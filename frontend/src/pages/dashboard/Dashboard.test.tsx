@@ -714,6 +714,50 @@ describe("J2 R6 — latent minors (verified receipt, missing field)", () => {
     expect(preset.evaluate([gridZoned, route]).headline).toBe("Wholesale LMP $42.00 / MWh verified live at TH_NP15_GEN-APND.");
   });
 
+  it("M1b: m12 LMP row renders the verified price when node_or_zone is absent", () => {
+    const preset = presetById("m12-curtail");
+    const route = deskResult("m12-curtail", 1, verifiedLiveReceipt("OPTIMAL_EXECUTION_ROUTE_GENERAL", { amount_out: 1700000000 }));
+    // (a) Verified LMP, no zone at all: the row shows the price with
+    // the market only, ok stays true, and the headline agrees — no
+    // "no live LMP returned" beside a PASS badge, no "undefined".
+    const gridNoZone = deskResult(
+      "m12-curtail",
+      0,
+      verifiedLiveReceipt("GRID_POWER_PRICE_GENERAL", { lmp_usd_per_mwh: 42, market: "CAISO" }),
+    );
+    const evNoZone = preset.evaluate([gridNoZone, route]);
+    const lmpNoZone = whyCard(evNoZone, "LMP (live)");
+    expect(lmpNoZone.v).toBe("$42.00 / MWh · CAISO");
+    expect(lmpNoZone.v).not.toContain("no live LMP returned");
+    expect(lmpNoZone.ok).toBe(true);
+    expect(evNoZone.headline).toBe("Wholesale LMP $42.00 / MWh verified live.");
+    expect(evNoZone.headline).not.toContain("undefined");
+    expect(evNoZone.headline).not.toContain("at undefined");
+    // (b) Empty-string zone: no trailing separator, no double separator.
+    const gridEmptyZone = deskResult(
+      "m12-curtail",
+      0,
+      verifiedLiveReceipt("GRID_POWER_PRICE_GENERAL", { lmp_usd_per_mwh: 42, market: "CAISO", node_or_zone: "" }),
+    );
+    const lmpEmptyZone = whyCard(preset.evaluate([gridEmptyZone, route]), "LMP (live)");
+    expect(lmpEmptyZone.v).toBe("$42.00 / MWh · CAISO");
+    expect(lmpEmptyZone.v).not.toMatch(/·\s*$/);
+    expect(lmpEmptyZone.v).not.toContain("·  ·");
+    // (c) Zone present: renders exactly as before.
+    const gridZoned = deskResult(
+      "m12-curtail",
+      0,
+      verifiedLiveReceipt("GRID_POWER_PRICE_GENERAL", { lmp_usd_per_mwh: 42, market: "CAISO", node_or_zone: "TH_NP15_GEN-APND" }),
+    );
+    expect(whyCard(preset.evaluate([gridZoned, route]), "LMP (live)").v).toBe("$42.00 / MWh · CAISO · TH_NP15_GEN-APND");
+    // Fallback still fires only when the price itself is unverified:
+    // a verified receipt without any LMP still says "no live LMP".
+    const gridNoLmp = deskResult("m12-curtail", 0, verifiedLiveReceipt("GRID_POWER_PRICE_GENERAL", { market: "CAISO" }));
+    const lmpNoLmp = whyCard(preset.evaluate([gridNoLmp, route]), "LMP (live)");
+    expect(lmpNoLmp.v).toBe("no live LMP returned");
+    expect(lmpNoLmp.ok).toBe(false);
+  });
+
   it("M2: m12 LMP card never renders '[object Object]' for a non-string market", () => {
     const preset = presetById("m12-curtail");
     const route = deskResult("m12-curtail", 1, verifiedLiveReceipt("OPTIMAL_EXECUTION_ROUTE_GENERAL", { amount_out: 1700000000 }));

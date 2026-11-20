@@ -429,14 +429,21 @@ export const DESK_PRESETS: DeskPreset[] = [
           // (J2 R5 B2) Same refusal-body trap as the filings cards: a
           // truthy {error, message} body rendered "— / MWh ·  ·
           // undefined". Render only on a verified receipt with a
-          // finite numeric LMP and a typed zone.
+          // finite numeric LMP.
           // (J2 R6 M2) `market` is unvalidated at runtime despite the
           // lib type: `market: {}` rendered "[object Object]". Render
           // the market segment only for a non-empty string, else omit
           // it cleanly — the LMP and zone still read.
+          // (J2 R7 M1b) The zone is a display label, not the price:
+          // requiring it in the `v` gate rendered "no live LMP
+          // returned" beside a true `ok` when a verified LMP had no
+          // zone, and `zone: ""` left a trailing "· ". Render the
+          // zone segment only for a non-empty string, same pattern
+          // as the market segment — the fallback fires only when the
+          // price itself is unverified/absent.
           v:
-            grid && isVerified(grid.receipt) && typeof gridBody?.lmp_usd_per_mwh === "number" && Number.isFinite(gridBody.lmp_usd_per_mwh) && typeof gridBody?.node_or_zone === "string"
-              ? `${formatUsdPrecise(gridBody.lmp_usd_per_mwh)} / MWh${typeof gridBody.market === "string" && gridBody.market ? ` · ${gridBody.market}` : ""} · ${gridBody.node_or_zone}`
+            grid && isVerified(grid.receipt) && typeof gridBody?.lmp_usd_per_mwh === "number" && Number.isFinite(gridBody.lmp_usd_per_mwh)
+              ? `${formatUsdPrecise(gridBody.lmp_usd_per_mwh)} / MWh${typeof gridBody.market === "string" && gridBody.market ? ` · ${gridBody.market}` : ""}${typeof gridBody.node_or_zone === "string" && gridBody.node_or_zone ? ` · ${gridBody.node_or_zone}` : ""}`
               : "no live LMP returned",
           ok: gridOk,
         },
