@@ -1,0 +1,56 @@
+/* Minimal scaffold tokens — replaced in full by the tokens commit. */
+:root,
+html[data-theme="dark"] {
+  --bg: #0b0b0c;
+  --surface: #121214;
+  --text: #f3f2ee;
+  --muted: #8f8e8a;
+  --border: rgba(255, 255, 255, 0.1);
+  --accent: #ff5722;
+}
+
+html[data-theme="light"] {
+  --bg: #e4e3df;
+  --surface: #dad9d4;
+  --text: #141414;
+  --muted: #5a5956;
+  --border: rgba(0, 0, 0, 0.11);
+  --accent: #ff5722;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14.5px;
+  line-height: 1.56;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.mono {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+.container {
+  max-width: 1300px;
+  margin: 0 auto;
+  padding: 0 28px;
+}
+
+.route-fallback {
+  padding: 40px;
+  text-align: center;
+  color: var(--muted);
+}
