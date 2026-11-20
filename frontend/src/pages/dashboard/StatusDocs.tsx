@@ -8,7 +8,10 @@
 //   src (region, Node version, SQLite path, abort cap, quorum). "5 / 5
 //   CLOSED" and "Fresh 2m ago" were canned; the cards now show how many
 //   endpoints actually answered and the age of the last live grid receipt.
-// - ERCOT/MISO are NOT advertised (de-advertised at base commit e35fb0a).
+// - ERCOT/MISO are not served by the live API (the handler refuses them,
+//   e.g. HB_NORTH → 422 unsupported_zone), although miner.yaml prose
+//   still lists them as sources — the live API, not the prose, is the
+//   authority on what is served.
 // - Doc snippets use the real GET endpoints and the real miner.yaml
 //   (id 774921, slug verireceipt); grid is /v1/grid-price (§8 A1/A2).
 
