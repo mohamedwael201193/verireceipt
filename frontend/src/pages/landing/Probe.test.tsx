@@ -252,9 +252,11 @@ describe("Probe — programmatic retarget mid-run is a no-op (J2 R2 M2)", () => 
     render(<Probe />);
 
     // Control: the same dispatched click DOES toggle the mode while idle,
-    // so the mid-run assertion below is not vacuous.
+    // so the mid-run assertion below is not vacuous. A plain Event("click")
+    // does not reach React's onClick (button is undefined, not 0); a real
+    // user click is a MouseEvent, so dispatch that.
     const modeButton = screen.getByRole("button", { name: "422 Refusal" });
-    modeButton.dispatchEvent(new Event("click", { bubbles: true }));
+    modeButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(modeButton).toHaveAttribute("aria-pressed", "true");
 
     // The TVL chip resets the mode to 200 OK and starts a run.
@@ -263,7 +265,7 @@ describe("Probe — programmatic retarget mid-run is a no-op (J2 R2 M2)", () => 
     expect(modeButton).toHaveAttribute("aria-pressed", "false");
 
     // Same dispatch mid-run: the guard must block it.
-    modeButton.dispatchEvent(new Event("click", { bubbles: true }));
+    modeButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(modeButton).toHaveAttribute("aria-pressed", "false");
 
