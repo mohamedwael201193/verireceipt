@@ -314,16 +314,26 @@ function isNonEmptyReceiptString(value: unknown, maxLength = Number.POSITIVE_INF
  * is error-like — the shape, not the prototype chain, decides.
  * Returns undefined for non-errors (thrown strings, nulls, objects
  * without a string message), which stay UNKNOWN.
+ *
+ * Guarded reads (J2 R6 M-2): a `.message` getter that throws must not
+ * escape fetchJson as a raw Error — a throwing accessor means "no
+ * usable message", so it returns undefined exactly like a missing one.
+ * Empty / whitespace-only messages (J2 R6 M-1) are absent too:
+ * fetch() throwing `{message: ""}` used to surface NETWORK_ERROR with
+ * an empty message; it is UNKNOWN instead.
  */
 function errorMessage(err: unknown): string | undefined {
-  if (
-    typeof err === "object" &&
-    err !== null &&
-    typeof (err as { message?: unknown }).message === "string"
-  ) {
-    return (err as { message: string }).message;
+  let message: unknown;
+  try {
+    message =
+      typeof err === "object" && err !== null
+        ? (err as { message?: unknown }).message
+        : undefined;
+  } catch {
+    return undefined;
   }
-  return undefined;
+  if (typeof message !== "string" || message.trim().length === 0) return undefined;
+  return message;
 }
 
 /**
@@ -333,13 +343,22 @@ function errorMessage(err: unknown): string | undefined {
  * instanceof) is an abort all the same. The name check covers both
  * DOMException and plain-Error aborts; instanceof alone missed the
  * latter and swallowed it to body = null -> INVALID_RESPONSE.
+ *
+ * Guarded read (J2 R6 M-2): a `.name` getter that throws must not
+ * escape fetchJson as a raw Error — a throwing accessor is simply
+ * not an abort (false), and the message read in the same catch path
+ * is guarded the same way by errorMessage.
  */
 function isAbortError(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    (err as { name?: unknown }).name === "AbortError"
-  );
+  try {
+    return (
+      typeof err === "object" &&
+      err !== null &&
+      (err as { name?: unknown }).name === "AbortError"
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promise<T> {

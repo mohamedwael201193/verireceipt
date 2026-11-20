@@ -720,6 +720,9 @@ describe("invisible format characters in receipt fields (J2 R5 B-1)", () => {
     "\u200D",
     "\u2060",
     "\u180E",
+    "\u00AD", // SOFT HYPHEN (J2 R6 M-4: card battery omitted it)
+    "\uFEFF", // BOM (J2 R6 M-4: card battery omitted it)
+    "\u202E", // RIGHT-TO-LEFT OVERRIDE (J2 R6 M-4: card battery omitted it)
     "\u200B\u200B",
     " \u200B ",
     "\u200B \u200C \u200D",
@@ -746,6 +749,156 @@ describe("invisible format characters in receipt fields (J2 R5 B-1)", () => {
     );
     const res = await getTx({ tx_hash: "0x00", chain: "sepolia" });
     expect(res.receipt.receipt_id).toBe("rcpt_\u200BTEST");
+  });
+});
+
+describe("extended blank-rendering family in receipt fields (J2 R6 B-1)", () => {
+  const baseBody = {
+    tx_hash: "0x00",
+    status: "not_found",
+    from: null,
+    to: null,
+    block_number: null,
+    value_eth: null,
+  };
+  // Same 295 code points as the formatter battery (format.test.ts):
+  // every Cf isolate/format survivor, every variation selector / CGJ,
+  // every Hangul filler, and U+2800. Each one, in each of the 4
+  // receipt fields, must be rejected as INVALID_RESPONSE — the R5
+  // literal list let all of them through.
+  const range = (start: number, end: number): number[] => {
+    const out: number[] = [];
+    for (let cp = start; cp <= end; cp++) out.push(cp);
+    return out;
+  };
+  const CODE_POINTS = [
+    ...range(0x2066, 0x2069),
+    0x206a, 0x206f, 0x061c, ...range(0x0600, 0x0605), 0x06dd, 0x070f,
+    ...range(0x0890, 0x0891), 0x08e2, ...range(0x1bca0, 0x1bca3), 0x1d173,
+    0x13430, ...range(0xfff9, 0xfffb), 0xe0001, 0xe007f,
+    ...range(0x180b, 0x180d),
+    0x180f,
+    ...range(0xfe00, 0xfe0f),
+    ...range(0xe0100, 0xe01ef),
+    0x034f,
+    0x115f, 0x1160, 0x3164, 0xffa0,
+    0x2800,
+  ];
+  const EXTENDED = CODE_POINTS.map((cp) => String.fromCodePoint(cp));
+  const fields = ["receipt_id", "raw_response_sha256", "fetched_at", "upstream_url"] as const;
+  const cases = fields.flatMap((field) =>
+    EXTENDED.map(
+      (value) =>
+        [`${field} is extended-family-only`, { ...sampleReceipt, [field]: value }] as const,
+    ),
+  );
+
+  it("covers exactly the 295 extended-family code points", () => {
+    expect(CODE_POINTS).toHaveLength(295);
+    expect(new Set(CODE_POINTS).size).toBe(295);
+  });
+
+  it.each(cases)("rejects a 200 whose receipt has %s", async (_label, receipt) => {
+    fetchMock.mockResolvedValue(jsonResponse({ ...baseBody, receipt }));
+    await expect(getTx({ tx_hash: "0x00", chain: "sepolia" })).rejects.toMatchObject({
+      status: 200,
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it("accepts a receipt_id carrying a keep-list character (U+2065, lone combining mark)", async () => {
+    // The strip must stay narrow: U+2065 (unassigned, visible tofu)
+    // and lone U+0301 (dotted-circle placeholder) are visible, so a
+    // receipt carrying them is valid — rejecting them would be a
+    // false positive on real data.
+    for (const receipt_id of ["rcpt_\u2065TEST", "rcpt_\u0301TEST"]) {
+      fetchMock.mockResolvedValue(
+        jsonResponse({ ...baseBody, receipt: { ...sampleReceipt, receipt_id } }),
+      );
+      const res = await getTx({ tx_hash: "0x00", chain: "sepolia" });
+      expect(res.receipt.receipt_id).toBe(receipt_id);
+    }
+  });
+});
+
+describe("empty-message and throwing-accessor errors (J2 R6 M-1/M-2)", () => {
+  it("classifies fetch() throwing {message: ''} as UNKNOWN, not NETWORK_ERROR with an empty message (M-1)", async () => {
+    fetchMock.mockRejectedValue({ message: "" });
+    await expect(getHealth()).rejects.toMatchObject({ status: 0, code: "UNKNOWN" });
+    try {
+      await getHealth();
+      expect.unreachable();
+    } catch (err) {
+      expect((err as Error).message).toBe("Unknown request failure");
+    }
+  });
+
+  it("classifies fetch() throwing an Error with an empty message as UNKNOWN (M-1)", async () => {
+    fetchMock.mockRejectedValue(new Error(""));
+    await expect(getHealth()).rejects.toMatchObject({ status: 0, code: "UNKNOWN" });
+  });
+
+  it("classifies fetch() throwing a whitespace-only message as UNKNOWN (M-1)", async () => {
+    fetchMock.mockRejectedValue({ message: "   " });
+    await expect(getHealth()).rejects.toMatchObject({ status: 0, code: "UNKNOWN" });
+  });
+
+  it("a throwing .message getter on the fetch() error escapes as UNKNOWN, never as a raw Error (M-2)", async () => {
+    const err = {};
+    Object.defineProperty(err, "message", {
+      get() {
+        throw new Error("getter boom");
+      },
+    });
+    fetchMock.mockRejectedValue(err);
+    try {
+      await getHealth();
+      expect.unreachable();
+    } catch (caught) {
+      expect(caught).toBeInstanceOf(ApiError);
+      expect(caught).toMatchObject({ status: 0, code: "UNKNOWN" });
+      expect((caught as Error).message).toBe("Unknown request failure");
+    }
+  });
+
+  it("a throwing .name getter on the fetch() error does not escape: a usable message still yields NETWORK_ERROR (M-2)", async () => {
+    const err = new Error("net down");
+    Object.defineProperty(err, "name", {
+      get() {
+        throw new Error("getter boom");
+      },
+    });
+    fetchMock.mockRejectedValue(err);
+    try {
+      await getHealth();
+      expect.unreachable();
+    } catch (caught) {
+      expect(caught).toBeInstanceOf(ApiError);
+      expect(caught).toMatchObject({ status: 0, code: "NETWORK_ERROR" });
+      expect((caught as Error).message).toBe("net down");
+    }
+  });
+
+  it("throwing .name AND .message getters on the fetch() error yield UNKNOWN, never a raw Error (M-2)", async () => {
+    const err = {};
+    Object.defineProperty(err, "name", {
+      get() {
+        throw new Error("name boom");
+      },
+    });
+    Object.defineProperty(err, "message", {
+      get() {
+        throw new Error("message boom");
+      },
+    });
+    fetchMock.mockRejectedValue(err);
+    try {
+      await getHealth();
+      expect.unreachable();
+    } catch (caught) {
+      expect(caught).toBeInstanceOf(ApiError);
+      expect(caught).toMatchObject({ status: 0, code: "UNKNOWN" });
+    }
   });
 });
 
