@@ -6,12 +6,13 @@
 import { createHash, randomBytes } from "crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../src/core/errors";
-import { envelope, makeReceipt, sha256Hex } from "../src/core/receipt";
+import { envelope, makeReceipt, sha256Hex, stableStringify } from "../src/core/receipt";
 import { CHAIN_RPCS } from "../src/config/chains";
-import { handleTx, weiToEth } from "../src/handlers/txLookup";
+import { handleTx, normalizeChain, receiptStatusNumber, weiToEth } from "../src/handlers/txLookup";
 
-// Verified live 2026-11-20 on ethereum-rpc.publicnode.com, eth.drpc.org,
-// rpc.mevblocker.io and eth-mainnet.public.blastapi.io:
+// Verified live 2026-11-20 on eth-mainnet.public.blastapi.io, eth.drpc.org
+// and rpc.mevblocker.io (A2: ethereum-rpc.publicnode.com is PRUNED — it
+// returns null/null for pre-15.5M-block txs and is no longer a leg):
 //   status 0x1, block 0x193a989 (26454409), value 0x0,
 //   from 0x5875db54cd9ae2b2a875e09bb731772297ae9d92,
 //   to   0x0000000aa232009084bd71a5797d089aa4edfad4
@@ -228,18 +229,24 @@ describe("handleTx live (real public RPCs, no mocks)", () => {
 // ---------------------------------------------------------------------------
 // Stubbed quorum tests (F2–F8; Judge 2). These stub global fetch — the
 // handler code itself is never mocked — so every branch below is exercised
-// deterministically without network. Each leg makes exactly 2 fetch calls
-// per round (one batch eth_getTransactionByHash + one
-// eth_getTransactionReceipt), so the stub derives the leg's "round" from
-// floor(callsToThatUrl / 2): round 0 is the first quorum round, round 1 is
-// the single F3 re-poll of the null legs.
+// deterministically without network. A leg issues exactly ONE batch call
+// (eth_getTransactionByHash) per round, then at most one receipt call —
+// at most, because fetchFromRpc is sequential: if the batch call throws,
+// the receipt call never fires and the leg costs 1 fetch that round, not
+// 2. The stub therefore derives the leg's "round" from the count of
+// BATCH calls to that URL (the leg-invocation index), not from total
+// calls: a batch call's round is its prior batch count, and the receipt
+// call that follows it belongs to that same round. (The old
+// floor(totalCalls/2) derivation assumed both calls always fire, which
+// the old concurrent fan-out guaranteed and the sequential shape does
+// not — a failed leg would desync the re-poll into round 0 again.)
 // ---------------------------------------------------------------------------
 
 type StubLeg = {
   tx: Record<string, unknown> | null;
   receipt: Record<string, unknown> | null;
   /** Delay the leg's responses by this many ms, honouring the AbortSignal
-   * (lets a stubbed leg hit the handler's real 4.5 s per-leg timeout). */
+   * (lets a stubbed leg hit the handler's real 12 s per-call timeout). */
   delayMs?: number;
   /** Throw this error instead of responding (simulates a dead leg). */
   throwError?: string;
@@ -288,21 +295,27 @@ function installStub(
   behavior: (url: string, round: number) => StubLeg,
 ): StubInstall {
   const requests: StubInstall["requests"] = [];
-  const callsPerUrl = new Map<string, number>();
+  /** Batch calls per URL: the leg-invocation index ("round") for that leg.
+   * See the header comment above for why the round comes from the batch
+   * count and not from total calls. */
+  const batchCallsPerUrl = new Map<string, number>();
   const fetchStub = async (url: unknown, init?: { body?: unknown; signal?: AbortSignal }) => {
     const u = String(url);
     const body: unknown = JSON.parse(String((init as { body?: unknown } | undefined)?.body ?? "null"));
     requests.push({ url: u, body });
-    const calls = callsPerUrl.get(u) ?? 0;
-    callsPerUrl.set(u, calls + 1);
-    const round = Math.floor(calls / 2);
+    const isBatch = Array.isArray(body);
+    const priorBatches = batchCallsPerUrl.get(u) ?? 0;
+    if (isBatch) batchCallsPerUrl.set(u, priorBatches + 1);
+    // A batch call opens round `priorBatches`; the receipt call that
+    // follows it in the same leg invocation belongs to that round.
+    const round = isBatch ? priorBatches : priorBatches - 1;
     const leg = behavior(u, round);
     if (leg.throwError !== undefined) throw new Error(leg.throwError);
     if (leg.delayMs !== undefined && leg.delayMs > 0) {
-      // Honour the handler's AbortSignal exactly like a real fetch: the
-      // per-leg AbortController aborts at RPC_TIMEOUT_MS (4.5 s), so a
-      // 6 s delay MUST reject — a stub that ignores the signal would
-      // silently never exercise the timeout path.
+      // Honour the handler's AbortSignal exactly like a real fetch: each
+      // upstream POST has its own AbortController at RPC_TIMEOUT_MS
+      // (12 s), so a delay above 12 s MUST reject — a stub that ignores
+      // the signal would silently never exercise the timeout path.
       const signal = init?.signal;
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -562,12 +575,16 @@ describe("handleTx stubbed quorum (fetch stubbed, no network)", () => {
     expect(padded.status).toBe("not_found");
   });
 
-  it("rejects wrong chain 'mainnet' with 400 UNSUPPORTED_CHAIN (F8)", async () => {
-    await expectApiError(
-      handleTx({ tx_hash: CONFIRMED_TX, chain: "mainnet" }),
-      400,
-      "UNSUPPORTED_CHAIN",
-    );
+  it("accepts chain synonyms 'mainnet', 'eth', '1', 'eip155:1' as ethereum (A2)", async () => {
+    // A2 (PLAN.md §6 A2): the reference question says "… on Ethereum" and
+    // the builder may send any of these spellings. They all resolve to
+    // the ethereum quorum (stubbed null legs → not_found, proving the
+    // chain was accepted and routed, not rejected).
+    installStub(() => NULL_LEG);
+    for (const chain of ["mainnet", "eth", "ETH", "1", "eip155:1", "Ethereum", "on Ethereum"]) {
+      const out = await handleTx({ tx_hash: CONFIRMED_TX, chain });
+      expect(out.status).toBe("not_found");
+    }
   });
 });
 
@@ -586,30 +603,115 @@ describe("weiToEth precision limit (F7)", () => {
 
 describe("handleTx live receipt recomputation (M2)", () => {
   it(
-    "receipt hash recomputes by re-POSTing eth_getTransactionReceipt to the winning leg (NOT a GET)",
+    "receipt hash recomputes by re-POSTing BOTH eth_getTransactionByHash and eth_getTransactionReceipt to the winning leg (NOT a GET)",
     async () => {
-      // M2/M3: the correct recomputation is a re-POST of
-      // eth_getTransactionReceipt with the tx hash — a GET to the RPC URL
+      // M2 (R2, JUDGE.md §4): the receipt digest is
+      // sha256(stableStringify({tx, receipt})) over the PARSED `result`
+      // of BOTH upstream calls on the winning leg
+      // (src/handlers/txLookup.ts buildTxEvidence) — NOT sha256 of the
+      // raw receipt-call text. The recomputation below uses FRESH
+      // re-POSTs, never the receipt's own stored evidence, so a wrong
+      // result from either call fails the test. A GET to the RPC URL
       // returns HTTP 301 with an empty body and proves nothing.
       const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
       const rc = out.receipt as Record<string, unknown>;
       const upstream = rc.upstream_url as string;
       expect(typeof upstream).toBe("string");
       expect(upstream.startsWith("https://")).toBe(true);
-      const res = await fetch(upstream, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "eth_getTransactionReceipt",
-          params: [CONFIRMED_TX],
-        }),
-      });
-      expect(res.ok).toBe(true);
-      const rawText = await res.text();
-      expect(sha256Hex(rawText)).toBe(rc.raw_response_sha256);
       expect(rc.raw_response_sha256).toMatch(SHA256_RE);
+      async function rePost(method: string): Promise<unknown> {
+        const res = await fetch(upstream, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method,
+            params: [CONFIRMED_TX],
+          }),
+        });
+        expect(res.ok).toBe(true);
+        const json = (await res.json()) as Record<string, unknown>;
+        expect(json.error).toBeUndefined();
+        return json.result ?? null;
+      }
+      const txResult = (await rePost(
+        "eth_getTransactionByHash",
+      )) as Record<string, unknown> | null;
+      const rcResult = (await rePost(
+        "eth_getTransactionReceipt",
+      )) as Record<string, unknown> | null;
+      // Strict: both calls must return the tx that was queried — a
+      // wrong result must fail the test, not just produce a different hash.
+      expect(txResult).not.toBeNull();
+      expect(txResult?.hash).toBe(CONFIRMED_TX);
+      expect(rcResult).not.toBeNull();
+      expect(rcResult?.transactionHash).toBe(CONFIRMED_TX);
+      expect(sha256Hex(stableStringify({ tx: txResult, receipt: rcResult }))).toBe(
+        rc.raw_response_sha256,
+      );
+    },
+    60000,
+  );
+
+  it(
+    "nonzero-value tx: receipt hash recomputes by re-POSTing BOTH calls (value covered by the hash)",
+    async () => {
+      // R3 (J2 R2 coverage gap): the M2 suite had NO live nonzero-value
+      // test — the only nonzero assertion (base-sepolia trap, value
+      // 0.001 ETH) never recomputed the digest. This tx was recorded
+      // live by J2 (R2): 0x413bc4… (block 0x193b33a, value
+      // 0x36ef19ec4c00 = 0.00006040056 ETH). The value lives ONLY in
+      // the tx result (an Ethereum receipt has no `value` field), so
+      // a receipt-only hash could never cover it — the digest equality
+      // below is the check that the money field is inside the hash.
+      // No digest is hardcoded: the expected digest is recomputed
+      // from FRESH re-POSTs, never from the receipt's stored evidence.
+      const NONZERO_TX =
+        "0x413bc4d899236f22004dd9bacf546730b796a06016517d724966a1e22f1cb564";
+      const out = await handleTx({ tx_hash: NONZERO_TX, chain: "ethereum" });
+      expect(out.status).toBe("confirmed");
+      expect(out.block_number).toBe(26456890);
+      expect(out.value_eth).toBe(weiToEth("0x36ef19ec4c00"));
+      expect(out.value_eth).toBeGreaterThan(0);
+      const rc = out.receipt as Record<string, unknown>;
+      const upstream = rc.upstream_url as string;
+      expect(typeof upstream).toBe("string");
+      expect(upstream.startsWith("https://")).toBe(true);
+      expect(rc.raw_response_sha256).toMatch(SHA256_RE);
+      async function rePost(method: string): Promise<unknown> {
+        const res = await fetch(upstream, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method,
+            params: [NONZERO_TX],
+          }),
+        });
+        expect(res.ok).toBe(true);
+        const json = (await res.json()) as Record<string, unknown>;
+        expect(json.error).toBeUndefined();
+        return json.result ?? null;
+      }
+      const txResult = (await rePost(
+        "eth_getTransactionByHash",
+      )) as Record<string, unknown> | null;
+      const rcResult = (await rePost(
+        "eth_getTransactionReceipt",
+      )) as Record<string, unknown> | null;
+      // Strict: both calls must return the tx that was queried, and
+      // the tx result must carry the nonzero value the answer reports.
+      expect(txResult).not.toBeNull();
+      expect(txResult?.hash).toBe(NONZERO_TX);
+      expect(txResult?.value).toBe("0x36ef19ec4c00");
+      expect(weiToEth(txResult?.value as string)).toBe(out.value_eth);
+      expect(rcResult).not.toBeNull();
+      expect(rcResult?.transactionHash).toBe(NONZERO_TX);
+      expect(sha256Hex(stableStringify({ tx: txResult, receipt: rcResult }))).toBe(
+        rc.raw_response_sha256,
+      );
     },
     60000,
   );
@@ -680,14 +782,13 @@ describe("handleTx stubbed: B1 errored/timed-out legs fail closed", () => {
   });
 
   it("B1(i): slow tx-bearing leg (6 s) + 2 immediate nulls → 502, never 200 not_found", async () => {
-    // The J2 attack, reproduced deterministically: the slow leg DOES hold
-    // the tx but exceeds the 4.5 s per-leg budget. Before the fix the
-    // timed-out leg vanished and 2 nulls answered 200 not_found in
-    // ~4.5 s. After the fix the leg is tracked as errored, re-polled
-    // (round 1 returns the tx immediately — the leg has it), and the
-    // 1-tx-vs-2-null split with no agreeing pair is 502
-    // QUORUM_DISAGREEMENT. Either 502 code is acceptable; a 200
-    // not_found is not.
+    // A2-fix re-pin: the per-call budget is now 12 s, so a 6 s-per-call
+    // leg no longer times out — it answers in round 0 (6 s tx + 6 s
+    // receipt, sequential) and the vote is still 1-tx-vs-2-null with no
+    // agreeing pair, re-polled (round 1 returns the tx immediately) and
+    // 502 QUORUM_DISAGREEMENT. Either 502 code is acceptable; a 200
+    // not_found is not. The timeout behaviour itself is now pinned by
+    // the all-slow matrix test below (20 s delays vs the 12 s budget).
     installStub(
       tableBehavior([
         [
@@ -909,8 +1010,8 @@ describe("handleTx refusal matrix + adversarial inputs (zero-tolerance gate)", (
   it("400 matrix: unsupported / injected chain names are UNSUPPORTED_CHAIN and never reach fetch", async () => {
     const badChains = [
       "solana",
-      "mainnet",
-      "eth",
+      "etherium", // typo must not resolve to ethereum
+      "main net", // spaced, not the "mainnet" alias
       "ethereum; DROP TABLE receipts",
       "ethereum\x00",
       "base_sepolia",
@@ -940,23 +1041,27 @@ describe("handleTx refusal matrix + adversarial inputs (zero-tolerance gate)", (
   });
 
   it("502 matrix: all legs down → QUORUM_UNREACHABLE", async () => {
-    // R4 MINOR 2: round 0 (6 fetches) + one re-poll of all 3 errored legs
-    // (6 fetches) = 12; the 502 outcome is unchanged.
+    // R4 MINOR 2: round 0 + one re-poll of all 3 errored legs. A2-fix:
+    // a failed leg costs 1 fetch per round (its batch call throws, so
+    // the receipt call never fires) — 3 + 3 = 6, not the old 12. The
+    // 502 outcome is unchanged.
     const { requests } = installStub(() => ({ tx: null, receipt: null, throwError: "connection refused" }));
     await expectApiError(
       handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" }),
       502,
       "QUORUM_UNREACHABLE",
     );
-    expect(requests.length).toBe(12);
+    expect(requests.length).toBe(6);
   });
 
   it("502 matrix: 2 of 3 legs down (only 1 success) → QUORUM_UNREACHABLE", async () => {
     // R4 MINOR 2: the <2-successes path now re-polls the errored legs once
-    // before 502ing, so the fetch count is round 0 (6) + re-poll of the 2
-    // errored legs (4) = 10. The 502 outcome is unchanged — only the
-    // fetch count changed, because a transient that recovers on re-poll
-    // must get its chance before the endpoint gives up.
+    // before 502ing. A2-fix: round 0 is 2 (healthy null leg) + 1 + 1
+    // (each down leg costs 1 fetch — its batch call throws, so the
+    // receipt call never fires) = 4, plus the re-poll of the 2 errored
+    // legs (2) = 6. The 502 outcome is unchanged — only the fetch count
+    // changed, because a transient that recovers on re-poll must get its
+    // chance before the endpoint gives up.
     const { requests } = installStub(
       tableBehavior([
         [{ tx: null, receipt: null, throwError: "down" }, { tx: null, receipt: null, throwError: "down" }, NULL_LEG],
@@ -967,17 +1072,22 @@ describe("handleTx refusal matrix + adversarial inputs (zero-tolerance gate)", (
       502,
       "QUORUM_UNREACHABLE",
     );
-    expect(requests.length).toBe(10);
+    expect(requests.length).toBe(6);
   });
 
-  it("502 matrix: all legs slow (6 s) → every leg times out → QUORUM_UNREACHABLE", async () => {
-    installStub(() => ({ tx: stubTx(), receipt: stubReceipt(), delayMs: 6000 }));
+  it("502 matrix: all legs slow (20 s) → every leg times out → QUORUM_UNREACHABLE", async () => {
+    // A2-fix re-pin: the per-call budget is 12 s, so the slow delay must
+    // exceed 12 s per call to time out (was 6 s vs the old 4.5 s per-leg
+    // budget). Sequential legs abort on the first call at 12 s, so the
+    // wall is ~2 rounds × 3 legs × 12 s ≈ 72 s — hence the 120 s
+    // timeout. The 502 outcome is unchanged.
+    installStub(() => ({ tx: stubTx(), receipt: stubReceipt(), delayMs: 20000 }));
     await expectApiError(
       handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" }),
       502,
       "QUORUM_UNREACHABLE",
     );
-  }, 30000);
+  }, 120000);
 
   it("502 matrix: legs returning malformed results → QUORUM_UNREACHABLE, never 200", async () => {
     // A leg returning a tx without from/value is malformed and fails the
@@ -1433,8 +1543,9 @@ describe("handleTx stubbed R4: MINOR 2 — re-poll from <2 successes", () => {
       502,
       "QUORUM_UNREACHABLE",
     );
-    // Round 0 (6 fetches) + re-poll of the 2 errored legs (4) = 10.
-    expect(requests.length).toBe(10);
+    // Round 0 (2 healthy + 1 + 1: each down leg costs 1 fetch, A2-fix)
+    // + re-poll of the 2 errored legs (2) = 6.
+    expect(requests.length).toBe(6);
   });
 });
 
@@ -1571,16 +1682,20 @@ describe("handleTx stubbed R4: MINOR 5 + MINOR 6 + MINOR 8", () => {
     expect(out.value_eth).toBeNull();
   });
 
-  it("B1(ii)-second-guard: slow tx-bearing leg (6 s) + 2 nulls, slow leg times out on re-poll too → 502 QUORUM_UNREACHABLE", async () => {
+  it("B1(ii)-second-guard: slow tx-bearing leg (20 s) + 2 nulls, slow leg times out on re-poll too → 502 QUORUM_UNREACHABLE", async () => {
+    // A2-fix re-pin: the per-call budget is 12 s, so the slow delay must
+    // exceed 12 s per call to time out on both rounds (was 6 s vs the
+    // old 4.5 s per-leg budget). Wall is ~2 × 12 s (one aborted call per
+    // round; the receipt call never starts) — hence the 60 s timeout.
     installStub(
       tableBehavior([
         [
-          { tx: stubTx(), receipt: stubReceipt(), delayMs: 6000 },
+          { tx: stubTx(), receipt: stubReceipt(), delayMs: 20000 },
           NULL_LEG,
           NULL_LEG,
         ],
         [
-          { tx: stubTx(), receipt: stubReceipt(), delayMs: 6000 },
+          { tx: stubTx(), receipt: stubReceipt(), delayMs: 20000 },
           NULL_LEG,
           NULL_LEG,
         ],
@@ -1591,7 +1706,7 @@ describe("handleTx stubbed R4: MINOR 5 + MINOR 6 + MINOR 8", () => {
       502,
       "QUORUM_UNREACHABLE",
     );
-  }, 30000);
+  }, 60000);
 
   it("M5-second-guard: receipt-only leg + 2 nulls, receipt-only persists on re-poll → 502 QUORUM_UNREACHABLE", async () => {
     installStub(
@@ -1715,4 +1830,293 @@ describe("handleTx stubbed R5: receipt.to null + receipt from/to + pending block
       "QUORUM_DISAGREEMENT",
     );
   });
+});
+
+// ---------------------------------------------------------------------------
+// A2 (PLAN.md §6 A2, 2026-11-20). Chain synonyms, "… on Ethereum" split
+// from tx_hash, status-less pre-Byzantium receipts, and the reference tx.
+// ---------------------------------------------------------------------------
+
+describe("normalizeChain (unit, A2)", () => {
+  it("maps every Ethereum spelling to ethereum", () => {
+    for (const raw of ["ethereum", "Ethereum", "ETHEREUM", "ETH", "eth", "mainnet", "Mainnet", "1", "eip155:1", "EIP155:1", "Ethereum Mainnet", "eth mainnet", "on Ethereum", "on eth", "  ethereum  "]) {
+      expect(normalizeChain(raw)).toBe("ethereum");
+    }
+  });
+
+  it("passes other canonical chains through unchanged", () => {
+    for (const raw of ["base", "arbitrum", "optimism", "polygon", "sepolia", "base-sepolia", "BASE-SEPOLIA"]) {
+      expect(normalizeChain(raw)).toBe(raw.trim().toLowerCase());
+    }
+  });
+
+  it("leaves unknown chains unchanged (still rejected downstream) and undefined as undefined", () => {
+    expect(normalizeChain("solana")).toBe("solana");
+    expect(normalizeChain("etherium")).toBe("etherium");
+    expect(normalizeChain("main net")).toBe("main net");
+    expect(normalizeChain(undefined)).toBeUndefined();
+  });
+});
+
+describe("handleTx stubbed A2: chain synonyms + 'on <chain>' split", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("chain '1' and 'eip155:1' route to the ethereum quorum and confirm", async () => {
+    installStub(() => CONFIRMED_LEG);
+    for (const chain of ["1", "eip155:1"]) {
+      const out = await handleTx({ tx_hash: CONFIRMED_TX, chain });
+      expect(out.status).toBe("confirmed");
+      expect(out.block_number).toBe(26454409);
+      expect(out.source).toBe(`Archive RPC quorum (ethereum, 2-of-${CHAIN_RPCS.ethereum.length})`);
+    }
+  });
+
+  it("tx_hash '… on Ethereum' with NO chain param splits the chain off and confirms", async () => {
+    installStub(() => CONFIRMED_LEG);
+    const out = await handleTx({ tx_hash: `${CONFIRMED_TX} on Ethereum` });
+    expect(out.status).toBe("confirmed");
+    expect(out.block_number).toBe(26454409);
+    expect(out.tx_hash).toBe(CONFIRMED_TX);
+    expect(out.source).toBe(`Archive RPC quorum (ethereum, 2-of-${CHAIN_RPCS.ethereum.length})`);
+  });
+
+  it("tx_hash '… on ETH' with NO chain param splits 'ETH' off as ethereum", async () => {
+    installStub(() => CONFIRMED_LEG);
+    const out = await handleTx({ tx_hash: `${CONFIRMED_TX} on ETH` });
+    expect(out.status).toBe("confirmed");
+    expect(out.block_number).toBe(26454409);
+  });
+
+  it("tx_hash '… on Ethereum' WITH an explicit chain param still confirms (suffix stripped)", async () => {
+    installStub(() => CONFIRMED_LEG);
+    const out = await handleTx({ tx_hash: `${CONFIRMED_TX} on Ethereum`, chain: "ethereum" });
+    expect(out.status).toBe("confirmed");
+    expect(out.tx_hash).toBe(CONFIRMED_TX);
+  });
+
+  it("tx_hash '… on Solana' with NO chain param → 400 UNSUPPORTED_CHAIN, never a fetch", async () => {
+    const { requests } = installStub(() => CONFIRMED_LEG);
+    await expectApiError(
+      handleTx({ tx_hash: `${CONFIRMED_TX} on Solana` }),
+      400,
+      "UNSUPPORTED_CHAIN",
+    );
+    expect(requests.length).toBe(0);
+  });
+
+  it("tx_hash '… on Solana' WITH chain=ethereum → 400 CHAIN_MISMATCH, never a fetch (A2-fix F3)", async () => {
+    // A contradictory input must fail loudly, not silently prefer the
+    // explicit param: the suffix names Solana, the param names ethereum.
+    const { requests } = installStub(() => CONFIRMED_LEG);
+    await expectApiError(
+      handleTx({ tx_hash: `${CONFIRMED_TX} on Solana`, chain: "ethereum" }),
+      400,
+      "CHAIN_MISMATCH",
+    );
+    expect(requests.length).toBe(0);
+  });
+
+  it("tx_hash '… on ETH' WITH chain=mainnet agrees (both normalise to ethereum) → confirms (A2-fix F3)", async () => {
+    installStub(() => CONFIRMED_LEG);
+    const out = await handleTx({ tx_hash: `${CONFIRMED_TX} on ETH`, chain: "mainnet" });
+    expect(out.status).toBe("confirmed");
+    expect(out.block_number).toBe(26454409);
+    expect(out.tx_hash).toBe(CONFIRMED_TX);
+  });
+});
+
+describe("handleTx stubbed A2: status-less pre-Byzantium receipts", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** A raw pre-Byzantium receipt shape as returned by rpc.mevblocker.io
+   * for the reference tx: no `status` field, `root` present. Verified
+   * live 2026-11-20 (A2 probe): root 0x96a8e009d2b88b14… Other endpoints
+   * return status 0x1 for the SAME tx (Cloudflare, drpc, BlastAPI —
+   * verification 2026-11-20 rows 20–21), so the missing status is
+   * endpoint-dependent, not a universal property of the receipt. */
+  const STATUSLESS_LEG: StubLeg = {
+    tx: stubTx(),
+    receipt: {
+      blockNumber: "0x193a989",
+      from: STUB_FROM,
+      to: STUB_TO,
+      transactionHash: CONFIRMED_TX,
+      root: "0x96a8e009d2b88b1483e6941e6812e32263b05683fac202abc622a1b2c3d4e5f6",
+    },
+  };
+
+  it("receiptStatusNumber: status-less (root present) is 1; 0x0/0x1 pass through", () => {
+    expect(receiptStatusNumber({ blockNumber: "0x1", from: STUB_FROM, to: STUB_TO, root: "0x96a8e009d2b88b1483e6941e6812e32263b05683fac202abc622a1b2c3d4e5f6" })).toBe(1);
+    expect(receiptStatusNumber({ status: "0x1", blockNumber: "0x1", from: STUB_FROM, to: STUB_TO })).toBe(1);
+    expect(receiptStatusNumber({ status: "0x0", blockNumber: "0x1", from: STUB_FROM, to: STUB_TO })).toBe(0);
+  });
+
+  it("all legs status-less (root present) → confirmed, never a crash or 502", async () => {
+    installStub(() => STATUSLESS_LEG);
+    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
+    expect(out.status).toBe("confirmed");
+    expect(out.verdict).toBe("verified");
+    expect(out.confidence).toBe(1.0);
+    expect(out.block_number).toBe(26454409);
+    expect(out.value_eth).toBe(1);
+    const rc = out.receipt as Record<string, unknown>;
+    expect(rc.quorum_votes).toBe("3/3 sources agreed");
+  });
+
+  it("mixed legs: status-less + status 0x1 + status 0x1 agree (effective status 1) → confirmed 3/3", async () => {
+    // This is the LIVE shape for the reference tx: mevblocker returns the
+    // raw receipt shape without a status field while drpc/BlastAPI
+    // return status 0x1 (and Cloudflare likewise — verification rows
+    // 20–21). Before the fix the status-less leg errored (missing
+    // status) and the quorum could not form.
+    installStub(tableBehavior([[STATUSLESS_LEG, CONFIRMED_LEG, CONFIRMED_LEG]]));
+    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
+    expect(out.status).toBe("confirmed");
+    const rc = out.receipt as Record<string, unknown>;
+    expect(rc.quorum_votes).toBe("3/3 sources agreed");
+  });
+
+  it("status-less vs reverted (0x0) with no pair → 502 QUORUM_DISAGREEMENT", async () => {
+    installStub(
+      tableBehavior([
+        [STATUSLESS_LEG, { tx: stubTx(), receipt: stubReceipt({ status: "0x0" }) }, NULL_LEG],
+        [STATUSLESS_LEG, { tx: stubTx(), receipt: stubReceipt({ status: "0x0" }) }, NULL_LEG],
+      ]),
+    );
+    await expectApiError(
+      handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" }),
+      502,
+      "QUORUM_DISAGREEMENT",
+    );
+  });
+
+  it("receipt with NEITHER status NOR root on all legs → 502, never confirmed", async () => {
+    installStub(() => ({
+      tx: stubTx(),
+      receipt: {
+        blockNumber: "0x193a989",
+        from: STUB_FROM,
+        to: STUB_TO,
+        transactionHash: CONFIRMED_TX,
+      },
+    }));
+    await expectApiError(
+      handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" }),
+      502,
+      "QUORUM_UNREACHABLE",
+    );
+  });
+
+  it("receipt with a malformed (non-hex) root and no status → 502", async () => {
+    installStub(() => ({
+      tx: stubTx(),
+      receipt: {
+        blockNumber: "0x193a989",
+        from: STUB_FROM,
+        to: STUB_TO,
+        transactionHash: CONFIRMED_TX,
+        root: "not-a-root",
+      },
+    }));
+    await expectApiError(
+      handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" }),
+      502,
+      "QUORUM_UNREACHABLE",
+    );
+  });
+
+  it("two status-less legs differing ONLY in root → 502 QUORUM_DISAGREEMENT, never agreement (A2-fix F2)", async () => {
+    // The state root is the one field that distinguishes two raw-shape
+    // receipts: same block/value/from/to and the same effective status
+    // (1) on both sides, but different roots must NOT agree 3/3. The
+    // third leg is null, so after the re-poll the vote is still 1-vs-1
+    // with no agreeing pair.
+    const rootA = "0x96a8e009d2b88b1483e6941e6812e32263b05683fac202abc622a1b2c3d4e5f6";
+    const rootB = "0xffa8e009d2b88b1483e6941e6812e32263b05683fac202abc622a1b2c3d4e5f6";
+    const rawLeg = (root: string): StubLeg => ({
+      tx: stubTx(),
+      receipt: {
+        blockNumber: "0x193a989",
+        from: STUB_FROM,
+        to: STUB_TO,
+        transactionHash: CONFIRMED_TX,
+        root,
+      },
+    });
+    installStub(
+      tableBehavior([
+        [rawLeg(rootA), rawLeg(rootB), NULL_LEG],
+        [rawLeg(rootA), rawLeg(rootB), NULL_LEG],
+      ]),
+    );
+    await expectApiError(
+      handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" }),
+      502,
+      "QUORUM_DISAGREEMENT",
+    );
+  });
+});
+
+// Reference tx (PLAN.md §2, S5_scoring_references.md:15,26; corrected by
+// verification-2026-11-20.md rows 20–21): the evalpool reference question
+// is tx `0x5c504ed4…2060 on Ethereum` → block 46147 (2015, Ethereum's
+// first-ever user transfer, pre-Byzantium). NOTE on the receipt shape:
+// whether the receipt carries a `status` field is ENDPOINT-DEPENDENT —
+// Cloudflare / drpc / BlastAPI return status (0x1) for this tx, while
+// mevblocker returns the raw shape with `root` and no `status`. Neither
+// shape is universal; the handler accepts both. Full hash + expected
+// fields verified live by A2 2026-11-20 against all three configured
+// ethereum legs (BlastAPI, drpc, mevblocker): blockNumber 0xb443, from
+// 0xa1e4380a3b1f749673e270229993ee55f35663b4, to
+// 0x5df9b87991262f6ba471f09758cde1c0fc1de734, value 0x7a69 wei.
+const REFERENCE_TX = "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060";
+
+describe("handleTx live A2: reference tx returns block 46147", () => {
+  it(
+    "reference tx on ethereum returns confirmed block 46147 with exact fields",
+    async () => {
+      const out = await handleTx({ tx_hash: REFERENCE_TX, chain: "ethereum" });
+      expect(out.tx_hash).toBe(REFERENCE_TX);
+      expect(out.status).toBe("confirmed");
+      expect(out.from).toBe("0xa1e4380a3b1f749673e270229993ee55f35663b4");
+      expect(out.to).toBe("0x5df9b87991262f6ba471f09758cde1c0fc1de734");
+      expect(out.block_number).toBe(46147);
+      expect(out.value_eth).toBe(weiToEth("0x7a69"));
+      expect(out.verdict).toBe("verified");
+      expect(out.confidence).toBe(1.0);
+      expect(out.source).toBe("Archive RPC quorum (ethereum, 2-of-3)");
+      const rc = out.receipt as Record<string, unknown>;
+      expect(rc.raw_response_sha256).toMatch(SHA256_RE);
+      expect(rc.quorum_votes).toBe("3/3 sources agreed");
+    },
+    60000,
+  );
+
+  it(
+    "reference tx under every chain synonym returns block 46147",
+    async () => {
+      for (const chain of ["ETH", "mainnet", "1", "eip155:1", "Ethereum"]) {
+        const out = await handleTx({ tx_hash: REFERENCE_TX, chain });
+        expect(out.status).toBe("confirmed");
+        expect(out.block_number).toBe(46147);
+        expect(out.source).toBe("Archive RPC quorum (ethereum, 2-of-3)");
+      }
+    },
+    120000,
+  );
+
+  it(
+    "reference tx as '… on Ethereum' with no chain param returns block 46147",
+    async () => {
+      const out = await handleTx({ tx_hash: `${REFERENCE_TX} on Ethereum` });
+      expect(out.status).toBe("confirmed");
+      expect(out.block_number).toBe(46147);
+      expect(out.tx_hash).toBe(REFERENCE_TX);
+    },
+    60000,
+  );
 });

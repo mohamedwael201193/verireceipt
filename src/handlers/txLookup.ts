@@ -4,8 +4,12 @@
 // (CHAIN_RPCS[chain]; N is the chain's configured RPC count, so the label
 // is "2-of-3" on 3-RPC chains and "2-of-2" on 2-RPC chains) and returns
 // exact tx_hash, status, from, to, block_number, value_eth plus a SHA-256
-// receipt over the exact receipt-call response text, so a judge can
-// recompute the hash within 30 seconds. Fails closed: on RPC outage it
+// receipt over the canonical {tx, receipt} evidence object (R2): the
+// parsed results of BOTH upstream calls on the winning leg —
+// eth_getTransactionByHash AND eth_getTransactionReceipt — combined with
+// stableStringify, so the served evidence re-derives every answer field
+// including value_eth (an Ethereum receipt has no `value` field, so a
+// receipt-only hash could never cover it). Fails closed: on RPC outage it
 // throws 502 and NEVER claims not_found.
 //
 // value_eth contract (verified live behaviour): value_eth is the tx's value
@@ -68,8 +72,18 @@
 //   for pending. Confirmed legs still compare blockNumber numerically.
 // - Intra-leg consistency: a leg whose tx blockNumber and receipt
 //   blockNumber disagree numerically is inconsistent and dropped.
+// A2-FIX (2026-11-20 — J2 FAIL on the A2 patch, F1–F3):
+// - F1 (blocker): legs are fetched SEQUENTIALLY, one POST at a time,
+//   and the budget is now 12 s PER CALL (was 4.5 s per leg over a 6-way
+//   concurrent fan-out that self-timed-out 0/6 twice while the same
+//   calls sequential served 6/6). No early exit: the full vote is
+//   needed ("3/3 sources agreed" is pinned live).
+// - F2: outcomesEqual compares `root` when both receipts are
+//   status-less — different state roots must not agree.
+// - F3: a "… on <chain>" suffix that conflicts with an explicit `chain`
+//   param is a 400 CHAIN_MISMATCH, never silently discarded.
 import { ApiError, badRequest } from "../core/errors";
-import { envelope, makeReceipt, type Receipt } from "../core/receipt";
+import { envelope, makeReceipt, stableStringify, type Receipt } from "../core/receipt";
 import { CHAIN_RPCS } from "../config/chains";
 import { saveReceipt } from "../core/db";
 
@@ -87,8 +101,52 @@ function assertHexQty(v: string, field: string): void {
   }
 }
 const SUPPORTED_CHAINS = ["ethereum", "base", "arbitrum", "optimism", "polygon", "sepolia", "base-sepolia"];
+/** A2: chain synonyms the request builder may send for Ethereum mainnet
+ * (PLAN.md §2: the reference question is "… on Ethereum"). Only the
+ * Ethereum spellings are aliased — every other chain keeps its single
+ * canonical name, so a typo can never silently resolve to a real chain. */
+const CHAIN_ALIASES: Record<string, string> = {
+  ethereum: "ethereum",
+  eth: "ethereum",
+  mainnet: "ethereum",
+  "ethereum mainnet": "ethereum",
+  "eth mainnet": "ethereum",
+  "1": "ethereum",
+  "eip155:1": "ethereum",
+  base: "base",
+  arbitrum: "arbitrum",
+  optimism: "optimism",
+  polygon: "polygon",
+  sepolia: "sepolia",
+  "base-sepolia": "base-sepolia",
+};
+
+/** Normalise a raw chain value to its canonical name: trim, lowercase,
+ * collapse inner whitespace, strip a leading "on " (the builder may send
+ * chain "on Ethereum"), then resolve aliases. Returns the lowercased raw
+ * value unchanged when it matches no alias, so the caller still rejects
+ * it as UNSUPPORTED_CHAIN. */
+export function normalizeChain(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  let c = raw.trim().toLowerCase().replace(/\s+/g, " ");
+  if (c.startsWith("on ")) c = c.slice(3).trim();
+  return CHAIN_ALIASES[c] ?? c;
+}
 const OP_STACK_CHAINS = new Set(["base", "optimism", "base-sepolia"]);
-const RPC_TIMEOUT_MS = 4500;
+/** Per-call RPC budget (A2-fix, 2026-11-20): 12 s for EACH upstream POST,
+ * not per leg. Measured on this VM (A2-fix probe, sequential 1-POST-at-a-
+ * time): per-call latency 126 ms–8,963 ms on the ethereum legs (slowest:
+ * mevblocker tx 8,963 ms), and J2 measured 9,995 ms for one base-sepolia
+ * publicnode call — 12 s covers every observed sequential call with
+ * margin. The old 4.5 s per-leg budget combined with a 6-way concurrent
+ * fan-out self-timed-out: 6 concurrent POSTs → 0/6 succeeded twice in a
+ * row, while the SAME 6 calls sequential → 6/6 in 0.2–1.5 s (J2) and
+ * 12/12 in the A2-fix probe. The handler therefore issues at most ONE
+ * upstream POST at a time (sequential legs, sequential tx-then-receipt
+ * calls within a leg) and gives each POST this budget. A leg's wall time
+ * is the sum of its two calls; a round's wall time is the sum of its
+ * legs (measured round 0: ~10.5 s and ~26.3 s on two runs). */
+const RPC_TIMEOUT_MS = 12000;
 /** Delay before the single re-poll of null legs on a split vote (F3). */
 const REPOLL_DELAY_MS = 800;
 const INTENT = "ONCHAIN_TX_LOOKUP_GENERAL";
@@ -102,7 +160,18 @@ interface RpcTx {
 }
 
 interface RpcReceipt {
-  status: string;
+  /** Absent on the RAW pre-Byzantium receipt shape some endpoints return
+   * (e.g. rpc.mevblocker.io for the reference tx — verified live A2):
+   * such a receipt carries `root` instead and means confirmed. Other
+   * endpoints synthesise/return a `status` field for the same tx
+   * (Cloudflare, drpc, BlastAPI all return status 0x1 — verification
+   * 2026-11-20 rows 20–21), so a missing status is ENDPOINT-DEPENDENT,
+   * never a universal property of the receipt. `status` is therefore
+   * optional; effective status is 1 when absent and `root` is present. */
+  status?: string;
+  /** Pre-Byzantium state root; present on the raw shape exactly when
+   * `status` is absent. */
+  root?: string;
   blockNumber: string;
   from: string;
   /** Null on contract-creation receipts (the receipt carries
@@ -115,8 +184,36 @@ interface RpcOutcome {
   rpcUrl: string;
   tx: RpcTx | null;
   receipt: RpcReceipt | null;
-  /** Exact JSON-RPC response text of the eth_getTransactionReceipt call. */
-  receiptRaw: string;
+  /** Parsed `result` of the eth_getTransactionByHash call (object or null). */
+  txResult: unknown;
+  /** Parsed `result` of the eth_getTransactionReceipt call (object or null). */
+  receiptResult: unknown;
+}
+
+/**
+ * Canonical TX evidence (R2, F1): the parsed results of BOTH upstream
+ * calls on the winning leg, combined deterministically as
+ * `{"receipt":<receipt-result>,"tx":<tx-result>}` (stableStringify sorts
+ * the keys; either result may be null). The receipt's SHA-256 is taken
+ * over exactly this string, and the string itself is what
+ * GET /receipts/:id/evidence serves — so the served evidence re-derives
+ * every answer field: status/block/from/to from the receipt result,
+ * value_eth from the tx result's `value` (the receipt has no `value`
+ * field), and pending vs not_found from whether the tx result is an
+ * object ({tx:{...},receipt:null}) or null ({tx:null,receipt:null}).
+ * A judge recomputes it (M2) by re-POSTing both calls to the winning leg
+ * named in receipt.upstream_url, taking each response's parsed `result`,
+ * and rebuilding this same object — see JUDGE.md §4. The parsed form
+ * (not the raw response texts) is deliberate: RPC envelope framing
+ * (jsonrpc/id, whitespace, key order) carries no answer data, so a
+ * re-POST that returns the same results in different framing still
+ * recomputes MATCH; a raw-text hash would mismatch on framing alone.
+ */
+export function buildTxEvidence(txResult: unknown, receiptResult: unknown): string {
+  return stableStringify({
+    tx: txResult ?? null,
+    receipt: receiptResult ?? null,
+  });
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -161,11 +258,34 @@ function parseReceipt(result: unknown, txHash: string): RpcReceipt | null {
   if (result === null) return null;
   if (!isRecord(result)) throw new Error("malformed eth_getTransactionReceipt result");
   const status = asHexString(result.status);
+  const root = asHexString(result.root);
   const blockNumber = asHexString(result.blockNumber);
   const from = asHexString(result.from);
-  if (status === null || blockNumber === null || from === null) {
-    throw new Error("malformed eth_getTransactionReceipt result: missing status/blockNumber/from");
+  if (blockNumber === null || from === null) {
+    throw new Error("malformed eth_getTransactionReceipt result: missing blockNumber/from");
   }
+  // A2: SOME endpoints return the raw pre-Byzantium receipt shape with
+  // NO `status` field (they carry `root` instead and mean confirmed);
+  // others return status 0x1 for the same tx (Cloudflare, drpc,
+  // BlastAPI — verification 2026-11-20 rows 20–21). A missing status is
+  // valid ONLY with a present `root`; a receipt with neither is
+  // malformed, and a present status must still be 0x0/0x1 (R4 MINOR 5).
+  if (status === null && root === null) {
+    throw new Error(
+      "malformed eth_getTransactionReceipt result: missing status and root (neither Byzantium nor pre-Byzantium shape)",
+    );
+  }
+  if (status !== null) {
+    assertHexQty(status, "eth_getTransactionReceipt status");
+    if (hexToNumber(status) !== 0 && hexToNumber(status) !== 1) {
+      throw new Error(
+        `malformed eth_getTransactionReceipt result: status must be 0x0 or 0x1, got ${status}`,
+      );
+    }
+  } else if (!HEX_ADDR_RE.test(root as string)) {
+    throw new Error("malformed eth_getTransactionReceipt result: root is not hex");
+  }
+  assertHexQty(blockNumber, "eth_getTransactionReceipt blockNumber");
   // R5 Finding 1: `to` is null on contract-creation receipts (real RPCs
   // return `to: null` with `contractAddress` instead). A null `to` is
   // valid; a non-string, non-null `to` is still malformed. The answer
@@ -175,16 +295,9 @@ function parseReceipt(result: unknown, txHash: string): RpcReceipt | null {
   if (to === null && result.to !== null) {
     throw new Error("malformed eth_getTransactionReceipt result: missing to");
   }
-  // R4 MINOR 1 + MINOR 5: validate hex format, and reject any status other
-  // than 0x0/0x1 (numeric) as a malformed leg — "0x2" must never be
-  // reported as "reverted". Real RPCs emit only 0/1.
-  assertHexQty(status, "eth_getTransactionReceipt status");
+  // R4 MINOR 1: blockNumber hex format (status already validated above;
+  // a status-less pre-Byzantium receipt is valid with `root` present).
   assertHexQty(blockNumber, "eth_getTransactionReceipt blockNumber");
-  if (hexToNumber(status) !== 0 && hexToNumber(status) !== 1) {
-    throw new Error(
-      `malformed eth_getTransactionReceipt result: status must be 0x0 or 0x1, got ${status}`,
-    );
-  }
   if (!HEX_ADDR_RE.test(from) || (to !== null && !HEX_ADDR_RE.test(to))) {
     throw new Error("malformed eth_getTransactionReceipt result: from/to is not hex");
   }
@@ -193,7 +306,15 @@ function parseReceipt(result: unknown, txHash: string): RpcReceipt | null {
   if (receiptTxHash === null || receiptTxHash.toLowerCase() !== txHash.toLowerCase()) {
     throw new Error("malformed eth_getTransactionReceipt result: transactionHash does not match queried hash");
   }
-  const receipt: RpcReceipt = { status, blockNumber, from, to };
+  // A2: a status-less receipt keeps `status` undefined and carries `root`
+  // (see receiptStatusNumber for the effective status = 1).
+  const receipt: RpcReceipt = {
+    ...(status !== null ? { status } : {}),
+    ...(root !== null ? { root } : {}),
+    blockNumber,
+    from,
+    to,
+  };
   // OP-stack chains report the L1 data fee on the receipt; keep it verbatim.
   // R4 MINOR 1: a malformed l1Fee ("0xZZZ", decimal "123") drops the leg.
   if (typeof result.l1Fee === "string") {
@@ -203,92 +324,107 @@ function parseReceipt(result: unknown, txHash: string): RpcReceipt | null {
   return receipt;
 }
 
+/** One upstream POST with its own AbortController: every call gets the
+ * full RPC_TIMEOUT_MS budget (A2-fix). Previously one controller covered
+ * both calls of a leg concurrently; with sequential calls each POST must
+ * time out on its own, or a slow first call would steal the second
+ * call's budget. */
 async function rpcCall(
   url: string,
   method: string,
   params: unknown[],
-  signal: AbortSignal,
 ): Promise<{ result: unknown; rawText: string }> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-    signal,
-  });
-  if (!res.ok) throw new Error(`RPC HTTP ${res.status} from ${url}`);
-  const rawText = await res.text();
-  let parsed: unknown;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
   try {
-    parsed = JSON.parse(rawText);
-  } catch {
-    throw new Error(`RPC invalid JSON from ${url}`);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`RPC HTTP ${res.status} from ${url}`);
+    const rawText = await res.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      throw new Error(`RPC invalid JSON from ${url}`);
+    }
+    if (!isRecord(parsed)) throw new Error(`RPC malformed response from ${url}`);
+    if (parsed.error !== undefined && parsed.error !== null) {
+      throw new Error(`RPC error from ${url}: ${JSON.stringify(parsed.error)}`);
+    }
+    if (!("result" in parsed)) throw new Error(`RPC response without result from ${url}`);
+    return { result: parsed.result, rawText };
+  } finally {
+    clearTimeout(timer);
   }
-  if (!isRecord(parsed)) throw new Error(`RPC malformed response from ${url}`);
-  if (parsed.error !== undefined && parsed.error !== null) {
-    throw new Error(`RPC error from ${url}: ${JSON.stringify(parsed.error)}`);
-  }
-  if (!("result" in parsed)) throw new Error(`RPC response without result from ${url}`);
-  return { result: parsed.result, rawText };
 }
 
 async function rpcBatchCall(
   url: string,
   calls: Array<{ method: string; params: unknown[] }>,
-  signal: AbortSignal,
 ): Promise<unknown[]> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(
-      calls.map((c, i) => ({ jsonrpc: "2.0", id: i + 1, method: c.method, params: c.params })),
-    ),
-    signal,
-  });
-  if (!res.ok) throw new Error(`RPC HTTP ${res.status} from ${url}`);
-  const rawText = await res.text();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawText);
-  } catch {
-    throw new Error(`RPC invalid JSON from ${url}`);
-  }
-  if (!Array.isArray(parsed)) throw new Error(`RPC batch response not an array from ${url}`);
-  return parsed.map((entry) => {
-    if (!isRecord(entry)) throw new Error(`RPC malformed batch entry from ${url}`);
-    if (entry.error !== undefined && entry.error !== null) {
-      throw new Error(`RPC error from ${url}: ${JSON.stringify(entry.error)}`);
-    }
-    if (!("result" in entry)) throw new Error(`RPC batch entry without result from ${url}`);
-    return entry.result;
-  });
-}
-
-async function fetchFromRpc(rpcUrl: string, txHash: string): Promise<RpcOutcome> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
   try {
-    // Two concurrent requests per RPC: one batch carrying only
-    // eth_getTransactionByHash, and one individual eth_getTransactionReceipt
-    // call whose exact response text becomes the receipt raw body. The
-    // public endpoints throttle concurrent connections from one IP, so
-    // fewer parallel calls per RPC is measurably more reliable inside the
-    // 4.5s budget (verified live 2026-11-20). eth_blockNumber used to ride
-    // in the batch, but its result was never read — it was pure failure
-    // surface (a dead blockNumber leg poisoned a healthy tx+receipt leg),
-    // so it was dropped (F5).
-    const batchP = rpcBatchCall(
-      rpcUrl,
-      [{ method: "eth_getTransactionByHash", params: [txHash] }],
-      controller.signal,
-    );
-    const rcP = rpcCall(rpcUrl, "eth_getTransactionReceipt", [txHash], controller.signal);
-    const [batchResults, rcRes] = await Promise.all([batchP, rcP]);
-    const outcome: RpcOutcome = {
-      rpcUrl,
-      tx: parseTx(batchResults[0], txHash),
-      receipt: parseReceipt(rcRes.result, txHash),
-      receiptRaw: rcRes.rawText,
-    };
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        calls.map((c, i) => ({ jsonrpc: "2.0", id: i + 1, method: c.method, params: c.params })),
+      ),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`RPC HTTP ${res.status} from ${url}`);
+    const rawText = await res.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      throw new Error(`RPC invalid JSON from ${url}`);
+    }
+    if (!Array.isArray(parsed)) throw new Error(`RPC batch response not an array from ${url}`);
+    return parsed.map((entry) => {
+      if (!isRecord(entry)) throw new Error(`RPC malformed batch entry from ${url}`);
+      if (entry.error !== undefined && entry.error !== null) {
+        throw new Error(`RPC error from ${url}: ${JSON.stringify(entry.error)}`);
+      }
+      if (!("result" in entry)) throw new Error(`RPC batch entry without result from ${url}`);
+      return entry.result;
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchFromRpc(rpcUrl: string, txHash: string): Promise<RpcOutcome> {
+  // A2-fix (F1): the two upstream calls run SEQUENTIALLY — one POST at a
+  // time — never concurrently. The old shape fired batch + receipt
+  // concurrently per leg and all legs concurrently (6 simultaneous
+  // POSTs), which self-timed-out at the 4.5 s budget (0/6 twice) while
+  // the same calls sequential all answered in 0.2–9 s. Sequential costs
+  // summed latency per leg but never queues behind its own fan-out.
+  // Each call carries its own RPC_TIMEOUT_MS budget (see rpcCall /
+  // rpcBatchCall); a slow first call cannot steal the second's budget.
+  // eth_blockNumber used to ride in the batch, but its result was never
+  // read — it was pure failure surface (a dead blockNumber leg poisoned
+  // a healthy tx+receipt leg), so it was dropped (F5). BOTH parsed
+  // results are kept: the receipt evidence (R2) is the canonical {tx,
+  // receipt} object built from them (see buildTxEvidence), so the
+  // tx-call result must survive parsing.
+  const batchResults = await rpcBatchCall(rpcUrl, [
+    { method: "eth_getTransactionByHash", params: [txHash] },
+  ]);
+  const rcRes = await rpcCall(rpcUrl, "eth_getTransactionReceipt", [txHash]);
+  const outcome: RpcOutcome = {
+    rpcUrl,
+    tx: parseTx(batchResults[0], txHash),
+    receipt: parseReceipt(rcRes.result, txHash),
+    txResult: batchResults[0],
+    receiptResult: rcRes.result,
+  };
     // M5: a receipt without a tx is inconsistent — a receipt implies a tx.
     // Treat the whole leg as failed (errored/unknown), never as a
     // confirming vote. Unreachable on real RPCs, but must not produce a
@@ -310,13 +446,21 @@ async function fetchFromRpc(rpcUrl: string, txHash: string): Promise<RpcOutcome>
       );
     }
     return outcome;
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 function hexToNumber(hex: string): number {
   return parseInt(hex, 16);
+}
+
+/** A2: effective receipt status as a number. A raw pre-Byzantium receipt
+ * shape (returned by some endpoints, e.g. mevblocker) has no `status`
+ * field but carries `root` — that means the tx succeeded, so the
+ * effective status is 1 (confirmed). Other endpoints return status 0x1
+ * for the same tx, so the missing-status shape is endpoint-dependent,
+ * not universal. parseReceipt guarantees a status-less receipt always
+ * has `root`; a status-less receipt without `root` never reaches here. */
+export function receiptStatusNumber(receipt: RpcReceipt): number {
+  return receipt.status === undefined ? 1 : hexToNumber(receipt.status);
 }
 
 /** Quorum equality (R4 BLOCKER A, extended R5): the FULL answer fields, not just
@@ -363,7 +507,10 @@ function outcomesEqual(a: RpcOutcome, b: RpcOutcome, l1FeeApplies: boolean): boo
     }
   }
   if (a.receipt !== null && b.receipt !== null) {
-    if (hexToNumber(a.receipt.status) !== hexToNumber(b.receipt.status)) return false;
+    // A2: compare EFFECTIVE status — a raw-shape status-less receipt
+    // (root present, as returned by some endpoints) counts as 1, so it
+    // agrees with a leg whose RPC returns status 0x1 for the same tx.
+    if (receiptStatusNumber(a.receipt) !== receiptStatusNumber(b.receipt)) return false;
     if (hexToNumber(a.receipt.blockNumber) !== hexToNumber(b.receipt.blockNumber)) return false;
     // R5 Finding 2: receipt from/to are compared. Receipt `to` CAN reach
     // the answer (`tx?.to ?? receipt?.to ?? null`) — e.g. contract
@@ -380,6 +527,20 @@ function outcomesEqual(a: RpcOutcome, b: RpcOutcome, l1FeeApplies: boolean): boo
       a.receipt.to.toLowerCase() !== b.receipt.to.toLowerCase()
     ) {
       return false;
+    }
+    // A2-fix (J2 F2): when BOTH receipts are status-less (raw
+    // pre-Byzantium shape), `root` is the one field that distinguishes
+    // them — two legs with different state roots for the same tx must
+    // NOT agree, even though their effective status is 1 on both sides.
+    // (When either receipt carries a `status`, the root is not compared:
+    // a status-carrying receipt need not carry a root at all, so
+    // missing-vs-present there is not a disagreement.)
+    if (a.receipt.status === undefined && b.receipt.status === undefined) {
+      const rootA = a.receipt.root ?? null;
+      const rootB = b.receipt.root ?? null;
+      if (rootA === null || rootB === null || rootA.toLowerCase() !== rootB.toLowerCase()) {
+        return false;
+      }
     }
     if (l1FeeApplies) {
       if ((a.receipt.l1Fee === undefined) !== (b.receipt.l1Fee === undefined)) return false;
@@ -445,17 +606,26 @@ function isFinalitySplit(outcomes: RpcOutcome[]): boolean {
   return hasPending && hasFinal;
 }
 
+/** Fetch every leg SEQUENTIALLY, one leg at a time (A2-fix F1). No
+ * early exit: the full vote is needed — the live reference test pins
+ * "3/3 sources agreed", a split vote needs the third leg's answer, and
+ * an agreeing pair must still be checked against the remaining legs'
+ * null/errored state (B1). Sequential costs summed latency but never
+ * queues behind its own fan-out (6 concurrent POSTs → 0/6; sequential
+ * → 6/6, measured 2026-11-20). */
 async function fetchAllLegs(
   rpcs: string[],
   txHash: string,
 ): Promise<{ successes: RpcOutcome[]; errored: string[] }> {
-  const settled = await Promise.allSettled(rpcs.map((rpcUrl) => fetchFromRpc(rpcUrl, txHash)));
   const successes: RpcOutcome[] = [];
   const errored: string[] = [];
-  settled.forEach((result, i) => {
-    if (result.status === "fulfilled") successes.push(result.value);
-    else errored.push(rpcs[i]);
-  });
+  for (const rpcUrl of rpcs) {
+    try {
+      successes.push(await fetchFromRpc(rpcUrl, txHash));
+    } catch {
+      errored.push(rpcUrl);
+    }
+  }
   return { successes, errored };
 }
 
@@ -511,8 +681,34 @@ function pickQuorum(
 export async function handleTx(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
-  const txHash = query.tx_hash?.trim();
-  const chain = query.chain?.trim().toLowerCase();
+  let txHash = query.tx_hash?.trim();
+  let chainRaw = query.chain?.trim();
+  // A2: the request builder copies the question text into tx_hash, e.g.
+  // "0x5c50…2060 on Ethereum" — split the trailing " on <chain>" off the
+  // hash and use it as the chain when no chain param was sent. The hash
+  // itself is validated strictly below, so trailing prose can never smuggle
+  // a malformed hash through.
+  const onChainMatch = txHash?.match(/^(0x[0-9a-fA-F]{64})\s+on\s+(.+)$/i);
+  if (onChainMatch) {
+    txHash = onChainMatch[1];
+    // A2-fix (J2 F3): when an explicit `chain` param is ALSO sent, the
+    // suffix must agree with it — a contradictory input ("… on Solana"
+    // + chain=ethereum) is a 400, never silently resolved in favour of
+    // the param. Comparison is on normalised names, so "… on ETH" +
+    // chain "mainnet" still agrees (both → ethereum).
+    if (chainRaw) {
+      const suffixChain = normalizeChain(onChainMatch[2].trim());
+      if (suffixChain !== normalizeChain(chainRaw)) {
+        throw badRequest(
+          "CHAIN_MISMATCH",
+          `conflicting chain: tx_hash names '${onChainMatch[2].trim()}' but chain parameter is '${chainRaw}'`,
+        );
+      }
+    } else {
+      chainRaw = onChainMatch[2].trim();
+    }
+  }
+  const chain = normalizeChain(chainRaw);
   if (!txHash || !chain) {
     throw badRequest("MISSING_PARAM", "tx_hash and chain are required query parameters");
   }
@@ -533,10 +729,13 @@ export async function handleTx(
   // chains, "2-of-2" on 2-RPC chains. Never hardcoded.
   const total = rpcs.length;
 
-  // 2-of-N quorum over the chain's archive RPCs. Each leg self-times-out
-  // at RPC_TIMEOUT_MS (fetchFromRpc's AbortController), so this round costs
-  // at most one timeout budget. Errored/timed-out legs are tracked
-  // explicitly (B1): they are unknown, not absent.
+  // 2-of-N quorum over the chain's archive RPCs. Legs are fetched
+  // SEQUENTIALLY, one POST at a time (A2-fix F1: the 6-way concurrent
+  // fan-out self-timed-out; sequential serves). Each POST carries its
+  // own RPC_TIMEOUT_MS budget, so a round costs the SUM of its legs'
+  // latencies (measured round 0: ~10–27 s), not one budget. Errored /
+  // timed-out legs are tracked explicitly (B1): they are unknown, not
+  // absent.
   let { successes, errored } = await fetchAllLegs(rpcs, txHash);
   const l1FeeApplies = OP_STACK_CHAINS.has(chain);
   let value: RpcOutcome;
@@ -547,21 +746,22 @@ export async function handleTx(
     // legs once (same 800 ms delay as the F3 re-poll), then 502 if still
     // <2 successes. The 502 outcome itself is unchanged — only the
     // fetch count changes (re-poll fetches now happen on this path).
-    // Cost: the all-down path now costs two timeout budgets (~9 s wall
-    // on stubs) instead of one; that is the price of not 502ing a
-    // recoverable transient. No second re-poll round follows: legs that
-    // answered in this re-poll round have fresh answers, so the vote is
-    // evaluated directly by pickQuorum below.
+    // Cost: the all-down path now costs two sequential rounds (each up
+    // to legs × calls × RPC_TIMEOUT_MS worst case) instead of one; that
+    // is the price of not 502ing a recoverable transient. No second
+    // re-poll round follows: legs that answered in this re-poll round
+    // have fresh answers, so the vote is evaluated directly by
+    // pickQuorum below.
     await new Promise((resolve) => setTimeout(resolve, REPOLL_DELAY_MS));
-    const recovered = await Promise.all(
-      errored.map(async (rpcUrl) => {
-        try {
-          return await fetchFromRpc(rpcUrl, txHash);
-        } catch {
-          return null;
-        }
-      }),
-    );
+    // A2-fix: re-poll sequentially, like round 0 — same fan-out rule.
+    const recovered: (RpcOutcome | null)[] = [];
+    for (const rpcUrl of errored) {
+      try {
+        recovered.push(await fetchFromRpc(rpcUrl, txHash));
+      } catch {
+        recovered.push(null);
+      }
+    }
     const stillErrored: string[] = [];
     recovered.forEach((outcome, i) => {
       if (outcome !== null) successes.push(outcome);
@@ -588,9 +788,9 @@ export async function handleTx(
     // null legs (F3) AND the errored/timed-out legs (B1; a transient
     // error may recover) AND the pending legs when the vote mixes pending
     // with final (MINOR 3; a lagging leg may confirm on re-poll).
-    // The re-poll reuses the same per-leg RPC_TIMEOUT_MS (the constant is
-    // not raised); the re-poll path is the only path whose wall time can
-    // exceed one budget (first round + 800 ms + one re-poll round).
+    // The re-poll reuses the same per-call RPC_TIMEOUT_MS; the re-poll
+    // path is the only path whose wall time can exceed one round (first
+    // round + 800 ms + one re-poll round, each sequential).
     // Re-evaluation is quorum-based, not all-or-nothing: a non-empty pair
     // that agrees after the re-poll wins (e.g. 2 tx + 1 still-null leg
     // confirms); all-null after the re-poll with zero errors is not_found;
@@ -619,29 +819,33 @@ export async function handleTx(
       // once; a second failure is not a clean null), not just
       // inconsistent-response throws.
       const repollErrors: string[] = [];
-      const repolled = await Promise.all(
-        successes.map(async (outcome) => {
-          // Final legs (receipt present) keep their answer; only
-          // empty and pending legs are re-polled.
-          if (!isEmptyOutcome(outcome) && outcome.receipt !== null) return outcome;
-          try {
-            return await fetchFromRpc(outcome.rpcUrl, txHash);
-          } catch {
-            repollErrors.push(outcome.rpcUrl);
-            return null;
-          }
-        }),
-      );
+      // A2-fix: re-poll sequentially, like round 0 — same fan-out rule.
+      // Order and membership are identical to the old concurrent form;
+      // only the issue order changes (one POST at a time).
+      const repolled: (RpcOutcome | null)[] = [];
+      for (const outcome of successes) {
+        // Final legs (receipt present) keep their answer; only
+        // empty and pending legs are re-polled.
+        if (!isEmptyOutcome(outcome) && outcome.receipt !== null) {
+          repolled.push(outcome);
+          continue;
+        }
+        try {
+          repolled.push(await fetchFromRpc(outcome.rpcUrl, txHash));
+        } catch {
+          repollErrors.push(outcome.rpcUrl);
+          repolled.push(null);
+        }
+      }
       successes = repolled.filter((o): o is RpcOutcome => o !== null);
-      const recovered = await Promise.all(
-        errored.map(async (rpcUrl) => {
-          try {
-            return await fetchFromRpc(rpcUrl, txHash);
-          } catch {
-            return null;
-          }
-        }),
-      );
+      const recovered: (RpcOutcome | null)[] = [];
+      for (const rpcUrl of errored) {
+        try {
+          recovered.push(await fetchFromRpc(rpcUrl, txHash));
+        } catch {
+          recovered.push(null);
+        }
+      }
       const stillErrored: string[] = [];
       recovered.forEach((outcome, i) => {
         if (outcome !== null) successes.push(outcome);
@@ -677,7 +881,9 @@ export async function handleTx(
   let answer: string;
   if (receipt !== null) {
     const blockNumber = hexToNumber(receipt.blockNumber);
-    if (hexToNumber(receipt.status) === 1) {
+    // A2: effective status — a raw-shape status-less receipt (root
+    // present, as returned by some endpoints) is confirmed, not a failure.
+    if (receiptStatusNumber(receipt) === 1) {
       status = "confirmed";
       verdict = "verified";
       confidence = 1.0;
@@ -727,17 +933,30 @@ export async function handleTx(
     value_eth: valueEth,
   };
   // OP-stack L1 data fee: include it (converted to whole native units) when
-  // the receipt carries it. The raw receipt body hashed below already
-  // contains the original l1Fee hex.
+  // the receipt carries it. The canonical {tx, receipt} evidence hashed
+  // below carries the receipt result verbatim, including the original
+  // l1Fee hex.
   if (receipt !== null && OP_STACK_CHAINS.has(chain) && receipt.l1Fee !== undefined) {
     fields.l1_fee_eth = weiToEth(receipt.l1Fee);
   }
 
-  const receiptDoc: Receipt = makeReceipt(INTENT, value.rpcUrl, value.receiptRaw, votes);
+  // R2 (F1): the receipt hashes the canonical {tx, receipt} evidence
+  // object (buildTxEvidence) — the parsed results of BOTH upstream calls
+  // on the winning leg — and that exact string is persisted as the
+  // evidence, so the audit URL serves it and a re-hash of the served
+  // bytes matches. The old receipt-only hash could never cover
+  // value_eth (the receipt has no `value` field) and left pending vs
+  // not_found indistinguishable from evidence alone.
+  const evidence = buildTxEvidence(value.txResult, value.receiptResult);
+  const receiptDoc: Receipt = makeReceipt(INTENT, value.rpcUrl, evidence, votes);
   try {
-    saveReceipt(receiptDoc);
-  } catch {
-    // Persistence must never fail the answer; the coordinator wires it.
+    saveReceipt(receiptDoc, evidence);
+  } catch (err) {
+    // R2: a failed persist is logged, never silent — the answer still
+    // ships (pre-existing behaviour), but the failure is now visible.
+    console.warn(
+      `verireceipt: failed to persist TX receipt ${receiptDoc.receipt_id}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
   return envelope(INTENT, fields, receiptDoc, {
