@@ -62,7 +62,7 @@ interface EndpointStats {
 
 export default function Benchmarks() {
   // Live service line (uptime comes from the API itself, not a canned value).
-  const healthQuery = useLiveQuery('benchmark-health', () => getHealth(), { enabled: true });
+  const healthQuery = useLiveQuery('benchmark-health', () => getHealth());
   const health = healthQuery.data as unknown as
     | { status: string; service: string; uptime_s: number }
     | null;

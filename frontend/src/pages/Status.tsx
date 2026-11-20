@@ -1,7 +1,8 @@
 // /status — live service status.
 //
 // ONLY WHAT THE API ITSELF REPORTS. The health card is the live /health
-// response (polled every 30 s via useHealth); each endpoint row is a real
+// response (polled every 30 s by an in-page interval calling the hook's
+// refetch — useHealth itself never polls); each endpoint row is a real
 // probe — a valid sample call against the live API, timed in this browser.
 // Up/down, latency, and last-checked time are all measured here; any outage
 // shows the real error (status + code + message).
@@ -126,10 +127,23 @@ function probeDetail(key: string, data: unknown): string | null {
 }
 
 export default function Status() {
-  const health = useHealth(30000);
+  const health = useHealth();
   const healthData = health.data as unknown as
     | { status: string; service: string; uptime_s: number; upstreams: Record<string, unknown> }
     | null;
+
+  // "Last checked" is page state, not a hook field: the real useHealth
+  // returns no lastChecked. Record a timestamp whenever a health fetch
+  // settles (success or error), and poll every 30 s in-page via refetch
+  // (the hook itself never polls), with cleanup on unmount.
+  const [healthCheckedAt, setHealthCheckedAt] = useState<string | null>(null);
+  useEffect(() => {
+    if (!health.loading) setHealthCheckedAt(new Date().toISOString());
+  }, [health.loading, health.data, health.error]);
+  useEffect(() => {
+    const id = window.setInterval(() => health.refetch(), 30000);
+    return () => window.clearInterval(id);
+  }, [health.refetch]);
 
   const [probes, setProbes] = useState<Record<string, ProbeResult>>(() =>
     Object.fromEntries(
@@ -247,7 +261,7 @@ export default function Status() {
           <div>
             <span className="vr-label">last checked</span>
             <span className="vr-mono vr-small">
-              {health.lastChecked ? fmtTime(health.lastChecked.toISOString()) : '—'}
+              {healthCheckedAt ? fmtTime(healthCheckedAt) : '—'}
             </span>
           </div>
         </div>

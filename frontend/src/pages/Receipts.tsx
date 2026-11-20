@@ -40,21 +40,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, ApiError } from '../lib/api';
 import { useHealth } from '../lib/hooks';
+import type { Receipt } from '../lib/types';
 import { ReceiptCard } from '../components/ReceiptCard';
 
 // ---------------------------------------------------------------------------
 // Types (structural; the lib returns the miner's flat JSON envelope)
 // ---------------------------------------------------------------------------
-
-export interface Receipt {
-  receipt_id: string;
-  intent: string;
-  upstream_url: string;
-  raw_response_sha256: string;
-  quorum_votes: string;
-  fetched_at: string;
-  audit_url: string;
-}
 
 type Envelope = Record<string, unknown> & {
   answer?: string;
@@ -419,7 +410,11 @@ function VerifyPanel({
         </div>
       )}
       <p className="vr-muted vr-small">
-        Recorded audit URL: <span className="vr-mono">{receipt.audit_url}</span> — the API does
+        Recorded audit URL:{' '}
+        <span className="vr-mono">
+          {typeof receipt.audit_url === 'string' ? receipt.audit_url : '—'}
+        </span>{' '}
+        — the API does
         not serve <span className="vr-mono">/receipts/:id</span> in this build (live check
         2026-11-20: HTTP 404), so it is shown as recorded text, not a working link.
       </p>
@@ -448,7 +443,6 @@ interface TryItProps {
   onRun: () => void;
   running: boolean;
   result: TryItResult | null;
-  onReceipt: (entry: StoredReceipt) => void;
 }
 
 function TryItCard(props: TryItProps) {
@@ -551,7 +545,19 @@ const ENDPOINT_META: Record<EndpointKey, { title: string; intent: string; path: 
 };
 
 export default function Receipts() {
-  const health = useHealth(30000);
+  const health = useHealth();
+  // "Last checked" is page state, not a hook field: the real useHealth
+  // returns no lastChecked. Record a timestamp whenever a health fetch
+  // settles, and poll every 30 s in-page via refetch (the hook itself
+  // never polls), with cleanup on unmount.
+  const [healthCheckedAt, setHealthCheckedAt] = useState<string | null>(null);
+  useEffect(() => {
+    if (!health.loading) setHealthCheckedAt(new Date().toISOString());
+  }, [health.loading, health.data, health.error]);
+  useEffect(() => {
+    const id = window.setInterval(() => health.refetch(), 30000);
+    return () => window.clearInterval(id);
+  }, [health.refetch]);
   const [stored, setStored] = useState<StoredReceipt[]>(() => loadStored());
   const [values, setValues] = useState<Record<string, string>>(() => ({
     tx_hash: SAMPLE_TX_HASH,
@@ -840,7 +846,7 @@ export default function Receipts() {
         <p className="vr-muted vr-small" style={{ marginTop: 10 }}>
           Base URL <span className="vr-mono">{API_BASE_URL}</span> · polled live every 30 s ·
           last checked{' '}
-          {health.lastChecked ? fmtTime(health.lastChecked.toISOString()) : '—'}
+          {healthCheckedAt ? fmtTime(healthCheckedAt) : '—'}
         </p>
       </section>
 
@@ -862,7 +868,6 @@ export default function Receipts() {
             onRun={() => runEndpoint(key)}
             running={running === key}
             result={results[key] ?? null}
-            onReceipt={addReceipt}
           />
         ))}
       </div>
