@@ -1,5 +1,6 @@
 // Pure helpers for the dashboard. No network, no canned data.
 
+import { useEffect, useRef, type RefObject } from "react";
 import { ApiError } from "../../lib/api";
 import type { LiveReceipt, ProbeOutcome, Receipt } from "./types";
 
@@ -109,13 +110,21 @@ export function futureGridInterval(): string {
  * Run one live API call and measure real browser-side latency.
  * Never fabricates: a timeout / network failure is returned as an outcome
  * with status 0, never as a fake 200.
+ *
+ * The optional AbortSignal is passed through to the fetcher, which must
+ * forward it to the underlying get* call: a cancelled run (Cancel button
+ * or unmount) aborts the in-flight fetch instead of letting it settle
+ * into state afterwards. A fetcher that ignores the signal still works —
+ * the caller guards onRecord/setState with the run token — but every
+ * built-in fetcher forwards it.
  */
 export async function probe<T>(
-  fetcher: () => Promise<T>,
+  fetcher: (signal?: AbortSignal) => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<ProbeOutcome> {
   const start = performance.now();
   try {
-    const body = (await fetcher()) as unknown;
+    const body = (await fetcher(signal)) as unknown;
     const latencyMs = performance.now() - start;
     const receipt =
       body !== null && typeof body === "object" && "receipt" in body
@@ -125,7 +134,11 @@ export async function probe<T>(
   } catch (err) {
     const latencyMs = performance.now() - start;
     if (err instanceof ApiError) {
-      const body = { error: err.code ?? "request_failed", message: err.message };
+      // Surface a server-advised retry delay when the API sent one (the
+      // 422 refusal cases assert on retry_after_sec — dropping it here
+      // made F01 unpassable even when the live API answered correctly).
+      const body: Record<string, unknown> = { error: err.code ?? "request_failed", message: err.message };
+      if (err.retry_after_sec !== undefined) body.retry_after_sec = err.retry_after_sec;
       return {
         ok: false,
         body,
@@ -147,19 +160,38 @@ export async function probe<T>(
   }
 }
 
-let refusalSeq = 0;
+/** Session ledger cap: keep the latest 200 receipts, drop older ones. */
+export const LEDGER_CAP = 200;
 
-/** Build a session-ledger row from a probe outcome. */
+/** Prepend one receipt to the session ledger, enforcing the cap. */
+export function appendToLedger(prev: LiveReceipt[], next: LiveReceipt): LiveReceipt[] {
+  return [next, ...prev].slice(0, LEDGER_CAP);
+}
+
+let refusalSeq = 0;
+let liveReceiptSeq = 0;
+
+/**
+ * Build a session-ledger row from a probe outcome.
+ *
+ * The row key is client-generated (a per-session counter + the server
+ * receipt_id): the server receipt_id alone must never be a React key —
+ * two calls can legitimately share one receipt_id (e.g. the same
+ * not_found answer), which duplicates keys and drops rows.
+ */
 export function toLiveReceipt(
   intent: string,
   query: string,
   requestUrl: string,
   outcome: ProbeOutcome,
 ): LiveReceipt {
+  liveReceiptSeq += 1;
   if (outcome.ok) {
     const receipt = outcome.receipt;
+    const serverId = receipt ? receipt.receipt_id : null;
     return {
-      id: receipt ? receipt.receipt_id : `ok-${Date.now().toString(36)}`,
+      key: `lr-${liveReceiptSeq}-${serverId ?? "ok"}`,
+      id: serverId ?? `ok-${Date.now().toString(36)}`,
       ts: receipt ? receipt.fetched_at : new Date().toISOString(),
       intent,
       query,
@@ -172,6 +204,7 @@ export function toLiveReceipt(
   }
   refusalSeq += 1;
   return {
+    key: `lr-${liveReceiptSeq}-refusal-${refusalSeq}`,
     id: `refusal-${Date.now().toString(36)}-${refusalSeq}`,
     ts: new Date().toISOString(),
     intent,
@@ -278,4 +311,28 @@ export function highlightJson(value: unknown): string {
 export function directUrl(path: string, params: Record<string, string>): string {
   const query = new URLSearchParams(params);
   return `${MINER_ORIGIN}${path}?${query.toString()}`;
+}
+
+// ---------------------------------------------------------------------------
+// Drawer accessibility (shared by AuthDrawer + ReceiptDrawer).
+// ---------------------------------------------------------------------------
+
+/**
+ * Drawer focus management: when the drawer opens, move focus into it;
+ * when it closes, return focus to whatever had it before. The drawer
+ * element itself must carry tabIndex={-1} so it is focusable but not in
+ * the tab order, and inert={!open} so a closed (off-canvas) drawer is
+ * not tabbable at all.
+ */
+export function useDrawerFocus(open: boolean, panelRef: RefObject<HTMLElement | null>): void {
+  const previousFocus = useRef<Element | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    previousFocus.current = document.activeElement;
+    panelRef.current?.focus();
+    return () => {
+      const prev = previousFocus.current;
+      if (prev instanceof HTMLElement) prev.focus();
+    };
+  }, [open, panelRef]);
 }

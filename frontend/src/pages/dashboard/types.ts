@@ -27,6 +27,12 @@ export type {
 
 /** One row of the session ledger: a real call the browser made, nothing else. */
 export interface LiveReceipt {
+  /**
+   * Client-generated React key (per-session counter + server receipt_id).
+   * The server receipt_id alone is NOT unique across rows and must never
+   * be used as a key (two calls can share one receipt_id).
+   */
+  key: string;
   /** receipt.receipt_id when the call returned one; `refusal-<rand>` for 422/4xx. */
   id: string;
   /** receipt.fetched_at when present, else the client time the call settled. */
@@ -74,5 +80,8 @@ export interface ScopeSamples {
 
 export type ScopeSeriesKey = keyof ScopeSamples;
 
-/** Auth mode (3-tier drawer). Values are kept in memory only, never persisted. */
-export type AuthMode = "sponsored" | "byok" | "mcp";
+/** Auth mode (2-tier drawer). Values are kept in memory only, never persisted.
+ * There is deliberately no BYO-key mode: the miner API is auth:none and
+ * there is no authenticated header path, so a key field could never be
+ * applied — collecting one would be a fake-apply credential field. */
+export type AuthMode = "sponsored" | "mcp";
