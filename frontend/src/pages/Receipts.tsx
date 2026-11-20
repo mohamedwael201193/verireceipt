@@ -37,11 +37,12 @@
 // The router/shell wraps this page in Layout (nav/footer chrome); this file
 // renders page content only.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Component, useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, ApiError } from '../lib/api';
 import { useHealth } from '../lib/hooks';
 import type { Receipt } from '../lib/types';
-import { ReceiptCard } from '../components/ReceiptCard';
+import { ReceiptCard, isSafeUpstreamUrl } from '../components/ReceiptCard';
 
 // ---------------------------------------------------------------------------
 // Types (structural; the lib returns the miner's flat JSON envelope)
@@ -92,6 +93,10 @@ interface TryItResult {
 
 const API_BASE_URL = 'https://verireceipt.onrender.com';
 const STORAGE_KEY = 'verireceipt.session-receipts.v1';
+// A corrupt stored value is preserved here instead of being overwritten.
+const BACKUP_KEY = 'verireceipt.session-receipts.v1.corrupt-backup';
+// Cap the session ledger: the newest 200 receipts, same as the dashboard.
+const LEDGER_CAP = 200;
 
 // Real confirmed Ethereum tx (block 26454869, checked live 2026-11-20).
 const SAMPLE_TX_HASH = '0xafdbc83c485355d90f79fd660bcd12713402aa78922d966657d1005f59e92902';
@@ -128,18 +133,75 @@ function fmtTime(iso: string): string {
   }
 }
 
-function loadStored(): StoredReceipt[] {
+// Stored entries are UNTRUSTED input: localStorage can hold anything, so
+// every stored entry is fully validated on load (bad entries are dropped),
+// ledger fields render through string guards, the list sits behind an
+// error boundary, and a receipt restored from storage never shows a bare
+// VERIFIED badge — it is labelled as a stored entry.
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === 'string' && v.length > 0;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function isValidReceipt(v: unknown): v is Receipt {
+  if (!isRecord(v)) return false;
+  return (
+    isNonEmptyString(v.receipt_id) &&
+    isNonEmptyString(v.upstream_url) &&
+    isNonEmptyString(v.raw_response_sha256) &&
+    isNonEmptyString(v.fetched_at)
+  );
+}
+
+function isValidStoredReceipt(v: unknown): v is StoredReceipt {
+  if (!isRecord(v)) return false;
+  if (!isNonEmptyString(v.key)) return false;
+  if (
+    v.endpoint !== 'tx' &&
+    v.endpoint !== 'filings' &&
+    v.endpoint !== 'tvl' &&
+    v.endpoint !== 'route' &&
+    v.endpoint !== 'grid'
+  ) {
+    return false;
+  }
+  if (!isNonEmptyString(v.label) || !isNonEmptyString(v.params) || !isNonEmptyString(v.summary)) {
+    return false;
+  }
+  if (!isNonEmptyString(v.fetchedAt) || Number.isNaN(Date.parse(v.fetchedAt))) return false;
+  if (!isValidReceipt(v.receipt)) return false;
+  if (v.verifyData !== undefined) {
+    if (!isRecord(v.verifyData)) return false;
+    const vd = v.verifyData;
+    if (vd.tx_hash !== undefined && typeof vd.tx_hash !== 'string') return false;
+    if (vd.node_or_zone !== undefined && typeof vd.node_or_zone !== 'string') return false;
+    if (vd.interval_start !== undefined && typeof vd.interval_start !== 'string') return false;
+    if (vd.lmp_usd_per_mwh !== undefined && typeof vd.lmp_usd_per_mwh !== 'number') return false;
+    if (vd.market !== undefined && typeof vd.market !== 'string') return false;
+  }
+  return true;
+}
+
+// Defense in depth for rendering: a non-string renders as "—", never as a
+// React child (an object child throws React error #31 and unmounts the page).
+function asText(value: unknown): string {
+  return typeof value === 'string' ? value : '—';
+}
+
+function readStored(): { entries: StoredReceipt[]; corrupt: boolean } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
+    if (!raw) return { entries: [], corrupt: false };
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (r): r is StoredReceipt =>
-        !!r && typeof r === 'object' && !!(r as StoredReceipt).receipt?.receipt_id,
-    );
+    if (!Array.isArray(parsed)) return { entries: [], corrupt: true };
+    // Invalid entries are dropped, never rendered; the ledger is capped.
+    return { entries: parsed.filter(isValidStoredReceipt).slice(0, LEDGER_CAP), corrupt: false };
   } catch {
-    return [];
+    // Unparseable JSON: corrupt, not empty — the caller must not overwrite it.
+    return { entries: [], corrupt: true };
   }
 }
 
@@ -264,8 +326,12 @@ async function verifyReceipt(
         reason: 'The transaction hash is missing from this record, so the JSON-RPC call cannot be replayed.',
       };
     }
-    if (!receipt.upstream_url) {
-      return { kind: 'unverifiable', reason: 'Receipt carries no upstream_url to replay against.' };
+    if (!isSafeUpstreamUrl(receipt.upstream_url)) {
+      return {
+        kind: 'unverifiable',
+        reason:
+          'The receipt’s upstream URL is not a safe https URL, so the replay was refused — nothing was fetched. (A data:, http:, or otherwise unsafe upstream can never verify.)',
+      };
     }
     try {
       const res = await fetch(receipt.upstream_url, {
@@ -302,8 +368,12 @@ async function verifyReceipt(
   }
 
   // --- /v1/filings + /v1/tvl: upstream GET re-fetch. ---
-  if (!receipt.upstream_url) {
-    return { kind: 'unverifiable', reason: 'Receipt carries no upstream_url to re-fetch.' };
+  if (!isSafeUpstreamUrl(receipt.upstream_url)) {
+    return {
+      kind: 'unverifiable',
+      reason:
+        'The receipt’s upstream URL is not a safe https URL, so the re-fetch was refused — nothing was fetched. (A data:, http:, or otherwise unsafe upstream can never verify.)',
+    };
   }
   try {
     const res = await fetch(receipt.upstream_url);
@@ -333,10 +403,16 @@ function VerifyPanel({
   receipt,
   endpoint,
   data,
+  stored,
 }: {
   receipt: Receipt;
   endpoint: EndpointKey;
   data?: VerifyData;
+  // True for entries restored from localStorage: a hash match there proves
+  // only that the stored fields are self-consistent (anyone can write
+  // matching bytes to localStorage), so a stored entry never shows the
+  // bare live VERIFIED badge — it is labelled as stored instead.
+  stored?: boolean;
 }) {
   const [state, setState] = useState<VerifyState>({ kind: 'idle' });
   const run = useCallback(async () => {
@@ -359,16 +435,47 @@ function VerifyPanel({
           {state.kind === 'checking' ? 'Verifying…' : 'Recompute SHA-256 in browser'}
         </button>
       </div>
+      {stored && (
+        <p className="vr-muted vr-small">
+          Stored entry — restored from this browser’s storage, not from a live call just now.
+          Re-run the live call for a fresh receipt; a hash match here is not live verification.
+        </p>
+      )}
       {state.kind === 'idle' && (
         <p className="vr-muted vr-small">{verifyMethodNote(endpoint)}</p>
       )}
       {state.kind === 'checking' && <p className="vr-muted vr-small">Verifying…</p>}
       {state.kind === 'verified' && (
         <div>
-          <span className="vr-badge vr-b-ok">SHA-256 MATCH VERIFIED ✓</span>
-          <p className="vr-muted vr-small" style={{ marginTop: 8 }}>
-            Method: {state.method}.
-          </p>
+          {stored ? (
+            endpoint === 'grid' ? (
+              <>
+                <span className="vr-badge vr-b-warn">STORED ENTRY — HASH MATCHES STORED FIELDS</span>
+                <p className="vr-muted vr-small" style={{ marginTop: 8 }}>
+                  The hash matches the fields stored in this browser — but the grid check
+                  re-hashes those stored fields, so this proves nothing about provenance:
+                  anyone can write matching bytes to localStorage. This entry is{' '}
+                  <strong>not live-verified</strong>. Re-run the live call to verify.
+                </p>
+              </>
+            ) : (
+              <>
+                <span className="vr-badge vr-b-warn">STORED ENTRY — RE-CHECKED AGAINST LIVE UPSTREAM</span>
+                <p className="vr-muted vr-small" style={{ marginTop: 8 }}>
+                  Method: {state.method}. The recorded https upstream was re-fetched just now
+                  and the hash matched — but the entry itself was restored from storage, so
+                  re-run the live call for a fresh receipt.
+                </p>
+              </>
+            )
+          ) : (
+            <>
+              <span className="vr-badge vr-b-ok">SHA-256 MATCH VERIFIED ✓</span>
+              <p className="vr-muted vr-small" style={{ marginTop: 8 }}>
+                Method: {state.method}.
+              </p>
+            </>
+          )}
           <p className="vr-muted vr-small vr-mono">
             computed {state.computed}
             <br />
@@ -423,6 +530,47 @@ function VerifyPanel({
 }
 
 // ---------------------------------------------------------------------------
+// Ledger error boundary (J2 B1): one bad stored row must never blank the
+// page. The boundary wraps only the ledger list, so a render throw inside
+// a row shows this fallback — with Clear reachable — while the rest of the
+// page (header, health, try-it forms) keeps working.
+// ---------------------------------------------------------------------------
+
+interface LedgerBoundaryProps {
+  onClear: () => void;
+  children: ReactNode;
+}
+
+interface LedgerBoundaryState {
+  hasError: boolean;
+}
+
+class LedgerErrorBoundary extends Component<LedgerBoundaryProps, LedgerBoundaryState> {
+  state: LedgerBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): LedgerBoundaryState {
+    return { hasError: true };
+  }
+
+  render(): ReactNode {
+    if (this.state.hasError) {
+      return (
+        <div className="vr-notice" role="alert">
+          <p>
+            The stored ledger could not be rendered — one of the saved entries is corrupt.
+            The rest of the page keeps working.
+          </p>
+          <button type="button" className="vr-btn-ghost" onClick={this.props.onClear}>
+            Clear session ledger
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Try-it form
 // ---------------------------------------------------------------------------
 
@@ -453,7 +601,7 @@ function TryItCard(props: TryItProps) {
     <section className="vr-card vr-tryit" aria-label={`${title} try-it`}>
       <div className="vr-kicker">// {intent}</div>
       <h3 className="vr-h3">{title}</h3>
-      <p className="vr-mono vr-small vr-muted" style={{ margin: '0 0 14px' }}>
+      <p className="vr-mono vr-small vr-muted" style={{ margin: '0 0 14px', overflowWrap: 'anywhere' }}>
         GET {methodPath}
       </p>
       {fields.map((f) => (
@@ -558,7 +706,11 @@ export default function Receipts() {
     const id = window.setInterval(() => health.refetch(), 30000);
     return () => window.clearInterval(id);
   }, [health.refetch]);
-  const [stored, setStored] = useState<StoredReceipt[]>(() => loadStored());
+  const [storedInit] = useState(readStored);
+  const [stored, setStored] = useState<StoredReceipt[]>(storedInit.entries);
+  // True when the saved value was unparseable (or not an array): the corrupt
+  // value is left untouched (M6) and a backup copy is kept under BACKUP_KEY.
+  const [storedCorrupt, setStoredCorrupt] = useState<boolean>(storedInit.corrupt);
   const [values, setValues] = useState<Record<string, string>>(() => ({
     tx_hash: SAMPLE_TX_HASH,
     chain: 'ethereum',
@@ -569,21 +721,51 @@ export default function Receipts() {
     node_or_zone: 'TH_NP15_GEN-APND',
     interval_start: defaultGridInterval(),
   }));
-  const [running, setRunning] = useState<EndpointKey | 'health' | null>(null);
+  // Running state is tracked PER ENDPOINT (B2): a single shared slot let a
+  // finishing call re-enable another endpoint's button mid-flight. Each
+  // form's button is disabled only by its own in-flight call.
+  const [running, setRunning] = useState<ReadonlySet<EndpointKey | 'health'>>(new Set());
+  const markRunning = useCallback((key: EndpointKey | 'health', on: boolean) => {
+    setRunning((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
   const [results, setResults] = useState<Partial<Record<EndpointKey | 'health', TryItResult>>>({});
   const [healthError, setHealthError] = useState<string | null>(null);
   const [healthMs, setHealthMs] = useState<number | null>(null);
 
   useEffect(() => {
+    // M6: never silently overwrite corrupt stored data with [].
+    if (storedCorrupt) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
     } catch {
       // storage full/unavailable — receipts stay in memory for the session
     }
-  }, [stored]);
+  }, [stored, storedCorrupt]);
+
+  // M6: preserve a corrupt stored value under a backup key on mount.
+  useEffect(() => {
+    if (!storedCorrupt) return;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw !== null) localStorage.setItem(BACKUP_KEY, raw);
+    } catch {
+      // ignore — the corrupt value itself is left untouched either way
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const addReceipt = useCallback((entry: StoredReceipt) => {
-    setStored((prev) => [entry, ...prev.filter((r) => r.receipt.receipt_id !== entry.receipt.receipt_id)]);
+    setStored((prev) =>
+      [entry, ...prev.filter((r) => r.receipt.receipt_id !== entry.receipt.receipt_id)].slice(
+        0,
+        LEDGER_CAP,
+      ),
+    );
   }, []);
 
   const setValue = useCallback((name: string, value: string) => {
@@ -592,7 +774,10 @@ export default function Receipts() {
 
   const runEndpoint = useCallback(
     async (endpoint: EndpointKey) => {
-      setRunning(endpoint);
+      // The button is disabled while its own call is in flight; this guard
+      // covers any other path that calls runEndpoint twice for one endpoint.
+      if (running.has(endpoint)) return;
+      markRunning(endpoint, true);
       const started = performance.now();
       try {
         let raw: unknown;
@@ -669,14 +854,17 @@ export default function Receipts() {
           [endpoint]: { endpoint, data: null, health: null, latencyMs, error: errText(err) },
         }));
       } finally {
-        setRunning(null);
+        // Only this endpoint's own slot is cleared — a finishing call can
+        // never re-enable another endpoint's button mid-flight (B2).
+        markRunning(endpoint, false);
       }
     },
-    [values, addReceipt],
+    [values, addReceipt, running, markRunning],
   );
 
   const runHealth = useCallback(async () => {
-    setRunning('health');
+    if (running.has('health')) return;
+    markRunning('health', true);
     setHealthError(null);
     const started = performance.now();
     try {
@@ -700,12 +888,13 @@ export default function Receipts() {
       setHealthMs(Math.round(performance.now() - started));
       setHealthError(errText(err));
     } finally {
-      setRunning(null);
+      markRunning('health', false);
     }
-  }, []);
+  }, [running, markRunning]);
 
   const clearStored = useCallback(() => {
     setStored([]);
+    setStoredCorrupt(false);
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
@@ -773,12 +962,24 @@ export default function Receipts() {
             </div>
             <h2 className="vr-h2">Receipts collected in this browser session</h2>
           </div>
-          {stored.length > 0 && (
-            <button type="button" className="vr-btn-ghost" onClick={clearStored}>
-              Clear session ledger
-            </button>
-          )}
+          {/* Always rendered (disabled when empty) so the clear control is
+              reachable in every state, including after a poisoned entry. */}
+          <button type="button" className="vr-btn-ghost" onClick={clearStored} disabled={stored.length === 0 && !storedCorrupt}>
+            Clear session ledger
+          </button>
         </div>
+        {storedCorrupt && (
+          <div className="vr-notice" role="alert">
+            <p>
+              Stored receipts could not be read — the saved data is corrupt and was ignored.
+              Nothing was deleted; a copy was kept under{' '}
+              <span className="vr-mono">{BACKUP_KEY}</span>. The page keeps working.
+            </p>
+            <button type="button" className="vr-btn-ghost" onClick={clearStored}>
+              Discard corrupt stored data
+            </button>
+          </div>
+        )}
         {stored.length === 0 ? (
           <div className="vr-empty">
             <p className="vr-empty-title">No receipts yet in this browser session.</p>
@@ -788,27 +989,36 @@ export default function Receipts() {
             </p>
           </div>
         ) : (
-          <ol className="vr-ledger-list">
-            {stored.map((entry) => (
-              <li key={entry.key} className="vr-ledger-row">
-                <details>
-                  <summary>
-                    <span className="vr-badge vr-b-acc">{entry.endpoint}</span>
-                    <span className="vr-ledger-label">{entry.label}</span>
-                    <span className="vr-mono vr-small vr-muted">{fmtTime(entry.fetchedAt)}</span>
-                  </summary>
-                  <p className="vr-answer vr-small">{entry.summary}</p>
-                  <p className="vr-mono vr-small vr-muted vr-params">{entry.params}</p>
-                  <ReceiptCard receipt={entry.receipt} />
-                  <VerifyPanel
-                    receipt={entry.receipt}
-                    endpoint={entry.endpoint as EndpointKey}
-                    data={entry.verifyData}
-                  />
-                </details>
-              </li>
-            ))}
-          </ol>
+          // One bad row must never blank the page: the boundary contains any
+          // render throw to this list and keeps Clear reachable (B1).
+          // key remounts the boundary when the ledger changes, so clearing
+          // after an error shows the list again instead of a stuck fallback.
+          <LedgerErrorBoundary key={stored.length} onClear={clearStored}>
+            <ol className="vr-ledger-list">
+              {stored.slice(0, LEDGER_CAP).map((entry, i) => (
+                <li key={typeof entry.key === 'string' ? entry.key : `row-${i}`} className="vr-ledger-row">
+                  <details>
+                    <summary>
+                      <span className="vr-badge vr-b-acc">{asText(entry.endpoint)}</span>
+                      <span className="vr-ledger-label">{asText(entry.label)}</span>
+                      <span className="vr-mono vr-small vr-muted">
+                        {typeof entry.fetchedAt === 'string' ? fmtTime(entry.fetchedAt) : '—'}
+                      </span>
+                    </summary>
+                    <p className="vr-answer vr-small">{asText(entry.summary)}</p>
+                    <p className="vr-mono vr-small vr-muted vr-params">{asText(entry.params)}</p>
+                    <ReceiptCard receipt={entry.receipt} />
+                    <VerifyPanel
+                      receipt={entry.receipt}
+                      endpoint={entry.endpoint as EndpointKey}
+                      data={entry.verifyData}
+                      stored
+                    />
+                  </details>
+                </li>
+              ))}
+            </ol>
+          </LedgerErrorBoundary>
         )}
       </section>
 
@@ -817,8 +1027,8 @@ export default function Receipts() {
         <div className="vr-kicker">// GET /health · no receipt — liveness only</div>
         <h2 className="vr-h2">Service health</h2>
         <div className="vr-tryit-actions">
-          <button type="button" className="vr-btn-accent" onClick={runHealth} disabled={running === 'health'}>
-            {running === 'health' ? 'Checking…' : 'Check /health →'}
+          <button type="button" className="vr-btn-accent" onClick={runHealth} disabled={running.has('health')}>
+            {running.has('health') ? 'Checking…' : 'Check /health →'}
           </button>
           {health.data && (
             <span className="vr-badge vr-b-ok">
@@ -866,7 +1076,7 @@ export default function Receipts() {
             values={values}
             onChange={setValue}
             onRun={() => runEndpoint(key)}
-            running={running === key}
+            running={running.has(key)}
             result={results[key] ?? null}
           />
         ))}
@@ -882,7 +1092,7 @@ export default function Receipts() {
 }
 
 const PAGE_CSS = `
-.vr-page{max-width:1340px;margin:0 auto;padding:28px 24px 64px;color:var(--text,#F3F2EE);font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px;line-height:1.55}
+.vr-page{max-width:1340px;margin:0 auto;padding:28px 24px 64px;color:var(--text,#F3F2EE);font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px;line-height:1.55;overflow-wrap:anywhere}
 .vr-kicker{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;color:var(--muted,#8F8E8A);margin-bottom:6px}
 .vr-h1{font-size:clamp(1.9rem,3.2vw,2.6rem);font-weight:300;letter-spacing:-.03em;line-height:1.08;margin:0 0 10px}
 .vr-h1 .serif-i,.serif-i{font-family:'Newsreader',Georgia,serif;font-style:italic;font-weight:400}
@@ -913,6 +1123,8 @@ const PAGE_CSS = `
 .vr-code{border-radius:10px;border:1px solid var(--border,rgba(255,255,255,.10));background:var(--code-bg,#0D0D0F);color:#F2F1EC;overflow:hidden}
 .vr-code pre{padding:16px 18px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.66;overflow-x:auto;margin:0;color:#F2F1EC;white-space:pre-wrap;word-break:break-word}
 .vr-err{color:var(--bad,var(--err,#EF4444));font-size:13px}
+.vr-notice{border:1px solid rgba(245,158,11,.36);background:var(--warn-soft,rgba(245,158,11,.15));color:var(--warn,#F59E0B);border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13px}
+.vr-notice p{margin:0 0 10px}
 .vr-empty{padding:18px 4px 8px}
 .vr-empty-title{font-size:16px;margin:0 0 6px}
 .vr-ledger-head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px}
