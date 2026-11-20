@@ -5,6 +5,9 @@
 //   POST /v1/tx-lookup etc. All curls below are real and runnable.
 // - miner.yaml tab: the REAL miner.yaml verbatim (id 774921, slug
 //   verireceipt). The design's 89412 / verireceipt-oracle is wrong (§8 A2).
+//   Byte-identity with the repo-root miner.yaml is enforced by the drift
+//   test in Dashboard.test.tsx — if miner.yaml changes, this tab must be
+//   re-synced from it or the suite fails. Do NOT hand-edit this string.
 // - cast tab: <user> / <COMMIT_SHA> filled with real values (§8 A13); the
 //   Test USDC address was verified as a live Sepolia contract (eth_getCode)
 //   on 2026-11-20. Amounts are template values — verify against the live
