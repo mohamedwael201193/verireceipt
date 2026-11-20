@@ -87,17 +87,27 @@ describe("hash scrolling (J2 B1): clicks scroll, not just change the URL", () =>
 
   // The scaffold's placeholder Landing has no sections: the scroll
   // targets come from fixtures standing in for the real landing page
-  // (work-landing, read-only: Probe.tsx #probe, SprintMatrix.tsx
-  // #roadmap, Manifesto.tsx #manifesto). What this proves is the App
+  // (src/test/landing-anchor-ids.json, committed in THIS repo: probe,
+  // roadmap, manifesto — the ids of the real landing's Probe,
+  // SprintMatrix and Manifesto sections). What this proves is the App
   // wiring — hash navigation reaches ScrollToHash and scrolls the
-  // element with that id; the ids themselves are verified against the
-  // real landing page, and the browser check measures the real scroll.
+  // element with that id; the ids themselves are the fixture values,
+  // and the browser check measures the real scroll. The fixture must
+  // stay in-repo: the old test read the sibling work-landing worktree
+  // (../../work-landing/...) and went ENOENT on a clean checkout
+  // (J1/J2 R2 B-J1-1).
+  const LANDING_IDS = JSON.parse(
+    readFrontendFile("src/test/landing-anchor-ids.json"),
+  ) as Record<string, string>;
+
   function renderAppWithLandingSections(initialEntries: string[]) {
     return render(
       <MemoryRouter initialEntries={initialEntries}>
-        <section id="probe">probe section</section>
-        <section id="roadmap">roadmap section</section>
-        <section id="manifesto">manifesto section</section>
+        {Object.values(LANDING_IDS).map((id) => (
+          <section key={id} id={id}>
+            {id} section
+          </section>
+        ))}
         <App />
       </MemoryRouter>,
     );
@@ -120,16 +130,15 @@ describe("hash scrolling (J2 B1): clicks scroll, not just change the URL", () =>
     expect(scrollSpy.mock.instances[0]).toBe(document.getElementById("manifesto"));
   });
 
-  it("footer anchor targets exist on the real landing page (J2 B1a)", () => {
-    const landingDir = "../../work-landing/frontend/src/pages/landing";
-    const probe = readFileSync(`${landingDir}/Probe.tsx`, "utf8");
-    const sprint = readFileSync(`${landingDir}/SprintMatrix.tsx`, "utf8");
-    const manifesto = readFileSync(`${landingDir}/Manifesto.tsx`, "utf8");
-    expect(probe).toContain('id="probe"');
-    expect(sprint).toContain('id="roadmap"');
-    expect(manifesto).toContain('id="manifesto"');
-    expect(sprint).not.toContain('id="sprint-matrix"');
-    // And the scaffold links point at those real ids, not sprint-matrix.
+  it("footer anchor targets match the landing fixture ids (J2 B1a)", () => {
+    // No sprint-matrix links/ids in app code; this test file asserts
+    // their absence (J1 R2 minor 2 — the old "zero sprint-matrix refs"
+    // wording was wrong: the test file itself mentions sprint-matrix
+    // in these negative assertions).
+    expect(LANDING_IDS.probe).toBe("probe");
+    expect(LANDING_IDS.roadmap).toBe("roadmap");
+    expect(LANDING_IDS.manifesto).toBe("manifesto");
+    // And the scaffold links point at those fixture ids, not sprint-matrix.
     const layout = readFrontendFile("src/components/Layout.tsx");
     expect(layout).toContain('to="/#probe"');
     expect(layout).toContain('to="/#roadmap"');

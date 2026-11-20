@@ -268,29 +268,6 @@ button {
   display: none;
 }
 
-/* Small-laptop band 861–1035px (J2 re-review minor 2): with all six nav
-   links + health pill + full CTA + toggle the bar wrapped to 3 rows
-   (133px tall at 861–880px, theme toggle stranded alone on row 3).
-   Hide the pill and use the compact CTA here, with tighter gaps, so the
-   bar stays one row; above 1035px the full row fits again. */
-@media (min-width: 861px) and (max-width: 1035px) {
-  .health-pill {
-    display: none;
-  }
-  .cta-label-full {
-    display: none;
-  }
-  .cta-label-short {
-    display: inline;
-  }
-  .nav-right {
-    gap: 14px;
-  }
-  .nav-links {
-    gap: 16px;
-  }
-}
-
 @media (max-width: 860px) {
   .nav-links {
     display: none;
@@ -465,6 +442,35 @@ html[data-theme="light"] .theme-knob {
   }
 }
 
+/* Small-laptop band 861–1035px (J2 re-review minor 2): with all six nav
+   links + health pill + full CTA + toggle the bar wrapped to 3 rows
+   (133px tall at 861–880px, theme toggle stranded alone on row 3).
+   Hide the pill and use the compact CTA here, with tighter gaps, so the
+   bar stays one row; above 1035px the full row fits again. NOTE: this
+   block MUST stay AFTER the .health-pill base rule above — same
+   specificity (0,1,0), so source order decides. In round 2 it sat
+   BEFORE the base rule and the base display:inline-flex won, so the
+   pill was never hidden in the band and the navbar wrapped to 2 rows
+   (83px at 861–880px, J1/J2 R2 B-J1-2). The css-regressions test asserts
+   this ordering, not just the band text. */
+@media (min-width: 861px) and (max-width: 1035px) {
+  .health-pill {
+    display: none;
+  }
+  .cta-label-full {
+    display: none;
+  }
+  .cta-label-short {
+    display: inline;
+  }
+  .nav-right {
+    gap: 14px;
+  }
+  .nav-links {
+    gap: 16px;
+  }
+}
+
 /* Below 560px the health pill is hidden entirely (its state lives on the
    Status page) so wordmark + compact CTA + theme toggle always fit on one
    row. NOTE: this block must stay AFTER the .health-pill base rule above —
@@ -488,7 +494,16 @@ html[data-theme="light"] .theme-knob {
   border-top: 1px solid var(--border);
 }
 
-.giant-wm {
+/* Scoped to .giant-footer (specificity 0,2,0), NOT a bare .giant-wm
+   class: the lazy Landing chunk loads landing.css LATER, and its bare
+   .giant-wm rule (clamp(3rem, …), landing.css:595) beats a bare
+   scaffold rule of the same specificity — in round 2 the merged /
+   rendered 48px/324px at 320px and overflowed 20px (J2 R2 B-J2-3).
+   The scoped rule wins over the bare landing rule regardless of load
+   order, on the scaffold footer AND on the landing's own SiteFooter
+   (same .giant-footer > .giant-wm structure). The css-regressions
+   test asserts the scoped selector and fails on a bare rule. */
+.giant-footer .giant-wm {
   /* Floor 2rem (not the design file's 3rem): at 48px the wordmark is
      ~324px wide, which overflows a 320px viewport (16px container
      padding leaves 288px) — the giant fix must not reintroduce
