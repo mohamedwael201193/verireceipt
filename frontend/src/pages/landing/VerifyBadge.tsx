@@ -1,20 +1,24 @@
-// "Verify in browser" — real receipt verification UI.
+// "Compute envelope digest" — envelope-digest UI.
 //
-// Fetches the same-origin endpoint as raw text, recomputes SHA-256 over
-// those exact bytes, and compares with the receipt's recorded digest from
-// the SAME response. MATCH VERIFIED is shown ONLY on a byte-exact match.
-// A mismatch is reported honestly: the miner's receipt covers the
-// upstream raw bytes (not the envelope the browser receives), so the two
-// digests are not expected to be equal with the current miner. The
-// steady state for that expected mismatch is therefore NEUTRAL, not a
-// warning: it is not a failed verification, it is a digest of the
-// envelope, which is not comparable to the upstream receipt. The
+// Fetches the same-origin endpoint as raw text and recomputes SHA-256
+// over those exact bytes. The result is shown next to the receipt's
+// recorded digest — it is NOT a browser verification: the recorded
+// digest covers the miner's upstream raw bytes (src/core/receipt.ts
+// `makeReceipt`), not the envelope the browser receives, so the two
+// digests are not expected to be equal with the current miner and a
+// match is unreachable by construction (J2 minor 4). The button is
+// therefore labelled "Compute envelope digest", never "Verify", and no
+// copy here promises a verification. The steady state for the expected
+// mismatch is NEUTRAL: it is not a failed verification, it is a digest
+// of the envelope, which is not comparable to the upstream receipt. The
 // computed and recorded digests are both shown, with the explanation,
-// so the user can see exactly what was compared.
+// so the user can see exactly what was compared. (The deeper fix — the
+// miner exposing the raw upstream bytes so a real browser verification
+// becomes possible — is miner-team owned, not this branch.)
 import { useState } from "react";
 import { verifyEndpoint, type VerifyState } from "./verify";
 
-export function VerifyBadge({ url, label = "Verify in browser" }: { url: string; label?: string }) {
+export function VerifyBadge({ url, label = "Compute envelope digest" }: { url: string; label?: string }) {
   const [state, setState] = useState<VerifyState>({ status: "idle" });
 
   async function run() {
@@ -58,13 +62,13 @@ export function VerifyBadge({ url, label = "Verify in browser" }: { url: string;
         </span>
       )}
       {state.status === "no-receipt" && (
-        <span style={{ color: "var(--muted)" }}>No receipt in this response — nothing to verify.</span>
+        <span style={{ color: "var(--muted)" }}>No receipt in this response — no digest to compute.</span>
       )}
-      {state.status === "error" && <span style={{ color: "var(--bad)" }}>Verification refused: {state.message}</span>}
+      {state.status === "error" && <span style={{ color: "var(--bad)" }}>Digest refused: {state.message}</span>}
       {state.status !== "idle" && state.status !== "running" && (
         <span style={{ display: "block", marginTop: 6 }}>
           <button type="button" className="micro-btn" style={{ padding: "3px 9px", fontSize: 10.5 }} onClick={run}>
-            Re-verify
+            Recompute digest
           </button>
         </span>
       )}

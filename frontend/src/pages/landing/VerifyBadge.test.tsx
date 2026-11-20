@@ -38,7 +38,7 @@ describe("VerifyBadge — neutral steady state (J1)", () => {
       <VerifyBadge url="/api/v1/tx?tx_hash=0x8c3f442fc6d640a6ff3ea0b12be64f1d4609ea94edd2966f42c01cd9bdcf04b5&chain=ethereum" />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Verify in browser" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compute envelope digest" }));
 
     await waitFor(() =>
       expect(

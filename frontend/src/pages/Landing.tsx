@@ -6,8 +6,10 @@
 // The design file made zero network requests — all of its "live"
 // behaviour was simulation over canned data. That simulation is gone:
 // try-it forms call the real endpoints, receipts are real ReceiptCards,
-// and receipt verification is a real SHA-256 recompute (Verified only
-// on match). See landing/data.ts for the full list of corrections.
+// and the envelope digest is a real SHA-256 recompute shown next to the
+// recorded digest (a match is not expected: the receipt covers the
+// miner's upstream bytes, not the envelope — see VerifyBadge).
+// See landing/data.ts for the full list of corrections.
 import { useEffect, useRef } from "react";
 import "./landing/landing.css";
 import { Hero } from "./landing/Hero";

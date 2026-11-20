@@ -3,8 +3,10 @@
 // The design's probe was simulated: the trap was a string check on the
 // payload, and "verification" hashed a canned string. This port sends the
 // user's payload to the LIVE endpoint, renders the actual response (or
-// the actual 422 error body), and verifies the receipt with a real
-// SHA-256 recompute (see VerifyBadge). Copy curl builds a real GET curl.
+// the actual 422 error body), and computes the envelope's SHA-256 digest
+// for comparison with the recorded digest (see VerifyBadge — a match is
+// not expected with the current miner, so no browser verification is
+// promised). Copy curl builds a real GET curl.
 import { useRef, useState } from "react";
 import { ApiError } from "../../lib/api";
 import { ReceiptCard } from "../../components/ReceiptCard";
