@@ -141,13 +141,16 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
           // B-J2-1 audit): probe() reports ok:true whenever the fetcher
           // resolves, so a body with no receipt would otherwise stream a
           // green "200 OK" line. The lib throws on refusals, so this is
-          // defence-in-depth, not a live path.
-          tag: outcome.ok && receipt.receipt ? "200 OK" : `HTTP ${receipt.status || "—"}`,
+          // defence-in-depth, not a live path. Keyed on the shared
+          // isVerified() predicate (J2 R4 M1), never an ad-hoc check.
+          tag: isVerified(receipt) ? "200 OK" : `HTTP ${receipt.status || "—"}`,
           mid: `${check.intent} (${formatMs(outcome.latencyMs)})`,
           tail: outcome.ok
-            ? `receipt ${receipt.receipt ? shortHash(receipt.receipt.raw_response_sha256) : "—"} · unbilled`
+            ? receipt.receipt
+              ? `receipt ${shortHash(receipt.receipt.raw_response_sha256)} · unbilled`
+              : `no receipt — refused HTTP ${receipt.status} · unbilled`
             : `fail-closed · ${receipt.errorMessage ?? "request failed"} · $0.00`,
-          color: outcome.ok && receipt.receipt ? "#22C55E" : "#F59E0B",
+          color: isVerified(receipt) ? "#22C55E" : "#F59E0B",
         });
       }
 

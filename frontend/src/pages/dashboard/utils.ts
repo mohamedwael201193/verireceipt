@@ -161,16 +161,38 @@ export async function probe<T>(
 }
 
 /**
- * The ONE display predicate for "verified / OK" (J2 R3 B-J2-1): a call
- * counts as verified only when HTTP 200 arrived AND the lib minted a
- * receipt for it. A bare 200 with no receipt is a refusal — the lib
- * fails it as ApiError INVALID_RESPONSE carrying status 200 — and must
- * never render as verified, OK, answered, or a receipt age. Every
- * display site that renders "200", "OK", "Verified", "Answered", or a
+ * The ONE display predicate for "verified / OK" on RECEIPTED intents
+ * (J2 R3 B-J2-1): a receipted call counts as verified only when HTTP
+ * 200 arrived AND the lib minted a receipt for it. A bare 200 with no
+ * receipt is a refusal — the lib fails it as ApiError INVALID_RESPONSE
+ * carrying status 200 — and must never render as verified, OK,
+ * answered, or a receipt age. Every display site for a receipted
+ * endpoint that renders "200", "OK", "Verified", "Answered", or a
  * receipt age MUST key on this, never on status alone.
+ *
+ * Scope note (J1 R3 B-1): this predicate is for RECEIPTED intents only.
+ * /health is non-receipted by contract (getHealth passes no
+ * expectReceipt; HealthResponse has no receipt field), so a healthy
+ * /health answers 200 {status:"ok"} with no receipt — that MUST render
+ * ok via isHealthOk below, never "refused". The /api/mcp GET probe
+ * likewise returns raw parsed JSON with no receipt.
  */
 export function isVerified(r: { status: number; receipt: Receipt | null }): boolean {
   return r.status === 200 && r.receipt !== null;
+}
+
+/**
+ * The display predicate for /health ONLY (J1 R3 B-1): /health is a
+ * non-receipted liveness endpoint by contract, so "ok" is HTTP 200
+ * AND body.status === "ok" — no receipt is ever minted for it, and
+ * requiring one called every healthy miner "refused". A 200 whose
+ * body is not {status:"ok"} (e.g. the lib refused it as
+ * INVALID_RESPONSE, status 200, error body) is NOT ok.
+ */
+export function isHealthOk(r: { status: number; body: unknown }): boolean {
+  if (r.status !== 200) return false;
+  const b = r.body as { status?: unknown } | null;
+  return b !== null && typeof b === "object" && b.status === "ok";
 }
 
 /** Session ledger cap: keep the latest 200 receipts, drop older ones. */
@@ -309,7 +331,14 @@ export function highlightJson(value: unknown): string {
   // Unreachable via probe() (body is always set), but a drawer body of
   // undefined/null must render empty, never throw.
   if (value === undefined || value === null) return "";
-  const raw = JSON.stringify(value, null, 2);
+  // Hardening (J2 R4 M3): JSON.stringify THROWS on BigInt and circular
+  // input instead of returning undefined — catch and render empty.
+  let raw: string | undefined;
+  try {
+    raw = JSON.stringify(value, null, 2);
+  } catch {
+    return "";
+  }
   if (typeof raw !== "string") return "";
   const s = raw
     .replace(/&/g, "&amp;")

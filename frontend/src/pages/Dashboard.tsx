@@ -32,7 +32,7 @@ import ReceiptsLedger from "./dashboard/ReceiptsLedger";
 import StatusDocs from "./dashboard/StatusDocs";
 import "./dashboard/dashboard.css";
 import type { AuthMode, DashboardView, LiveReceipt, ScopeSamples, ScopeSeriesKey } from "./dashboard/types";
-import { DIAMOND_SHORT, LEDGER_CAP, appendToLedger, isVerified, utcClock } from "./dashboard/utils";
+import { DIAMOND_SHORT, LEDGER_CAP, appendToLedger, isHealthOk, utcClock } from "./dashboard/utils";
 
 const SCOPE_CAP = 48;
 
@@ -243,11 +243,15 @@ export default function Dashboard() {
   // shell's health pill already polls /health every 30s, and a second
   // (plus a third in StatusDocs) poller per route was pure duplication.
   const lastHealthReceipt = receipts.find((r) => r.intent === "HEALTH") ?? null;
-  // "ok" requires a receipt, not a bare 200 (J2 R3 B-J2-1): a refused
-  // /health ping answers HTTP 200 with a malformed body and no receipt,
-  // and the telemetry bar must say so instead of "/health: ok".
+  // /health is NON-receipted by contract (J1 R3 B-1): getHealth passes
+  // no expectReceipt and HealthResponse has no receipt field, so a
+  // healthy miner answers 200 {status:"ok",...} with no receipt — that
+  // is "ok" via isHealthOk, never a refusal. Requiring a receipt here
+  // (round 3) called every healthy miner "refused". A 200 whose body
+  // is NOT {status:"ok"} — e.g. the lib refused it as INVALID_RESPONSE,
+  // status 200, error body — keeps the refused text below.
   const healthLabel = lastHealthReceipt
-    ? isVerified(lastHealthReceipt)
+    ? isHealthOk(lastHealthReceipt)
       ? `/health: ok · uptime ${(() => {
           const b = lastHealthReceipt.body as { uptime_s?: unknown } | null;
           return typeof b?.uptime_s === "number" ? `${b.uptime_s}s` : "—";

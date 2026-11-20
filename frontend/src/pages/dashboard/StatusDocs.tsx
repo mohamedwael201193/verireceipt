@@ -23,6 +23,7 @@ import {
   copyText,
   directUrl,
   formatMs,
+  isHealthOk,
   isVerified,
   median,
   probe,
@@ -146,8 +147,11 @@ function endpointDefs(): EndpointDef[] {
 interface RowProbe {
   latencyMs: number;
   status: number;
-  /** True only when the ping returned a receipt (J2 R3 B-J2-1): a bare
-   * 200 with no receipt is a refusal and must never render "UP". */
+  /** True only when the ping answered as designed (see ping()): a
+   * receipt for a receipted /v1/* row (isVerified), 200 +
+   * body.status === "ok" for /health (isHealthOk), a parsed 200 for
+   * the /api/mcp GET probe. A bare 200 with no receipt on a receipted
+   * endpoint is a refusal and must never render "UP". */
   verified: boolean;
 }
 
@@ -192,7 +196,21 @@ function HealthRow({
       if (!mountedRef.current || controller.signal.aborted) return;
       const receipt = toLiveReceipt(def.intent, def.query, def.requestUrl, outcome);
       onRecord(receipt);
-      setLast({ latencyMs: outcome.latencyMs, status: receipt.status, verified: receipt.receipt !== null });
+      // "Answered as designed" is endpoint-dependent (J1 R3 B-1, J2 R3
+      // B-J2-1): receipted /v1/* rows require isVerified (200 AND a
+      // receipt) — a bare 200 there is a refusal. /health is
+      // non-receipted by contract, so 200 + body.status === "ok" is
+      // UP (isHealthOk). The /api/mcp GET probe returns raw parsed
+      // JSON with no receipt by design (its fetcher already throws on
+      // non-2xx and on unparseable JSON), so a parsed 200 is UP there
+      // too — the same latent over-application as /health (J1 R3 M-b).
+      const answered =
+        def.key === "health"
+          ? isHealthOk(receipt)
+          : def.key === "mcp"
+            ? receipt.status === 200
+            : isVerified(receipt);
+      setLast({ latencyMs: outcome.latencyMs, status: receipt.status, verified: answered });
       setLatencies((prev) => [...prev, outcome.latencyMs].slice(-20));
       if (!outcome.ok) {
         setError(`HTTP ${receipt.status || "—"}: ${receipt.errorMessage ?? "request failed"}`);
@@ -275,11 +293,11 @@ export default function StatusDocs({
     const body = r.body as { status?: unknown; uptime_s?: unknown } | null;
     return {
       httpStatus: r.status,
-      // "ok" requires a receipt, not a bare 200 (J2 R3 B-J2-1): a
-      // refused /health ping carries status 200 with an error body and
-      // no receipt, and body.status is absent there — but the receipt
-      // check is the deciding predicate, not the body shape.
-      ok: r.status === 200 && r.receipt !== null && (body === null || body === undefined || body.status === "ok"),
+      // /health is NON-receipted by contract (J1 R3 B-1): "ok" is
+      // status 200 + body.status === "ok" (isHealthOk) — no receipt
+      // is ever minted for it. A refused /health ping carries status
+      // 200 with an error body and no status:"ok", so it stays not-ok.
+      ok: isHealthOk(r),
       uptime_s: typeof body?.uptime_s === "number" ? body.uptime_s : null,
       ts: r.ts,
     };

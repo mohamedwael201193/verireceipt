@@ -14,7 +14,7 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "../Dashboard";
 import ReceiptDrawer from "./ReceiptDrawer";
@@ -358,6 +358,15 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     return [...container.querySelectorAll(".badge.b-ok")].filter((b) => b.textContent === "200");
   }
 
+  /** Click the Ping button on the /health endpoint row (J1 R3 M-c):
+   * an index-based pingButtons[5] silently pings the wrong row if
+   * endpointDefs() is ever reordered. */
+  function pingHealthRow() {
+    const row = screen.getByText("/health").closest("tr");
+    if (!row) throw new Error("no /health row in the endpoint table");
+    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "Ping" }));
+  }
+
   it("B-J2-1 repro: 200 + >1 MiB body, m13-defi preset — all 8 display sites stay honest", async () => {
     vi.stubGlobal("fetch", (url: string) => oversize200Fetch(url));
     const { container } = render(<Dashboard />);
@@ -366,6 +375,19 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     // Verdict logic (presets.ts, untouched) reads the probe error body:
     // all four refusals score 0.
     expect(screen.getByText(/Score 0 \/ 100/)).toBeTruthy();
+    // (J2 R4 B1c) why-cards never render success text for a refused
+    // call: Archive Quorum must NOT claim "status ? · block ?".
+    const quorumCard = screen.getByText("Archive Quorum").closest(".panel");
+    expect(quorumCard?.textContent).not.toContain("status ? · block ?");
+    expect(quorumCard?.textContent).toContain("call failed: HTTP 200");
+    expect(quorumCard?.textContent).toContain("GATE");
+    // The other three cards fall back to their honest "no live …" text.
+    expect(screen.getByText("TVL (live)").closest(".panel")?.textContent).toContain("no live TVL returned");
+    expect(screen.getByText("SEC Compliance").closest(".panel")?.textContent).toContain("no live filings returned");
+    expect(screen.getByText("Route Execution").closest(".panel")?.textContent).toContain("no live route returned");
+    // All four why-cards are GATE, none PASS.
+    expect(screen.getAllByText("GATE")).toHaveLength(4);
+    expect(screen.queryByText("PASS")).toBeNull();
     // (2) Mission Desk run table: no green 200 badges on refused rows,
     // while the Proofs cell honestly says "no receipt · 200 refusal".
     expect(green200Badges(container)).toHaveLength(0);
@@ -394,10 +416,14 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     // ok, (5) Endpoints Answered 0/5, (6) no "Last grid receipt".
     const statusTab = screen.getAllByRole("button", { name: "04 Status & Docs" })[0];
     fireEvent.click(statusTab);
-    const pingButtons = screen.getAllByRole("button", { name: "Ping" });
-    fireEvent.click(pingButtons[5]); // /health row
+    pingHealthRow();
     expect(await screen.findByText(/\/health: HTTP 200 — refused \(no receipt\)/, {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.queryByText(/\/health: ok/)).toBeNull();
+    // (J1 R3 B-1b) the /health row never renders UP for a refused ping.
+    const healthRow = screen.getByText("/health").closest("tr");
+    const rowBadge = healthRow?.querySelector(".badge");
+    expect(rowBadge?.textContent).not.toBe("UP");
+    expect(rowBadge?.classList.contains("b-ok")).toBe(false);
     const answeredCard = screen.getByText("Endpoints Answered (this session)").closest(".card");
     expect(answeredCard?.textContent).toContain("0 / 5");
     expect(screen.getByText("No grid probe yet")).toBeTruthy();
@@ -412,6 +438,33 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     const f01Http = [...(f01Row?.querySelectorAll(".badge") ?? [])].find((b) => b.textContent === "200");
     expect(f01Http).toBeTruthy();
     expect(f01Http?.classList.contains("b-ok")).toBe(false);
+  }, 120000);
+
+  it("B1a/B1b: m13-reverted with 200-refusals never renders success why-card text", async () => {
+    vi.stubGlobal("fetch", (url: string) => oversize200Fetch(url));
+    render(<Dashboard />);
+    // Select the Reverted Counterparty Trap preset (m13-reverted).
+    fireEvent.click(screen.getByRole("button", { name: /Reverted Counterparty Trap/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
+    expect(await screen.findByText(/COMPLETE · APPENDED TO LEDGER/, {}, { timeout: 15000 })).toBeTruthy();
+    expect(screen.getByText(/Score 0 \/ 100/)).toBeTruthy();
+    // (B1a) Receipt Status must NOT claim an archive-quorum
+    // confirmation that never happened.
+    const receiptCard = screen.getByText("Receipt Status").closest(".panel");
+    expect(receiptCard?.textContent).not.toContain("archive quorum confirms");
+    expect(receiptCard?.textContent).toContain("call failed: HTTP 200");
+    expect(receiptCard?.textContent).toContain("GATE");
+    // (B1b) TVL Guard must NOT claim a live TVL that was never returned.
+    const tvlCard = screen.getByText("TVL Guard").closest(".panel");
+    expect(tvlCard?.textContent).not.toContain("live TVL");
+    expect(tvlCard?.textContent).toContain("clean refusal HTTP 200");
+    expect(tvlCard?.textContent).toContain("GATE");
+    // Signing Policy stays GATE too: no reverted tx was observed.
+    expect(screen.getByText("Signing Policy").closest(".panel")?.textContent).toContain("GATE");
+    expect(screen.getAllByText("GATE")).toHaveLength(3);
+    expect(screen.queryByText("PASS")).toBeNull();
+    // The run table honestly records two refused rows, no green 200s.
+    expect(screen.getAllByText(/no receipt · 200 refusal/)).toHaveLength(2);
   }, 120000);
 
   it("positive control: a genuine 200 WITH a receipt still shows verified/OK everywhere", async () => {
@@ -435,9 +488,15 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     // Status: ping /health → telemetry reads "/health: ok"; 4/5 answered
     // (desk ran tx/tvl/filings/route; grid never probed).
     fireEvent.click(screen.getAllByRole("button", { name: "04 Status & Docs" })[0]);
-    const pingButtons = screen.getAllByRole("button", { name: "Ping" });
-    fireEvent.click(pingButtons[5]); // /health row
+    pingHealthRow();
     expect(await screen.findByText(/\/health: ok/, {}, { timeout: 5000 })).toBeTruthy();
+    // (J1 R3 B-1b/B-1c) the /health row badge is UP, never "refused",
+    // for a healthy ping, and the health card reads "/health ok".
+    const healthRow = screen.getByText("/health").closest("tr");
+    const rowBadge = healthRow?.querySelector(".badge");
+    expect(rowBadge?.textContent).toBe("UP");
+    expect(rowBadge?.classList.contains("b-ok")).toBe(true);
+    expect(screen.getByText(/\/health ok · uptime 123s/)).toBeTruthy();
     const answeredCard = screen.getByText("Endpoints Answered (this session)").closest(".card");
     expect(answeredCard?.textContent).toContain("4 / 5");
     // Benchmarks: a PASS with http 200 keeps its green badge (T11).
@@ -492,6 +551,11 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     expect(highlightJson(null)).toBe("");
     expect(highlightJson(() => 1)).toBe("");
     expect(highlightJson(Symbol("x"))).toBe("");
+    // JSON.stringify THROWS on BigInt and circular input (J2 R4 M3).
+    expect(highlightJson(BigInt(1))).toBe("");
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(highlightJson(circular)).toBe("");
     expect(highlightJson({ a: 1 })).toContain("a");
     expect(highlightJson("plain")).toContain("plain");
   });
@@ -512,5 +576,24 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     expect(document.querySelectorAll(".badge.b-ok")).toHaveLength(0);
     const kpiCell = screen.getByText("200 OK Verified").closest(".kpi-cell");
     expect(kpiCell?.querySelector(".kpi-val")?.textContent).toBe("0");
+  });
+
+  it("ledger Refusals KPI counts 200-refusals (M4)", () => {
+    const verified = makeReceipt({ intent: "ONCHAIN_TX_LOOKUP_GENERAL", status: 200, query: "tx-ok" });
+    const refused422 = makeReceipt({ intent: "GRID_POWER_PRICE_GENERAL", status: 422, query: "grid-422" });
+    const refused200 = toLiveReceipt("ONCHAIN_TX_LOOKUP_GENERAL", "tx-200", "https://example.com", {
+      ok: false,
+      body: { error: "INVALID_RESPONSE", message: "Response body exceeds the 1048576 byte limit" },
+      latencyMs: 12,
+      status: 200,
+      errorCode: "INVALID_RESPONSE",
+      errorMessage: "Response body exceeds the 1048576 byte limit",
+    });
+    render(<ReceiptsLedger receipts={[verified, refused422, refused200]} onInspect={() => undefined} showToast={() => undefined} />);
+    // 422 + 200-refusal = 2; the verified 200 is never a refusal.
+    const kpiCell = screen.getByText("Refusals (incl. 200)").closest(".kpi-cell");
+    expect(kpiCell?.querySelector(".kpi-val")?.textContent).toBe("2");
+    const okCell = screen.getByText("200 OK Verified").closest(".kpi-cell");
+    expect(okCell?.querySelector(".kpi-val")?.textContent).toBe("1");
   });
 });

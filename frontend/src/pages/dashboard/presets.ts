@@ -21,7 +21,7 @@
 
 import { getFilings, getGridPrice, getRoute, getTvl, getTx } from "../../lib/api";
 import type { FilingsResponse, GridPriceResponse, LiveReceipt, ProbeOutcome, RouteResponse, TvlResponse, TxResponse } from "./types";
-import { formatUsd, formatUsdPrecise, probe, recentGridInterval } from "./utils";
+import { formatUsd, formatUsdPrecise, isVerified, probe, recentGridInterval } from "./utils";
 
 export type MissionId = "m13" | "m12";
 export type DeskVerdict = "APPROVE" | "REJECT" | "HOLD";
@@ -93,9 +93,11 @@ function txStatusOf(r: DeskCheckResult): string | null {
   return b && typeof b.status === "string" ? b.status : null;
 }
 
-function isOk(r: DeskCheckResult): boolean {
-  return r.receipt.status === 200;
-}
+// NOTE (J2 R4 B1): there is deliberately NO bare `status === 200`
+// helper in this file anymore. Every "ok" check below keys on the
+// shared isVerified() predicate (200 AND a receipt, utils.ts) — a
+// 200-refusal (lib: INVALID_RESPONSE, status 200, no receipt) must
+// never render success text in a why-card.
 
 function scoreOf(passes: number, total: number): number {
   return total === 0 ? 0 : Math.round((passes / total) * 100);
@@ -160,21 +162,21 @@ export const DESK_PRESETS: DeskPreset[] = [
     },
     evaluate: (results) => {
       const [tx, tvl, filings, route] = results;
-      const txOk = !!tx && isOk(tx) && txStatusOf(tx) === "confirmed";
+      const txOk = !!tx && isVerified(tx.receipt) && txStatusOf(tx) === "confirmed";
       const tvlBody = tvl ? bodyOf<TvlResponse>(tvl) : null;
-      const tvlOk = !!tvl && isOk(tvl) && typeof tvlBody?.tvl_usd === "number" && tvlBody.tvl_usd > 0;
+      const tvlOk = !!tvl && isVerified(tvl.receipt) && typeof tvlBody?.tvl_usd === "number" && tvlBody.tvl_usd > 0;
       const filingsBody = filings ? bodyOf<FilingsResponse>(filings) : null;
       const filingsOk =
-        !!filings && isOk(filings) && typeof filingsBody?.filing_count === "number" && filingsBody.filing_count > 0;
+        !!filings && isVerified(filings.receipt) && typeof filingsBody?.filing_count === "number" && filingsBody.filing_count > 0;
       const routeBody = route ? bodyOf<RouteResponse>(route) : null;
-      const routeOk = !!route && isOk(route) && typeof routeBody?.amount_out === "number" && routeBody.amount_out > 0;
+      const routeOk = !!route && isVerified(route.receipt) && typeof routeBody?.amount_out === "number" && routeBody.amount_out > 0;
       const passes = [txOk, tvlOk, filingsOk, routeOk].filter(Boolean).length;
       const verdict: DeskVerdict =
-        passes === 4 ? "APPROVE" : tx && isOk(tx) && txStatusOf(tx) === "reverted" ? "REJECT" : "HOLD";
+        passes === 4 ? "APPROVE" : tx && isVerified(tx.receipt) && txStatusOf(tx) === "reverted" ? "REJECT" : "HOLD";
       const why: WhyCard[] = [
         {
           k: "Archive Quorum",
-          v: tx ? (isOk(tx) ? `status ${txStatusOf(tx) ?? "?"} · block ${bodyOf<TxResponse>(tx)?.block_number ?? "?"}` : `call failed: HTTP ${tx.receipt.status}`) : "not run",
+          v: tx ? (isVerified(tx.receipt) ? `status ${txStatusOf(tx) ?? "?"} · block ${bodyOf<TxResponse>(tx)?.block_number ?? "?"}` : `call failed: HTTP ${tx.receipt.status}`) : "not run",
           ok: txOk,
         },
         {
@@ -242,18 +244,18 @@ export const DESK_PRESETS: DeskPreset[] = [
     },
     evaluate: (results) => {
       const [tx, tvl] = results;
-      const txReverted = !!tx && isOk(tx) && txStatusOf(tx) === "reverted";
+      const txReverted = !!tx && isVerified(tx.receipt) && txStatusOf(tx) === "reverted";
       const tvlBody = tvl ? bodyOf<TvlResponse>(tvl) : null;
       const tvlAnswered =
         !!tvl &&
-        (isOk(tvl)
+        (isVerified(tvl.receipt)
           ? typeof tvlBody?.tvl_usd === "number"
           : tvl.receipt.status === 400 || tvl.receipt.status === 422);
       const passes = (txReverted ? 1 : 0) + (tvlAnswered ? 1 : 0);
       const why: WhyCard[] = [
         {
           k: "Receipt Status",
-          v: tx ? (isOk(tx) ? `archive quorum confirms status: ${txStatusOf(tx) ?? "?"}` : `call failed: HTTP ${tx.receipt.status}`) : "not run",
+          v: tx ? (isVerified(tx.receipt) ? `archive quorum confirms status: ${txStatusOf(tx) ?? "?"}` : `call failed: HTTP ${tx.receipt.status}`) : "not run",
           ok: txReverted,
         },
         {
@@ -264,7 +266,7 @@ export const DESK_PRESETS: DeskPreset[] = [
         {
           k: "TVL Guard",
           v: tvl
-            ? isOk(tvl)
+            ? isVerified(tvl.receipt)
               ? `live TVL ${formatUsd(tvlBody?.tvl_usd ?? null)}`
               : `clean refusal HTTP ${tvl.receipt.status} — no fabricated TVL`
             : "not run",
@@ -316,9 +318,9 @@ export const DESK_PRESETS: DeskPreset[] = [
       const [filings, route] = results;
       const filingsBody = filings ? bodyOf<FilingsResponse>(filings) : null;
       const filingsOk =
-        !!filings && isOk(filings) && typeof filingsBody?.filing_count === "number" && filingsBody.filing_count > 0;
+        !!filings && isVerified(filings.receipt) && typeof filingsBody?.filing_count === "number" && filingsBody.filing_count > 0;
       const routeBody = route ? bodyOf<RouteResponse>(route) : null;
-      const routeOk = !!route && isOk(route) && typeof routeBody?.amount_out === "number" && routeBody.amount_out > 0;
+      const routeOk = !!route && isVerified(route.receipt) && typeof routeBody?.amount_out === "number" && routeBody.amount_out > 0;
       const why: WhyCard[] = [
         {
           k: "Official EDGAR",
@@ -387,9 +389,9 @@ export const DESK_PRESETS: DeskPreset[] = [
     evaluate: (results) => {
       const [grid, route] = results;
       const gridBody = grid ? bodyOf<GridPriceResponse>(grid) : null;
-      const gridOk = !!grid && isOk(grid) && typeof gridBody?.lmp_usd_per_mwh === "number" && Number.isFinite(gridBody.lmp_usd_per_mwh);
+      const gridOk = !!grid && isVerified(grid.receipt) && typeof gridBody?.lmp_usd_per_mwh === "number" && Number.isFinite(gridBody.lmp_usd_per_mwh);
       const routeBody = route ? bodyOf<RouteResponse>(route) : null;
-      const routeOk = !!route && isOk(route) && typeof routeBody?.amount_out === "number" && routeBody.amount_out > 0;
+      const routeOk = !!route && isVerified(route.receipt) && typeof routeBody?.amount_out === "number" && routeBody.amount_out > 0;
       const why: WhyCard[] = [
         {
           k: "LMP (live)",
@@ -448,16 +450,29 @@ export const DESK_PRESETS: DeskPreset[] = [
     evaluate: (results) => {
       const [tx] = results;
       const refused = !!tx && (tx.receipt.status === 400 || tx.receipt.status === 422);
-      const answered200 = !!tx && tx.receipt.status === 200;
+      // A 200 with no receipt is a refusal, not an answer (J1 R3 M-a /
+      // J2 R4 B1): the lib fails it as INVALID_RESPONSE, status 200.
+      // Only a verified 200 (receipt minted) counts as "answered".
+      const answered200 = !!tx && isVerified(tx.receipt);
       const why: WhyCard[] = [
         {
           k: "Schema Gate",
-          v: tx ? (refused ? `refused HTTP ${tx.receipt.status} · ${tx.receipt.errorCode ?? "invalid input"}` : `answered HTTP ${tx.receipt.status} — guard did not refuse`) : "not run",
+          v: tx
+            ? refused
+              ? `refused HTTP ${tx.receipt.status} · ${tx.receipt.errorCode ?? "invalid input"}`
+              : answered200
+                ? `answered HTTP ${tx.receipt.status} — guard did not refuse`
+                : `refused: HTTP 200 with an unparseable body — no receipt issued`
+            : "not run",
           ok: refused,
         },
         {
           k: "Billing Guard",
-          v: refused ? "HTTP 4xx returned pre-receipt ($0.00 — direct probes are unbilled)" : "unexpected 200 for a malformed hash",
+          v: refused
+            ? "HTTP 4xx returned pre-receipt ($0.00 — direct probes are unbilled)"
+            : answered200
+              ? "unexpected 200 for a malformed hash"
+              : "HTTP 200 with an unparseable body — no receipt, $0.00 billed",
           ok: refused,
         },
       ];
