@@ -179,7 +179,7 @@ describe("getGridPrice", () => {
 });
 
 describe("timeout", () => {
-  it("aborts after 20s and throws a TIMEOUT ApiError", async () => {
+  it("aborts after 45s, retries once, then throws a TIMEOUT ApiError", async () => {
     vi.useFakeTimers();
     // Real fetch rejects with AbortError when the signal aborts; the mock
     // must do the same or the request would hang forever.
@@ -196,8 +196,311 @@ describe("timeout", () => {
       status: 0,
       code: "TIMEOUT",
     });
-    await vi.advanceTimersByTimeAsync(20_001);
+    // First attempt times out at 45s, the single retry times out at 90s.
+    await vi.advanceTimersByTimeAsync(45_001);
+    await vi.advanceTimersByTimeAsync(45_001);
     await assertion;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries once after a timeout and succeeds on the second attempt", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(
+      (_url: string, init?: { signal?: AbortSignal }) => {
+        if (fetchMock.mock.calls.length === 1) {
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("The operation was aborted.", "AbortError"));
+            });
+          });
+        }
+        return Promise.resolve(
+          jsonResponse({ status: "ok", service: "verireceipt", uptime_s: 1, upstreams: {} }),
+        );
+      },
+    );
+    const pending = getHealth();
+    const assertion = expect(pending).resolves.toMatchObject({ status: "ok" });
+    await vi.advanceTimersByTimeAsync(45_001);
+    await assertion;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("response validation (B2)", () => {
+  it("throws ApiError on 200 with an HTML body", async () => {
+    fetchMock.mockResolvedValue(
+      new Response("<html><body>Bad Gateway</body></html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      }),
+    );
+    await expect(getTx({ tx_hash: "0x00", chain: "sepolia" })).rejects.toMatchObject({
+      status: 200,
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it("throws ApiError on 200 with an empty body", async () => {
+    fetchMock.mockResolvedValue(new Response("", { status: 200 }));
+    await expect(getHealth()).rejects.toMatchObject({
+      status: 200,
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it("throws ApiError on 200 with a non-object JSON body", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify("ok"), { status: 200 }),
+    );
+    await expect(getHealth()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    fetchMock.mockResolvedValue(new Response(JSON.stringify([1, 2, 3]), { status: 200 }));
+    await expect(getHealth()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it("throws ApiError on 200 with a missing receipt", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ tx_hash: "0x00", status: "not_found" }),
+    );
+    await expect(getTx({ tx_hash: "0x00", chain: "sepolia" })).rejects.toMatchObject({
+      status: 200,
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it("throws ApiError on 200 with a receipt missing receipt_id", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        tx_hash: "0x00",
+        status: "not_found",
+        receipt: { upstream_url: "https://example.com" },
+      }),
+    );
+    await expect(getTx({ tx_hash: "0x00", chain: "sepolia" })).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+  });
+});
+
+describe("client-side validation (M1)", () => {
+  it("rejects a non-ETH/USDC pair without calling fetch", async () => {
+    await expect(getRoute({ pair: "BTC/USD" })).rejects.toMatchObject({
+      code: "UNSUPPORTED_PAIR",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty string params without calling fetch", async () => {
+    await expect(getRoute({ pair: "" })).rejects.toMatchObject({ code: "INVALID_PARAM" });
+    await expect(getTx({ tx_hash: "", chain: "sepolia" })).rejects.toMatchObject({
+      code: "INVALID_PARAM",
+    });
+    await expect(getTvl({ protocol: "   " })).rejects.toMatchObject({
+      code: "INVALID_PARAM",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects undefined params without calling fetch", async () => {
+    await expect(
+      getTx({ tx_hash: undefined as unknown as string, chain: "sepolia" }),
+    ).rejects.toMatchObject({ code: "INVALID_PARAM" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects string params over 512 chars without calling fetch", async () => {
+    await expect(getFilings({ entity: "x".repeat(513), period: "2026" })).rejects.toMatchObject({
+      code: "INVALID_PARAM",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("retry_after_sec round-trip", () => {
+  it("a 422 body with retry_after_sec surfaces it on the ApiError", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        {
+          error: "grid_no_data",
+          code: "GRID_NO_DATA",
+          message: "no settlement data yet for this interval",
+          retry_after_sec: 30,
+        },
+        422,
+      ),
+    );
+    try {
+      await getGridPrice({
+        node_or_zone: "TH_NP15_GEN-APND",
+        interval_start: "2026-11-19T00:00:00Z",
+      });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 422, code: "GRID_NO_DATA", retry_after_sec: 30 });
+    }
+  });
+
+  it("ignores a non-numeric retry_after_sec instead of surfacing garbage", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        {
+          error: "grid_no_data",
+          code: "GRID_NO_DATA",
+          message: "no settlement data yet",
+          retry_after_sec: "soon",
+        },
+        422,
+      ),
+    );
+    try {
+      await getGridPrice({
+        node_or_zone: "TH_NP15_GEN-APND",
+        interval_start: "2026-11-19T00:00:00Z",
+      });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).retry_after_sec).toBeUndefined();
+    }
+  });
+});
+
+describe("error message truncation (J2 M2)", () => {
+  it("truncates a 600-char server error message to 500 chars", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ error: "e".repeat(600), code: "LONG_ERROR" }, 400),
+    );
+    try {
+      await getTx({ tx_hash: "bad", chain: "sepolia" });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as Error).message).toHaveLength(500);
+    }
+  });
+});
+
+describe("cold start (slow first response)", () => {
+  // Abort-aware delayed mock: resolves after delayMs unless the signal
+  // aborts first, like a real fetch under a timeout.
+  function abortableDelayedResponse(delayMs: number, body: unknown) {
+    return (_url: string, init?: { signal?: AbortSignal }) =>
+      new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(jsonResponse(body)), delayMs);
+        init?.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        });
+      });
+  }
+
+  it("a 30s-delayed response succeeds within the 45s timeout", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(
+      abortableDelayedResponse(30_000, {
+        status: "ok",
+        service: "verireceipt",
+        uptime_s: 1,
+        upstreams: {},
+      }),
+    );
+    const pending = getHealth();
+    const assertion = expect(pending).resolves.toMatchObject({ status: "ok" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await assertion;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a 50s delay aborts at 45s, retries once, then throws TIMEOUT", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(
+      abortableDelayedResponse(50_000, {
+        status: "ok",
+        service: "verireceipt",
+        uptime_s: 1,
+        upstreams: {},
+      }),
+    );
+    const pending = getHealth();
+    const assertion = expect(pending).rejects.toMatchObject({
+      status: 0,
+      code: "TIMEOUT",
+    });
+    await vi.advanceTimersByTimeAsync(45_001);
+    await vi.advanceTimersByTimeAsync(45_001);
+    await assertion;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("route tolerates a 50s cold start inside its 60s budget", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(
+      abortableDelayedResponse(50_000, {
+        amount_out: 1739260358,
+        block_number: 26454858,
+        receipt: sampleReceipt,
+      }),
+    );
+    const pending = getRoute({ pair: "ETH/USDC" });
+    const assertion = expect(pending).resolves.toMatchObject({
+      amount_out: 1739260358,
+    });
+    await vi.advanceTimersByTimeAsync(50_000);
+    await assertion;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("route times out at 60s per attempt (message names 60s)", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(
+      (_url: string, init?: { signal?: AbortSignal }) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          });
+        }),
+    );
+    const pending = getRoute({ pair: "ETH/USDC" });
+    const assertion = expect(pending).rejects.toMatchObject({
+      status: 0,
+      code: "TIMEOUT",
+    });
+    await vi.advanceTimersByTimeAsync(60_001);
+    await vi.advanceTimersByTimeAsync(60_001);
+    await assertion;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    try {
+      await pending;
+      expect.unreachable();
+    } catch (err) {
+      expect((err as Error).message).toContain("60s");
+    }
+  });
+});
+
+describe("external abort", () => {
+  it("throws ABORTED (not TIMEOUT, no retry) when the caller aborts", async () => {
+    const controller = new AbortController();
+    fetchMock.mockImplementation(
+      (_url: string, init?: { signal?: AbortSignal }) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          });
+        }),
+    );
+    const pending = getHealth(controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ status: 0, code: "ABORTED" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws ABORTED immediately for an already-aborted signal", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(getHealth(controller.signal)).rejects.toMatchObject({ code: "ABORTED" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
