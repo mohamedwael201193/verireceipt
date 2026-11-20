@@ -13,13 +13,13 @@ const usdPrecise = new Intl.NumberFormat("en-US", {
 
 /** $15,083,256,265 — whole dollars, no cents. */
 export function formatUsd(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return usd.format(value);
 }
 
 /** $43.43 — two decimals, for per-MWh prices and other small USD values. */
 export function formatUsdPrecise(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return usdPrecise.format(value);
 }
 
@@ -27,7 +27,7 @@ export function formatUsdPrecise(value: number | null | undefined): string {
 export function formatEth(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === "") return "—";
   const num = typeof value === "string" ? Number(value) : value;
-  if (Number.isNaN(num)) return "—";
+  if (!Number.isFinite(num)) return "—";
   return `${num.toLocaleString("en-US", { maximumFractionDigits: 6 })} ETH`;
 }
 

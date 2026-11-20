@@ -12,6 +12,13 @@ describe("formatUsd", () => {
     expect(formatUsd(undefined)).toBe("—");
     expect(formatUsd(Number.NaN)).toBe("—");
   });
+
+  it("returns an em dash for non-finite input (J2 M7)", () => {
+    expect(formatUsd(Number.POSITIVE_INFINITY)).toBe("—");
+    expect(formatUsd(Number.NEGATIVE_INFINITY)).toBe("—");
+    expect(formatUsdPrecise(Number.POSITIVE_INFINITY)).toBe("—");
+    expect(formatUsdPrecise(Number.NaN)).toBe("—");
+  });
 });
 
 describe("formatUsdPrecise", () => {
@@ -30,6 +37,13 @@ describe("formatEth", () => {
   it("returns an em dash for missing or non-numeric input", () => {
     expect(formatEth(null)).toBe("—");
     expect(formatEth("not-a-number")).toBe("—");
+  });
+
+  it("returns an em dash for non-finite input (J2 M7)", () => {
+    expect(formatEth(Number.POSITIVE_INFINITY)).toBe("—");
+    expect(formatEth(Number.NEGATIVE_INFINITY)).toBe("—");
+    expect(formatEth(Number.NaN)).toBe("—");
+    expect(formatEth("Infinity")).toBe("—");
   });
 });
 

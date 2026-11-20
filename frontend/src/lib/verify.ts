@@ -25,7 +25,11 @@ export interface ReceiptVerification {
 }
 
 function toBytes(data: string | Uint8Array): Uint8Array {
-  return typeof data === "string" ? new TextEncoder().encode(data) : data;
+  if (typeof data === "string") return new TextEncoder().encode(data);
+  // ArrayBuffer.isView (not instanceof) — jsdom TextEncoder returns a
+  // Uint8Array from another realm, which fails instanceof.
+  if (ArrayBuffer.isView(data)) return data as Uint8Array;
+  throw new TypeError("sha256Hex expects a string or Uint8Array");
 }
 
 function normalizeHash(hash: string): string {
@@ -51,13 +55,36 @@ export async function sha256Hex(data: string | Uint8Array): Promise<string> {
  * Recompute SHA-256 over the raw upstream response body and compare it
  * with `receipt.raw_response_sha256` (comparison ignores `0x` prefix and
  * case). Returns `{ verified, computedSha }`.
+ *
+ * Malformed input (null / non-object receipt, non-string recorded hash,
+ * non-string / non-Uint8Array body) returns `{ verified: false,
+ * computedSha: "" }` instead of throwing — a bad receipt is a failed
+ * verification, not a crash. The ONE exception is WebCrypto being
+ * unavailable: sha256Hex still throws, because returning a verdict
+ * without a real hash would be a fake result.
  */
 export async function verifyReceipt(
-  receipt: Receipt,
-  rawBody: string | Uint8Array,
+  receipt: Receipt | null | undefined,
+  rawBody: string | Uint8Array | null | undefined,
 ): Promise<ReceiptVerification> {
+  // Check WebCrypto FIRST: unavailable crypto must throw even for
+  // malformed input — never a silent verdict without a real hash.
+  if (!globalThis.crypto?.subtle) {
+    throw new Error(
+      "WebCrypto (crypto.subtle) is unavailable in this environment — cannot compute SHA-256",
+    );
+  }
+  if (
+    receipt === null ||
+    receipt === undefined ||
+    typeof receipt !== "object" ||
+    typeof receipt.raw_response_sha256 !== "string" ||
+    (typeof rawBody !== "string" && !ArrayBuffer.isView(rawBody))
+  ) {
+    return { verified: false, computedSha: "" };
+  }
   const computedSha = await sha256Hex(rawBody);
-  const recorded = normalizeHash(receipt.raw_response_sha256 ?? "");
+  const recorded = normalizeHash(receipt.raw_response_sha256);
   return {
     verified: recorded.length > 0 && normalizeHash(computedSha) === recorded,
     computedSha,
