@@ -188,7 +188,7 @@ button {
   position: sticky;
   top: 0;
   z-index: 60;
-  height: 68px;
+  min-height: 68px;
   background: var(--nav-bg);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -199,8 +199,9 @@ button {
 }
 
 .nav-inner {
-  height: 100%;
+  min-height: 68px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -234,7 +235,9 @@ button {
 
 .nav-right {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  min-width: 0;
   gap: 26px;
 }
 
@@ -258,12 +261,25 @@ button {
   color: var(--text);
 }
 
+/* Compact "Probe" CTA label below 860px: the full "Start a probe" text
+   plus health pill and theme toggle need ~560px, which overflows phones.
+   The theme toggle must stay reachable at every width. */
+.cta-label-short {
+  display: none;
+}
+
 @media (max-width: 860px) {
   .nav-links {
     display: none;
   }
   .nav-right {
     gap: 12px;
+  }
+  .cta-label-full {
+    display: none;
+  }
+  .cta-label-short {
+    display: inline;
   }
 }
 
@@ -426,6 +442,23 @@ html[data-theme="light"] .theme-knob {
   }
 }
 
+/* Below 560px the health pill is hidden entirely (its state lives on the
+   Status page) so wordmark + compact CTA + theme toggle always fit on one
+   row. NOTE: this block must stay AFTER the .health-pill base rule above —
+   same specificity, so source order decides and the base display would
+   otherwise override the hide. */
+@media (max-width: 560px) {
+  .health-pill {
+    display: none;
+  }
+  .nav-right {
+    gap: 8px;
+  }
+  .btn-outline-accent {
+    padding: 8px 13px;
+  }
+}
+
 /* --- Giant footer (from the landing file) --- */
 .giant-footer {
   padding: 84px 0 42px;
@@ -447,7 +480,7 @@ html[data-theme="light"] .theme-knob {
   border-top: 1px solid var(--border);
 }
 
-@media (max-width: 860px) {
+@media (max-width: 780px) {
   .foot-cols {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

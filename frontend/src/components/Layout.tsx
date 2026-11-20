@@ -125,8 +125,11 @@ export default function Layout() {
               ))}
             </nav>
             <HealthPill />
-            <Link to="/" className="btn-outline-accent">
-              Start a probe
+            <Link to="/#probe" className="btn-outline-accent" aria-label="Start a probe">
+              <span className="cta-label-full">Start a probe</span>
+              <span className="cta-label-short" aria-hidden="true">
+                Probe
+              </span>
             </Link>
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
           </div>
