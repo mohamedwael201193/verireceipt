@@ -90,7 +90,7 @@ const ENDPOINTS: EndpointDoc[] = [
       { name: 'urls' },
     ],
     exampleLabel: 'Apple Inc. filings, last 12 months (live 2026-11-20)',
-    exampleUrl: `${API_BASE_URL}/v1/filings?entity=Apple&period=last%2012%20months`,
+    exampleUrl: `${API_BASE_URL}/v1/filings?entity=Apple%20Inc&period=last%2012%20months`,
     exampleCurl: `curl "${API_BASE_URL}/v1/filings?entity=Apple%20Inc&period=last%2012%20months"`,
   },
   {
@@ -142,12 +142,12 @@ const ENDPOINTS: EndpointDoc[] = [
     path: '/v1/grid-price',
     intent: 'GRID_POWER_PRICE_GENERAL',
     description:
-      'Returns wholesale electricity locational marginal price (lmp_usd_per_mwh) from official public ISO feeds (CAISO, ERCOT, NYISO, MISO, ENTSO-E/Elering) for a node_or_zone and interval_start datetime with a SHA-256 receipt.',
+      'Returns wholesale electricity locational marginal price (lmp_usd_per_mwh) from official public ISO feeds (CAISO, NYISO, ENTSO-E/Elering) for a node_or_zone and interval_start datetime with a SHA-256 receipt.',
     params: [
       {
         name: 'node_or_zone',
         type: 'string',
-        description: 'Pricing node or bidding zone (e.g., TH_NP15_GEN-APND, HB_NORTH, ZONE_J).',
+        description: 'Pricing node or bidding zone (e.g., TH_NP15_GEN-APND, ZONE_J, EE).',
       },
       {
         name: 'interval_start',
@@ -190,11 +190,13 @@ const ERROR_ROWS: { status: number; code: string; meaning: string }[] = [
   { status: 502, code: 'GRID_CACHE_MISS', meaning: 'No cached price for that node at that interval.' },
   { status: 502, code: 'GRID_CACHE_STALE', meaning: 'Cached price is older than the staleness bound; never served as verified.' },
   { status: 502, code: 'SEC_UNAVAILABLE', meaning: 'SEC EDGAR upstream unreachable.' },
+  { status: 502, code: 'SEC_USER_AGENT_MISSING', meaning: 'SEC_USER_AGENT is not set on the server, so SEC EDGAR cannot be called.' },
   { status: 502, code: 'FEDREG_UNAVAILABLE', meaning: 'Federal Register upstream unreachable.' },
   { status: 502, code: 'DEFILLAMA_UNAVAILABLE', meaning: 'DeFiLlama upstream unreachable.' },
   { status: 502, code: 'DEFILLAMA_BAD_RESPONSE', meaning: 'DeFiLlama response has no usable TVL data.' },
   { status: 502, code: 'RPC_CONFIG', meaning: 'Archive-RPC configuration unavailable.' },
   { status: 502, code: 'ALL_QUOTERS_FAILED', meaning: 'All DEX quoters failed for the pinned block.' },
+  { status: 502, code: 'QUORUM_UNREACHABLE', meaning: 'Fewer than 2 of 3 archive-RPC sources succeeded, or the successes did not agree — tx lookup quorum failed.' },
   { status: 502, code: 'INTERNAL', meaning: 'Fallback for any other failure; never leaks a stack trace.' },
 ];
 
@@ -421,7 +423,7 @@ export default function Docs() {
           Errors are JSON: <span className="vr-mono">{'{"error": "snake_case", "code": "CODE", "message": "…"}'}</span>
           , plus <span className="vr-mono">retry_after_sec</span> where it applies (FUTURE_INTERVAL).
           The miner fails closed — a bad input or a dead upstream is an error, never an invented
-          answer. Unbilled refusals (400/422) carry no charge.
+          answer.
         </p>
         <div className="vr-tbl-wrap">
           <table className="vr-tbl">
