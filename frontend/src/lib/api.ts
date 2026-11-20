@@ -299,6 +299,22 @@ function isNonEmptyReceiptString(value: unknown, maxLength = Number.POSITIVE_INF
   );
 }
 
+/**
+ * Abort classification by error NAME, not instanceof (J2 R4 M-3): a
+ * non-DOMException error with name === "AbortError" (e.g. a plain Error
+ * thrown by res.text(), or a cross-realm DOMException that fails
+ * instanceof) is an abort all the same. The name check covers both
+ * DOMException and plain-Error aborts; instanceof alone missed the
+ * latter and swallowed it to body = null -> INVALID_RESPONSE.
+ */
+function isAbortError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { name?: unknown }).name === "AbortError"
+  );
+}
+
 async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promise<T> {
   const { expectReceipt = false, signal: externalSignal } = options;
   const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
@@ -365,8 +381,21 @@ async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promis
           }
         }
       } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") throw err;
+        if (isAbortError(err)) throw err;
         if (err instanceof ApiError) throw err;
+        // A non-abort failure reading the body (J1 R3 m3): the body
+        // never arrived, so nothing about it was invalid — a mid-body
+        // network failure is a NETWORK_ERROR, not INVALID_RESPONSE.
+        // On an error status the HTTP status is still real information,
+        // so only a 2xx body-read failure is reclassified; otherwise
+        // the body stays null and the status error below surfaces.
+        if (res.ok) {
+          throw new ApiError(
+            err instanceof Error ? err.message : "Failed to read response body",
+            0,
+            "NETWORK_ERROR",
+          );
+        }
         body = null;
       }
       if (!res.ok) {
@@ -394,7 +423,7 @@ async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promis
       return body as T;
     } catch (err) {
       if (err instanceof ApiError) throw err;
-      if (err instanceof DOMException && err.name === "AbortError") {
+      if (isAbortError(err)) {
         // An external abort (unmount / refetch) is not a timeout and is
         // never retried: the caller deliberately cancelled this request.
         if (externalSignal?.aborted) {

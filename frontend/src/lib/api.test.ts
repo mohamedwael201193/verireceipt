@@ -691,6 +691,16 @@ describe("spurious abort (J2 R2 M-6)", () => {
     // Not retried: a spurious abort is not a timeout.
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("a non-DOMException AbortError from fetch() itself is ABORTED (J2 R4 M-3)", async () => {
+    // Name-based classification (not instanceof): a plain Error carrying
+    // the AbortError name is an abort all the same.
+    const abortLike = new Error("The operation was aborted.");
+    abortLike.name = "AbortError";
+    fetchMock.mockRejectedValue(abortLike);
+    await expect(getHealth()).rejects.toMatchObject({ status: 0, code: "ABORTED" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("abort during the body read (J2 R3 M-6)", () => {
@@ -737,6 +747,50 @@ describe("abort during the body read (J2 R3 M-6)", () => {
       text: () => Promise.reject(new DOMException("The operation was aborted.", "AbortError")),
     } as unknown as Response);
     await expect(getHealth()).rejects.toMatchObject({ status: 0, code: "ABORTED" });
+  });
+
+  it("a non-DOMException error with name 'AbortError' thrown by text() is ABORTED (J2 R4 M-3)", async () => {
+    // A plain Error (not a DOMException) carrying the AbortError name —
+    // e.g. thrown by a non-DOM text() implementation — used to be
+    // swallowed to body = null and surface as INVALID_RESPONSE.
+    const abortLike = new Error("The operation was aborted.");
+    abortLike.name = "AbortError";
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "Content-Type": "application/json" }),
+      text: () => Promise.reject(abortLike),
+    } as unknown as Response);
+    await expect(getHealth()).rejects.toMatchObject({ status: 0, code: "ABORTED" });
+  });
+
+  it("a generic Error thrown by text() is NETWORK_ERROR, not INVALID_RESPONSE (J1 R3 m3)", async () => {
+    // A mid-body network failure: the body never arrived, so nothing
+    // about it was invalid.
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "Content-Type": "application/json" }),
+      text: () => Promise.reject(new Error("network failure mid-body")),
+    } as unknown as Response);
+    try {
+      await getHealth();
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 0, code: "NETWORK_ERROR" });
+      expect((err as Error).message).toBe("network failure mid-body");
+    }
+  });
+
+  it("a text() failure on an error status still surfaces the HTTP status (J1 R3 m3 — status preserved)", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 500,
+      headers: new Headers({ "Content-Type": "application/json" }),
+      text: () => Promise.reject(new Error("network failure mid-body")),
+    } as unknown as Response);
+    await expect(getHealth()).rejects.toMatchObject({ status: 500 });
   });
 });
 
