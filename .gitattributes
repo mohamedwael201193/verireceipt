@@ -1,0 +1,13 @@
+# A0 infra (2026-11-20): normalize line endings to LF so CRLF from
+# Windows checkouts never flips tests or YAML hashes.
+* text=auto
+.gitignore text eol=lf
+.gitattributes text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
