@@ -186,7 +186,7 @@ describe("Probe — programmatic retarget mid-run is a no-op (J2 R2 M2)", () => 
     vi.restoreAllMocks();
   });
 
-  it("a dispatched change reaches the handler when idle (control for the repro)", () => {
+  it("a dispatched change reaches the handler when idle (control for the repro)", async () => {
     mockFetch();
     render(<Probe />);
 
@@ -200,8 +200,10 @@ describe("Probe — programmatic retarget mid-run is a no-op (J2 R2 M2)", () => 
     )!.set!;
     setter.call(select, "sec");
     select.dispatchEvent(new Event("change", { bubbles: true }));
-    expect(screen.getByLabelText("Payload JSON")).toHaveValue(
-      JSON.stringify({ entity: "AAPL", period: "last 6 months" }),
+    await waitFor(() =>
+      expect(screen.getByLabelText("Payload JSON")).toHaveValue(
+        JSON.stringify({ entity: "AAPL", period: "last 6 months" }),
+      ),
     );
   });
 
@@ -230,7 +232,10 @@ describe("Probe — programmatic retarget mid-run is a no-op (J2 R2 M2)", () => 
     // holds the TVL preset (the handler would have swapped in the sec
     // preset). The select's own DOM value is not asserted — React only
     // restores a controlled value on re-render, and the guard correctly
-    // causes no re-render.
+    // causes no re-render. Settle a tick first: a dispatched event
+    // outside act() can flush async, and "still TVL after a tick" is
+    // the assertion that would fail without the guard.
+    await new Promise((r) => setTimeout(r, 50));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(screen.getByLabelText("Payload JSON")).toHaveValue(
       JSON.stringify({ protocol: "aave-v3" }),
@@ -254,18 +259,21 @@ describe("Probe — programmatic retarget mid-run is a no-op (J2 R2 M2)", () => 
     // Control: the same dispatched click DOES toggle the mode while idle,
     // so the mid-run assertion below is not vacuous. A plain Event("click")
     // does not reach React's onClick (button is undefined, not 0); a real
-    // user click is a MouseEvent, so dispatch that.
+    // user click is a MouseEvent, so dispatch that. A raw dispatch outside
+    // act() flushes async — wait for the toggle instead of asserting sync.
     const modeButton = screen.getByRole("button", { name: "422 Refusal" });
     modeButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(modeButton).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(modeButton).toHaveAttribute("aria-pressed", "true"));
 
     // The TVL chip resets the mode to 200 OK and starts a run.
     fireEvent.click(screen.getByRole("button", { name: "TVL: aave-v3" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(modeButton).toHaveAttribute("aria-pressed", "false");
 
-    // Same dispatch mid-run: the guard must block it.
+    // Same dispatch mid-run: the guard must block it. Settle a tick
+    // first (see above — the flush is async), then it must still be off.
     modeButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 50));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(modeButton).toHaveAttribute("aria-pressed", "false");
 
