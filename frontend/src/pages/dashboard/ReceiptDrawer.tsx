@@ -11,10 +11,10 @@
 //   WebCrypto unavailable => an error, never a fallback fake hash (A19).
 // - Copy curl rebuilds the real GET request; Copy JSON copies the live body.
 
-import { useEffect, useState } from "react";
-import { ReceiptCard } from "../../components/ReceiptCard";
+import { useEffect, useRef, useState } from "react";
+import { isSafeUpstreamUrl, ReceiptCard } from "../../components/ReceiptCard";
 import type { LiveReceipt } from "./types";
-import { copyText, highlightJson, sha256Hex } from "./utils";
+import { copyText, highlightJson, sha256Hex, useDrawerFocus } from "./utils";
 
 interface ReceiptDrawerProps {
   receipt: LiveReceipt | null;
@@ -32,13 +32,15 @@ type VerifyState =
 
 export default function ReceiptDrawer({ receipt, onClose, showToast }: ReceiptDrawerProps) {
   const [verify, setVerify] = useState<VerifyState>({ kind: "idle" });
+  const panelRef = useRef<HTMLElement | null>(null);
+  const open = receipt !== null;
+  useDrawerFocus(open, panelRef);
 
   // A verification result belongs to the receipt it was computed for.
   useEffect(() => {
     setVerify({ kind: "idle" });
   }, [receipt?.id]);
 
-  const open = receipt !== null;
   const recorded = receipt?.receipt?.raw_response_sha256 ?? null;
   // audit_url / quorum_votes come through the Receipt index signature as
   // unknown; narrow before rendering.
@@ -46,6 +48,11 @@ export default function ReceiptDrawer({ receipt, onClose, showToast }: ReceiptDr
     receipt?.receipt && typeof receipt.receipt.audit_url === "string"
       ? receipt.receipt.audit_url
       : null;
+  // The audit URL comes from the server (and therefore from upstream
+  // data): it renders as a link ONLY when it passes the shared
+  // https-only allowlist (isSafeUpstreamUrl, data-layer lib). Anything
+  // else — javascript:, data:, http:, relative — renders as plain text,
+  // never as an <a href> (XSS sink).
 
   async function recompute() {
     if (!receipt?.receipt) return;
@@ -88,8 +95,15 @@ export default function ReceiptDrawer({ receipt, onClose, showToast }: ReceiptDr
   const curlCmd = receipt ? `curl -s "${receipt.requestUrl}"` : "";
 
   return (
-    <aside className={`drawer${open ? " open" : ""}`} aria-label="Receipt Inspector">
-      <div className="drawer-head">
+    <aside
+      ref={panelRef}
+      tabIndex={-1}
+      role="dialog"
+      aria-modal={open}
+      aria-label="Receipt Inspector"
+      inert={!open}
+      className={`drawer${open ? " open" : ""}`}
+    >      <div className="drawer-head">
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           <span className="mono" style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis" }}>
             {receipt?.id ?? ""}
@@ -118,9 +132,15 @@ export default function ReceiptDrawer({ receipt, onClose, showToast }: ReceiptDr
               <div style={{ borderTop: "1px solid var(--border)", paddingTop: 9 }}>
                 <div style={{ color: "var(--muted)", fontSize: 10, marginBottom: 2 }}>MINER AUDIT URL</div>
                 {auditUrl ? (
-                  <a href={auditUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", textDecoration: "underline", wordBreak: "break-all" }}>
-                    {auditUrl}
-                  </a>
+                  isSafeUpstreamUrl(auditUrl) ? (
+                    <a href={auditUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", textDecoration: "underline", wordBreak: "break-all" }}>
+                      {auditUrl}
+                    </a>
+                  ) : (
+                    <div style={{ color: "var(--text)", wordBreak: "break-all" }}>
+                      {auditUrl} <span style={{ color: "var(--muted)" }}>(not rendered as a link — non-https URL)</span>
+                    </div>
+                  )
                 ) : (
                   <div style={{ color: "var(--text)" }}>No audit URL — refused before receipting.</div>
                 )}
