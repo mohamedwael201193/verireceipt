@@ -114,7 +114,39 @@ function Wordmark() {
 
 export default function Layout() {
   const { theme, toggleTheme } = useTheme();
-  const { pathname } = useLocation();
+  const { pathname, search, hash } = useLocation();
+
+  // (J2 C3 F2b / P-C3 B) Same-URL re-click nonce. A click on a CTA whose
+  // URL equals the current location (e.g. "Start a probe" → /#probe while
+  // already on /#probe) does NOT navigate — React Router no-ops — so
+  // pathname/search/hash never change and the boundary's resetKeys never
+  // fire, leaving a shown fallback stuck. The capture-phase document
+  // listener bumps this nonce on same-URL anchor clicks, which IS a
+  // resetKey change, so the fallback clears and the page re-renders.
+  // Capture phase (before React Router handles the click) so the
+  // comparison sees the pre-click location; same-origin anchors only.
+  // The comparison is against the ROUTER's location (the same values
+  // resetKeys uses), not window.location: under MemoryRouter the two
+  // differ, and the router is the source of truth for navigation.
+  const [navNonce, setNavNonce] = useState(0);
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!anchor) return;
+      let url: URL;
+      try {
+        url = new URL(anchor.getAttribute("href") ?? "", window.location.href);
+      } catch {
+        return;
+      }
+      if (url.origin !== window.location.origin) return;
+      if (url.pathname === pathname && url.search === search && url.hash === hash) {
+        setNavNonce((n) => n + 1);
+      }
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [pathname, search, hash]);
 
   return (
     <div className="app-shell">
@@ -151,12 +183,20 @@ export default function Layout() {
       {/* The boundary wraps ONLY the routed page (J2 R2 B1/B2): Layout —
           nav, health pill, UTC clock, footer — lives outside it and keeps
           its state across navigations, so a click never resets the health
-          pill to "checking…". resetKeys={[pathname]} clears
+          pill to "checking…". resetKeys={[pathname, search, hash]} clears
           a render error when the user navigates away WITHOUT remounting
           (PLAN.md C3) — the old key={pathname} remount dropped the page's
           state on every nav, including /receipts → /receipts/:id. The
-          nav stays usable to navigate away from a failed page. */}
-      <ErrorBoundary resetKeys={[pathname]}>
+          hash (and search) are keys too: a hash-only click such as the
+          navbar "Start a probe" CTA (/#probe) changes neither the
+          pathname nor the page, so pathname-only keys left the fallback
+          stuck on a failed Landing page (J2 C3 F2). The navNonce key
+          covers the last hole: a SAME-URL re-click of that CTA (already
+          on /#probe) does not navigate at all, so no location key
+          changes — the nonce bump clears the fallback (J2 C3 F2b /
+          P-C3 B). The nav stays usable to navigate away from a failed
+          page. */}
+      <ErrorBoundary resetKeys={[pathname, search, hash, navNonce]}>
         <Outlet />
       </ErrorBoundary>
 

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import Layout from "./components/Layout";
@@ -536,6 +536,112 @@ describe("in-app navigation (2026-11-20 click-test): every nav link renders its 
     }
   });
 
+  it("hash-only navigation clears the fallback (C3 resetKeys includes hash, J2 C3 F2)", async () => {
+    // Regression: resetKeys={[pathname]} left the fallback stuck when
+    // the only change was the hash — the navbar "Start a probe" CTA
+    // (Link to="/#probe") changes neither pathname nor page, so a
+    // failed Landing page could never be navigated away from by hash.
+    // The Bomb throws while the hash is empty and renders fine once
+    // it is "#probe": with hash in resetKeys the click clears the
+    // error and the page renders; with pathname-only keys the fallback
+    // stays (proven on the revert: "child is fine" never appears).
+    // The throw is location-driven, not a one-shot closure flag: a
+    // spurious re-render before the click re-throws instead of
+    // silently recovering, so the fallback is genuinely present until
+    // the hash navigation.
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      function BombHash() {
+        const { hash } = useLocation();
+        if (hash === "") throw new Error("boom without hash");
+        return <p>child is fine</p>;
+      }
+      render(
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route index element={<BombHash />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>,
+      );
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      expect(screen.getByText("boom without hash")).toBeInTheDocument();
+      // The navbar CTA is a real in-app Link to "/#probe": pathname
+      // stays "/", only the hash changes.
+      fireEvent.click(screen.getByRole("link", { name: "Start a probe" }));
+      expect(await screen.findByText("child is fine")).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.queryByText("boom without hash")).toBeNull();
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it("same-hash re-click of the probe CTA clears the fallback (C3 resetKeys navNonce, J2 C3 F2b / P-C3 B)", async () => {
+    // Regression: the hash key clears the fallback when the hash CHANGES
+    // (F2 above), but a RE-CLICK of the same CTA while already on
+    // /#probe does not navigate at all — React Router no-ops, no
+    // location key changes — so the fallback stayed stuck (attack B1:
+    // 3/3 repro). Layout's navNonce bumps on same-URL anchor clicks,
+    // which IS a resetKey change, so the fallback clears and the page
+    // re-renders. The Bomb throws on its first TWO renders while the
+    // hash is "#probe" and renders fine from the third: React's
+    // concurrent render is discarded and retried after the first throw,
+    // so a one-shot flag recovers spuriously on mount (the F2 comment's
+    // warning) — the count survives the retry, and the pre-click
+    // fallback assertion proves the fallback was genuinely present (a
+    // spurious recovery before the click would fail it, not pass
+    // vacuously).
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      let attempts = 0;
+      function BombOnce() {
+        const { hash } = useLocation();
+        attempts += 1;
+        if (hash === "#probe" && attempts <= 2) {
+          throw new Error("boom on #probe");
+        }
+        return <p>child is fine</p>;
+      }
+      render(
+        <MemoryRouter initialEntries={["/#probe"]}>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route index element={<BombOnce />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>,
+      );
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      expect(screen.getByText("boom on #probe")).toBeInTheDocument();
+      // The navbar CTA is a real in-app Link to "/#probe" — the SAME
+      // URL as the current location, so this click navigates nowhere.
+      fireEvent.click(screen.getByRole("link", { name: "Start a probe" }));
+      expect(await screen.findByText("child is fine")).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.queryByText("boom on #probe")).toBeNull();
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it("landing probe CTAs are router Links, not bare-hash anchors (C3 J2 F3)", async () => {
+    // SprintMatrix ("Open Live Probe") and DeskStage ("Run live probe")
+    // used to be plain <a href="#probe">: no full reload, but they
+    // bypassed React Router (router location went stale after the
+    // click) and relied on native scrolling instead of ScrollToHash.
+    // They are now <Link to="/#probe"> like Hero's CTA — so no bare
+    // "#probe" anchor remains anywhere on the landing page.
+    renderAt("/");
+    expect(await screen.findByRole("heading", { name: /A zero-LLM receipt/ })).toBeInTheDocument();
+    expect(document.querySelectorAll('a[href="#probe"]')).toHaveLength(0);
+    const ctas = screen.getAllByRole("link", { name: /Open Live Probe|Run live probe/ });
+    expect(ctas.length).toBeGreaterThanOrEqual(2);
+    for (const cta of ctas) {
+      expect(cta.getAttribute("href")).toBe("/#probe");
+    }
+  });
 });
 
 describe("footer copy (J1-5)", () => {
