@@ -576,6 +576,18 @@ describe("null/undefined params object (J2 R2 M-2)", () => {
       () =>
         getGridPrice(null as unknown as { node_or_zone: string; interval_start: string }),
     ],
+    // Array params (J2 R3 M-2): typeof [] is "object", so without the
+    // Array.isArray guard in assertValidParamsObject these would throw a
+    // raw TypeError from `params.tx_hash` instead of an ApiError.
+    ["getTx", () => getTx([] as unknown as { tx_hash: string; chain: string })],
+    ["getFilings", () => getFilings([] as unknown as { entity: string; period: string })],
+    ["getTvl", () => getTvl([] as unknown as { protocol: string })],
+    ["getRoute", () => getRoute([] as unknown as { pair: string })],
+    [
+      "getGridPrice",
+      () =>
+        getGridPrice([] as unknown as { node_or_zone: string; interval_start: string }),
+    ],
   ])("%s throws ApiError INVALID_PARAM (not raw TypeError) with zero fetch calls", async (_name, call) => {
     await expect(call()).rejects.toMatchObject({ status: 400, code: "INVALID_PARAM" });
     try {
@@ -626,6 +638,42 @@ describe("receipt field validation (J2 R2 B-1a / M-5)", () => {
     const res = await getTx({ tx_hash: "0x00", chain: "sepolia" });
     expect(res.receipt.receipt_id).toHaveLength(512);
   });
+
+  // The other receipt fields were uncapped (J2 R3): a 1 MB fetched_at
+  // passed validation and rendered verbatim, a 1 MB upstream_url
+  // rendered as plain text, a 1 MB sha sat in the title= attribute.
+  it.each([
+    ["1 MB fetched_at", { ...sampleReceipt, fetched_at: "x".repeat(1024 * 1024) }],
+    ["1 MB upstream_url", { ...sampleReceipt, upstream_url: "x".repeat(1024 * 1024) }],
+    ["1 MB raw_response_sha256", { ...sampleReceipt, raw_response_sha256: "x".repeat(1024 * 1024) }],
+    ["129-char fetched_at (over the 128 cap)", { ...sampleReceipt, fetched_at: "x".repeat(129) }],
+    ["2049-char upstream_url (over the 2048 cap)", { ...sampleReceipt, upstream_url: "x".repeat(2049) }],
+    ["129-char raw_response_sha256 (over the 128 cap)", { ...sampleReceipt, raw_response_sha256: "x".repeat(129) }],
+  ])("rejects a 200 whose receipt has %s", async (_label, receipt) => {
+    fetchMock.mockResolvedValue(jsonResponse({ ...baseBody, receipt }));
+    await expect(getTx({ tx_hash: "0x00", chain: "sepolia" })).rejects.toMatchObject({
+      status: 200,
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it("accepts each receipt field exactly at its cap (128 / 2048 / 128)", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...baseBody,
+        receipt: {
+          ...sampleReceipt,
+          fetched_at: "x".repeat(128),
+          upstream_url: "x".repeat(2048),
+          raw_response_sha256: "x".repeat(128),
+        },
+      }),
+    );
+    const res = await getTx({ tx_hash: "0x00", chain: "sepolia" });
+    expect(res.receipt.fetched_at).toHaveLength(128);
+    expect(res.receipt.upstream_url).toHaveLength(2048);
+    expect(res.receipt.raw_response_sha256).toHaveLength(128);
+  });
 });
 
 describe("spurious abort (J2 R2 M-6)", () => {
@@ -642,5 +690,222 @@ describe("spurious abort (J2 R2 M-6)", () => {
     }
     // Not retried: a spurious abort is not a timeout.
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("abort during the body read (J2 R3 M-6)", () => {
+  it("an external abort fired while the body is still pending returns ABORTED, never the data", async () => {
+    // The body is now read via res.text() (size-cap change), so the
+    // pending-body mock defers text(): it resolves only when the
+    // controller signal aborts — exactly the race the fix closes.
+    const controller = new AbortController();
+    fetchMock.mockImplementation(
+      (_url: string, init?: { signal?: AbortSignal }) => {
+        let resolveText: (value: string) => void = () => {};
+        const textPromise = new Promise<string>((resolve) => {
+          resolveText = resolve;
+        });
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            resolveText(
+              JSON.stringify({ status: "ok", service: "verireceipt", uptime_s: 1, upstreams: {} }),
+            );
+          },
+          { once: true },
+        );
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ "Content-Type": "application/json" }),
+          text: () => textPromise,
+        } as unknown as Response);
+      },
+    );
+    const pending = getHealth(controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ status: 0, code: "ABORTED" });
+    // The body resolved after the abort — it must not have been returned.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("an AbortError thrown by text() itself is ABORTED, not INVALID_RESPONSE", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "Content-Type": "application/json" }),
+      text: () => Promise.reject(new DOMException("The operation was aborted.", "AbortError")),
+    } as unknown as Response);
+    await expect(getHealth()).rejects.toMatchObject({ status: 0, code: "ABORTED" });
+  });
+});
+
+describe("Retry-After response header (J2 R3)", () => {
+  function headerResponse(status: number, retryAfter: string | null, body: unknown): Response {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (retryAfter !== null) headers["Retry-After"] = retryAfter;
+    return new Response(JSON.stringify(body), { status, headers });
+  }
+
+  const errBody = { error: "rate_limited", code: "RATE_LIMITED", message: "too many requests" };
+
+  it("reads Retry-After: 120 from a 429 when the body carries no retry_after_sec", async () => {
+    fetchMock.mockResolvedValue(headerResponse(429, "120", errBody));
+    try {
+      await getGridPrice({
+        node_or_zone: "TH_NP15_GEN-APND",
+        interval_start: "2026-11-19T00:00:00Z",
+      });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 429, code: "RATE_LIMITED", retry_after_sec: 120 });
+    }
+  });
+
+  it("prefers a valid body retry_after_sec over the header", async () => {
+    fetchMock.mockResolvedValue(
+      headerResponse(429, "120", { ...errBody, retry_after_sec: 30 }),
+    );
+    try {
+      await getGridPrice({
+        node_or_zone: "TH_NP15_GEN-APND",
+        interval_start: "2026-11-19T00:00:00Z",
+      });
+      expect.unreachable();
+    } catch (err) {
+      expect((err as ApiError).retry_after_sec).toBe(30);
+    }
+  });
+
+  it("falls back to the header when the body value is invalid", async () => {
+    fetchMock.mockResolvedValue(
+      headerResponse(429, "45", { ...errBody, retry_after_sec: "soon" }),
+    );
+    try {
+      await getGridPrice({
+        node_or_zone: "TH_NP15_GEN-APND",
+        interval_start: "2026-11-19T00:00:00Z",
+      });
+      expect.unreachable();
+    } catch (err) {
+      expect((err as ApiError).retry_after_sec).toBe(45);
+    }
+  });
+
+  it("ignores an unparseable or out-of-range header instead of surfacing garbage", async () => {
+    for (const bad of ["soon", "999999", "-5"]) {
+      fetchMock.mockResolvedValue(headerResponse(429, bad, errBody));
+      try {
+        await getGridPrice({
+          node_or_zone: "TH_NP15_GEN-APND",
+          interval_start: "2026-11-19T00:00:00Z",
+        });
+        expect.unreachable();
+      } catch (err) {
+        expect((err as ApiError).retry_after_sec).toBeUndefined();
+      }
+    }
+  });
+
+  it("accepts an HTTP-date Retry-After as seconds-from-now", async () => {
+    const date = new Date(Date.now() + 60_000).toUTCString();
+    fetchMock.mockResolvedValue(headerResponse(429, date, errBody));
+    try {
+      await getGridPrice({
+        node_or_zone: "TH_NP15_GEN-APND",
+        interval_start: "2026-11-19T00:00:00Z",
+      });
+      expect.unreachable();
+    } catch (err) {
+      const secs = (err as ApiError).retry_after_sec;
+      expect(secs).toBeGreaterThanOrEqual(55);
+      expect(secs).toBeLessThanOrEqual(60);
+    }
+  });
+});
+
+describe("response-body size cap (J2 R3)", () => {
+  it("rejects a valid-JSON body over 1 MiB as INVALID_RESPONSE", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        status: "ok",
+        service: "verireceipt",
+        uptime_s: 1,
+        upstreams: {},
+        pad: "x".repeat(1_048_576),
+      }),
+    );
+    try {
+      await getHealth();
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 200, code: "INVALID_RESPONSE" });
+      expect((err as Error).message).toContain("exceeds");
+    }
+  });
+});
+
+describe("payload fields beyond the receipt (J2 R3 §8b)", () => {
+  it("rejects a 200 with a valid receipt but filings: 'not-an-array'", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        entity: "Apple",
+        filing_count: 94,
+        filings: "not-an-array",
+        urls: ["https://example.com"],
+        receipt: sampleReceipt,
+      }),
+    );
+    await expect(getFilings({ entity: "Apple", period: "2026" })).rejects.toMatchObject({
+      status: 200,
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it("rejects a 200 with a valid receipt but a non-numeric tvl_usd", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        protocol_or_chain: "aave-v3",
+        tvl_usd: "lots",
+        chain_tvl_usd: 12899774367.87363,
+        as_of: "2026-11-20T06:12:59.000Z",
+        receipt: sampleReceipt,
+      }),
+    );
+    await expect(getTvl({ protocol: "aave-v3" })).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it("rejects a 200 with a valid receipt but urls: 'not-an-array'", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        entity: "Apple",
+        filing_count: 94,
+        filings: [],
+        urls: "https://example.com",
+        receipt: sampleReceipt,
+      }),
+    );
+    await expect(getFilings({ entity: "Apple", period: "2026" })).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it("still accepts the live-shaped payloads (numbers, null block_number, arrays)", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        protocol_or_chain: "aave-v3",
+        tvl_usd: 15083256265,
+        chain_tvl_usd: null,
+        as_of: "2026-11-20T06:12:59.000Z",
+        receipt: sampleReceipt,
+      }),
+    );
+    const res = await getTvl({ protocol: "aave-v3" });
+    expect(res.tvl_usd).toBe(15083256265);
+    expect(res.chain_tvl_usd).toBeNull();
   });
 });

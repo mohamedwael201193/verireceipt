@@ -49,6 +49,32 @@ export const MAX_RETRY_AFTER_SEC = 86_400;
 /** A receipt_id longer than this is rejected as malformed (B-1a / M-5). */
 export const MAX_RECEIPT_ID_LENGTH = 512;
 
+/**
+ * Length caps for the other receipt fields (J2 R3): only receipt_id was
+ * capped, so a 1 MB fetched_at passed validation and rendered verbatim,
+ * a 1 MB upstream_url rendered as plain text, and a 1 MB sha sat in the
+ * title= attribute. Caps are generous against every legit live value —
+ * fetched_at is an ISO timestamp (~24–32 chars), upstream_url is a real
+ * upstream URL (live values are well under 200 chars; 2048 is the common
+ * URL-length bound), and raw_response_sha256 is "0x" + 64 hex = 66 chars
+ * (128 leaves ~2x headroom) — so no legit live receipt can trip them.
+ */
+export const MAX_RECEIPT_FETCHED_AT_LENGTH = 128;
+export const MAX_RECEIPT_UPSTREAM_URL_LENGTH = 2048;
+export const MAX_RECEIPT_SHA_LENGTH = 128;
+
+/**
+ * Maximum miner-response body accepted (J2 R3): the miner returns a
+ * small JSON envelope — never the 16 MB upstream payload it hashes —
+ * so an unbounded parse lets a garbage / hostile multi-MB body through
+ * to JSON.parse and the UI. 1 MiB is comfortably above the largest legit
+ * live envelope, measured live 2026-11-20: filings (the largest, 94
+ * filings) is 25,709 bytes; tvl 726, route 808, grid 795, health 70 —
+ * so the cap is ~40x the largest legit envelope and no legit live
+ * response can trip it. Anything larger is INVALID_RESPONSE.
+ */
+export const MAX_RESPONSE_BODY_BYTES = 1_048_576;
+
 /** Shared retry-delay validation: finite, non-negative, sane upper bound. */
 export function isValidRetryAfterSec(value: unknown): value is number {
   return (
@@ -57,6 +83,29 @@ export function isValidRetryAfterSec(value: unknown): value is number {
     value >= 0 &&
     value <= MAX_RETRY_AFTER_SEC
   );
+}
+
+/**
+ * Parse a `Retry-After` response header as a fallback when the error
+ * body carries no usable retry_after_sec (J2 R3: only the body was
+ * read, so a 429 that signals the delay via the standard header was
+ * silently dropped). Accepts delay-seconds ("120") and HTTP-dates
+ * ("Fri, 20 Nov 2026 10:30:00 GMT", converted to seconds-from-now);
+ * anything unparseable or outside [0, 86400] is absent, exactly like
+ * an invalid body value.
+ */
+export function parseRetryAfterHeader(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return undefined;
+  const asSeconds = Number(trimmed);
+  if (Number.isFinite(asSeconds) && isValidRetryAfterSec(asSeconds)) return asSeconds;
+  const asDate = Date.parse(trimmed);
+  if (!Number.isNaN(asDate)) {
+    const deltaSec = Math.floor((asDate - Date.now()) / 1000);
+    if (isValidRetryAfterSec(deltaSec)) return deltaSec;
+  }
+  return undefined;
 }
 
 export class ApiError extends Error {
@@ -174,9 +223,18 @@ function assertValidBody(
         (receipt as Record<string, unknown>)["receipt_id"],
         MAX_RECEIPT_ID_LENGTH,
       ) &&
-      isNonEmptyReceiptString((receipt as Record<string, unknown>)["raw_response_sha256"]) &&
-      isNonEmptyReceiptString((receipt as Record<string, unknown>)["fetched_at"]) &&
-      isNonEmptyReceiptString((receipt as Record<string, unknown>)["upstream_url"]);
+      isNonEmptyReceiptString(
+        (receipt as Record<string, unknown>)["raw_response_sha256"],
+        MAX_RECEIPT_SHA_LENGTH,
+      ) &&
+      isNonEmptyReceiptString(
+        (receipt as Record<string, unknown>)["fetched_at"],
+        MAX_RECEIPT_FETCHED_AT_LENGTH,
+      ) &&
+      isNonEmptyReceiptString(
+        (receipt as Record<string, unknown>)["upstream_url"],
+        MAX_RECEIPT_UPSTREAM_URL_LENGTH,
+      );
     if (!fieldsValid) {
       throw new ApiError(
         "Invalid response from server: missing or malformed receipt",
@@ -185,6 +243,49 @@ function assertValidBody(
       );
     }
   }
+  // Payload fields beyond the receipt (J2 R3 §8b): a 200 with a valid
+  // receipt but `filings: "not-an-array"` used to pass straight through
+  // to a consumer that iterates filings. Only type checks that are
+  // clearly safe are applied — "if present, it must be the declared
+  // type" — and every one was verified against live responses
+  // 2026-11-20 (filings is a 94-item array, urls a string array,
+  // filing_count/tvl_usd/amount_out/lmp_usd_per_mwh finite numbers,
+  // chain_tvl_usd/block_number numbers or null). Nested entry shapes
+  // are NOT validated: that would be over-engineering for fields no
+  // consumer in this branch iterates.
+  if (!arePayloadFieldsValid(body as Record<string, unknown>)) {
+    throw new ApiError(
+      "Invalid response from server: malformed payload fields",
+      status,
+      "INVALID_RESPONSE",
+    );
+  }
+}
+
+/**
+ * "If present, it must be the declared type" for the payload fields a
+ * consumer iterates or formats. Absent fields are fine (not every
+ * endpoint returns every field); null is allowed only where the type
+ * declares it (chain_tvl_usd, block_number).
+ */
+function arePayloadFieldsValid(body: Record<string, unknown>): boolean {
+  if ("filings" in body && !Array.isArray(body["filings"])) return false;
+  if ("urls" in body && !Array.isArray(body["urls"])) return false;
+  for (const key of ["filing_count", "tvl_usd", "amount_out", "lmp_usd_per_mwh"]) {
+    if (key in body && (typeof body[key] !== "number" || !Number.isFinite(body[key] as number))) {
+      return false;
+    }
+  }
+  for (const key of ["chain_tvl_usd", "block_number"]) {
+    if (
+      key in body &&
+      body[key] !== null &&
+      (typeof body[key] !== "number" || !Number.isFinite(body[key] as number))
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -222,12 +323,50 @@ async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promis
         headers: { Accept: "application/json" },
         signal: controller.signal,
       });
+      // Body is read as text (not res.json()) so the response can be
+      // size-capped before it is parsed: the miner returns a small JSON
+      // envelope, never the upstream payload, so anything over
+      // MAX_RESPONSE_BODY_BYTES (1 MiB) is garbage, not data.
+      // Non-JSON / empty body: body stays null and is rejected below
+      // on 2xx, or reported with the HTTP status on an error status.
+      // An AbortError from text() is rethrown (never swallowed to null):
+      // swallowing it would turn a timeout/abort into INVALID_RESPONSE.
       let body: unknown = null;
       try {
-        body = await res.json();
-      } catch {
-        // Non-JSON / empty body: body stays null and is rejected below
-        // on 2xx, or reported with the HTTP status on an error status.
+        const text = await res.text();
+        // Abort during the body read (J2 R3 M-6): the fetch resolved but
+        // the body was still pending when the caller aborted — returning
+        // the data now would hand the caller a response it cancelled.
+        // Throwing AbortError lets the outer catch classify it exactly
+        // like a fetch-time abort (external ABORTED, timeout TIMEOUT
+        // with one retry, spurious ABORTED).
+        if (controller.signal.aborted) {
+          throw new DOMException("The operation was aborted.", "AbortError");
+        }
+        // Size cap (J2 R3): text.length already bounds UTF-8 bytes from
+        // below (every char is >= 1 byte), so a longer string is over
+        // the cap without encoding it; the exact byte length is checked
+        // for multi-byte text that fits in chars but not in bytes.
+        if (
+          text.length > MAX_RESPONSE_BODY_BYTES ||
+          new TextEncoder().encode(text).length > MAX_RESPONSE_BODY_BYTES
+        ) {
+          throw new ApiError(
+            `Response body exceeds the ${MAX_RESPONSE_BODY_BYTES} byte limit`,
+            res.status,
+            "INVALID_RESPONSE",
+          );
+        }
+        if (text.length > 0) {
+          try {
+            body = JSON.parse(text);
+          } catch {
+            body = null;
+          }
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") throw err;
+        if (err instanceof ApiError) throw err;
         body = null;
       }
       if (!res.ok) {
@@ -242,10 +381,13 @@ async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promis
         // 422 bodies carry retry_after_sec: surface it instead of dropping
         // it, so the UI can tell the user how long to wait. Only a finite
         // non-negative number within the sane bound counts (shared
-        // isValidRetryAfterSec); anything else is ignored.
+        // isValidRetryAfterSec); anything else is ignored. When the body
+        // value is absent/invalid, the standard Retry-After response
+        // header is the fallback (J2 R3) — a 429 that signals its delay
+        // only via the header must not lose it.
         const retryAfterSec = isValidRetryAfterSec(err?.retry_after_sec)
           ? err?.retry_after_sec
-          : undefined;
+          : parseRetryAfterHeader(res.headers.get("Retry-After"));
         throw new ApiError(message, res.status, err?.code, retryAfterSec);
       }
       assertValidBody(body, res.status, expectReceipt);
