@@ -61,7 +61,26 @@ function toBytes(data: string | Uint8Array | ArrayBuffer): Uint8Array {
   if (isArrayBuffer(data)) return new Uint8Array(data);
   // ArrayBuffer.isView (not instanceof) — jsdom TextEncoder returns a
   // Uint8Array from another realm, which fails instanceof.
-  if (ArrayBuffer.isView(data)) return data as Uint8Array;
+  if (ArrayBuffer.isView(data)) {
+    // Detached-view check (J2 R5 B-2): a detached TypedArray/DataView
+    // sails through the isView gate and WebCrypto silently hashes it
+    // as ZERO bytes — a detached view of "hello" verified true against
+    // the sha256("") digest (fail-open). A detached buffer is
+    // detectable because constructing any view over it throws
+    // TypeError, while a live buffer — even a zero-length one, or a
+    // resizable buffer resized to 0 — constructs fine. So a throw
+    // here means "detached", never "genuinely empty": an empty view
+    // constructed with length 0 still verifies true vs the empty hash.
+    // (Reading .byteLength would also throw for a detached DataView,
+    // but returns 0 without throwing for a detached TypedArray, so
+    // the constructor probe is the uniform detector.)
+    try {
+      new Uint8Array(data.buffer as ArrayBuffer);
+    } catch {
+      throw new TypeError("sha256Hex: cannot hash a view of a detached ArrayBuffer");
+    }
+    return data as Uint8Array;
+  }
   throw new TypeError("sha256Hex expects a string, Uint8Array or ArrayBuffer");
 }
 
@@ -92,9 +111,13 @@ export async function sha256Hex(data: string | Uint8Array | ArrayBuffer): Promis
  * Malformed input (null / non-object receipt, non-string recorded hash,
  * non-string / non-Uint8Array / non-ArrayBuffer body) returns
  * `{ verified: false, computedSha: "" }` instead of throwing — a bad
- * receipt is a failed verification, not a crash. The ONE exception is
- * WebCrypto being unavailable: sha256Hex still throws, because returning
- * a verdict without a real hash would be a fake result.
+ * receipt is a failed verification, not a crash. A detached view or
+ * detached DataView body (J2 R5 B-2) is malformed the same way: it
+ * returns `{ verified: false }` instead of throwing out of
+ * subtle.digest (the old DataView path) or hashing zero bytes (the old
+ * TypedArray path). The ONE exception is WebCrypto being unavailable:
+ * sha256Hex still throws, because returning a verdict without a real
+ * hash would be a fake result.
  */
 export async function verifyReceipt(
   receipt: Receipt | null | undefined,
@@ -118,7 +141,17 @@ export async function verifyReceipt(
   ) {
     return { verified: false, computedSha: "" };
   }
-  const computedSha = await sha256Hex(rawBody);
+  let computedSha: string;
+  try {
+    computedSha = await sha256Hex(rawBody);
+  } catch (err) {
+    // A hash that cannot be computed (detached view/DataView, or a
+    // digest failure) is a failed verification, not a crash — EXCEPT
+    // missing WebCrypto, which must still throw (checked above, and
+    // re-checked here in case subtle vanished mid-call).
+    if (!globalThis.crypto?.subtle) throw err;
+    return { verified: false, computedSha: "" };
+  }
   const recorded = normalizeHash(receipt.raw_response_sha256);
   return {
     verified: recorded.length > 0 && normalizeHash(computedSha) === recorded,

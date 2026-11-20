@@ -220,6 +220,108 @@ describe("verifyReceipt", () => {
   });
 });
 
+describe("detached views fail closed (J2 R5 B-2)", () => {
+  // ArrayBuffer.transfer() / resizable buffers exist at runtime
+  // (Node 24) but predate this project's TS lib, so reach them
+  // through narrow casts instead of changing the lib for the branch.
+  const transferBuffer = (buf: ArrayBuffer): void => {
+    (buf as unknown as { transfer(): ArrayBuffer }).transfer();
+  };
+  const resizableBuffer = (byteLength: number, maxByteLength: number): ArrayBuffer =>
+    new (
+      ArrayBuffer as unknown as new (
+        byteLength: number,
+        options: { maxByteLength: number },
+      ) => ArrayBuffer
+    )(byteLength, { maxByteLength });
+  const resizeBuffer = (buf: ArrayBuffer, byteLength: number): void => {
+    (buf as unknown as { resize(byteLength: number): void }).resize(byteLength);
+  };
+  const EMPTY_SHA =
+    "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+  const ABC_SHA =
+    "0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+  /** A Uint8Array view over `text`, detached via buffer.transfer(). */
+  function detachedViewOf(text: string): Uint8Array {
+    const view = new Uint8Array(arrayBufferOf(text));
+    transferBuffer(view.buffer);
+    return view;
+  }
+
+  it("fails a detached Uint8Array view instead of hashing zero bytes", async () => {
+    // J2's repro: buffer "hello" -> view -> transfer() -> verifyReceipt
+    // against sha256("") returned { verified: true } (fail-open).
+    const view = detachedViewOf("hello");
+    expect(view.length).toBe(0);
+    await expect(verifyReceipt(receiptWith(EMPTY_SHA), view)).resolves.toEqual({
+      verified: false,
+      computedSha: "",
+    });
+  });
+
+  it("fails a detached offset view", async () => {
+    const buf = new ArrayBuffer(10);
+    new Uint8Array(buf).set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const view = new Uint8Array(buf, 2, 5);
+    transferBuffer(buf);
+    expect(view.length).toBe(0);
+    await expect(verifyReceipt(receiptWith(EMPTY_SHA), view)).resolves.toEqual({
+      verified: false,
+      computedSha: "",
+    });
+  });
+
+  it("fails a detached Float64Array view", async () => {
+    const view = new Float64Array([1, 2, 3]);
+    transferBuffer(view.buffer);
+    expect(view.length).toBe(0);
+    await expect(
+      verifyReceipt(receiptWith(EMPTY_SHA), view as unknown as ArrayBuffer),
+    ).resolves.toEqual({ verified: false, computedSha: "" });
+  });
+
+  it("fails a detached DataView instead of throwing", async () => {
+    // The old path threw TypeError out of subtle.digest, violating the
+    // documented "malformed input returns {verified:false}" contract.
+    const view = new DataView(arrayBufferOf("hello"));
+    transferBuffer(view.buffer);
+    await expect(
+      verifyReceipt(receiptWith(EMPTY_SHA), view as unknown as ArrayBuffer),
+    ).resolves.toEqual({ verified: false, computedSha: "" });
+  });
+
+  it("sha256Hex rejects (never empty-hashes) a detached view / DataView", async () => {
+    await expect(sha256Hex(detachedViewOf("hello"))).rejects.toThrow(TypeError);
+    const dv = new DataView(arrayBufferOf("hello"));
+    transferBuffer(dv.buffer);
+    await expect(sha256Hex(dv as unknown as ArrayBuffer)).rejects.toThrow(TypeError);
+  });
+
+  it("still verifies a genuinely empty view (length 0 by construction) against the empty digest", async () => {
+    const result = await verifyReceipt(receiptWith(EMPTY_SHA), new Uint8Array(0));
+    expect(result).toEqual({ verified: true, computedSha: EMPTY_SHA });
+  });
+
+  it("still verifies a resizable buffer resized to 0 against the empty digest", async () => {
+    const buf = resizableBuffer(5, 10);
+    const view = new Uint8Array(buf);
+    resizeBuffer(buf, 0);
+    expect(view.length).toBe(0);
+    const result = await verifyReceipt(receiptWith(EMPTY_SHA), view);
+    expect(result).toEqual({ verified: true, computedSha: EMPTY_SHA });
+  });
+
+  it("still fails (not throws) a detached ArrayBuffer", async () => {
+    const buf = arrayBufferOf("abc");
+    transferBuffer(buf);
+    await expect(verifyReceipt(receiptWith(ABC_SHA), buf)).resolves.toEqual({
+      verified: false,
+      computedSha: "",
+    });
+  });
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
