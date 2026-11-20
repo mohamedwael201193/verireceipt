@@ -68,25 +68,41 @@ describe("IntentIde — one live call per switch (M1)", () => {
   // M4: generous waits — the 1 s waitFor defaults flaked twice under
   // CPU load (slow chunk transform), so each wait gets 15 s and the
   // test itself 60 s. No production-code change.
+  // J2 minor 1: the mode buttons are disabled while a run is loading,
+  // so clicking one mid-flight is a no-op and the next count assertion
+  // stalls (the old test only waited for the fetch count, not for the
+  // run to settle). Wait for the buttons to re-enable before every
+  // click, so each click lands on exactly one fresh run.
+  async function waitSettled() {
+    await waitFor(
+      () => expect(screen.getByRole("button", { name: "Test 422 trap" })).not.toBeDisabled(),
+      { timeout: 15000 },
+    );
+  }
+
   it("fires exactly one fetch on mount, per mode switch, per re-run, and per tab switch", async () => {
     const fetchMock = mockFetch();
     render(<IntentIde />);
 
     // Mount: one call for the default (tx) tab.
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1), { timeout: 15000 });
+    await waitSettled();
 
     // Mode switch to the 422 trap: exactly one more call, to the trap params.
     fireEvent.click(screen.getByRole("button", { name: "Test 422 trap" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), { timeout: 15000 });
     expect(String(fetchMock.mock.calls[1][0])).toContain("tx_hash=0x0000000000000000000000000000000000000000000000000000000000000000");
+    await waitSettled();
 
     // Mode switch back to 200 OK: exactly one more call.
     fireEvent.click(screen.getByRole("button", { name: "Run 200 OK" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3), { timeout: 15000 });
+    await waitSettled();
 
     // Re-run in the same mode: still exactly one call (not zero, not two).
     fireEvent.click(screen.getByRole("button", { name: "Run 200 OK" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4), { timeout: 15000 });
+    await waitSettled();
 
     // Tab switch: exactly one call for the new tab. (The accessible name
     // has a space — "sec-filing .ts" — because the extension is a
