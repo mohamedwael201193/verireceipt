@@ -268,6 +268,29 @@ button {
   display: none;
 }
 
+/* Small-laptop band 861–1035px (J2 re-review minor 2): with all six nav
+   links + health pill + full CTA + toggle the bar wrapped to 3 rows
+   (133px tall at 861–880px, theme toggle stranded alone on row 3).
+   Hide the pill and use the compact CTA here, with tighter gaps, so the
+   bar stays one row; above 1035px the full row fits again. */
+@media (min-width: 861px) and (max-width: 1035px) {
+  .health-pill {
+    display: none;
+  }
+  .cta-label-full {
+    display: none;
+  }
+  .cta-label-short {
+    display: inline;
+  }
+  .nav-right {
+    gap: 14px;
+  }
+  .nav-links {
+    gap: 16px;
+  }
+}
+
 @media (max-width: 860px) {
   .nav-links {
     display: none;
@@ -466,10 +489,22 @@ html[data-theme="light"] .theme-knob {
 }
 
 .giant-wm {
-  font-size: clamp(3rem, 7.6vw, 6.8rem);
+  /* Floor 2rem (not the design file's 3rem): at 48px the wordmark is
+     ~324px wide, which overflows a 320px viewport (16px container
+     padding leaves 288px) — the giant fix must not reintroduce
+     horizontal overflow. Above ~632px the 7.6vw term dominates, so the
+     design curve is unchanged there (97.28px @1280). */
+  font-size: clamp(2rem, 7.6vw, 6.8rem);
   line-height: 0.96;
   letter-spacing: -0.042em;
   user-select: none;
+}
+
+/* The inner .wordmark sets font-size: 17px, which beat the giant size
+   above (rendered 115px wide at every viewport — J2 re-review minor 1).
+   Inherit so the footer wordmark is actually giant. */
+.giant-wm .wordmark {
+  font-size: inherit;
 }
 
 .foot-cols {
@@ -501,8 +536,13 @@ html[data-theme="light"] .theme-knob {
 }
 
 /* --- Placeholder pages (scaffold only; replaced by page workers) --- */
+/* padding-block only: the horizontal padding belongs to .container
+   (28px, 16px ≤640px). The old `padding: 88px 0` shorthand zeroed the
+   container's side padding (same specificity, later in the file), so
+   every placeholder page's text sat flush to the viewport edge
+   (J2 re-review B2). */
 .page-placeholder {
-  padding: 88px 0;
+  padding-block: 88px;
   min-height: 55vh;
 }
 
