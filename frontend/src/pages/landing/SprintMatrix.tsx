@@ -3,13 +3,44 @@
 // A dated plan (Nov 20 → Dec 1), kept as static plan copy (DESIGN-SPEC
 // §8 A17: no live progress source exists for these gates). Default step
 // is day 01 (Nov 20, the current day).
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SPRINT_COLUMN_LABELS, SPRINT_STEPS } from "./data";
+
+/**
+ * Clamp a tooltip's left offset so its right edge never passes the
+ * container's right edge — clamped against the MEASURED tooltip width,
+ * not an assumed one. The old clamp assumed a ~140px tooltip
+ * (parentWidth - 140), but the single-line nowrap tooltip is actually
+ * ~310–317px wide at 360px, so columns 1–7 overflowed the viewport
+ * (tip right edge up to 521px vs a 361px viewport; the layout viewport
+ * itself grew to 514px). With the real width the clamp is
+ * left = min(desired, parentWidth - tipWidth), floored at 0; when the
+ * tooltip is wider than the container, left 0 + maxWidth 100% lets the
+ * ellipsis backstop engage instead of overflowing.
+ */
+export function clampSprintTipLeft(desiredLeft: number, parentWidth: number, tipWidth: number): number {
+  return Math.max(0, Math.min(desiredLeft, parentWidth - tipWidth));
+}
 
 export function SprintMatrix() {
   const [cur, setCur] = useState(0);
   const [tip, setTip] = useState<{ text: string; left: number } | null>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
   const st = SPRINT_STEPS[cur];
+
+  // Re-clamp against the MEASURED tooltip width once it has painted:
+  // the mouseover handler can only guess the width (the tooltip does
+  // not exist yet), and the guess was wrong by ~175px. offsetWidth is
+  // the real nowrap width (min-content forces the full ~317px even when
+  // it overflows the available space), capped by maxWidth 100%.
+  useEffect(() => {
+    if (!tip || !tipRef.current) return;
+    const parentWidth = tipRef.current.parentElement?.offsetWidth ?? 0;
+    const tipWidth = tipRef.current.offsetWidth;
+    const next = clampSprintTipLeft(tip.left, parentWidth, tipWidth);
+    if (next !== tip.left) setTip({ ...tip, left: next });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tip]);
 
   function cellClass(c: number, r: number): string {
     let cls = "scell ";
@@ -59,6 +90,7 @@ export function SprintMatrix() {
             {tip && (
               <div
                 id="sprint-tip"
+                ref={tipRef}
                 className="mono"
                 style={{ position: "absolute", top: -34, left: tip.left, maxWidth: "100%", background: "var(--paper)", color: "var(--paper-ink)", padding: "4px 10px", borderRadius: 4, fontSize: 11, zIndex: 20, pointerEvents: "none", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textAlign: "left", boxSizing: "border-box", boxShadow: "0 10px 24px rgba(0,0,0,0.45)" }}
               >
@@ -86,9 +118,13 @@ export function SprintMatrix() {
                       // is ~23px tall, so it sits fully ABOVE the grid
                       // and can never paint over the cells below — the
                       // old wrapping tooltip grew to 77px at 360px and
-                      // covered the first row. Clamp left so the longest
-                      // label (~132px incl. padding) fits inside the
-                      // container; ellipsis is the backstop.
+                      // covered the first row. The left set here is only
+                      // PROVISIONAL: the tooltip does not exist yet, so
+                      // its real width (~317px, not the ~140px this clamp
+                      // used to assume) cannot be measured until it
+                      // paints — the effect above re-clamps against the
+                      // measured offsetWidth, which is what keeps the
+                      // right edge inside the container on all 8 columns.
                       setTip({
                         text: `${SPRINT_COLUMN_LABELS[c]} · gate ${r + 1}/6`,
                         left: Math.max(0, Math.min(parentWidth - 140, el.offsetLeft)),
