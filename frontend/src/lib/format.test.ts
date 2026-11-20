@@ -103,6 +103,57 @@ describe("formatEth whitespace / -0 (J2 R2 M-4)", () => {
   });
 });
 
+describe("invisible format characters render '—' (J2 R5 B-1)", () => {
+  // trim() strips NBSP/FEFF but NOT these: every one used to pass the
+  // blank-render guards and render as a visually blank cell.
+  const INVISIBLE = [
+    "\u200B", // ZWSP
+    "\u200C", // ZWNJ
+    "\u200D", // ZWJ
+    "\u2060", // WORD JOINER
+    "\u180E", // Mongolian vowel separator
+    "\u200B\u200B", // doubled
+    " \u200B ", // mixed with spaces
+    "\u200B \u200C \u200D", // mixed multiples
+  ];
+
+  it.each(INVISIBLE)("formatDate renders '—' for %s", (value) => {
+    expect(formatDate(value)).toBe("—");
+  });
+
+  it.each(INVISIBLE)("shortenHash renders '—' for %s", (value) => {
+    expect(shortenHash(value)).toBe("—");
+  });
+
+  it.each(INVISIBLE)("shortenSha renders '—' for %s", (value) => {
+    expect(shortenSha(value)).toBe("—");
+  });
+
+  it.each(INVISIBLE)("formatEth renders '—' for %s", (value) => {
+    expect(formatEth(value)).toBe("—");
+  });
+
+  it("still passes through / formats strings that have a visible character next to a format character", () => {
+    // Only all-invisible strings are blank: a ZWSP inside real content
+    // must not nuke the value.
+    expect(formatDate("x\u200B")).toBe("x\u200B");
+    expect(shortenSha("0xabc\u200B")).toBe("0xabc\u200B");
+    expect(shortenHash("0x1234\u200B")).toBe("0x1234\u200B");
+  });
+});
+
+describe("formatDate over-long invalid passthrough (J2 R5 m5)", () => {
+  it("renders '—' for an over-long invalid string instead of passing 100k chars through", () => {
+    expect(formatDate("x".repeat(100_000))).toBe("—");
+    expect(formatDate("x".repeat(129))).toBe("—");
+  });
+
+  it("still passes a short invalid string through, and keeps the 128-char boundary", () => {
+    expect(formatDate("not-a-date")).toBe("not-a-date");
+    expect(formatDate("x".repeat(128))).toBe("x".repeat(128));
+  });
+});
+
 describe("formatUsd -0 (J2 R2 M-4)", () => {
   it("normalises -0 to 0 (no '-$0')", () => {
     expect(formatUsd(-0)).toBe("$0");

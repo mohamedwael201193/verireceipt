@@ -4,6 +4,41 @@ const usd = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
 
+/**
+ * Invisible format characters that `String.trim()` does NOT strip
+ * (J2 R5 B-1, re-opened): U+200B (ZWSP), U+200C (ZWNJ), U+200D (ZWJ),
+ * U+200E/U+200F (LRM/RLM), U+202A–U+202E (bidi controls),
+ * U+2060–U+2064 (word joiner / invisible operators), U+180E (Mongolian
+ * vowel separator), U+00AD (soft hyphen), U+FEFF (BOM). `trim()` strips
+ * whitespace (incl. NBSP and BOM at the edges) but leaves these in
+ * place, so a string of only such characters passed every
+ * `trim().length > 0` blank-render guard in this branch and rendered
+ * as a visually blank cell — or passed API validation as a receipt
+ * field. A string "has a visible character" only if, after removing
+ * these format characters, something non-whitespace remains. A visible
+ * character next to a format character (e.g. "a\u200Bb") still counts:
+ * only all-invisible strings are blank.
+ */
+const INVISIBLE_FORMAT_CHARS = /[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g;
+
+/** True when `value` is a string containing at least one visible character. */
+export function hasVisibleCharacter(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  return value.replace(INVISIBLE_FORMAT_CHARS, "").trim().length > 0;
+}
+
+/**
+ * Cap on the unparseable-input passthrough in formatDate (J2 R5 m5):
+ * a short invalid string ("not-a-date") still passes through verbatim
+ * (tested behaviour), but an over-long invalid string renders "—"
+ * instead of landing 100k chars in the DOM. 128 mirrors
+ * MAX_RECEIPT_FETCHED_AT_LENGTH (api.ts) — the card already caps
+ * fetched_at at 128 before calling formatDate, so this only binds
+ * direct callers of the exported helper. The cap applies ONLY to the
+ * unparseable branch: a parseable date is always short.
+ */
+const MAX_INVALID_DATE_PASSTHROUGH_LENGTH = 128;
+
 const usdPrecise = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -28,8 +63,10 @@ export function formatUsdPrecise(value: number | null | undefined): string {
 export function formatEth(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === "") return "—";
   // Whitespace-only strings coerce to 0 via Number(" ") — they are not
-  // amounts and must render as "—" (J2 M-4).
-  if (typeof value === "string" && value.trim().length === 0) return "—";
+  // amounts and must render as "—" (J2 M-4). Same for strings of only
+  // invisible format characters (J2 R5 B-1): trim() does not strip
+  // U+200B etc., so hasVisibleCharacter decides, not trim().
+  if (typeof value === "string" && !hasVisibleCharacter(value)) return "—";
   const num = typeof value === "string" ? Number(value) : value;
   if (!Number.isFinite(num)) return "—";
   // -0 renders as "-0 ETH" via toLocaleString; normalise it (J2 M-4).
@@ -47,11 +84,16 @@ export function formatDate(value: unknown): string {
   // Whitespace-only strings are unparseable (new Date("   ") is Invalid
   // Date) and used to be returned verbatim, rendering a blank cell
   // (J2 R4 B-1, re-opened): like shortenSha/shortenHash, they render "—".
-  // Non-whitespace unparseable input still passes through ("not-a-date")
-  // — that passthrough is tested behaviour, not a blank render.
-  if (typeof value !== "string" || value.length === 0 || value.trim().length === 0) return "—";
+  // Strings of only invisible format characters (U+200B etc.) are blank
+  // the same way — trim() does not strip them, so hasVisibleCharacter
+  // decides (J2 R5 B-1). Non-whitespace unparseable input still passes
+  // through ("not-a-date") — that passthrough is tested behaviour, not
+  // a blank render — subject to the over-long cap below (J2 R5 m5).
+  if (typeof value !== "string" || value.length === 0 || !hasVisibleCharacter(value)) return "—";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  if (Number.isNaN(date.getTime())) {
+    return value.length > MAX_INVALID_DATE_PASSTHROUGH_LENGTH ? "—" : value;
+  }
   const day = String(date.getUTCDate()).padStart(2, "0");
   const month = date.toLocaleString("en-US", {
     month: "short",
@@ -69,7 +111,7 @@ export function formatDate(value: unknown): string {
  * (value.slice on a number). Any non-string renders "—".
  */
 export function shortenHash(value: unknown): string {
-  if (typeof value !== "string" || value.length === 0 || value.trim().length === 0) return "—";
+  if (typeof value !== "string" || value.length === 0 || !hasVisibleCharacter(value)) return "—";
   if (value.length <= 13) return value;
   return `${value.slice(0, 6)}…${value.slice(-4)}`;
 }
@@ -79,7 +121,7 @@ export function shortenHash(value: unknown): string {
  * Total over non-string values (B-1b), same as shortenHash.
  */
 export function shortenSha(value: unknown): string {
-  if (typeof value !== "string" || value.length === 0 || value.trim().length === 0) return "—";
+  if (typeof value !== "string" || value.length === 0 || !hasVisibleCharacter(value)) return "—";
   if (value.length <= 20) return value;
   return `${value.slice(0, 10)}…${value.slice(-8)}`;
 }
