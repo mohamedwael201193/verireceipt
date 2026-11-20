@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
+import ScrollToHash from "./components/ScrollToHash";
 
 const Landing = lazy(() => import("./pages/Landing"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -12,7 +13,11 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 
 export default function App() {
   return (
-    <Suspense fallback={<div className="route-fallback mono">loading…</div>}>
+    <>
+      {/* Outside <Suspense> so it mounts immediately and can catch the
+          hash even while the lazy route chunk is still loading. */}
+      <ScrollToHash />
+      <Suspense fallback={<div className="route-fallback mono">loading…</div>}>
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<Landing />} />
@@ -24,6 +29,7 @@ export default function App() {
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
-    </Suspense>
+      </Suspense>
+    </>
   );
 }

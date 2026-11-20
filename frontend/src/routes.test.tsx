@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -69,6 +69,76 @@ describe("catch-all route (J2 M4)", () => {
     expect(screen.getByRole("link", { name: "Home ↑" })).toHaveAttribute("href", "/");
     // The landing heading must NOT appear: no silent redirect happened.
     expect(screen.queryByRole("heading", { name: /Zero-LLM Receipt Oracle/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("hash scrolling (J2 B1): clicks scroll, not just change the URL", () => {
+  let scrollSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy as unknown as typeof Element.prototype.scrollIntoView;
+  });
+
+  afterEach(() => {
+    // @ts-expect-error jsdom has no scrollIntoView — remove the mock.
+    delete Element.prototype.scrollIntoView;
+  });
+
+  // The scaffold's placeholder Landing has no sections: the scroll
+  // targets come from fixtures standing in for the real landing page
+  // (work-landing, read-only: Probe.tsx #probe, SprintMatrix.tsx
+  // #roadmap, Manifesto.tsx #manifesto). What this proves is the App
+  // wiring — hash navigation reaches ScrollToHash and scrolls the
+  // element with that id; the ids themselves are verified against the
+  // real landing page, and the browser check measures the real scroll.
+  function renderAppWithLandingSections(initialEntries: string[]) {
+    return render(
+      <MemoryRouter initialEntries={initialEntries}>
+        <section id="probe">probe section</section>
+        <section id="roadmap">roadmap section</section>
+        <section id="manifesto">manifesto section</section>
+        <App />
+      </MemoryRouter>,
+    );
+  }
+
+  it.each([
+    ["Start a probe", "probe"],
+    ["Roadmap", "roadmap"],
+    ["Manifesto", "manifesto"],
+  ])("clicking %s scrolls the #%s element into view", async (label, id) => {
+    renderAppWithLandingSections(["/"]);
+    fireEvent.click(await screen.findByRole("link", { name: label }));
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalledTimes(1));
+    expect(scrollSpy.mock.instances[0]).toBe(document.getElementById(id));
+  });
+
+  it("initial load with a hash scrolls once the route mounts", async () => {
+    renderAppWithLandingSections(["/#manifesto"]);
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalledTimes(1));
+    expect(scrollSpy.mock.instances[0]).toBe(document.getElementById("manifesto"));
+  });
+
+  it("footer anchor targets exist on the real landing page (J2 B1a)", () => {
+    const landingDir = "../../work-landing/frontend/src/pages/landing";
+    const probe = readFileSync(`${landingDir}/Probe.tsx`, "utf8");
+    const sprint = readFileSync(`${landingDir}/SprintMatrix.tsx`, "utf8");
+    const manifesto = readFileSync(`${landingDir}/Manifesto.tsx`, "utf8");
+    expect(probe).toContain('id="probe"');
+    expect(sprint).toContain('id="roadmap"');
+    expect(manifesto).toContain('id="manifesto"');
+    expect(sprint).not.toContain('id="sprint-matrix"');
+    // And the scaffold links point at those real ids, not sprint-matrix.
+    const layout = readFrontendFile("src/components/Layout.tsx");
+    expect(layout).toContain('to="/#probe"');
+    expect(layout).toContain('to="/#roadmap"');
+    expect(layout).toContain('to="/#manifesto"');
+    expect(layout).not.toContain("sprint-matrix");
+    const css = readFrontendFile("src/styles/tokens.css");
+    expect(css).not.toContain("sprint-matrix");
+    const app = readFrontendFile("src/App.tsx");
+    expect(app).toContain("ScrollToHash");
   });
 });
 
