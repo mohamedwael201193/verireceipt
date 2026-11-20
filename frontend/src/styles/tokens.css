@@ -1,0 +1,591 @@
+/* ==========================================================================
+   VeriReceipt design tokens — ported from the two design files.
+   Canonical source: verireceipt_interactive_showcase_landing_page.html
+   (DESIGN-SPEC §8 A11: landing tokens win where the files drift —
+   container 1300px, nav 68px, dark text #F3F2EE, dark surface #121214).
+   Dashboard-only tokens (--panel, --code-bg, --shadow, --err) merged in.
+   Miner identity (DESIGN-SPEC §8 A2): id 774921, slug verireceipt —
+   the dashboard file's id/slug are wrong and unused here.
+   ========================================================================== */
+:root,
+html[data-theme="dark"] {
+  --bg: #0b0b0c;
+  --surface: #121214;
+  --plate: #0e0e10;
+  --panel: #151518;
+  --code-bg: #0d0d0f;
+  --text: #f3f2ee;
+  --soft: #cecdc8;
+  --muted: #8f8e8a;
+  --dim: #454543;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-hi: rgba(255, 255, 255, 0.22);
+  --border-strong: rgba(255, 255, 255, 0.22);
+  --accent: #ff5722;
+  --accent-hover: #ff6e40;
+  --accent-soft: rgba(255, 87, 34, 0.14);
+  --accent-glow: rgba(255, 87, 34, 0.42);
+  --paper: #f1efe9;
+  --paper-border: #dddad0;
+  --paper-ink: #141414;
+  --paper-muted: #66645e;
+  --nav-bg: rgba(11, 11, 12, 0.84);
+  --ok: #22c55e;
+  --ok-soft: rgba(34, 197, 94, 0.14);
+  --warn: #f59e0b;
+  --warn-soft: rgba(245, 158, 11, 0.15);
+  --bad: #ef4444;
+  --bad-soft: rgba(239, 68, 68, 0.15);
+  --err: #ef4444;
+  --err-soft: rgba(239, 68, 68, 0.15);
+  --cell-0: #18181a;
+  --cell-1: #262629;
+  --cell-2: #3a3a3e;
+  --cell-3: #8f8e8a;
+  --cell-4: #ecece8;
+  --hl-stroke: rgba(243, 242, 238, 0.68);
+  --hl-dim: rgba(243, 242, 238, 0.2);
+  --cursor-fill: rgba(243, 242, 238, 0.18);
+  --cursor-ring: rgba(243, 242, 238, 0.35);
+  --shadow: 0 24px 56px -18px rgba(0, 0, 0, 0.65);
+}
+
+html[data-theme="light"] {
+  --bg: #e4e3df;
+  --surface: #dad9d4;
+  --plate: #dfded9;
+  --panel: #f5f4f0;
+  --code-bg: #141416;
+  --text: #141414;
+  --soft: #2d2d2b;
+  --muted: #5a5956;
+  --dim: #9a9994;
+  --border: rgba(0, 0, 0, 0.11);
+  --border-hi: rgba(0, 0, 0, 0.24);
+  --border-strong: rgba(0, 0, 0, 0.26);
+  --accent: #ff5722;
+  --accent-hover: #e64a19;
+  --accent-soft: rgba(255, 87, 34, 0.14);
+  --accent-glow: rgba(255, 87, 34, 0.36);
+  --paper: #f7f6f2;
+  --paper-border: #d4d2c9;
+  --paper-ink: #141414;
+  --paper-muted: #5c5a55;
+  --nav-bg: rgba(228, 227, 223, 0.86);
+  --ok: #15803d;
+  --ok-soft: rgba(21, 128, 61, 0.13);
+  --warn: #b45309;
+  --warn-soft: rgba(180, 83, 9, 0.14);
+  --bad: #b91c1c;
+  --bad-soft: rgba(185, 28, 28, 0.14);
+  --err: #b91c1c;
+  --err-soft: rgba(185, 28, 28, 0.13);
+  --cell-0: #d2d1cc;
+  --cell-1: #c2c1bc;
+  --cell-2: #a6a5a0;
+  --cell-3: #5a5956;
+  --cell-4: #1c1c1e;
+  --hl-stroke: rgba(20, 20, 20, 0.72);
+  --hl-dim: rgba(20, 20, 20, 0.2);
+  --cursor-fill: rgba(20, 20, 20, 0.12);
+  --cursor-ring: rgba(20, 20, 20, 0.28);
+  --shadow: 0 24px 52px -18px rgba(0, 0, 0, 0.22);
+}
+
+/* --- Base resets (from the design files) --- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14.5px;
+  line-height: 1.56;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  transition:
+    background-color 0.35s ease,
+    color 0.35s ease;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* --- Utility classes --- */
+.mono {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+.serif-i {
+  font-family: "Newsreader", Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.container {
+  max-width: 1300px;
+  margin: 0 auto;
+  padding: 0 28px;
+}
+
+@media (max-width: 640px) {
+  .container {
+    padding: 0 16px;
+  }
+}
+
+.kicker {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.sec-h2 {
+  font-size: clamp(2.1rem, 4.1vw, 3.25rem);
+  font-weight: 300;
+  letter-spacing: -0.032em;
+  line-height: 1.07;
+  color: var(--text);
+}
+
+.sec-h2 .it {
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* --- 68px sticky navbar (landing file canonical) --- */
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  min-height: 68px;
+  background: var(--nav-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+  transition:
+    background-color 0.35s ease,
+    border-color 0.35s ease;
+}
+
+.nav-inner {
+  min-height: 68px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  font-size: 17px;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+}
+
+.wm-dim {
+  font-family: "JetBrains Mono", monospace;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.wm-crisp {
+  font-family: "JetBrains Mono", monospace;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.wm-name {
+  font-family: "Inter", sans-serif;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.nav-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  gap: 26px;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.nav-links a {
+  transition: color 0.16s ease;
+}
+
+.nav-links a:hover {
+  color: var(--text);
+}
+
+.nav-links a.active {
+  color: var(--text);
+}
+
+/* Compact "Probe" CTA label below 860px: the full "Start a probe" text
+   plus health pill and theme toggle need ~560px, which overflows phones.
+   The theme toggle must stay reachable at every width. */
+.cta-label-short {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .nav-links {
+    display: none;
+  }
+  .nav-right {
+    gap: 12px;
+  }
+  .cta-label-full {
+    display: none;
+  }
+  .cta-label-short {
+    display: inline;
+  }
+}
+
+/* --- Buttons (from the design files) --- */
+.btn-outline-accent {
+  padding: 8px 17px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  transition:
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.btn-outline-accent:hover {
+  background: var(--accent-soft);
+  box-shadow: 0 0 18px var(--accent-glow);
+}
+
+.btn-solid-accent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 13px 26px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background-color 0.18s ease,
+    transform 0.14s ease,
+    box-shadow 0.2s ease;
+}
+
+.btn-solid-accent:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 0 28px var(--accent-glow);
+}
+
+.btn-solid-accent:active {
+  transform: scale(0.98);
+}
+
+.btn-pill-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border-hi);
+  font-size: 12.5px;
+  color: var(--text);
+  transition:
+    border-color 0.16s,
+    background-color 0.16s;
+}
+
+.btn-pill-ghost:hover {
+  border-color: var(--text);
+  background: var(--border);
+}
+
+/* --- Exact 44x24px sliding pill theme switch --- */
+.theme-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid var(--border-hi);
+  background: var(--surface);
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.3s ease;
+}
+
+.theme-switch:hover {
+  border-color: var(--accent);
+}
+
+.theme-knob {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateX(20px);
+  transition:
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.3s ease,
+    color 0.3s ease;
+}
+
+html[data-theme="light"] .theme-knob {
+  transform: translateX(0);
+}
+
+/* --- Live health pill (scaffold addition; design language only) --- */
+.health-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--border-hi);
+  background: var(--surface);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.health-pill .hp-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+
+.health-pill.ok {
+  border-color: var(--ok);
+  color: var(--text);
+}
+
+.health-pill.ok .hp-dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.65);
+  animation: hpPing 2.2s infinite;
+}
+
+.health-pill.down {
+  border-color: var(--bad);
+  color: var(--text);
+}
+
+.health-pill.down .hp-dot {
+  background: var(--bad);
+}
+
+@keyframes hpPing {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6);
+  }
+  55% {
+    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+  }
+}
+
+/* Small-laptop band 861–1035px (J2 re-review minor 2): with all six nav
+   links + health pill + full CTA + toggle the bar wrapped to 3 rows
+   (133px tall at 861–880px, theme toggle stranded alone on row 3).
+   Hide the pill and use the compact CTA here, with tighter gaps, so the
+   bar stays one row; above 1035px the full row fits again. NOTE: this
+   block MUST stay AFTER the .health-pill base rule above — same
+   specificity (0,1,0), so source order decides. In round 2 it sat
+   BEFORE the base rule and the base display:inline-flex won, so the
+   pill was never hidden in the band and the navbar wrapped to 2 rows
+   (83px at 861–880px, J1/J2 R2 B-J1-2). The css-regressions test asserts
+   this ordering, not just the band text. */
+@media (min-width: 861px) and (max-width: 1035px) {
+  .health-pill {
+    display: none;
+  }
+  .cta-label-full {
+    display: none;
+  }
+  .cta-label-short {
+    display: inline;
+  }
+  .nav-right {
+    gap: 14px;
+  }
+  .nav-links {
+    gap: 16px;
+  }
+}
+
+/* Below 560px the health pill is hidden entirely (its state lives on the
+   Status page) so wordmark + compact CTA + theme toggle always fit on one
+   row. NOTE: this block must stay AFTER the .health-pill base rule above —
+   same specificity, so source order decides and the base display would
+   otherwise override the hide. */
+@media (max-width: 560px) {
+  .health-pill {
+    display: none;
+  }
+  .nav-right {
+    gap: 8px;
+  }
+  .btn-outline-accent {
+    padding: 8px 13px;
+  }
+}
+
+/* --- Giant footer (from the landing file) --- */
+.giant-footer {
+  padding: 84px 0 42px;
+  border-top: 1px solid var(--border);
+}
+
+/* Scoped to .giant-footer (specificity 0,2,0), NOT a bare .giant-wm
+   class: the lazy Landing chunk loads landing.css LATER, and its bare
+   .giant-wm rule (clamp(3rem, …), landing.css:595) beats a bare
+   scaffold rule of the same specificity — in round 2 the merged /
+   rendered 48px/324px at 320px and overflowed 20px (J2 R2 B-J2-3).
+   The scoped rule wins over the bare landing rule regardless of load
+   order, on the scaffold footer AND on the landing's own SiteFooter
+   (same .giant-footer > .giant-wm structure). The css-regressions
+   test asserts the scoped selector and fails on a bare rule. */
+.giant-footer .giant-wm {
+  /* Floor 2rem (not the design file's 3rem): at 48px the wordmark is
+     ~324px wide, which overflows a 320px viewport (16px container
+     padding leaves 288px) — the giant fix must not reintroduce
+     horizontal overflow. Above ~632px the 7.6vw term dominates, so the
+     design curve is unchanged there (97.28px @1280). */
+  font-size: clamp(2rem, 7.6vw, 6.8rem);
+  line-height: 0.96;
+  letter-spacing: -0.042em;
+  user-select: none;
+}
+
+/* The inner .wordmark sets font-size: 17px, which beat the giant size
+   above (rendered 115px wide at every viewport — J2 re-review minor 1).
+   Inherit so the footer wordmark is actually giant. */
+.giant-wm .wordmark {
+  font-size: inherit;
+}
+
+.foot-cols {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 28px;
+  padding-top: 40px;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 780px) {
+  .foot-cols {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .foot-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+.foot-cols a {
+  transition: color 0.16s ease;
+}
+
+.foot-cols a:hover {
+  color: var(--text);
+}
+
+/* --- Placeholder pages (scaffold only; replaced by page workers) --- */
+/* padding-block only: the horizontal padding belongs to .container
+   (28px, 16px ≤640px). The old `padding: 88px 0` shorthand zeroed the
+   container's side padding (same specificity, later in the file), so
+   every placeholder page's text sat flush to the viewport edge
+   (J2 re-review B2). */
+.page-placeholder {
+  padding-block: 88px;
+  min-height: 55vh;
+}
+
+.placeholder-note {
+  margin-top: 22px;
+  color: var(--muted);
+  max-width: 560px;
+}
+
+.placeholder-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  margin-right: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 11px;
+}
+
+.route-fallback {
+  padding: 40px;
+  text-align: center;
+  color: var(--muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .health-pill.ok .hp-dot {
+    animation: none;
+  }
+}
