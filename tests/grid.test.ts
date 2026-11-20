@@ -15,14 +15,28 @@ process.env.SQLITE_PATH = tmpDb;
 import { ApiError } from "../src/core/errors";
 import { getDb, saveGridPrice } from "../src/core/db";
 import { handleGridPrice } from "../src/handlers/gridPrice";
-import { runIngesterOnce, SUPPORTED_ZONES } from "../src/jobs/gridIngester";
+import {
+  eleringMissingZones,
+  nyWallString,
+  nyWallToUtcMs,
+  runIngesterOnce,
+  SUPPORTED_ZONES,
+} from "../src/jobs/gridIngester";
 
+/** Past instant floored to a 15-min boundary (also a 5-min and 60-min boundary). */
 function pastIso(hoursAgo: number): string {
-  return new Date(Date.now() - hoursAgo * 3600_000).toISOString();
+  const ms = Math.floor((Date.now() - hoursAgo * 3600_000) / 900_000) * 900_000;
+  return new Date(ms).toISOString();
 }
 
 function futureIso(hoursAhead: number): string {
-  return new Date(Date.now() + hoursAhead * 3600_000).toISOString();
+  const ms = Math.floor((Date.now() + hoursAhead * 3600_000) / 900_000) * 900_000;
+  return new Date(ms).toISOString();
+}
+
+/** ISO instant N minutes ago (exact, for ingested_at values). */
+function minutesAgoIso(minutes: number): string {
+  return new Date(Date.now() - minutes * 60_000).toISOString();
 }
 
 async function expectApiError(
@@ -103,6 +117,27 @@ describe("handleGridPrice validation", () => {
       "GRID_CACHE_MISS",
     );
   });
+
+  it("off-boundary interval -> 422 OFF_BOUNDARY_INTERVAL naming the containing window", async () => {
+    const err = await expectApiError(
+      handleGridPrice({ node_or_zone: "EE", interval_start: "2026-11-19T05:17:00Z" }),
+      422,
+      "OFF_BOUNDARY_INTERVAL",
+    );
+    expect(err.message).toContain("05:17");
+    expect(err.message).toContain("15-minute");
+    expect(err.message).toContain("05:15");
+  });
+
+  it("off-boundary NYISO interval names the 5-minute containing window", async () => {
+    const err = await expectApiError(
+      handleGridPrice({ node_or_zone: "ZONE_J", interval_start: "2026-11-19T05:17:00Z" }),
+      422,
+      "OFF_BOUNDARY_INTERVAL",
+    );
+    expect(err.message).toContain("5-minute");
+    expect(err.message).toContain("05:15");
+  });
 });
 
 describe("handleGridPrice cache hit + envelope", () => {
@@ -144,6 +179,192 @@ describe("handleGridPrice cache hit + envelope", () => {
     expect(res.lmp_usd_per_mwh).toBe(39.92);
     expect(res.market).toBe("NYISO");
     expect(res.source).toBe("NYISO MIS realtime LBMP CSV");
+  });
+
+  it("fractional seconds are normalised to whole seconds before lookup", async () => {
+    const interval = pastIso(4);
+    saveGridPrice("EE", interval, 77.7, "Elering EE");
+    const withMillis = interval.replace("Z", "").replace(/\.000$/, "") + ".123Z";
+    const res = await handleGridPrice({ node_or_zone: "EE", interval_start: withMillis });
+    expect(res.lmp_usd_per_mwh).toBe(77.7);
+    expect(res.interval_start).toBe(interval);
+  });
+
+  it("two intervals for one zone: each returns its own price, unseeded neighbour is a miss", async () => {
+    const t0 = "2026-11-19T05:00:00.000Z";
+    const t1 = "2026-11-19T05:15:00.000Z";
+    const t2 = "2026-11-19T05:30:00.000Z";
+    saveGridPrice("EE", t0, 111.11, "Elering EE");
+    saveGridPrice("EE", t1, 222.22, "Elering EE");
+    const r0 = await handleGridPrice({ node_or_zone: "EE", interval_start: t0 });
+    expect(r0.lmp_usd_per_mwh).toBe(111.11);
+    const r1 = await handleGridPrice({ node_or_zone: "EE", interval_start: t1 });
+    expect(r1.lmp_usd_per_mwh).toBe(222.22);
+    await expectApiError(
+      handleGridPrice({ node_or_zone: "EE", interval_start: t2 }),
+      502,
+      "GRID_CACHE_MISS",
+    );
+  });
+
+  it("N.Y.C. query serves a row stored only under ZONE_J (alias fallback)", async () => {
+    const interval = pastIso(5);
+    saveGridPrice("ZONE_J", interval, 39.92, "NYISO");
+    const res = await handleGridPrice({ node_or_zone: "N.Y.C.", interval_start: interval });
+    expect(res.lmp_usd_per_mwh).toBe(39.92);
+    expect(res.market).toBe("NYISO");
+  });
+
+  it("ZONE_J query serves a row stored only under N.Y.C. (reverse alias fallback)", async () => {
+    const interval = pastIso(6);
+    saveGridPrice("N.Y.C.", interval, 41.5, "NYISO");
+    const res = await handleGridPrice({ node_or_zone: "ZONE_J", interval_start: interval });
+    expect(res.lmp_usd_per_mwh).toBe(41.5);
+  });
+
+  it("a price of exactly 0 is served (Nord Pool can clear at 0)", async () => {
+    const interval = pastIso(7);
+    saveGridPrice("EE", interval, 0, "Elering EE");
+    const res = await handleGridPrice({ node_or_zone: "EE", interval_start: interval });
+    expect(res.lmp_usd_per_mwh).toBe(0);
+    expect(res.verdict).toBe("verified");
+  });
+});
+
+describe("handleGridPrice staleness bound (1 hour)", () => {
+  it("59-minute-old row serves as verified", async () => {
+    const interval = pastIso(2);
+    saveGridPrice("EE", interval, 99.99, "Elering EE", minutesAgoIso(59));
+    const res = await handleGridPrice({ node_or_zone: "EE", interval_start: interval });
+    expect(res.lmp_usd_per_mwh).toBe(99.99);
+    expect(res.verdict).toBe("verified");
+  });
+
+  it("61-minute-old row -> 502 GRID_CACHE_STALE", async () => {
+    const interval = pastIso(3);
+    saveGridPrice("EE", interval, 99.99, "Elering EE", minutesAgoIso(61));
+    await expectApiError(
+      handleGridPrice({ node_or_zone: "EE", interval_start: interval }),
+      502,
+      "GRID_CACHE_STALE",
+    );
+  });
+
+  it("48-hour-old and 1-year-old rows -> 502 GRID_CACHE_STALE (never verified 1.0)", async () => {
+    const interval48 = pastIso(50);
+    saveGridPrice("EE", interval48, 99.99, "Elering EE", minutesAgoIso(48 * 60));
+    await expectApiError(
+      handleGridPrice({ node_or_zone: "EE", interval_start: interval48 }),
+      502,
+      "GRID_CACHE_STALE",
+    );
+    const intervalYear = "2025-11-19T05:00:00.000Z";
+    saveGridPrice(
+      "EE",
+      intervalYear,
+      99.99,
+      "Elering EE",
+      new Date(Date.now() - 365 * 24 * 3600_000).toISOString(),
+    );
+    await expectApiError(
+      handleGridPrice({ node_or_zone: "EE", interval_start: intervalYear }),
+      502,
+      "GRID_CACHE_STALE",
+    );
+  });
+
+  it("receipt fetched_at is the row's ingested_at, not the response time", async () => {
+    const interval = pastIso(8);
+    const ingestedAt = minutesAgoIso(30);
+    saveGridPrice("EE", interval, 55.55, "Elering EE", ingestedAt);
+    const res = await handleGridPrice({ node_or_zone: "EE", interval_start: interval });
+    const receipt = res.receipt as Record<string, unknown>;
+    expect(receipt.fetched_at).toBe(ingestedAt);
+  });
+});
+
+describe("handleGridPrice persisted upstream_url (restart-safe)", () => {
+  it("receipt upstream_url is the exact stored URL (no in-memory map needed)", async () => {
+    // Simulates a restart: the row was written by an earlier process and
+    // this process never ran the ingester, so no in-memory source map exists.
+    const interval = pastIso(9);
+    const storedUrl =
+      "https://mis.nyiso.com/public/csv/realtime/20261119realtime_zone.csv";
+    saveGridPrice("ZONE_J", interval, 39.92, "NYISO", minutesAgoIso(10), storedUrl);
+    const res = await handleGridPrice({ node_or_zone: "ZONE_J", interval_start: interval });
+    const receipt = res.receipt as Record<string, unknown>;
+    expect(receipt.upstream_url).toBe(storedUrl);
+  });
+
+  it("legacy row with no stored URL falls back to the dated-file pattern, never the bare directory", async () => {
+    const interval = "2026-11-19T05:05:00.000Z";
+    saveGridPrice("ZONE_J", interval, 39.92, "NYISO", minutesAgoIso(10), "");
+    const res = await handleGridPrice({ node_or_zone: "ZONE_J", interval_start: interval });
+    const receipt = res.receipt as Record<string, unknown>;
+    const url = receipt.upstream_url as string;
+    expect(url).toContain("realtime_zone.csv");
+    expect(url).not.toBe("https://mis.nyiso.com/public/csv/realtime/");
+  });
+
+  it("legacy CAISO row falls back to the full SingleZip URL with query params", async () => {
+    const interval = "2026-11-19T03:00:00.000Z";
+    saveGridPrice("TH_NP15_GEN-APND", interval, 67.57, "CAISO", minutesAgoIso(10), "");
+    const res = await handleGridPrice({
+      node_or_zone: "TH_NP15_GEN-APND",
+      interval_start: interval,
+    });
+    const receipt = res.receipt as Record<string, unknown>;
+    const url = receipt.upstream_url as string;
+    expect(url).toContain("oasis.caiso.com/oasisapi/SingleZip?queryname=PRC_LMP");
+    expect(url).toContain("TH_NP15_GEN-APND");
+  });
+});
+
+describe("NYISO DST conversion (nyWallToUtcMs)", () => {
+  function wallTimes(date: string): string[] {
+    const out: string[] = [];
+    for (let i = 0; i < 288; i++) {
+      const mins = i * 5;
+      const hh = String(Math.floor(mins / 60)).padStart(2, "0");
+      const mm = String(mins % 60).padStart(2, "0");
+      out.push(date + " " + hh + ":" + mm + ":00");
+    }
+    return out;
+  }
+
+  it("all 288 wall times round-trip on fall-back day 2026-11-01", () => {
+    for (const wall of wallTimes("11/01/2026")) {
+      const utcMs = nyWallToUtcMs(wall);
+      expect(utcMs).not.toBeNull();
+      expect(nyWallString(utcMs as number)).toBe(wall);
+    }
+  });
+
+  it("all 288 wall times round-trip on control day 2026-10-15", () => {
+    for (const wall of wallTimes("10/15/2026")) {
+      const utcMs = nyWallToUtcMs(wall);
+      expect(utcMs).not.toBeNull();
+      expect(nyWallString(utcMs as number)).toBe(wall);
+    }
+  });
+
+  it("ambiguous 01:30 on fall-back day resolves to the second occurrence (EST, 06:30Z)", () => {
+    expect(new Date(nyWallToUtcMs("11/01/2026 01:30:00") as number).toISOString()).toBe(
+      "2026-11-01T06:30:00.000Z",
+    );
+    // First occurrence would have been 05:30Z (EDT); the second wins.
+    expect(new Date(nyWallToUtcMs("11/01/2026 01:00:00") as number).toISOString()).toBe(
+      "2026-11-01T06:00:00.000Z",
+    );
+  });
+});
+
+describe("Elering missing-zone reporting", () => {
+  it("a zone with zero rows appears in failed[]; all zones present -> []", () => {
+    const failed = eleringMissingZones({ ee: 38, fi: 0, lv: 38, lt: 38 });
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toContain("FI");
+    expect(eleringMissingZones({ ee: 38, fi: 38, lv: 38, lt: 38 })).toEqual([]);
   });
 });
 

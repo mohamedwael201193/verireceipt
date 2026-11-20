@@ -4,7 +4,9 @@
 //   EE, FI, LV, LT        -> Elering <zone>  -> Elering dashboard API
 //                            https://dashboard.elering.ee/api/nps/price
 //                            JSON {success, data:{ee,fi,lv,lt:[{timestamp,price}]}},
-//                            37 rows/zone, 15-min intervals, price in EUR/MWh.
+//                            38-39 rows/zone (rolling window; 152 observed
+//                            2026-11-20 ~06:06 UTC, 156 on a later run that day),
+//                            15-min intervals, price in EUR/MWh.
 //                            Observed 2026-11-20: EE 108.74 EUR/MWh @ 2026-11-19T21:00Z.
 //   ZONE_A..ZONE_K plus WEST, GENESE, CENTRL, NORTH, MHK VL, CAPITL, HUD VL,
 //   MILLWD, DUNWOD, N.Y.C., LONGIL -> NYISO -> NYISO MIS realtime LBMP CSV
@@ -27,8 +29,10 @@
 // no ERCOT zones are supported. HB_NORTH (an ERCOT hub named in the spec
 // examples) is therefore UNSUPPORTED_ZONE until a keyless ERCOT feed is found.
 //
-// Rules: never write a null, zero, or guessed price into the cache. A source
-// failure is logged and the other sources still run. No mocks, no LLM.
+// Rules: never write a null or guessed price into the cache. A price of
+// exactly 0 is real (Nord Pool can clear at 0) and IS cached; only
+// null/undefined/NaN/non-finite prices are refused. A source failure is
+// logged and the other sources still run. No mocks, no LLM.
 
 import { inflateRawSync } from "zlib";
 import { saveGridPrice } from "../core/db";
@@ -82,15 +86,66 @@ export const SUPPORTED_ZONES: Record<string, GridZoneInfo> = {
   "TH_ZP26_GEN-APND": { market: "CAISO", source: CAISO_SOURCE, url: CAISO_OASIS_URL, windowMin: 60 },
 };
 
-/** Feed URL that produced a cached row, keyed by `node|interval_start`. */
-const sourceByRow = new Map<string, string>();
+/**
+ * NYISO zone aliases: the ingester writes both keys for every load zone
+ * (e.g. ZONE_J and N.Y.C.), but the handler must not depend on that — it
+ * canonicalises via this map so a lookup for either spelling finds a row
+ * stored under the other spelling.
+ */
+export const NYISO_ALIASES: Record<string, string> = {
+  ZONE_A: "WEST",
+  WEST: "ZONE_A",
+  ZONE_B: "GENESE",
+  GENESE: "ZONE_B",
+  ZONE_C: "CENTRL",
+  CENTRL: "ZONE_C",
+  ZONE_D: "NORTH",
+  NORTH: "ZONE_D",
+  ZONE_E: "MHK VL",
+  "MHK VL": "ZONE_E",
+  ZONE_F: "CAPITL",
+  CAPITL: "ZONE_F",
+  ZONE_G: "HUD VL",
+  "HUD VL": "ZONE_G",
+  ZONE_H: "MILLWD",
+  MILLWD: "ZONE_H",
+  ZONE_I: "DUNWOD",
+  DUNWOD: "ZONE_I",
+  ZONE_J: "N.Y.C.",
+  "N.Y.C.": "ZONE_J",
+  ZONE_K: "LONGIL",
+  LONGIL: "ZONE_K",
+};
 
-export function getGridSource(nodeOrZone: string, intervalStart: string): string | undefined {
-  return sourceByRow.get(nodeOrZone + "|" + intervalStart);
+export function resolveGridAlias(nodeOrZone: string): string | undefined {
+  return NYISO_ALIASES[nodeOrZone];
 }
 
-function recordSource(nodeOrZone: string, intervalStart: string, url: string): void {
-  sourceByRow.set(nodeOrZone + "|" + intervalStart, url);
+/**
+ * Fallback upstream URL for a legacy cache row whose stored upstream_url is
+ * empty (rows ingested before upstream_url was persisted). NEVER the bare
+ * NYISO directory (live HTTP 403) or the bare SingleZip endpoint (live
+ * HTTP 429): NYISO falls back to the dated-file URL for the interval's NY
+ * date, CAISO to the full SingleZip URL with its query params, Elering to
+ * its dashboard API URL.
+ */
+export function gridFallbackUrl(nodeOrZone: string, intervalStartIso: string): string {
+  const zone = SUPPORTED_ZONES[nodeOrZone];
+  if (!zone) return "";
+  if (zone.market === "NYISO") {
+    const ms = Date.parse(intervalStartIso);
+    const yyyymmdd = Number.isNaN(ms) ? "" : nyDateString(ms);
+    return NYISO_BASE_URL + yyyymmdd + "realtime_zone.csv";
+  }
+  if (zone.market === "CAISO") {
+    return (
+      CAISO_OASIS_URL +
+      "?queryname=PRC_LMP&market_run_id=DAM&node=" +
+      encodeURIComponent(nodeOrZone) +
+      "&resultformat=6"
+    );
+  }
+  return zone.url;
 }
 
 const FETCH_TIMEOUT_MS = 20000;
@@ -134,15 +189,31 @@ async function fetchEurUsd(): Promise<number> {
   return rate;
 }
 
+/** Expected Elering zones. A zone that yields zero rows is reported, never silently dropped. */
+export const ELERING_ZONE_KEYS = ["ee", "fi", "lv", "lt"] as const;
+
+/** Failed entries for Elering zones that yielded zero usable rows. Pure: unit-tested directly. */
+export function eleringMissingZones(perZoneCounts: Record<string, number>): string[] {
+  const failed: string[] = [];
+  for (const key of ELERING_ZONE_KEYS) {
+    if ((perZoneCounts[key] ?? 0) === 0) {
+      failed.push("Elering: zone " + key.toUpperCase() + " yielded zero rows");
+    }
+  }
+  return failed;
+}
+
 /** Elering Nord Pool day-ahead / intraday prices, EUR/MWh, 15-min intervals. */
-async function ingestElering(eurUsd: number): Promise<number> {
+async function ingestElering(eurUsd: number): Promise<{ count: number; failed: string[] }> {
   const json = JSON.parse(await fetchText(ELERING_URL)) as unknown;
   const data = (json as { success?: unknown; data?: unknown } | null)?.data;
   if ((json as { success?: unknown } | null)?.success !== true || typeof data !== "object" || data === null) {
     throw new Error("unexpected Elering response shape");
   }
   const zoneKeyToNode: Record<string, string> = { ee: "EE", fi: "FI", lv: "LV", lt: "LT" };
+  const ingestedAt = new Date().toISOString();
   let count = 0;
+  const perZoneCounts: Record<string, number> = { ee: 0, fi: 0, lv: 0, lt: 0 };
   for (const [key, rows] of Object.entries(data as Record<string, unknown>)) {
     const node = zoneKeyToNode[key];
     if (!node || !Array.isArray(rows)) continue;
@@ -150,17 +221,21 @@ async function ingestElering(eurUsd: number): Promise<number> {
       const ts = row?.timestamp;
       const priceEur = row?.price;
       if (typeof ts !== "number" || typeof priceEur !== "number") continue;
-      if (!Number.isFinite(priceEur) || priceEur === 0) continue; // never cache null/zero
+      // A price of exactly 0 is real (Nord Pool can clear at 0); only
+      // null/undefined/NaN/non-finite prices are refused.
+      if (!Number.isFinite(priceEur)) continue;
       const intervalStart = new Date(ts * 1000).toISOString();
       const lmp = priceEur * eurUsd;
-      if (!Number.isFinite(lmp) || lmp === 0) continue;
-      saveGridPrice(node, intervalStart, lmp, SUPPORTED_ZONES[node].market);
-      recordSource(node, intervalStart, ELERING_URL);
+      if (!Number.isFinite(lmp)) continue;
+      saveGridPrice(node, intervalStart, lmp, SUPPORTED_ZONES[node].market, ingestedAt, ELERING_URL);
       count++;
+      perZoneCounts[key] = (perZoneCounts[key] ?? 0) + 1;
     }
   }
+  const failed = eleringMissingZones(perZoneCounts);
+  for (const msg of failed) console.error("[grid-ingester] " + msg);
   if (count === 0) throw new Error("Elering returned no usable price rows");
-  return count;
+  return { count, failed };
 }
 
 /** Offset (ms) of a named IANA zone from UTC at a given UTC instant. */
@@ -181,12 +256,66 @@ function tzOffsetMs(timeZone: string, utcMs: number): number {
   return asUtc - utcMs;
 }
 
-/** "MM/DD/YYYY HH:MM:SS" wall time in America/New_York -> UTC epoch ms. */
-function nyWallToUtcMs(wall: string): number | null {
+/** "MM/DD/YYYY HH:MM:SS" wall time in America/New_York for a UTC instant. */
+export function nyWallString(utcMs: number): string {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const parts = dtf.formatToParts(new Date(utcMs));
+  const v = (t: string): string => parts.find((p) => p.type === t)?.value ?? "00";
+  return v("month") + "/" + v("day") + "/" + v("year") + " " + v("hour") + ":" + v("minute") + ":" + v("second");
+}
+
+/**
+ * "MM/DD/YYYY HH:MM:SS" wall time in America/New_York -> UTC epoch ms.
+ * Iterates the offset computation to convergence (a single-iteration
+ * approximation is off by 1 hour for 48 intervals on the fall-back day).
+ * Ambiguous wall times (the repeated hour on fall-back day, e.g. 01:30 on
+ * 2026-11-01, which occurs once in EDT and once in EST) resolve to the
+ * SECOND occurrence (EST): the NYISO CSV carries no DST flag, so both
+ * occurrences arrive with the identical wall string and the later row must
+ * win the INSERT OR REPLACE rather than the earlier one. Nonexistent wall
+ * times (the skipped hour on spring-forward day) resolve to the
+ * post-transition instant, which still round-trips to the same wall string.
+ */
+export function nyWallToUtcMs(wall: string): number | null {
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4}) (\d{1,2}):(\d{2}):(\d{2})$/.exec(wall.trim());
   if (!m) return null;
   const wallAsUtc = Date.UTC(Number(m[3]), Number(m[1]) - 1, Number(m[2]), Number(m[4]), Number(m[5]), Number(m[6]));
-  return wallAsUtc - tzOffsetMs("America/New_York", wallAsUtc);
+  let utcMs = wallAsUtc - tzOffsetMs("America/New_York", wallAsUtc);
+  for (let i = 0; i < 4; i++) {
+    const next = wallAsUtc - tzOffsetMs("America/New_York", utcMs);
+    if (next === utcMs) break;
+    utcMs = next;
+  }
+  // Ambiguity check: if the wall clock reads the same one hour later, this
+  // wall time occurs twice — take the second (later, standard-time) occurrence.
+  const wallNorm =
+    m[1].padStart(2, "0") +
+    "/" +
+    m[2].padStart(2, "0") +
+    "/" +
+    m[3] +
+    " " +
+    m[4].padStart(2, "0") +
+    ":" +
+    m[5] +
+    ":" +
+    m[6];
+  if (
+    tzOffsetMs("America/New_York", utcMs) !== tzOffsetMs("America/New_York", utcMs + 3600_000) &&
+    nyWallString(utcMs + 3600_000) === wallNorm
+  ) {
+    utcMs += 3600_000;
+  }
+  return utcMs;
 }
 
 /** "YYYY-MM-DD" in America/New_York for a UTC instant. */
@@ -264,6 +393,7 @@ async function ingestNyiso(): Promise<number> {
       errors.push(url + ": unexpected CSV header");
       continue;
     }
+    const ingestedAt = new Date().toISOString();
     for (const line of lines.slice(1)) {
       const cols = splitCsvLine(line);
       const name = (cols[nameIdx] ?? "").trim();
@@ -271,16 +401,18 @@ async function ingestNyiso(): Promise<number> {
       if (!keys) continue; // interfaces (H Q, NPX, O H, PJM) are not load zones
       const utcMs = nyWallToUtcMs(cols[tsIdx] ?? "");
       const lbmp = Number((cols[lbmpIdx] ?? "").trim());
-      if (utcMs === null || !Number.isFinite(lbmp) || lbmp === 0) continue;
+      // A price of exactly 0 is real; only NaN/non-finite prices are refused.
+      if (utcMs === null || !Number.isFinite(lbmp)) continue;
       const intervalStart = new Date(utcMs).toISOString();
       for (const key of keys) {
-        saveGridPrice(key, intervalStart, lbmp, "NYISO");
-        recordSource(key, intervalStart, url);
+        saveGridPrice(key, intervalStart, lbmp, "NYISO", ingestedAt, url);
         count++;
       }
     }
   }
-  if (count === 0) throw new Error("NYISO: no usable rows (" + errors.join("; ") + ")");
+  // No "NYISO: " prefix here: runIngesterOnce() adds it (a prefix in both
+  // places produced "NYISO: NYISO: ..." in failed[]).
+  if (count === 0) throw new Error("no usable rows (" + errors.join("; ") + ")");
   return count;
 }
 
@@ -385,14 +517,16 @@ async function ingestCaiso(): Promise<number> {
       if ((cols[nodeIdx] ?? "").trim() !== node) continue;
       const startMs = Date.parse((cols[startIdx] ?? "").trim());
       const lmp = Number((cols[mwIdx] ?? "").trim());
-      if (Number.isNaN(startMs) || !Number.isFinite(lmp) || lmp === 0) continue;
+      // A price of exactly 0 is real; only NaN/non-finite prices are refused.
+      if (Number.isNaN(startMs) || !Number.isFinite(lmp)) continue;
       const intervalStart = new Date(startMs).toISOString();
-      saveGridPrice(node, intervalStart, lmp, "CAISO");
-      recordSource(node, intervalStart, url);
+      saveGridPrice(node, intervalStart, lmp, "CAISO", new Date().toISOString(), url);
       count++;
     }
   }
-  if (count === 0) throw new Error("CAISO: no usable rows (" + errors.join("; ") + ")");
+  // No "CAISO: " prefix here: runIngesterOnce() adds it (a prefix in both
+  // places produced "CAISO: CAISO: ..." in failed[]).
+  if (count === 0) throw new Error("no usable rows (" + errors.join("; ") + ")");
   return count;
 }
 
@@ -411,8 +545,9 @@ export async function runIngesterOnce(): Promise<{ fetched: number; failed: stri
 
   try {
     if (eurUsd === null) throw new Error("no EUR->USD rate available, skipping Elering");
-    const n = await ingestElering(eurUsd);
+    const { count: n, failed: eleringFailed } = await ingestElering(eurUsd);
     fetched += n;
+    failed.push(...eleringFailed);
     console.log("[grid-ingester] Elering: " + n + " rows");
   } catch (err) {
     const msg = "Elering: " + errMsg(err);
