@@ -152,6 +152,12 @@ export default function Status() {
   );
   const [probing, setProbing] = useState(false);
   const mounted = useRef(true);
+  // Generation guard + in-flight check (M2): a probe round can outlast the
+  // 60 s interval (slow grid probe, 45 s timeout + 1 retry = 90 s), so a
+  // new round must never start while one is in flight, and results from a
+  // stale round must never overwrite newer state.
+  const probeRound = useRef(0);
+  const probeInFlight = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -161,6 +167,11 @@ export default function Status() {
   }, []);
 
   const runProbes = useCallback(async () => {
+    // Skip starting a new round while one is in flight (interval overlap
+    // or a second manual re-probe during a slow round).
+    if (probeInFlight.current) return;
+    probeInFlight.current = true;
+    const round = ++probeRound.current;
     setProbing(true);
     setProbes((prev) => {
       const next = { ...prev };
@@ -172,7 +183,7 @@ export default function Status() {
         const t0 = performance.now();
         try {
           const data = await probe.run();
-          if (!mounted.current) return;
+          if (!mounted.current || round !== probeRound.current) return;
           setProbes((prev) => ({
             ...prev,
             [probe.key]: {
@@ -184,7 +195,7 @@ export default function Status() {
             },
           }));
         } catch (err) {
-          if (!mounted.current) return;
+          if (!mounted.current || round !== probeRound.current) return;
           setProbes((prev) => ({
             ...prev,
             [probe.key]: {
@@ -198,7 +209,8 @@ export default function Status() {
         }
       }),
     );
-    if (mounted.current) setProbing(false);
+    probeInFlight.current = false;
+    if (mounted.current && round === probeRound.current) setProbing(false);
   }, []);
 
   useEffect(() => {
@@ -372,7 +384,7 @@ export default function Status() {
 }
 
 const PAGE_CSS = `
-.vr-page{max-width:1340px;margin:0 auto;padding:28px 24px 64px;color:var(--text,#F3F2EE);font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px;line-height:1.55}
+.vr-page{max-width:1340px;margin:0 auto;padding:28px 24px 64px;color:var(--text,#F3F2EE);font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px;line-height:1.55;overflow-wrap:anywhere}
 .vr-kicker{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;color:var(--muted,#8F8E8A);margin-bottom:6px}
 .vr-h1{font-size:clamp(1.9rem,3.2vw,2.6rem);font-weight:300;letter-spacing:-.03em;line-height:1.08;margin:0 0 10px}
 .vr-h1 .serif-i,.serif-i{font-family:'Newsreader',Georgia,serif;font-style:italic;font-weight:400}
