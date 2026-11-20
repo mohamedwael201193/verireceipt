@@ -180,7 +180,10 @@ export function ReceiptCard({ receipt }: ReceiptCardProps) {
   // caller — so every rendered field is total over non-string values.
   // A number/object receipt_id, sha or fetched_at renders "—", never
   // throws and never hands React an object child.
-  const receiptId = typeof receipt.receipt_id === "string" ? receipt.receipt_id : "—";
+  const receiptId =
+    typeof receipt.receipt_id === "string" && receipt.receipt_id.trim() !== ""
+      ? receipt.receipt_id
+      : "—";
   const sha = typeof receipt.raw_response_sha256 === "string" ? receipt.raw_response_sha256 : undefined;
 
   return (

@@ -64,7 +64,7 @@ export function formatDate(value: unknown): string {
  * (value.slice on a number). Any non-string renders "—".
  */
 export function shortenHash(value: unknown): string {
-  if (typeof value !== "string" || value.length === 0) return "—";
+  if (typeof value !== "string" || value.length === 0 || value.trim().length === 0) return "—";
   if (value.length <= 13) return value;
   return `${value.slice(0, 6)}…${value.slice(-4)}`;
 }
@@ -74,7 +74,7 @@ export function shortenHash(value: unknown): string {
  * Total over non-string values (B-1b), same as shortenHash.
  */
 export function shortenSha(value: unknown): string {
-  if (typeof value !== "string" || value.length === 0) return "—";
+  if (typeof value !== "string" || value.length === 0 || value.trim().length === 0) return "—";
   if (value.length <= 20) return value;
   return `${value.slice(0, 10)}…${value.slice(-8)}`;
 }

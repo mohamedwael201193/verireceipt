@@ -124,4 +124,13 @@ describe("formatters total over non-string values (J2 R2 B-1b)", () => {
     expect(shortenHash({})).toBe("—");
     expect(shortenHash(null)).toBe("—");
   });
+
+  it("shortenSha / shortenHash render '—' for whitespace-only and empty strings (J2 R3 B-1)", () => {
+    expect(shortenSha("")).toBe("—");
+    expect(shortenSha("   ")).toBe("—");
+    expect(shortenSha("\t\n")).toBe("—");
+    expect(shortenHash("")).toBe("—");
+    expect(shortenHash("   ")).toBe("—");
+    expect(shortenHash("\t\n")).toBe("—");
+  });
 });

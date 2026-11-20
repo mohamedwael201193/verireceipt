@@ -221,6 +221,21 @@ describe("malformed receipt fields — defense in depth (J2 R2 B-1b)", () => {
       "https://example.com/upstream",
     );
   });
+
+  it("renders '—' (not blank whitespace) when receipt_id is whitespace-only (J2 R3 B-1)", () => {
+    const bad = { ...receipt, receipt_id: "   " };
+    expect(() => render(<ReceiptCard receipt={bad} />)).not.toThrow();
+    // Only the Receipt ID row falls back: sha, upstream and fetched_at
+    // are all valid in this receipt.
+    expect(screen.getAllByText("—")).toHaveLength(1);
+    expect(screen.queryByText("   ", { exact: true })).toBeNull();
+  });
+
+  it("renders '—' (not an empty span) when receipt_id is empty (J2 R3 B-1)", () => {
+    const bad = { ...receipt, receipt_id: "" };
+    expect(() => render(<ReceiptCard receipt={bad} />)).not.toThrow();
+    expect(screen.getAllByText("—")).toHaveLength(1);
+  });
 });
 
 describe("upstream URL userinfo / encoding tricks (J2 R2 M-3)", () => {
