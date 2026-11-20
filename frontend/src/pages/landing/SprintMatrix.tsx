@@ -120,14 +120,16 @@ export function SprintMatrix() {
                       // old wrapping tooltip grew to 77px at 360px and
                       // covered the first row. The left set here is only
                       // PROVISIONAL: the tooltip does not exist yet, so
-                      // its real width (~317px, not the ~140px this clamp
-                      // used to assume) cannot be measured until it
-                      // paints — the effect above re-clamps against the
-                      // measured offsetWidth, which is what keeps the
-                      // right edge inside the container on all 8 columns.
+                      // its real width cannot be measured until it paints
+                      // — the effect above re-clamps against the measured
+                      // offsetWidth. The provisional bound uses 320px
+                      // (just above the longest measured tip, ~317px),
+                      // NOT the old ~140px assumption, so even the first
+                      // painted frame keeps the right edge inside the
+                      // container on all 8 columns.
                       setTip({
                         text: `${SPRINT_COLUMN_LABELS[c]} · gate ${r + 1}/6`,
-                        left: Math.max(0, Math.min(parentWidth - 140, el.offsetLeft)),
+                        left: Math.max(0, Math.min(parentWidth - 320, el.offsetLeft)),
                       });
                     }}
                     onClick={() => setCur([0, 1, 2, 3, 4, 4, 5, 5][c] ?? 0)}
