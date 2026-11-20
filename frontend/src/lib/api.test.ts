@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import vm from "node:vm";
 import { ApiError, getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx } from "./api";
 
 const fetchMock = vi.fn();
@@ -512,6 +513,32 @@ describe("network failure", () => {
       code: "NETWORK_ERROR",
     });
   });
+
+  it("classifies a cross-realm Error from fetch() as NETWORK_ERROR, not UNKNOWN (J2 R5 m2)", async () => {
+    // An Error constructed in another vm realm fails `instanceof
+    // Error` in this realm — classification must use the message
+    // shape, not the prototype chain.
+    const crossRealmError = vm.runInNewContext("new Error('net down')");
+    expect(crossRealmError instanceof Error).toBe(false);
+    expect(typeof crossRealmError.message).toBe("string");
+    fetchMock.mockRejectedValue(crossRealmError);
+    try {
+      await getHealth();
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 0, code: "NETWORK_ERROR" });
+      expect((err as Error).message).toBe("net down");
+    }
+  });
+
+  it("still reports UNKNOWN for a non-error thrown from fetch()", async () => {
+    fetchMock.mockRejectedValue("boom");
+    await expect(getHealth()).rejects.toMatchObject({
+      status: 0,
+      code: "UNKNOWN",
+    });
+  });
 });
 
 describe("ApiError retry_after_sec validation (J2 R2 M-1)", () => {
@@ -673,6 +700,52 @@ describe("receipt field validation (J2 R2 B-1a / M-5)", () => {
     expect(res.receipt.fetched_at).toHaveLength(128);
     expect(res.receipt.upstream_url).toHaveLength(2048);
     expect(res.receipt.raw_response_sha256).toHaveLength(128);
+  });
+});
+
+describe("invisible format characters in receipt fields (J2 R5 B-1)", () => {
+  const baseBody = {
+    tx_hash: "0x00",
+    status: "not_found",
+    from: null,
+    to: null,
+    block_number: null,
+    value_eth: null,
+  };
+  // trim() strips NBSP/FEFF but NOT these: every one used to pass
+  // isNonEmptyReceiptString and be ACCEPTED as a receipt field.
+  const INVISIBLE = [
+    "\u200B",
+    "\u200C",
+    "\u200D",
+    "\u2060",
+    "\u180E",
+    "\u200B\u200B",
+    " \u200B ",
+    "\u200B \u200C \u200D",
+  ];
+  const fields = ["receipt_id", "raw_response_sha256", "fetched_at", "upstream_url"] as const;
+  const cases = fields.flatMap((field) =>
+    INVISIBLE.map(
+      (value) =>
+        [`${field} is invisible-only`, { ...sampleReceipt, [field]: value }] as const,
+    ),
+  );
+
+  it.each(cases)("rejects a 200 whose receipt has %s", async (_label, receipt) => {
+    fetchMock.mockResolvedValue(jsonResponse({ ...baseBody, receipt }));
+    await expect(getTx({ tx_hash: "0x00", chain: "sepolia" })).rejects.toMatchObject({
+      status: 200,
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it("accepts a receipt_id with a visible character next to a format character", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ ...baseBody, receipt: { ...sampleReceipt, receipt_id: "rcpt_\u200BTEST" } }),
+    );
+    const res = await getTx({ tx_hash: "0x00", chain: "sepolia" });
+    expect(res.receipt.receipt_id).toBe("rcpt_\u200BTEST");
   });
 });
 
@@ -896,6 +969,31 @@ describe("Retry-After response header (J2 R3)", () => {
       expect(err).toBeInstanceOf(ApiError);
       expect(err).toMatchObject({ status: 422, code: "UNSUPPORTED_PAIR" });
       expect((err as Error).message).toBe("pair not supported");
+    }
+  });
+  it("surfaces the real error code/status when headers.get throws (J2 R5 m1)", async () => {
+    // A throwing .get used to propagate to the outer catch and mask
+    // the real 422 as NETWORK_ERROR (status 0). It must fall back to
+    // "no header" and preserve the body code/status.
+    const body = { error: "unprocessable", code: "UNSUPPORTED_PAIR", message: "pair not supported" };
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 422,
+      headers: {
+        get() {
+          throw new Error("headers boom");
+        },
+      },
+      text: () => Promise.resolve(JSON.stringify(body)),
+    } as unknown as Response);
+    try {
+      await getHealth();
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 422, code: "UNSUPPORTED_PAIR" });
+      expect((err as Error).message).toBe("pair not supported");
+      expect((err as ApiError).retry_after_sec).toBeUndefined();
     }
   });
 });

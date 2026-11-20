@@ -12,6 +12,7 @@ import type {
   TvlResponse,
   TxResponse,
 } from "./types";
+import { hasVisibleCharacter } from "./format";
 
 export const API_BASE = "/api";
 
@@ -96,8 +97,10 @@ export function isValidRetryAfterSec(value: unknown): value is number {
  */
 export function parseRetryAfterHeader(value: string | null): number | undefined {
   if (value === null) return undefined;
+  // A header of only invisible format characters (J2 R5 B-1) is blank,
+  // not a delay: trim() does not strip U+200B etc.
+  if (!hasVisibleCharacter(value)) return undefined;
   const trimmed = value.trim();
-  if (trimmed.length === 0) return undefined;
   const asSeconds = Number(trimmed);
   if (Number.isFinite(asSeconds) && isValidRetryAfterSec(asSeconds)) return asSeconds;
   const asDate = Date.parse(trimmed);
@@ -145,7 +148,9 @@ function buildUrl(path: string, params: Record<string, string>): string {
  * server) when the value is not a non-empty string within the length cap.
  */
 export function assertValidParam(value: unknown, name: string): asserts value is string {
-  if (typeof value !== "string" || value.trim().length === 0) {
+  // Invisible-format-only strings (J2 R5 B-1) are blank, not params:
+  // trim() does not strip U+200B etc., so hasVisibleCharacter decides.
+  if (typeof value !== "string" || !hasVisibleCharacter(value)) {
     throw new ApiError(
       `Invalid parameter "${name}": must be a non-empty string`,
       400,
@@ -291,12 +296,34 @@ function arePayloadFieldsValid(body: Record<string, unknown>): boolean {
 /**
  * A receipt field is usable only as a non-empty (after trim), non-blank
  * string, optionally capped in length. Non-strings (numbers, objects,
- * null) and whitespace-only strings are malformed.
+ * null), whitespace-only strings, and strings of only invisible format
+ * characters (U+200B etc. — J2 R5 B-1, trim() does not strip them) are
+ * malformed.
  */
 function isNonEmptyReceiptString(value: unknown, maxLength = Number.POSITIVE_INFINITY): boolean {
   return (
-    typeof value === "string" && value.trim().length > 0 && value.length <= maxLength
+    typeof value === "string" && hasVisibleCharacter(value) && value.length <= maxLength
   );
+}
+
+/**
+ * Cross-realm-safe error message (J2 R5 m2): `err instanceof Error`
+ * fails for an Error thrown from another realm (a vm context, an
+ * iframe, jsdom's fetch), so such an error fell through to UNKNOWN
+ * instead of NETWORK_ERROR. Any object carrying a string `message`
+ * is error-like — the shape, not the prototype chain, decides.
+ * Returns undefined for non-errors (thrown strings, nulls, objects
+ * without a string message), which stay UNKNOWN.
+ */
+function errorMessage(err: unknown): string | undefined {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof (err as { message?: unknown }).message === "string"
+  ) {
+    return (err as { message: string }).message;
+  }
+  return undefined;
 }
 
 /**
@@ -391,7 +418,7 @@ async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promis
         // the body stays null and the status error below surfaces.
         if (res.ok) {
           throw new ApiError(
-            err instanceof Error ? err.message : "Failed to read response body",
+            errorMessage(err) ?? "Failed to read response body",
             0,
             "NETWORK_ERROR",
           );
@@ -420,10 +447,19 @@ async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promis
         // unguarded read threw TypeError, wrapped as NETWORK_ERROR
         // (status 0), masking the real error status/code. A missing
         // headers object (or a headers without .get) simply means no
-        // header fallback, never a network error.
+        // header fallback, never a network error. And a THROWING .get
+        // (J2 R5 m1) must not mask the real status either: the header
+        // read is wrapped so a throw falls back to "no header" and the
+        // body code/status survive.
+        let retryAfterHeader: string | null = null;
+        try {
+          retryAfterHeader = res.headers?.get?.("Retry-After") ?? null;
+        } catch {
+          retryAfterHeader = null;
+        }
         const retryAfterSec = isValidRetryAfterSec(err?.retry_after_sec)
           ? err?.retry_after_sec
-          : parseRetryAfterHeader(res.headers?.get?.("Retry-After") ?? null);
+          : parseRetryAfterHeader(retryAfterHeader);
         throw new ApiError(message, res.status, err?.code, retryAfterSec);
       }
       assertValidBody(body, res.status, expectReceipt);
@@ -451,8 +487,12 @@ async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promis
         // "timed out after 45s", and it is never retried.
         throw new ApiError("Request aborted", 0, "ABORTED");
       }
-      if (err instanceof Error) {
-        throw new ApiError(err.message, 0, "NETWORK_ERROR");
+      // A fetch() failure is a network error — including a cross-realm
+      // Error (J2 R5 m2), which fails `instanceof Error`: errorMessage
+      // classifies by the message shape, not the prototype chain.
+      const networkMessage = errorMessage(err);
+      if (networkMessage !== undefined) {
+        throw new ApiError(networkMessage, 0, "NETWORK_ERROR");
       }
       throw new ApiError("Unknown request failure", 0, "UNKNOWN");
     } finally {
