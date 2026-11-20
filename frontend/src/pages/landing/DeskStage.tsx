@@ -28,7 +28,20 @@ const FIELD_LABELS: Record<string, string> = {
   interval_start: "interval_start",
 };
 
+// Item 02 defaults to a REAL reverted mainnet tx, so Play demonstrates
+// REJECT instead of always CLEAR. Source: the backend's own live test
+// (tests/tx.test.ts, "reverted mainnet tx returns status reverted") —
+// ethereum block 26454411, status reverted. NOTE: the trap fixtures'
+// reverted hashes (scripts/run-traptest.ts t07/t08) are base-sepolia,
+// which the live miner rejects as an unsupported chain, so they cannot
+// be used as a preset here.
+const REVERTED_TX_PRESET = {
+  tx_hash: "0x1a1467893eaed124a13164b589f1ed7a70ec203257084a7be27eee8f93bd8ba9",
+  chain: "ethereum",
+};
+
 function defaultParams(itemIdx: number, key: IntentKey): Record<string, string> {
+  if (itemIdx === 1 && key === "tx") return { ...REVERTED_TX_PRESET };
   if (itemIdx === 3 && key === "grid") return { ...GRID_NYISO_PRESET };
   if (itemIdx === 4 && key === "grid") return { ...TRAP_PRESETS.grid };
   return { ...PRESETS[key] };
@@ -85,7 +98,10 @@ export function DeskStage() {
       const tvlOk = tvl.data && ((tvl.data as { tvl_usd?: number }).tvl_usd ?? 0) > 0;
       const routeOk = route.data && ((route.data as { amount_out?: number }).amount_out ?? 0) > 0;
       if (txOk && secOk && tvlOk && routeOk) {
-        return { label: "APPROVE", cls: "b-ok", msg: "All 4 deterministic receipts verified · allocation approved" };
+        // Honest wording: the four live responses arrived with receipts,
+        // but no SHA-256 recompute is performed here — "verified" would
+        // overstate what this stage checks.
+        return { label: "APPROVE", cls: "b-ok", msg: "All 4 live responses received with receipts · allocation approved" };
       }
       const failed = outcomes
         .filter((o) => !o.data)
@@ -97,7 +113,9 @@ export function DeskStage() {
       const txRes = outcomes[0];
       const status = (txRes.data as { status?: string } | null)?.status;
       if (status === "reverted") {
-        return { label: "REJECT", cls: "b-bad", msg: "Counterparty reference tx reverted · signing refused automatically" };
+        // No signing flow exists anywhere on this page (read-only GET
+        // checks, no wallet) — nothing is "refused automatically".
+        return { label: "REJECT", cls: "b-bad", msg: "Counterparty reference tx reverted · reject this reference — read-only check, no wallet or signing" };
       }
       if (status === "confirmed") {
         return { label: "CLEAR", cls: "b-ok", msg: "Counterparty reference tx confirmed on-chain · no trap in the checked reference" };
@@ -111,7 +129,7 @@ export function DeskStage() {
         return {
           label: "VERIFIED",
           cls: "b-ok",
-          msg: `Live LMP ${d.node_or_zone ?? ""} $${(d.lmp_usd_per_mwh ?? 0).toFixed(2)}/MWh (${d.market ?? ""}) — verified receipt, no threshold applied`,
+          msg: `Live LMP ${d.node_or_zone ?? ""} $${(d.lmp_usd_per_mwh ?? 0).toFixed(2)}/MWh (${d.market ?? ""}) — live response with receipt, no threshold applied`,
         };
       }
       return { label: "CHECK FAILED", cls: "b-bad", msg: g.error ? `Grid lookup failed: ${errorMessage(g.error)}` : "Grid lookup returned no data" };
