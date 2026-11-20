@@ -1,8 +1,11 @@
 import {
   accessSync,
+  closeSync,
   constants,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   statSync,
   statfsSync,
 } from "fs";
@@ -420,6 +423,39 @@ export function validateWalBuffer(wal: Buffer, expectedPageSize?: number): WalVa
 }
 
 /**
+ * Read the DB file's page size from its 18-byte header (A6, 2026-11-20):
+ * the SQLite header stores the page size as a big-endian u16 at offset
+ * 16 (1 means 65536). The old code read the WHOLE DB file with
+ * readFileSync() for these 2 bytes — unbounded I/O at every boot for a
+ * file that grows with receipts. openSync/readSync read exactly 18
+ * bytes and the fd is closed in a finally. Any failure (missing,
+ * short, or unreadable file) returns undefined and the cross-check is
+ * skipped, exactly as before (the old `header.length >= 18` guard and
+ * the try/catch produced undefined in the same cases).
+ */
+function readDbPageSizeHeader(dbPath: string): number | undefined {
+  let fd: number | undefined;
+  try {
+    fd = openSync(dbPath, "r");
+    const header = Buffer.alloc(18);
+    const bytesRead = readSync(fd, header, 0, 18, 0);
+    if (bytesRead < 18) return undefined;
+    const pageSize = header.readUInt16BE(16);
+    return pageSize === 1 ? 65536 : pageSize;
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Best effort; the read already succeeded or failed.
+      }
+    }
+  }
+}
+
+/**
  * Validate the `-wal` file for `dbPath` BEFORE any `new Database()`
  * call (see validateWalBuffer() for the rule). A missing `-wal` file
  * boots normally; a "warn" verdict logs a warning (redacted) and
@@ -433,6 +469,14 @@ export function validateWalBuffer(wal: Buffer, expectedPageSize?: number): WalVa
  */
 export function assertWalValid(dbPath: string): void {
   const walPath = dbPath + "-wal";
+  // NOTE (A6): the WAL is read WHOLE here, deliberately. validateWalBuffer()
+  // verifies every frame checksum, so a header-only WAL read would return
+  // "warn (shorter than the 32-byte WAL header)" for every real WAL and
+  // turn every corrupt-frame "refuse" into a boot-allowed warn (verified
+  // 2026-11-20: a first-frame flip at offset 40 refuses on the full WAL
+  // and warns on its 18-byte prefix — the R5 reproduction). Only the DB
+  // header read above became a header read: the WAL is checkpoint-bounded
+  // in size, the DB file is not.
   let wal: Buffer;
   try {
     wal = readFileSync(walPath);
@@ -447,16 +491,7 @@ export function assertWalValid(dbPath: string): void {
     console.error(redactSecrets(message));
     throw new Error(message);
   }
-  let expectedPageSize: number | undefined;
-  try {
-    const header = readFileSync(dbPath);
-    if (header.length >= 18) {
-      expectedPageSize = header.readUInt16BE(16);
-      if (expectedPageSize === 1) expectedPageSize = 65536;
-    }
-  } catch {
-    expectedPageSize = undefined;
-  }
+  const expectedPageSize = readDbPageSizeHeader(dbPath);
   const result = validateWalBuffer(wal, expectedPageSize);
   if (result.status === "refuse") {
     const message =
