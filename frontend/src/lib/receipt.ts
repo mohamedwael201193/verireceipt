@@ -30,11 +30,19 @@ export async function sha256Hex(input: string | Uint8Array): Promise<string> {
 }
 
 /** Returns true only when the SHA-256 of `rawBody` equals `expectedSha256`
- *  (with or without a `0x` prefix, case-insensitive). */
+ *  (with or without a `0x` prefix, case-insensitive). Non-string inputs
+ *  return false instead of throwing — except when WebCrypto itself is
+ *  unavailable, which still throws (never a fake hash). */
 export async function verifyReceipt(
-  rawBody: string,
-  expectedSha256: string,
+  rawBody: unknown,
+  expectedSha256: unknown,
 ): Promise<boolean> {
+  // WebCrypto availability is checked first on purpose: an unavailable
+  // WebCrypto must refuse loudly even for malformed inputs.
+  void getSubtle();
+  if (typeof rawBody !== "string" || typeof expectedSha256 !== "string") {
+    return false;
+  }
   const normalized = expectedSha256.toLowerCase().replace(/^0x/, "");
   if (!/^[0-9a-f]{64}$/.test(normalized)) return false;
   const actual = await sha256Hex(rawBody);
