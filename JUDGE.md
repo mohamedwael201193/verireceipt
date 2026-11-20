@@ -100,3 +100,65 @@ Notes:
   evaluator whose criteria are not public, so no placement is guaranteed.
   The quote itself is block-pinned and receipted.
 - `GRID_POWER_PRICE` scores vary epoch to epoch with ISO feed availability.
+
+## 6. VeriReceipt Desk (Track 3)
+
+Deterministic M13 + M12 gates over ranked Telegraph escrow calls.
+Routes are mounted without an `/api` prefix (the proxy strips it).
+
+```bash
+BASE=https://verireceipt.onrender.com
+
+# Desk stats: spend, caps ($0.06 M13 run, $0.02 M12 run), runway
+curl "$BASE/desk/stats"
+
+# Desk ledger: paginated runs with signal_hash links
+curl "$BASE/desk/ledger?page=1&limit=20"
+
+# One M13 audit ($0.06, 6 ranked calls incl. independent spot price)
+curl -X POST "$BASE/desk/run" -H 'Content-Type: application/json' -d \
+  '{"mission":"M13","protocol":"aave-v3","tx_hash":"0x1b9e2b48eb3510ee1a8aae2fc402139784f32d43b76d5853387cacb484a9a9d3","chain":"ethereum","issuer_entity":"Apple Inc","period":"last 12 months","trade_pair":"ETH/USDC"}'
+
+# MCP tools/list (Streamable HTTP JSON-RPC)
+curl -X POST "$BASE/mcp" -H 'Content-Type: application/json' -d \
+  '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+What to check: the current code emits 8 checks per M13 verdict
+(including `route_vs_spot` computed against the bought
+`CRYPTO_PRICE_USD` and a `tx_hash` binding check) and 7 checks per
+M12 verdict (including `interval_match` and `hashprice_block`). The
+settled runs (17:02–17:07 UTC, 2026-11-20, decided by pre-revision
+evaluators) do NOT satisfy that description: settled M13 decisions
+carry 7 checks with `route_vs_spot` skipped and no `tx_hash` check,
+and settled M12 decisions carry 5 checks. A re-run through the
+current code (the held re-proof) will produce 8-check M13 / 7-check
+M12 verdicts with `route_vs_spot` computed. Do not read current-code
+behaviour as settled-run behaviour.
+Caps (5 free checks / IP / day, $2.00 / day) apply identically to
+`POST /desk/run` and to the MCP `run_*` tools.
+
+Pending: the `desk_runs.receipt_json` migration is code-verified but
+the live DB still lacks the column — no post-fix run has touched the
+real DB; the re-proof that would migrate it is held.
+
+Known gap (see README §Desk): the 2026-11-20 run logged 130,000
+µUSDC while the node ledger shows charged 150,000 µUSDC (unbilled 0
+at last check, 2026-11-20, epoch 25) — $0.02
+of unlogged spend, root-caused to an eager-promise budget bug and
+fixed. Node-ledger snapshot retained in-tree:
+`receipts/node-ledger-snapshot-2026-11-20.json` (live read-only GET,
+fetched 2026-11-20T20:50:08Z, HTTP 200, body verbatim — deposited
+2,000,000, available 1,850,000, charged 150,000, unbilled 0, epoch 25).
+Funding txs (verified on Sepolia): mint
+`0xfacf3a8de2712b7520c234753d089f1027b32832f27b6bd4ffde141efc777232`,
+approve
+`0x0ca31b23670cc6a1c6a52eaf8998a09abbd0ac7d73e6db4265b2b032684d0ff0`,
+deposit
+`0xe8696cc29652173b1fdce601cfbd5d61649583bf811163d778d412739b78d2d3`
+($2.00 deposited; 1,850,000 µUSDC available at last check).
+
+Full-suite counts fluctuate run-to-run from live-network flakes — do
+not cite a single exact count as stable. This round (2026-11-20
+~21:04 UTC): 8,652 passed / 27 failed / 1 skipped of 8,680; zero Desk
+failures (desk 23, policy 92, seed-plan 8 — all passed).

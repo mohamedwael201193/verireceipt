@@ -1,0 +1,31 @@
+{
+    "body": {
+        "active_root": {
+            "balance": "1850000",
+            "charged": "150000",
+            "credited": "0",
+            "cutoff": 1795197960,
+            "epoch_id": 25,
+            "seq": 25
+        },
+        "address": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+        "available": "1850000",
+        "balance": "1850000",
+        "charge_limit": "1000000000",
+        "charged": "150000",
+        "charged_this_block": "0",
+        "credited": "0",
+        "deposited": "2000000",
+        "request": {
+            "status": "none"
+        },
+        "unbilled": "0",
+        "withdrawn": "0"
+    },
+    "fetched_at": "2026-11-20T20:50:08Z",
+    "fetched_at_eet": "2026-11-20 22:50:08 EET",
+    "http_status": 200,
+    "note": "Verbatim body of the live node-ledger read, fetched with a plain read-only GET (no key, no spend). Figures: deposited 2,000,000 / available 1,850,000 / charged 150,000 / unbilled 0 \u00b5USDC, epoch_id 25. The $0.02 gap (charged 150,000 vs 130,000 logged in receipts/ledger.jsonl) is the difference between `charged` and the logged total in this snapshot.",
+    "payer": "0xf76e6B0920e9332fF4410f6dD53F01722AbC71a3",
+    "url": "https://devnode.telegraphprotocol.com/v1/ledger/account/0xf76e6B0920e9332fF4410f6dD53F01722AbC71a3"
+}

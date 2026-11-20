@@ -15,6 +15,8 @@ import { handleRoute } from "./handlers/optimalRoute";
 import { handleGridPrice } from "./handlers/gridPrice";
 import { ApiError, errorBody } from "./core/errors";
 import { getDb } from "./core/db";
+import { registerDeskRoutes } from "./desk/routes";
+import { registerMcp } from "./desk/mcp";
 
 const startedAtMs = Date.now();
 
@@ -41,7 +43,22 @@ function asQuery(raw: unknown): Query {
 
 /** Build (but do not listen on) the Fastify instance. Used by tests and scripts. */
 export function buildServer(): FastifyInstance {
-  const app = Fastify({ logger: false });
+  // trustProxy: trust ONLY the immediate socket peer (hop 0) — Render
+  // terminates TLS exactly one proxy hop in front of this app, so the
+  // socket peer IS Render's proxy and the last X-Forwarded-For entry
+  // is the client address Render appended — conditional, not proven
+  // live: this rests on Render appending the real client IP last, which
+  // is unverified (no endpoint echoes request.ip, no live quota was
+  // burned to test it; see src/desk/caps.ts). Verified against the
+  // installed proxy-addr: with this function a spoofed
+  // "X-Forwarded-For: 1.2.3.4, <real-ip>" still resolves request.ip
+  // to <real-ip> (the spoofed entry is an untrusted further hop),
+  // while trusting everything would resolve it to 1.2.3.4. Note
+  // Fastify 5 deliberately treats trustProxy: <number> as trust-
+  // nothing, so the hop count must be expressed as this function.
+  // Desk cap code reads request.ip ONLY and never reads
+  // X-Forwarded-For directly (see src/desk/caps.ts).
+  const app = Fastify({ logger: false, trustProxy: (_address, hop) => hop === 0 });
 
   // Initialise storage (creates tables on first run). Handlers rely on it
   // for receipt persistence and the grid-price cache.
@@ -69,6 +86,11 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/tvl", async (request) => handleTvl(asQuery(request.query)));
   app.get("/v1/route", async (request) => handleRoute(asQuery(request.query)));
   app.get("/v1/grid-price", async (request) => handleGridPrice(asQuery(request.query)));
+
+  // VeriReceipt Desk (Track 3): deterministic M13/M12 gates over ranked
+  // Telegraph escrow calls + keyless Streamable HTTP MCP + /llms.txt.
+  registerDeskRoutes(app);
+  registerMcp(app);
 
   return app;
 }
