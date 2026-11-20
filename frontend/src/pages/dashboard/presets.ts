@@ -40,7 +40,7 @@ export interface DeskCheckDef {
   query: string;
   /** Direct Render URL (Copy curl). */
   requestUrl: string;
-  run: () => Promise<ProbeOutcome>;
+  run: (signal?: AbortSignal) => Promise<ProbeOutcome>;
 }
 
 export interface DeskPreset {
@@ -118,39 +118,43 @@ export const DESK_PRESETS: DeskPreset[] = [
       scope: "ethereum · last 12 months · ETH/USDC",
     },
     buildChecks: (inputs) => {
+      // No silent defaults: a cleared field stays empty and the lib
+      // refuses it (400) — the run reports on what the user entered.
       const segs = splitSegments(inputs.scope);
-      const chain = segs[0] || "ethereum";
-      const period = segs[1] || "last 12 months";
-      const pair = segs[2] || "ETH/USDC";
+      const chain = segs[0] ?? "";
+      const period = segs[1] ?? "";
+      const pair = segs[2] ?? "";
       const [protocol, entity] = splitSegments(inputs.entity);
+      const protocolValue = protocol ?? "";
+      const entityValue = entity ?? "";
       return [
         {
           label: "TX lookup",
           intent: "ONCHAIN_TX_LOOKUP_GENERAL",
           query: `${inputs.ref.slice(0, 8)}…${inputs.ref.slice(-4)} (${chain})`,
           requestUrl: direct("/v1/tx", { tx_hash: inputs.ref, chain }),
-          run: () => probe(() => getTx({ tx_hash: inputs.ref, chain })),
+          run: (signal) => probe((s) => getTx({ tx_hash: inputs.ref, chain }, s), signal),
         },
         {
           label: "TVL lookup",
           intent: "TVL_LOOKUP_GENERAL",
-          query: `protocol=${protocol || "aave-v3"}`,
-          requestUrl: direct("/v1/tvl", { protocol: protocol || "aave-v3" }),
-          run: () => probe(() => getTvl({ protocol: protocol || "aave-v3" })),
+          query: `protocol=${protocolValue}`,
+          requestUrl: direct("/v1/tvl", { protocol: protocolValue }),
+          run: (signal) => probe((s) => getTvl({ protocol: protocolValue }, s), signal),
         },
         {
           label: "SEC filing",
           intent: "REGULATORY_FILING_MONITOR_GENERAL",
-          query: `${entity || "AAPL"} · ${period}`,
-          requestUrl: direct("/v1/filings", { entity: entity || "AAPL", period }),
-          run: () => probe(() => getFilings({ entity: entity || "AAPL", period })),
+          query: `${entityValue} · ${period}`,
+          requestUrl: direct("/v1/filings", { entity: entityValue, period }),
+          run: (signal) => probe((s) => getFilings({ entity: entityValue, period }, s), signal),
         },
         {
           label: "ETH/USDC route",
           intent: "OPTIMAL_EXECUTION_ROUTE_GENERAL",
           query: `pair=${pair}`,
           requestUrl: direct("/v1/route", { pair }),
-          run: () => probe(() => getRoute({ pair })),
+          run: (signal) => probe((s) => getRoute({ pair }, s), signal),
         },
       ];
     },
@@ -217,21 +221,22 @@ export const DESK_PRESETS: DeskPreset[] = [
       scope: "ethereum",
     },
     buildChecks: (inputs) => {
-      const chain = splitSegments(inputs.scope)[0] || "ethereum";
+      // No silent defaults (see m13-defi): a cleared chain runs empty.
+      const chain = splitSegments(inputs.scope)[0] ?? "";
       return [
         {
           label: "TX lookup",
           intent: "ONCHAIN_TX_LOOKUP_GENERAL",
           query: `${inputs.ref.slice(0, 8)}…${inputs.ref.slice(-4)} (${chain})`,
           requestUrl: direct("/v1/tx", { tx_hash: inputs.ref, chain }),
-          run: () => probe(() => getTx({ tx_hash: inputs.ref, chain })),
+          run: (signal) => probe((s) => getTx({ tx_hash: inputs.ref, chain }, s), signal),
         },
         {
           label: "TVL lookup",
           intent: "TVL_LOOKUP_GENERAL",
           query: `protocol=${inputs.entity}`,
           requestUrl: direct("/v1/tvl", { protocol: inputs.entity }),
-          run: () => probe(() => getTvl({ protocol: inputs.entity })),
+          run: (signal) => probe((s) => getTvl({ protocol: inputs.entity }, s), signal),
         },
       ];
     },
@@ -288,21 +293,22 @@ export const DESK_PRESETS: DeskPreset[] = [
       scope: "last 12 months · SEC EDGAR",
     },
     buildChecks: (inputs) => {
-      const period = splitSegments(inputs.scope)[0] || "last 12 months";
+      // No silent defaults (see m13-defi): a cleared period runs empty.
+      const period = splitSegments(inputs.scope)[0] ?? "";
       return [
         {
           label: "SEC filing",
           intent: "REGULATORY_FILING_MONITOR_GENERAL",
           query: `${inputs.entity} · ${period}`,
           requestUrl: direct("/v1/filings", { entity: inputs.entity, period }),
-          run: () => probe(() => getFilings({ entity: inputs.entity, period })),
+          run: (signal) => probe((s) => getFilings({ entity: inputs.entity, period }, s), signal),
         },
         {
           label: "ETH/USDC route",
           intent: "OPTIMAL_EXECUTION_ROUTE_GENERAL",
           query: "pair=ETH/USDC",
           requestUrl: direct("/v1/route", { pair: "ETH/USDC" }),
-          run: () => probe(() => getRoute({ pair: "ETH/USDC" })),
+          run: (signal) => probe((s) => getRoute({ pair: "ETH/USDC" }, s), signal),
         },
       ];
     },
@@ -357,22 +363,24 @@ export const DESK_PRESETS: DeskPreset[] = [
       scope: `${recentGridInterval()} · no curtailment threshold configured`,
     },
     buildChecks: (inputs) => {
+      // No silent defaults (see m13-defi): an unparseable/missing
+      // interval runs empty instead of quietly substituting "2h ago".
       const segs = splitSegments(inputs.scope);
-      const parsed = segs[0] && !Number.isNaN(Date.parse(segs[0])) ? segs[0] : recentGridInterval();
+      const parsed = segs[0] && !Number.isNaN(Date.parse(segs[0])) ? segs[0] : "";
       return [
         {
           label: "Grid LMP",
           intent: "GRID_POWER_PRICE_GENERAL",
           query: `zone=${inputs.ref} · ${parsed}`,
           requestUrl: direct("/v1/grid-price", { node_or_zone: inputs.ref, interval_start: parsed }),
-          run: () => probe(() => getGridPrice({ node_or_zone: inputs.ref, interval_start: parsed })),
+          run: (signal) => probe((s) => getGridPrice({ node_or_zone: inputs.ref, interval_start: parsed }, s), signal),
         },
         {
           label: "ETH/USDC route",
           intent: "OPTIMAL_EXECUTION_ROUTE_GENERAL",
           query: "pair=ETH/USDC",
           requestUrl: direct("/v1/route", { pair: "ETH/USDC" }),
-          run: () => probe(() => getRoute({ pair: "ETH/USDC" })),
+          run: (signal) => probe((s) => getRoute({ pair: "ETH/USDC" }, s), signal),
         },
       ];
     },
@@ -425,14 +433,15 @@ export const DESK_PRESETS: DeskPreset[] = [
       scope: "ethereum · schema validation",
     },
     buildChecks: (inputs) => {
-      const chain = splitSegments(inputs.scope)[0] || "ethereum";
+      // No silent defaults (see m13-defi): a cleared chain runs empty.
+      const chain = splitSegments(inputs.scope)[0] ?? "";
       return [
         {
           label: "TX lookup",
           intent: "ONCHAIN_TX_LOOKUP_GENERAL",
           query: `tx=${inputs.ref} · ${chain}`,
           requestUrl: direct("/v1/tx", { tx_hash: inputs.ref, chain }),
-          run: () => probe(() => getTx({ tx_hash: inputs.ref, chain })),
+          run: (signal) => probe((s) => getTx({ tx_hash: inputs.ref, chain }, s), signal),
         },
       ];
     },

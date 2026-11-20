@@ -7,7 +7,7 @@
 // No canned preview, no staged 402/signing lines, no escrow spend claims:
 // direct probes are unbilled and no signing happens in the browser.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DESK_PRESETS, type DeskEvaluation, type DeskInputs, type DeskPreset } from "./presets";
 import type { LiveReceipt } from "./types";
 import { formatMs, shortHash, toLiveReceipt } from "./utils";
@@ -56,6 +56,22 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
   const [evaluation, setEvaluation] = useState<DeskEvaluation | null>(null);
   const [runTotalMs, setRunTotalMs] = useState<number | null>(null);
   const runToken = useRef(0);
+  const runAbort = useRef<AbortController | null>(null);
+
+  // Unmount cancels the in-flight run: the fetch aborts and no
+  // onRecord/setState runs afterwards.
+  useEffect(() => {
+    return () => {
+      runToken.current += 1;
+      runAbort.current?.abort();
+      runAbort.current = null;
+    };
+  }, []);
+
+  function cancelRun() {
+    runToken.current += 1;
+    runAbort.current?.abort();
+  }
 
   const preset: DeskPreset = DESK_PRESETS[presetIdx];
   const visiblePresets = useMemo(
@@ -89,6 +105,8 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
   async function executeRun() {
     if (running) return;
     const token = ++runToken.current;
+    const controller = new AbortController();
+    runAbort.current = controller;
     setRunning(true);
     setEvaluation(null);
     setRunReceipts([]);
@@ -99,39 +117,50 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
     const checks = preset.buildChecks(inputs);
     const settled: LiveReceipt[] = [];
 
-    for (const check of checks) {
-      if (runToken.current !== token) return;
-      appendLine({
-        time: new Date().toISOString().slice(11, 19),
-        tag: "GET",
-        mid: check.label,
-        tail: `${check.intent} — calling…`,
-        color: "#8E8D89",
-      });
-      const outcome = await check.run();
-      if (runToken.current !== token) return;
-      const receipt = toLiveReceipt(check.intent, check.query, check.requestUrl, outcome);
-      settled.push(receipt);
-      onRecord(receipt);
-      setRunReceipts([...settled]);
-      appendLine({
-        time: new Date().toISOString().slice(11, 19),
-        tag: outcome.ok ? "200 OK" : `HTTP ${receipt.status || "—"}`,
-        mid: `${check.intent} (${formatMs(outcome.latencyMs)})`,
-        tail: outcome.ok
-          ? `receipt ${receipt.receipt ? shortHash(receipt.receipt.raw_response_sha256) : "—"} · unbilled`
-          : `fail-closed · ${receipt.errorMessage ?? "request failed"} · $0.00`,
-        color: outcome.ok ? "#22C55E" : "#F59E0B",
-      });
-    }
+    // try/finally: a throwing check must never wedge the UI with the Run
+    // button permanently disabled and the stream stuck on RUNNING.
+    try {
+      for (const check of checks) {
+        if (runToken.current !== token) return;
+        appendLine({
+          time: new Date().toISOString().slice(11, 19),
+          tag: "GET",
+          mid: check.label,
+          tail: `${check.intent} — calling…`,
+          color: "#8E8D89",
+        });
+        const outcome = await check.run(controller.signal);
+        if (runToken.current !== token) return;
+        const receipt = toLiveReceipt(check.intent, check.query, check.requestUrl, outcome);
+        settled.push(receipt);
+        onRecord(receipt);
+        setRunReceipts([...settled]);
+        appendLine({
+          time: new Date().toISOString().slice(11, 19),
+          tag: outcome.ok ? "200 OK" : `HTTP ${receipt.status || "—"}`,
+          mid: `${check.intent} (${formatMs(outcome.latencyMs)})`,
+          tail: outcome.ok
+            ? `receipt ${receipt.receipt ? shortHash(receipt.receipt.raw_response_sha256) : "—"} · unbilled`
+            : `fail-closed · ${receipt.errorMessage ?? "request failed"} · $0.00`,
+          color: outcome.ok ? "#22C55E" : "#F59E0B",
+        });
+      }
 
-    if (runToken.current !== token) return;
-    const totalMs = performance.now() - startedAt;
-    setRunTotalMs(totalMs);
-    setEvaluation(preset.evaluate(settled.map((receipt, i) => ({ check: checks[i], receipt }))));
-    setStreamState("COMPLETE · APPENDED TO LEDGER");
-    setRunning(false);
-    showToast(`Desk run settled — ${settled.length} receipt(s) added to ledger`);
+      if (runToken.current !== token) return;
+      const totalMs = performance.now() - startedAt;
+      setRunTotalMs(totalMs);
+      setEvaluation(preset.evaluate(settled.map((receipt, i) => ({ check: checks[i], receipt }))));
+      setStreamState("COMPLETE · APPENDED TO LEDGER");
+      showToast(`Desk run settled — ${settled.length} receipt(s) added to ledger`);
+    } finally {
+      // Always reset the running state — including on Cancel, on unmount
+      // (a no-op then), and if any check throws. A new run cannot have
+      // started while this one was running (the button is disabled), so
+      // unconditionally clearing here can never clobber a fresh run.
+      setRunning(false);
+      if (runToken.current !== token) setStreamState("CANCELLED — RUN ABORTED");
+      if (runAbort.current === controller) runAbort.current = null;
+    }
   }
 
   const totalCostLine =
@@ -228,6 +257,11 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
               <span>Run Live Checks →</span>
             )}
           </button>
+          {running && (
+            <button type="button" className="btn-ghost" style={{ width: "100%" }} onClick={cancelRun}>
+              Cancel run
+            </button>
+          )}
 
           <div className="panel mono" style={{ padding: "12px 13px", fontSize: 11, color: "var(--muted)", lineHeight: 1.58 }}>
             <div style={{ color: "var(--text)", fontWeight: 500, marginBottom: 3 }}>// disclosure · sepolia testnet only</div>
@@ -330,7 +364,7 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
                     </tr>
                   ) : (
                     runReceipts.map((r) => (
-                      <tr key={r.id} className="clickable" onClick={() => onInspect(r)}>
+                      <tr key={r.key} className="clickable" onClick={() => onInspect(r)}>
                         <td className="mono" style={{ fontSize: 11, fontWeight: 500 }}>{r.intent.replace("_GENERAL", "")}</td>
                         <td className="mono" style={{ fontSize: 11 }}>verireceipt</td>
                         <td className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>direct</td>
