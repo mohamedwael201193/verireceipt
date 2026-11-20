@@ -17,7 +17,11 @@ describe("landing overflow containment (J2 R2 B4/M5)", () => {
     // and the label words (~38px each) forced the grid to ~408px wide
     // at a 320px viewport (right edge 343.9, scrollWidth 344).
     expect(css).toContain("repeat(8, minmax(0, 1fr))");
-    expect(css).not.toContain("repeat(8, 1fr)");
+    // Strip block comments first: the B4 comment in landing.css names
+    // the old rule for documentation, and that mention must not trip
+    // this assertion — only a real rule counts.
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(rules).not.toContain("repeat(8, 1fr)");
   });
 
   it("B4: sprint label spans break instead of forcing tracks wide", () => {
