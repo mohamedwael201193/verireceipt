@@ -81,3 +81,47 @@ describe("shortenSha", () => {
     expect(shortenSha("0xabc")).toBe("0xabc");
   });
 });
+
+describe("formatEth whitespace / -0 (J2 R2 M-4)", () => {
+  it("returns an em dash for whitespace-only strings", () => {
+    expect(formatEth(" ")).toBe("—");
+    expect(formatEth("   ")).toBe("—");
+    expect(formatEth("\t\n")).toBe("—");
+  });
+
+  it("normalises -0 to 0 (no '-0 ETH')", () => {
+    expect(formatEth(-0)).toBe("0 ETH");
+    expect(formatEth("-0")).toBe("0 ETH");
+  });
+});
+
+describe("formatUsd -0 (J2 R2 M-4)", () => {
+  it("normalises -0 to 0 (no '-$0')", () => {
+    expect(formatUsd(-0)).toBe("$0");
+    expect(formatUsdPrecise(-0)).toBe("$0.00");
+  });
+});
+
+describe("formatters total over non-string values (J2 R2 B-1b)", () => {
+  it("formatDate renders '—' for numbers, objects and arrays — never throws, never returns an object", () => {
+    expect(formatDate(12345)).toBe("—");
+    expect(formatDate({})).toBe("—");
+    expect(formatDate([])).toBe("—");
+    expect(formatDate(true)).toBe("—");
+    expect(formatDate(undefined)).toBe("—");
+  });
+
+  it("shortenSha renders '—' for numbers and objects — never throws on .slice", () => {
+    expect(shortenSha(12345)).toBe("—");
+    expect(shortenSha({})).toBe("—");
+    expect(shortenSha([])).toBe("—");
+    expect(shortenSha(null)).toBe("—");
+    expect(shortenSha(undefined)).toBe("—");
+  });
+
+  it("shortenHash renders '—' for numbers and objects", () => {
+    expect(shortenHash(12345)).toBe("—");
+    expect(shortenHash({})).toBe("—");
+    expect(shortenHash(null)).toBe("—");
+  });
+});

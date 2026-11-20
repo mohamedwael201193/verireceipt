@@ -38,6 +38,27 @@ export const MAX_PARAM_LENGTH = 512;
 /** Server error messages are truncated to this length in ApiError. */
 export const MAX_ERROR_MESSAGE_LENGTH = 500;
 
+/**
+ * Upper bound for a server-advised retry delay. A 422 body may carry
+ * retry_after_sec, but the value is untrusted: -5 / NaN / Infinity /
+ * 1e21 / "soon" must never reach the UI (J2 M1). Anything outside
+ * [0, 86400] (24h) is treated as absent.
+ */
+export const MAX_RETRY_AFTER_SEC = 86_400;
+
+/** A receipt_id longer than this is rejected as malformed (B-1a / M-5). */
+export const MAX_RECEIPT_ID_LENGTH = 512;
+
+/** Shared retry-delay validation: finite, non-negative, sane upper bound. */
+export function isValidRetryAfterSec(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= MAX_RETRY_AFTER_SEC
+  );
+}
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -55,7 +76,12 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.status = status;
     this.code = code;
-    this.retry_after_sec = retryAfterSec;
+    // Validate: the constructor must never trust retry_after_sec blindly
+    // (J2 M1) — -5/NaN/Infinity/1e21/"soon" would render insanely, and
+    // a non-number ({} cast in) would crash the retry display.
+    this.retry_after_sec = isValidRetryAfterSec(retryAfterSec)
+      ? retryAfterSec
+      : undefined;
   }
 }
 
@@ -86,6 +112,26 @@ export function assertValidParam(value: unknown, name: string): asserts value is
   }
 }
 
+/**
+ * Guard the params object itself at the top of every get* (J2 M-2):
+ * getTx(null) / getTx(undefined) used to throw a raw TypeError from
+ * `params.tx_hash` instead of an ApiError, and still cost a fetch.
+ * A null/undefined/non-object params argument is INVALID_PARAM with
+ * zero fetch calls.
+ */
+export function assertValidParamsObject(
+  params: unknown,
+  fnName: string,
+): asserts params is Record<string, unknown> {
+  if (params === null || params === undefined || typeof params !== "object" || Array.isArray(params)) {
+    throw new ApiError(
+      `Invalid parameter for ${fnName}: expected a params object`,
+      400,
+      "INVALID_PARAM",
+    );
+  }
+}
+
 export interface FetchJsonOptions {
   /** Receipted endpoints must return an object with a receipt block. */
   expectReceipt?: boolean;
@@ -97,9 +143,14 @@ export interface FetchJsonOptions {
 
 /**
  * Validate a 2xx body: it must be a non-null JSON object, and when
- * `expectReceipt` is set it must carry a receipt object whose receipt_id
- * is a non-empty string. A 200 with an HTML/empty/array body is a broken
- * response, not a success — it throws ApiError instead of returning null.
+ * `expectReceipt` is set it must carry a receipt object whose fields are
+ * all usable. B-1a: checking only receipt_id let a validation-PASSING
+ * response such as `{receipt_id:"rcpt_OK", raw_response_sha256:12345}`
+ * through to ReceiptCard, which then crashed (shortenSha does
+ * value.slice on a number). So every field the card renders must be a
+ * non-empty string here: receipt_id (also trimmed non-empty and capped
+ * at 512 chars — M-5: whitespace-only and 1 MB ids passed before),
+ * raw_response_sha256, fetched_at and upstream_url.
  */
 function assertValidBody(
   body: unknown,
@@ -115,13 +166,18 @@ function assertValidBody(
   }
   if (expectReceipt) {
     const receipt = (body as Record<string, unknown>)["receipt"];
-    if (
-      receipt === null ||
-      typeof receipt !== "object" ||
-      Array.isArray(receipt) ||
-      typeof (receipt as Record<string, unknown>)["receipt_id"] !== "string" ||
-      ((receipt as Record<string, unknown>)["receipt_id"] as string).length === 0
-    ) {
+    const fieldsValid =
+      receipt !== null &&
+      typeof receipt === "object" &&
+      !Array.isArray(receipt) &&
+      isNonEmptyReceiptString(
+        (receipt as Record<string, unknown>)["receipt_id"],
+        MAX_RECEIPT_ID_LENGTH,
+      ) &&
+      isNonEmptyReceiptString((receipt as Record<string, unknown>)["raw_response_sha256"]) &&
+      isNonEmptyReceiptString((receipt as Record<string, unknown>)["fetched_at"]) &&
+      isNonEmptyReceiptString((receipt as Record<string, unknown>)["upstream_url"]);
+    if (!fieldsValid) {
       throw new ApiError(
         "Invalid response from server: missing or malformed receipt",
         status,
@@ -129,6 +185,17 @@ function assertValidBody(
       );
     }
   }
+}
+
+/**
+ * A receipt field is usable only as a non-empty (after trim), non-blank
+ * string, optionally capped in length. Non-strings (numbers, objects,
+ * null) and whitespace-only strings are malformed.
+ */
+function isNonEmptyReceiptString(value: unknown, maxLength = Number.POSITIVE_INFINITY): boolean {
+  return (
+    typeof value === "string" && value.trim().length > 0 && value.length <= maxLength
+  );
 }
 
 async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promise<T> {
@@ -174,13 +241,11 @@ async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promis
           err?.message ?? err?.error ?? `Request failed with status ${res.status}`;
         // 422 bodies carry retry_after_sec: surface it instead of dropping
         // it, so the UI can tell the user how long to wait. Only a finite
-        // non-negative number counts; anything else is ignored.
-        const retryAfterSec =
-          typeof err?.retry_after_sec === "number" &&
-          Number.isFinite(err.retry_after_sec) &&
-          err.retry_after_sec >= 0
-            ? err.retry_after_sec
-            : undefined;
+        // non-negative number within the sane bound counts (shared
+        // isValidRetryAfterSec); anything else is ignored.
+        const retryAfterSec = isValidRetryAfterSec(err?.retry_after_sec)
+          ? err?.retry_after_sec
+          : undefined;
         throw new ApiError(message, res.status, err?.code, retryAfterSec);
       }
       assertValidBody(body, res.status, expectReceipt);
@@ -195,11 +260,18 @@ async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promis
         }
         // Timeout: exactly one retry for these idempotent GETs.
         if (timedOut && attempt + 1 < MAX_ATTEMPTS) continue;
-        throw new ApiError(
-          `Request timed out after ${timeoutMs / 1000}s`,
-          0,
-          "TIMEOUT",
-        );
+        if (timedOut) {
+          throw new ApiError(
+            `Request timed out after ${timeoutMs / 1000}s`,
+            0,
+            "TIMEOUT",
+          );
+        }
+        // Spurious abort (J2 M-6): no timeout fired and no external abort
+        // was requested — e.g. the runtime aborted the request on its own.
+        // It is NOT a timeout, so it must never be reported as
+        // "timed out after 45s", and it is never retried.
+        throw new ApiError("Request aborted", 0, "ABORTED");
       }
       if (err instanceof Error) {
         throw new ApiError(err.message, 0, "NETWORK_ERROR");
@@ -222,6 +294,7 @@ export async function getTx(
   params: { tx_hash: string; chain: string },
   signal?: AbortSignal,
 ): Promise<TxResponse> {
+  assertValidParamsObject(params, "getTx");
   assertValidParam(params.tx_hash, "tx_hash");
   assertValidParam(params.chain, "chain");
   return fetchJson<TxResponse>(
@@ -234,6 +307,7 @@ export async function getFilings(
   params: { entity: string; period: string },
   signal?: AbortSignal,
 ): Promise<FilingsResponse> {
+  assertValidParamsObject(params, "getFilings");
   assertValidParam(params.entity, "entity");
   assertValidParam(params.period, "period");
   return fetchJson<FilingsResponse>(
@@ -246,6 +320,7 @@ export async function getTvl(
   params: { protocol: string },
   signal?: AbortSignal,
 ): Promise<TvlResponse> {
+  assertValidParamsObject(params, "getTvl");
   assertValidParam(params.protocol, "protocol");
   return fetchJson<TvlResponse>(
     buildUrl("/v1/tvl", { protocol: params.protocol }),
@@ -257,6 +332,7 @@ export async function getRoute(
   params: { pair: string },
   signal?: AbortSignal,
 ): Promise<RouteResponse> {
+  assertValidParamsObject(params, "getRoute");
   assertValidParam(params.pair, "pair");
   // The miner only quotes ETH/USDC (live 422 for anything else); refuse
   // client-side instead of sending a pair the server must reject.
@@ -275,6 +351,7 @@ export async function getGridPrice(
   params: { node_or_zone: string; interval_start: string },
   signal?: AbortSignal,
 ): Promise<GridPriceResponse> {
+  assertValidParamsObject(params, "getGridPrice");
   assertValidParam(params.node_or_zone, "node_or_zone");
   assertValidParam(params.interval_start, "interval_start");
   return fetchJson<GridPriceResponse>(

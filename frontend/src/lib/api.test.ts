@@ -513,3 +513,134 @@ describe("network failure", () => {
     });
   });
 });
+
+describe("ApiError retry_after_sec validation (J2 R2 M-1)", () => {
+  it("keeps a sane finite non-negative delay", () => {
+    expect(new ApiError("x", 422, "C", 30).retry_after_sec).toBe(30);
+    expect(new ApiError("x", 422, "C", 0).retry_after_sec).toBe(0);
+    expect(new ApiError("x", 422, "C", 86400).retry_after_sec).toBe(86400);
+  });
+
+  it.each([-5, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 1e21, 86401])(
+    "drops an insane delay (%s) to undefined instead of storing it",
+    (bad) => {
+      expect(new ApiError("x", 422, "C", bad).retry_after_sec).toBeUndefined();
+    },
+  );
+
+  it("drops a non-number delay (e.g. 'soon', {}) to undefined", () => {
+    expect(
+      new ApiError("x", 422, "C", "soon" as unknown as number).retry_after_sec,
+    ).toBeUndefined();
+    expect(
+      new ApiError("x", 422, "C", {} as unknown as number).retry_after_sec,
+    ).toBeUndefined();
+  });
+
+  it("a 422 body with an insane retry_after_sec surfaces undefined, not 1e21", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        {
+          error: "grid_no_data",
+          code: "GRID_NO_DATA",
+          message: "no settlement data yet",
+          retry_after_sec: 1e21,
+        },
+        422,
+      ),
+    );
+    try {
+      await getGridPrice({
+        node_or_zone: "TH_NP15_GEN-APND",
+        interval_start: "2026-11-19T00:00:00Z",
+      });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).retry_after_sec).toBeUndefined();
+    }
+  });
+});
+
+describe("null/undefined params object (J2 R2 M-2)", () => {
+  it.each([
+    ["getTx", () => getTx(null as unknown as { tx_hash: string; chain: string })],
+    ["getTx", () => getTx(undefined as unknown as { tx_hash: string; chain: string })],
+    ["getTx", () => getTx("nope" as unknown as { tx_hash: string; chain: string })],
+    ["getRoute", () => getRoute(null as unknown as { pair: string })],
+    ["getRoute", () => getRoute(undefined as unknown as { pair: string })],
+    ["getFilings", () => getFilings(null as unknown as { entity: string; period: string })],
+    ["getTvl", () => getTvl(null as unknown as { protocol: string })],
+    [
+      "getGridPrice",
+      () =>
+        getGridPrice(null as unknown as { node_or_zone: string; interval_start: string }),
+    ],
+  ])("%s throws ApiError INVALID_PARAM (not raw TypeError) with zero fetch calls", async (_name, call) => {
+    await expect(call()).rejects.toMatchObject({ status: 400, code: "INVALID_PARAM" });
+    try {
+      await call();
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("receipt field validation (J2 R2 B-1a / M-5)", () => {
+  const baseBody = {
+    tx_hash: "0x00",
+    status: "not_found",
+    from: null,
+    to: null,
+    block_number: null,
+    value_eth: null,
+  };
+
+  it.each([
+    ["non-string raw_response_sha256 (number)", { ...sampleReceipt, raw_response_sha256: 12345 }],
+    ["non-string raw_response_sha256 (object)", { ...sampleReceipt, raw_response_sha256: {} }],
+    ["missing raw_response_sha256", (({ raw_response_sha256: _r, ...rest }) => rest)(sampleReceipt)],
+    ["non-string fetched_at (object)", { ...sampleReceipt, fetched_at: {} }],
+    ["non-string fetched_at (number)", { ...sampleReceipt, fetched_at: 12345 }],
+    ["missing fetched_at", (({ fetched_at: _f, ...rest }) => rest)(sampleReceipt)],
+    ["non-string upstream_url (number)", { ...sampleReceipt, upstream_url: 42 }],
+    ["missing upstream_url", (({ upstream_url: _u, ...rest }) => rest)(sampleReceipt)],
+    ["whitespace-only receipt_id", { ...sampleReceipt, receipt_id: "   " }],
+    ["empty receipt_id", { ...sampleReceipt, receipt_id: "" }],
+    ["oversized receipt_id (513 chars)", { ...sampleReceipt, receipt_id: "x".repeat(513) }],
+    ["1 MB receipt_id", { ...sampleReceipt, receipt_id: "x".repeat(1024 * 1024) }],
+  ])("rejects a 200 whose receipt has %s", async (_label, receipt) => {
+    fetchMock.mockResolvedValue(jsonResponse({ ...baseBody, receipt }));
+    await expect(getTx({ tx_hash: "0x00", chain: "sepolia" })).rejects.toMatchObject({
+      status: 200,
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it("accepts a 512-char receipt_id (at the cap)", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ ...baseBody, receipt: { ...sampleReceipt, receipt_id: "x".repeat(512) } }),
+    );
+    const res = await getTx({ tx_hash: "0x00", chain: "sepolia" });
+    expect(res.receipt.receipt_id).toHaveLength(512);
+  });
+});
+
+describe("spurious abort (J2 R2 M-6)", () => {
+  it("an AbortError with no timeout and no external abort is ABORTED, never TIMEOUT", async () => {
+    fetchMock.mockRejectedValue(new DOMException("The operation was aborted.", "AbortError"));
+    const pending = getHealth();
+    await expect(pending).rejects.toMatchObject({ status: 0, code: "ABORTED" });
+    try {
+      await pending;
+      expect.unreachable();
+    } catch (err) {
+      expect((err as Error).message).not.toContain("timed out");
+      expect((err as Error).message).toBe("Request aborted");
+    }
+    // Not retried: a spurious abort is not a timeout.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
