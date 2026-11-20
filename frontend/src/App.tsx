@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 
 const Landing = lazy(() => import("./pages/Landing"));
@@ -8,6 +8,7 @@ const Receipts = lazy(() => import("./pages/Receipts"));
 const Benchmarks = lazy(() => import("./pages/Benchmarks"));
 const Status = lazy(() => import("./pages/Status"));
 const Docs = lazy(() => import("./pages/Docs"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 export default function App() {
   return (
@@ -20,7 +21,7 @@ export default function App() {
           <Route path="benchmarks" element={<Benchmarks />} />
           <Route path="status" element={<Status />} />
           <Route path="docs" element={<Docs />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
     </Suspense>
