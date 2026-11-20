@@ -133,4 +133,49 @@ describe("Probe — chip race guard (M2)", () => {
     expect(out).not.toContain("0x8c3f442fc6d640a6ff3ea0b12be64f1d4609ea94edd2966f42c01cd9bdcf04b5");
     expect(out).not.toContain("rcpt-test-1");
   });
+
+  it("disables inputs while loading and Copy curl uses the displayed run's params (J2 minor 6)", async () => {
+    const writeMock = vi.fn(async (_text: string) => {});
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: writeMock },
+      configurable: true,
+    });
+    try {
+      const { fetchMock, pending } = mockFetch();
+      render(<Probe />);
+
+      fireEvent.click(screen.getByRole("button", { name: "TVL: aave-v3" }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+      // The chips and Run button were already disabled mid-run; the
+      // select, payload input, and mode buttons stayed live, so a user
+      // could edit the payload mid-flight and copy a mismatched curl.
+      expect(screen.getByRole("combobox")).toBeDisabled();
+      expect(screen.getByLabelText("Payload JSON")).toBeDisabled();
+      expect(screen.getByRole("button", { name: "200 OK" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "422 Refusal" })).toBeDisabled();
+
+      // Copy curl mid-flight copies the RUNNING params.
+      fireEvent.click(screen.getByRole("button", { name: "Copy curl" }));
+      await waitFor(() => expect(writeMock).toHaveBeenCalledTimes(1));
+      expect(writeMock.mock.calls[0][0]).toContain("protocol=aave-v3");
+
+      pending[0].resolve(TVL_BODY);
+      await waitFor(() => expect(screen.getByRole("combobox")).not.toBeDisabled());
+
+      // After the run, editing the payload box must NOT change what Copy
+      // curl copies: it still reflects the displayed run's params.
+      fireEvent.change(screen.getByLabelText("Payload JSON"), {
+        target: { value: JSON.stringify({ protocol: "not-a-real-protocol-xyz" }) },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Copy curl" }));
+      await waitFor(() => expect(writeMock).toHaveBeenCalledTimes(2));
+      expect(writeMock.mock.calls[1][0]).toContain("protocol=aave-v3");
+      expect(writeMock.mock.calls[1][0]).not.toContain("not-a-real-protocol-xyz");
+    } finally {
+      // jsdom has no clipboard; remove the stub so other tests see the
+      // stock navigator again.
+      delete (navigator as unknown as Record<string, unknown>).clipboard;
+    }
+  });
 });

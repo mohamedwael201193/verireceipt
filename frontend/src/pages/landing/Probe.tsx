@@ -141,6 +141,7 @@ export function Probe() {
               id="pr-sel"
               className="term-input"
               value={intent}
+              disabled={loading}
               onChange={(e) => onIntentChange(e.target.value as IntentKey)}
             >
               {INTENTS.map((it) => (
@@ -160,6 +161,7 @@ export function Probe() {
               type="text"
               className="term-input"
               value={payload}
+              disabled={loading}
               onChange={(e) => setPayload(e.target.value)}
               aria-label="Payload JSON"
               spellCheck={false}
@@ -175,6 +177,7 @@ export function Probe() {
                 type="button"
                 className={`micro-btn${!force422 ? " active" : ""}`}
                 style={{ padding: "4px 10px", fontSize: 11 }}
+                disabled={loading}
                 onClick={() => onModeChange(false)}
                 aria-pressed={!force422}
               >
@@ -184,6 +187,7 @@ export function Probe() {
                 type="button"
                 className={`micro-btn${force422 ? " active" : ""}`}
                 style={{ padding: "4px 10px", fontSize: 11 }}
+                disabled={loading}
                 onClick={() => onModeChange(true)}
                 aria-pressed={force422}
               >
@@ -213,13 +217,22 @@ export function Probe() {
               className="mono"
               style={{ fontSize: 12, textDecoration: "underline", textUnderlineOffset: 4 }}
               onClick={() => {
-                try {
-                  const p = JSON.parse(payload) as Record<string, string>;
-                  void copyText(curlFor(intent, p));
-                } catch {
-                  // Payload is not valid JSON — copy the curl for the preset instead.
-                  void copyText(curlFor(intent, force422 ? TRAP_PRESETS[intent] : PRESETS[intent]));
-                }
+                // Copy the DISPLAYED run's params (paramsUsed), not the
+                // payload box: the box stays editable after a run, so
+                // copying from it could produce a curl that does not
+                // match the displayed receipt. Before any run,
+                // paramsUsed is null and the box is the source.
+                const p =
+                  paramsUsed ??
+                  (() => {
+                    try {
+                      return JSON.parse(payload) as Record<string, string>;
+                    } catch {
+                      // Payload is not valid JSON — copy the curl for the preset instead.
+                      return force422 ? TRAP_PRESETS[intent] : PRESETS[intent];
+                    }
+                  })();
+                void copyText(curlFor(intent, p));
               }}
             >
               Copy curl
