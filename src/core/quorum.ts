@@ -23,40 +23,107 @@ function withTimeout<T>(task: () => Promise<T>, timeoutMs: number): Promise<T> {
   });
 }
 
+/**
+ * 2-of-N quorum with short-circuit (Part B, round 4).
+ *
+ * The previous implementation awaited every leg via Promise.allSettled, so
+ * one hung leg delayed the answer by the full per-leg timeout even after
+ * two legs had already agreed. This version resolves or rejects as soon
+ * as the outcome is decided:
+ * - EARLY-RESOLVE: as soon as any value has a second agreeing success,
+ *   resolve at once with that value. A still-hung leg never delays a
+ *   decided quorum. `votes` counts the agreements observed at decision
+ *   time (usually 2/N); a later leg that would also have agreed does not
+ *   change the returned value, which is equal to it by `equals` anyway.
+ * - EARLY-FAIL: as soon as 2 agreeing successes are impossible — i.e.
+ *   successes-so-far + legs-still-pending < 2 — reject at once with
+ *   QUORUM_UNREACHABLE instead of waiting out the remaining timeouts.
+ *   The same rejection fires when every leg has settled and no pair
+ *   agrees, or when fewer than 2 tasks were supplied (a quorum of 2 can
+ *   never form).
+ *
+ * Semantics preserved vs the allSettled version: the winner is a value
+ * with at least one equal partner; with fewer than 2 successes the call
+ * 502s QUORUM_UNREACHABLE; with >= 2 successes but no agreeing pair it
+ * also 502s QUORUM_UNREACHABLE. The only change is WHEN the promise
+ * settles — at decision time, not at the slowest leg's timeout.
+ * Every leg's promise has handlers attached synchronously, so a leg that
+ * settles after the quorum is decided can neither reject unhandled nor
+ * change the outcome.
+ */
 export async function quorum2of3<T>(
   tasks: Array<() => Promise<T>>,
   equals: (a: T, b: T) => boolean,
   timeoutMs: number = TIMEOUT_MS,
 ): Promise<{ value: T; votes: string }> {
-  const settled = await Promise.allSettled(
-    tasks.map((task) => withTimeout(task, timeoutMs)),
-  );
-  const successes: T[] = [];
-  for (const result of settled) {
-    if (result.status === "fulfilled") successes.push(result.value);
-  }
-  if (successes.length < 2) {
+  if (tasks.length < 2) {
     throw new ApiError(
       502,
       "QUORUM_UNREACHABLE",
-      `quorum unreachable: only ${successes.length} of ${tasks.length} sources succeeded`,
+      `quorum unreachable: only 0 of ${tasks.length} sources succeeded`,
     );
   }
-  // First value (in task order) that has at least one equal partner wins.
-  for (let i = 0; i < successes.length; i++) {
-    let count = 1;
-    for (let j = 0; j < successes.length; j++) {
-      if (j !== i && equals(successes[i], successes[j])) count++;
-    }
-    if (count >= 2) {
-      return { value: successes[i], votes: `${count}/${tasks.length} sources agreed` };
-    }
-  }
-  throw new ApiError(
-    502,
-    "QUORUM_UNREACHABLE",
-    `quorum unreachable: ${successes.length} sources succeeded but none agreed`,
-  );
+  return new Promise<{ value: T; votes: string }>((resolve, reject) => {
+    let settled = false;
+    const successes: T[] = [];
+    let failures = 0;
+    let doneCount = 0;
+
+    const finishResolve = (value: T, count: number): void => {
+      if (settled) return;
+      settled = true;
+      resolve({ value, votes: `${count}/${tasks.length} sources agreed` });
+    };
+    const finishReject = (message: string): void => {
+      if (settled) return;
+      settled = true;
+      reject(new ApiError(502, "QUORUM_UNREACHABLE", message));
+    };
+
+    tasks.forEach((task) => {
+      withTimeout(task, timeoutMs).then(
+        (value) => {
+          if (settled) return;
+          successes.push(value);
+          doneCount++;
+          // Early-resolve: any value with an agreeing partner decides it.
+          for (const candidate of successes) {
+            let count = 0;
+            for (const other of successes) {
+              if (equals(candidate, other)) count++;
+            }
+            if (count >= 2) {
+              finishResolve(candidate, count);
+              return;
+            }
+          }
+          if (doneCount === tasks.length) {
+            finishReject(
+              `quorum unreachable: ${successes.length} sources succeeded but none agreed`,
+            );
+          }
+        },
+        () => {
+          if (settled) return;
+          failures++;
+          doneCount++;
+          const remaining = tasks.length - doneCount;
+          if (successes.length + remaining < 2) {
+            // Even if every pending leg succeeded, 2 agreeing successes
+            // are impossible — fail now instead of waiting out timeouts.
+            finishReject(
+              `quorum unreachable: at most ${successes.length + remaining} of ${tasks.length} ` +
+                `sources can succeed (${failures} failed, ${successes.length} succeeded)`,
+            );
+          } else if (doneCount === tasks.length) {
+            finishReject(
+              `quorum unreachable: only ${successes.length} of ${tasks.length} sources succeeded`,
+            );
+          }
+        },
+      );
+    });
+  });
 }
 
 interface BreakerState {

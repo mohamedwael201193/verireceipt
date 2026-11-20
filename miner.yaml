@@ -49,9 +49,10 @@ endpoints:
     external_path: /v1/tx
     method: GET
     description: >-
-      Looks up an EVM transaction hash on a specified chain using a 2-of-3
-      archive-RPC quorum (including OP-stack L1 data fee) and returns exact
-      tx_hash, status, from, to, block_number, value_eth, and a SHA-256 receipt.
+      Looks up an EVM transaction hash on a specified chain using a 2-of-N
+      archive-RPC quorum (N = configured RPCs per chain), including the
+      OP-stack L1 data fee, and returns exact tx_hash, status, from, to,
+      block_number, value_eth, and a SHA-256 receipt.
     intents:
       - ONCHAIN_TX_LOOKUP_GENERAL
     params:
@@ -64,7 +65,7 @@ endpoints:
           - name: chain
             type: string
             intents: ["ONCHAIN_TX_LOOKUP_GENERAL"]
-            description: EVM chain name (ethereum, base, arbitrum, optimism, polygon, sepolia).
+            description: EVM chain name (ethereum, base, arbitrum, optimism, polygon, sepolia, base-sepolia).
 
   - path: /v1/filings
     external_path: /v1/filings
@@ -109,7 +110,7 @@ endpoints:
     description: >-
       Returns block-pinned Ethereum mainnet execution quote (amount_out in
       6-decimal USDC base units) for selling exactly 1 ETH for USDC across
-      Uniswap V2/V3, SushiSwap V2, and Curve pools with a SHA-256 receipt.
+      Uniswap V2/V3, SushiSwap V2, with a SHA-256 receipt.
     intents:
       - OPTIMAL_EXECUTION_ROUTE_GENERAL
     params:
@@ -130,7 +131,7 @@ endpoints:
     method: GET
     description: >-
       Returns wholesale electricity locational marginal price (lmp_usd_per_mwh)
-      from official public ISO feeds (CAISO, ERCOT, NYISO, MISO, ENTSO-E/Elering)
+      from official public ISO feeds (CAISO, NYISO, ENTSO-E/Elering)
       for a node_or_zone and interval_start datetime with a SHA-256 receipt.
     intents:
       - GRID_POWER_PRICE_GENERAL
@@ -140,7 +141,7 @@ endpoints:
           - name: node_or_zone
             type: string
             intents: ["GRID_POWER_PRICE_GENERAL"]
-            description: Pricing node or bidding zone (e.g., TH_NP15_GEN-APND, HB_NORTH, ZONE_J).
+            description: Pricing node or bidding zone (e.g., TH_NP15_GEN-APND, ZONE_J).
           - name: interval_start
             type: string
             intents: ["GRID_POWER_PRICE_GENERAL"]
@@ -155,7 +156,7 @@ intent_mapping:
         how: "Copy the complete 0x-prefixed 64-hex-character transaction hash verbatim."
       chain:
         from: chain
-        how: "Normalize chain name to lowercase (ethereum, base, arbitrum, optimism, polygon, sepolia)."
+        how: "Normalize chain name to lowercase (ethereum, base, arbitrum, optimism, polygon, sepolia, base-sepolia)."
     output:
       tx_hash:
         path: tx_hash
@@ -170,6 +171,9 @@ intent_mapping:
         unit: "block height"
       value_eth:
         path: value_eth
+        unit: "whole native units"
+      l1_fee_eth:
+        path: l1_fee_eth
         unit: "whole native units"
 
   REGULATORY_FILING_MONITOR_GENERAL:
