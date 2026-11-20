@@ -19,7 +19,15 @@ import { SprintMatrix } from "./landing/SprintMatrix";
 import { DeskStage } from "./landing/DeskStage";
 import { Manifesto } from "./landing/Manifesto";
 import { Probe } from "./landing/Probe";
-import { SiteFooter } from "./landing/SiteFooter";
+
+// NOTE (J1 M2): the landing page does NOT render its own SiteFooter.
+// The shell Layout owns the single giant footer for all six pages, so
+// rendering SiteFooter here stacked two giant footers on "/". The
+// SiteFooter component file is kept (unused) so integration can lift
+// the content the shell footer lacks — repo link + base commit, live
+// /health status in the deployment column, the GET /health endpoint
+// row, and the in-page sitemap anchors — into Layout; see the round-2
+// report. Do not re-add <SiteFooter /> here.
 
 export default function Landing() {
   const toastRef = useRef<HTMLDivElement>(null);
@@ -133,7 +141,6 @@ export default function Landing() {
         <DeskStage />
         <Manifesto />
         <Probe />
-        <SiteFooter />
       </main>
       <div id="toast" ref={toastRef} role="status" aria-live="polite" />
     </>
