@@ -27,6 +27,10 @@ interface RunState {
   data: AnyResponse | null;
   error: ApiError | null;
   ms: number | null;
+  /** Which tab the data belongs to — the visual/metric must never render
+   *  a previous tab's response under the new tab (SecVisual reads
+   *  data.filings off a TxResponse and crashes). */
+  key: IntentKey | null;
 }
 
 function metricFor(key: IntentKey, data: AnyResponse | null): string {
@@ -207,7 +211,13 @@ export function IntentIde() {
   const [showJson, setShowJson] = useState(false);
   const [animPaused, setAnimPaused] = useState(false);
   const [scattered, setScattered] = useState(false);
-  const [run, setRun] = useState<RunState>({ loading: true, data: null, error: null, ms: null });
+  const [run, setRun] = useState<RunState>({ loading: true, data: null, error: null, ms: null, key: null });
+  // Re-run epoch: the mode buttons ("Run 200 OK" / "Test 422 trap") only
+  // set state and bump this — the effect below is the SINGLE dispatch
+  // path. Calling runIntent from the onClick as well double-fired a live
+  // call on every mode switch (the click ran one call, then setIs422
+  // re-fired the effect for a second).
+  const [runNonce, setRunNonce] = useState(0);
   const reqRef = useRef(0);
   const manualLockUntil = useRef(0);
   const trackRef = useRef<HTMLElement>(null);
@@ -215,15 +225,23 @@ export function IntentIde() {
   idxRef.current = idx;
 
   const meta = INTENTS[idx];
+  // Only the current tab's response may render: between a tab switch
+  // and the new run resolving, run.data still holds the previous tab's
+  // response (and run.key says which tab it belongs to).
+  const dataForTab = run.data && run.key === meta.key ? run.data : null;
 
   const runIntent = useCallback(async (key: IntentKey, trap: boolean) => {
     const id = ++reqRef.current;
-    setRun((r) => ({ ...r, loading: true, error: null }));
+    // Clear stale data: the visual is keyed on the tab, so rendering the
+    // new tab with the previous tab's response crashes (e.g. SecVisual
+    // reads data.filings off a TxResponse). A new run has no data yet —
+    // the loading pane shows until it resolves.
+    setRun((r) => ({ ...r, loading: true, data: null, error: null, key: null }));
     const t0 = performance.now();
     try {
       const data = await callLive(key, trap ? TRAP_PRESETS[key] : PRESETS[key]);
       if (reqRef.current !== id) return;
-      setRun({ loading: false, data, error: null, ms: Math.round(performance.now() - t0) });
+      setRun({ loading: false, data, error: null, ms: Math.round(performance.now() - t0), key });
     } catch (err) {
       if (reqRef.current !== id) return;
       setRun({
@@ -231,13 +249,17 @@ export function IntentIde() {
         data: null,
         error: err instanceof ApiError ? err : new ApiError(errorMessage(err), 0),
         ms: Math.round(performance.now() - t0),
+        key: null,
       });
     }
   }, []);
 
+  // Single dispatch path: tab/mode/scroll/keyboard changes only set state;
+  // this effect issues exactly one live call per change (runNonce covers
+  // re-runs in the same mode, where idx/is422 do not change).
   useEffect(() => {
     runIntent(meta.key, is422);
-  }, [idx, is422, meta.key, runIntent]);
+  }, [idx, is422, meta.key, runNonce, runIntent]);
 
   // TVL scatter/dock cycle (decorative; only on the TVL tab, JSON hidden).
   useEffect(() => {
@@ -308,7 +330,7 @@ export function IntentIde() {
 
   const jsonBody: unknown = run.error
     ? { error: run.error.message, code: run.error.code ?? null, status: run.error.status }
-    : run.data;
+    : dataForTab;
 
   const verifyUrl = apiUrlFor(meta.key, is422 ? TRAP_PRESETS[meta.key] : PRESETS[meta.key]);
 
@@ -353,7 +375,7 @@ export function IntentIde() {
                   <div>
                     <div className="mono" style={{ fontSize: 11, color: "var(--muted)", marginBottom: 5 }}>// result</div>
                     <h3 style={{ fontSize: "clamp(1.35rem,2.2vw,1.8rem)", fontWeight: 300, letterSpacing: "-0.025em", lineHeight: 1.18 }}>
-                      {run.error ? "Live refusal — see error" : metricFor(meta.key, run.data)}
+                      {run.error ? "Live refusal — see error" : metricFor(meta.key, dataForTab)}
                     </h3>
                   </div>
                 </div>
@@ -392,7 +414,7 @@ export function IntentIde() {
                       onClick={() => {
                         setIs422(false);
                         setShowJson(false);
-                        runIntent(meta.key, false);
+                        setRunNonce((n) => n + 1);
                       }}
                     >
                       Run 200 OK
@@ -405,7 +427,7 @@ export function IntentIde() {
                       onClick={() => {
                         setIs422(true);
                         setShowJson(true);
-                        runIntent(meta.key, true);
+                        setRunNonce((n) => n + 1);
                       }}
                     >
                       Test 422 trap
@@ -466,18 +488,18 @@ export function IntentIde() {
                   </div>
                 ) : (
                   <div id="ide-visual" style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-                    {meta.key === "tx" && run.data && <TxVisual data={run.data as TxResponse} />}
-                    {meta.key === "sec" && run.data && <SecVisual data={run.data as FilingsResponse} />}
-                    {meta.key === "tvl" && run.data && <TvlVisual data={run.data as TvlResponse} scattered={scattered} />}
-                    {meta.key === "route" && run.data && <RouteVisual data={run.data as RouteResponse} />}
-                    {meta.key === "grid" && run.data && <GridVisual data={run.data as GridPriceResponse} />}
+                    {meta.key === "tx" && dataForTab && <TxVisual data={dataForTab as TxResponse} />}
+                    {meta.key === "sec" && dataForTab && <SecVisual data={dataForTab as FilingsResponse} />}
+                    {meta.key === "tvl" && dataForTab && <TvlVisual data={dataForTab as TvlResponse} scattered={scattered} />}
+                    {meta.key === "route" && dataForTab && <RouteVisual data={dataForTab as RouteResponse} />}
+                    {meta.key === "grid" && dataForTab && <GridVisual data={dataForTab as GridPriceResponse} />}
                   </div>
                 )}
               </div>
 
-              {run.data && (
+              {dataForTab && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <ReceiptCard receipt={run.data.receipt} />
+                  <ReceiptCard receipt={dataForTab.receipt} />
                   <VerifyBadge url={verifyUrl} />
                 </div>
               )}

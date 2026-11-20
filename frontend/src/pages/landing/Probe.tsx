@@ -5,7 +5,7 @@
 // user's payload to the LIVE endpoint, renders the actual response (or
 // the actual 422 error body), and verifies the receipt with a real
 // SHA-256 recompute (see VerifyBadge). Copy curl builds a real GET curl.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ApiError } from "../../lib/api";
 import { ReceiptCard } from "../../components/ReceiptCard";
 import { INTENTS, PRESETS, TRAP_PRESETS, type IntentKey } from "./data";
@@ -33,6 +33,10 @@ export function Probe() {
   const [ms, setMs] = useState<number | null>(null);
   const [paramsUsed, setParamsUsed] = useState<Record<string, string> | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  // Request-id guard: two rapid runs must not race — a stale response
+  // (e.g. the first chip's) must never overwrite the newest run's
+  // receipt, or the VerifyBadge URL could mismatch the displayed receipt.
+  const reqRef = useRef(0);
 
   async function run(key: IntentKey, rawPayload: string) {
     let parsed: unknown;
@@ -48,6 +52,7 @@ export function Probe() {
     }
     const params = parsed as Record<string, string>;
     setFormError(null);
+    const id = ++reqRef.current;
     setLoading(true);
     setData(null);
     setError(null);
@@ -56,13 +61,15 @@ export function Probe() {
     const t0 = performance.now();
     try {
       const res = await callLive(key, params);
+      if (reqRef.current !== id) return;
       setData(res);
       setMs(Math.round(performance.now() - t0));
     } catch (err) {
+      if (reqRef.current !== id) return;
       setError(err instanceof ApiError ? err : new ApiError(errorMessage(err), 0));
       setMs(Math.round(performance.now() - t0));
     } finally {
-      setLoading(false);
+      if (reqRef.current === id) setLoading(false);
     }
   }
 
@@ -111,6 +118,7 @@ export function Probe() {
                 key={c.id}
                 type="button"
                 className="btn-pill-ghost mono"
+                disabled={loading}
                 style={{
                   padding: "5px 11px",
                   fontSize: 11,
@@ -196,7 +204,7 @@ export function Probe() {
               disabled={loading}
               onClick={() => void run(intent, payload)}
             >
-              {loading ? "Verifying…" : "Verify SHA-256 →"}
+              {loading ? "Running…" : "Run live probe →"}
             </button>
             <button
               type="button"
@@ -214,7 +222,7 @@ export function Probe() {
             >
               Copy curl
             </button>
-            <span style={{ fontSize: 11, color: "var(--muted)" }}>// live crypto.subtle.digest(&apos;SHA-256&apos;)</span>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>// live endpoint · receipted response</span>
           </div>
 
           {(data || error) && !loading && (
