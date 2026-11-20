@@ -236,6 +236,31 @@ describe("malformed receipt fields — defense in depth (J2 R2 B-1b)", () => {
     expect(() => render(<ReceiptCard receipt={bad} />)).not.toThrow();
     expect(screen.getAllByText("—")).toHaveLength(1);
   });
+
+  it("renders '—' (not a blank cell) when fetched_at is whitespace-only (J2 R4 B-1, re-opened)", () => {
+    for (const fetched_at of ["   ", "\t\n"]) {
+      const bad = { ...receipt, fetched_at };
+      const { unmount } = render(<ReceiptCard receipt={bad} />);
+      // Only the Fetched-at row falls back: id, sha and upstream are valid.
+      expect(screen.getAllByText("—")).toHaveLength(1);
+      expect(screen.queryByText("   ", { exact: true })).toBeNull();
+      expect(screen.queryByText("\t\n", { exact: true })).toBeNull();
+      unmount();
+    }
+  });
+
+  it("renders '—' (not a blank cell) when upstream_url is empty or whitespace-only (J2 R4 B-1, re-opened)", () => {
+    for (const upstream_url of ["", "   ", "\t\n"]) {
+      const bad = { ...receipt, upstream_url };
+      const { container, unmount } = render(<ReceiptCard receipt={bad} />);
+      // Only the Upstream row falls back: id, sha and fetched_at are valid.
+      expect(screen.getAllByText("—")).toHaveLength(1);
+      expect(screen.queryByRole("link")).toBeNull();
+      // The fallback span must contain the dash, not blank text.
+      expect(container.textContent).not.toContain("\t\n");
+      unmount();
+    }
+  });
 });
 
 describe("upstream URL userinfo / encoding tricks (J2 R2 M-3)", () => {

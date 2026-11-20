@@ -44,7 +44,12 @@ export function formatEth(value: string | number | null | undefined): string {
  * object child.
  */
 export function formatDate(value: unknown): string {
-  if (typeof value !== "string" || value.length === 0) return "—";
+  // Whitespace-only strings are unparseable (new Date("   ") is Invalid
+  // Date) and used to be returned verbatim, rendering a blank cell
+  // (J2 R4 B-1, re-opened): like shortenSha/shortenHash, they render "—".
+  // Non-whitespace unparseable input still passes through ("not-a-date")
+  // — that passthrough is tested behaviour, not a blank render.
+  if (typeof value !== "string" || value.length === 0 || value.trim().length === 0) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   const day = String(date.getUTCDate()).padStart(2, "0");

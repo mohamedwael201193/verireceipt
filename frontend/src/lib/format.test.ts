@@ -57,6 +57,14 @@ describe("formatDate", () => {
     expect(formatDate(null)).toBe("—");
     expect(formatDate("")).toBe("—");
   });
+
+  it("returns an em dash for whitespace-only input (J2 R4 B-1, re-opened)", () => {
+    // Whitespace-only is unparseable and used to be returned verbatim,
+    // rendering a blank Fetched-at cell.
+    expect(formatDate("   ")).toBe("—");
+    expect(formatDate("\t\n")).toBe("—");
+    expect(formatDate(" ")).toBe("—");
+  });
 });
 
 describe("shortenHash", () => {

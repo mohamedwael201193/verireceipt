@@ -164,7 +164,9 @@ export function ReceiptCard({ receipt }: ReceiptCardProps) {
   async function copySha() {
     // Never copy the literal string "undefined" when the sha is missing.
     const sha = receipt?.raw_response_sha256;
-    if (typeof sha !== "string" || sha.length === 0) return;
+    // Audit (J2 R4 B-1): a whitespace-only sha renders "—" via shortenSha,
+    // so it must not be copied either — same trim rule as the renderers.
+    if (typeof sha !== "string" || sha.length === 0 || sha.trim().length === 0) return;
     try {
       await navigator.clipboard.writeText(sha);
       setCopied(true);
@@ -230,7 +232,10 @@ export function ReceiptCard({ receipt }: ReceiptCardProps) {
         ) : (
           // Deliberately NOT a link: unsafe scheme, relative URL, or
           // missing value — rendered as plain text so it cannot execute.
-          <span style={styles.plainUrl}>{typeof upstreamUrl === "string" ? upstreamUrl : "—"}</span>
+          // Whitespace-only/empty strings pass the typeof check but must
+          // render "—", not a blank span (J2 R4 B-1, re-opened) — same
+          // trim rule as receipt_id / shortenSha / formatDate.
+          <span style={styles.plainUrl}>{typeof upstreamUrl === "string" && upstreamUrl.trim() !== "" ? upstreamUrl : "—"}</span>
         )}
       </div>
       <div style={styles.row}>
