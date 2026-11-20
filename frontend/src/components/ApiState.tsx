@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ApiError } from "../lib/api";
+import { ApiError, isValidRetryAfterSec } from "../lib/api";
 
 const styles: Record<string, React.CSSProperties> = {
   wrap: {
@@ -78,8 +78,13 @@ export function ApiState({ loading, error, empty, onRetry, children }: ApiStateP
 
   if (error) {
     const status = error instanceof ApiError ? error.status : null;
+    // Guard before rendering (J2 M-1): ApiError's constructor already
+    // validates retry_after_sec, but an error can be mutated or built
+    // elsewhere — never render a non-finite, negative or absurd delay.
     const retryAfter =
-      error instanceof ApiError ? (error.retry_after_sec ?? null) : null;
+      error instanceof ApiError && isValidRetryAfterSec(error.retry_after_sec)
+        ? error.retry_after_sec
+        : null;
     return (
       <div style={styles.wrap}>
         <div style={styles.center}>

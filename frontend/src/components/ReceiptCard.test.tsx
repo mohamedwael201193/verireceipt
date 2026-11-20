@@ -184,3 +184,74 @@ describe("copySha guard (J2 M6)", () => {
     }
   });
 });
+
+describe("malformed receipt fields — defense in depth (J2 R2 B-1b)", () => {
+  it("renders '—' and never throws when raw_response_sha256 is a number", () => {
+    const bad = { ...receipt, raw_response_sha256: 12345 as unknown as string };
+    expect(() => render(<ReceiptCard receipt={bad} />)).not.toThrow();
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("12345")).toBeNull();
+  });
+
+  it("renders '—' and never throws when fetched_at is an object", () => {
+    const bad = { ...receipt, fetched_at: { when: "now" } as unknown as string };
+    expect(() => render(<ReceiptCard receipt={bad} />)).not.toThrow();
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders '—' and never throws when receipt_id is an object", () => {
+    const bad = { ...receipt, receipt_id: { id: "rcpt_OK" } as unknown as string };
+    expect(() => render(<ReceiptCard receipt={bad} />)).not.toThrow();
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/rcpt_OK/)).toBeNull();
+  });
+
+  it("renders '—' for every field when all receipt fields are malformed at once", () => {
+    const bad = {
+      receipt_id: {} as unknown as string,
+      upstream_url: "https://example.com/upstream",
+      raw_response_sha256: 12345 as unknown as string,
+      fetched_at: [] as unknown as string,
+    };
+    expect(() => render(<ReceiptCard receipt={bad} />)).not.toThrow();
+    // Receipt ID + SHA + fetched_at all fall back to "—".
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3);
+    // The safe upstream URL still renders as a link.
+    expect(screen.getByRole("link").getAttribute("href")).toBe(
+      "https://example.com/upstream",
+    );
+  });
+});
+
+describe("upstream URL userinfo / encoding tricks (J2 R2 M-3)", () => {
+  it.each([
+    "https://user:pass@evil.com/",
+    "https://user@evil.com/",
+    "https://user:pass@evil.com/path?x=1",
+    "https://example.com%2f@evil.com/",
+    "https://user%2f@evil.com/",
+    "https://evil.com%00@example.com/",
+    "https://example.com%00.evil.com/",
+    "https://exam%00ple.com/",
+    "https://evil.com%2fexample.com/",
+    "https://example.com%252f@evil.com/",
+  ])("renders %s as plain text, never a link", (url) => {
+    const { container } = render(<ReceiptCard receipt={receiptWithUrl(url)} />);
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.textContent).toContain(url);
+  });
+
+  it("isSafeUpstreamUrl rejects userinfo, %00 and %-encoded hosts", () => {
+    expect(isSafeUpstreamUrl("https://user:pass@evil.com/")).toBe(false);
+    expect(isSafeUpstreamUrl("https://user@evil.com/")).toBe(false);
+    expect(isSafeUpstreamUrl("https://example.com%2f@evil.com/")).toBe(false);
+    expect(isSafeUpstreamUrl("https://evil.com%00@example.com/")).toBe(false);
+    expect(isSafeUpstreamUrl("https://example.com/%00")).toBe(false);
+    expect(isSafeUpstreamUrl("https://example.com/%00path")).toBe(false);
+    expect(isSafeUpstreamUrl("https://%65xample.com/")).toBe(false);
+    // A plain https URL with no userinfo still passes.
+    expect(isSafeUpstreamUrl("https://example.com/upstream?x=1&y=2")).toBe(true);
+    expect(isSafeUpstreamUrl("https://example.com:8443/upstream")).toBe(true);
+  });
+});

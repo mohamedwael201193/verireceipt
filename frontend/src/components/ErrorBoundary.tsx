@@ -5,6 +5,14 @@ import { Component, type ReactNode } from "react";
  * (e.g. a malformed receipt reaching a component) must degrade to an
  * honest fallback instead of blanking the whole page. Wrap each page's
  * content in this boundary once page files land.
+ *
+ * Reset behaviour (J2 M-7): the fallback used to be sticky — it stayed
+ * until the user clicked Retry. Pass `resetKeys` (e.g. the query the
+ * page is showing, `resetKeys={[txHash, chain]}`) and the boundary
+ * clears its error state whenever any key changes, so navigating to a
+ * new query or refetching recovers automatically. The Retry button
+ * still works as a manual reset. Without resetKeys the old behaviour
+ * (reset only via Retry) is unchanged.
  */
 
 const styles: Record<string, React.CSSProperties> = {
@@ -44,10 +52,29 @@ export interface ErrorBoundaryProps {
   fallback?: ReactNode;
   /** Called when the user retries after an error (before state resets). */
   onReset?: () => void;
+  /**
+   * Keys that reset the boundary when they change (shallow-compared with
+   * Object.is per element). Pages should pass the identity of what is
+   * being shown — e.g. `resetKeys={[txHash, chain]}` on a tx page, or
+   * `resetKeys={[entity, period]}` on a filings page — so a new query
+   * clears a stale fallback without a manual Retry click.
+   */
+  resetKeys?: unknown[];
 }
 
 interface ErrorBoundaryState {
   error: Error | null;
+}
+
+/** Shallow resetKeys comparison: changed if length differs or any element differs by Object.is. */
+function hasResetKeysChanged(prev: unknown[] | undefined, next: unknown[] | undefined): boolean {
+  if (prev === next) return false;
+  if (prev === undefined || next === undefined) return prev !== next;
+  if (prev.length !== next.length) return true;
+  for (let i = 0; i < prev.length; i++) {
+    if (!Object.is(prev[i], next[i])) return true;
+  }
+  return false;
 }
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
@@ -61,6 +88,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     // Deliberately not rethrown: the boundary owns the failure. Logging
     // keeps the crash visible in diagnostics without blanking the page.
     console.error("ErrorBoundary caught a render error:", error);
+  }
+
+  componentDidUpdate(prevProps: ErrorBoundaryProps): void {
+    // J2 M-7: a stale fallback must not survive a navigation/query
+    // change. When resetKeys change while an error is shown, clear the
+    // error so the new children render; if they still throw, the
+    // boundary catches again and the fallback returns.
+    if (this.state.error && hasResetKeysChanged(prevProps.resetKeys, this.props.resetKeys)) {
+      this.setState({ error: null });
+    }
   }
 
   private handleReset = (): void => {

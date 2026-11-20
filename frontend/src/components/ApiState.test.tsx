@@ -72,3 +72,35 @@ describe("ApiState", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 });
+
+describe("retry_after_sec guard (J2 R2 M-1)", () => {
+  it.each([-5, Number.NaN, Number.POSITIVE_INFINITY, 1e21, 86401])(
+    "never renders a 'Retry after' line for an insane delay (%s), even if the field is mutated in",
+    (bad) => {
+      const err = new ApiError("no settlement data yet", 422, "GRID_NO_DATA", 30);
+      // Simulate an error whose retry field bypassed the constructor
+      // (mutation / foreign construction): the render guard must still hold.
+      (err as { retry_after_sec?: unknown }).retry_after_sec = bad;
+      render(
+        <ApiState loading={false} error={err} empty={false} onRetry={() => {}}>
+          <p>child</p>
+        </ApiState>,
+      );
+      expect(screen.queryByText(/retry after/i)).toBeNull();
+    },
+  );
+
+  it("still renders a sane delay", () => {
+    render(
+      <ApiState
+        loading={false}
+        error={new ApiError("no settlement data yet", 422, "GRID_NO_DATA", 45)}
+        empty={false}
+        onRetry={() => {}}
+      >
+        <p>child</p>
+      </ApiState>,
+    );
+    expect(screen.getByText("Retry after 45s")).toBeTruthy();
+  });
+});

@@ -10,15 +10,36 @@ import { formatDate, shortenSha } from "../lib/format";
  * the page origin when clicked. Anything outside the allowlist (including
  * relative URLs, which `new URL` rejects, and non-string values) renders
  * as plain text. https only: every real upstream in this system is https.
+ *
+ * Scheme-only was not enough (J2 M-3): `https://user:pass@evil.com/`
+ * passes a scheme check and renders a clickable link to evil.com while
+ * looking like a trusted host. So userinfo is rejected too — any
+ * username/password in the authority means plain text, never a link.
+ * Also rejected: a raw NUL escape (%00, any case) anywhere in the value,
+ * and a `%` in the hostname (percent-encoded host tricks such as
+ * `https://evil.com%2fexample.com/` fail the parse anyway, but a
+ * percent-encoded hostname is never a real upstream).
  */
 export function isSafeUpstreamUrl(value: unknown): value is string {
   if (typeof value !== "string" || value.length === 0) return false;
+  if (/%00/i.test(value)) return false;
   try {
     // The URL parser normalises case, strips leading/trailing whitespace
     // and control characters, and strips tabs/newlines — so obfuscations
     // like "JaVaScRiPt:…", "  javascript:…" or "java\tscript:…" still
     // parse to the javascript: scheme and are rejected here.
-    return new URL(value).protocol === "https:";
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:") return false;
+    if (parsed.username !== "" || parsed.password !== "") return false;
+    // Percent-encoded host tricks: the parser percent-decodes the
+    // hostname (%65 -> "e", %2f -> "/"), so a %-encoded host looks clean
+    // AFTER parsing. Check the RAW authority instead — a real upstream
+    // host never contains "%" (userinfo was already rejected above, so
+    // any "%" left in the authority is in the host:port part).
+    const authority = value.trim().match(/^[^:]+:\/\/([^/?#]*)/)?.[1] ?? "";
+    if (authority.includes("%")) return false;
+    if (parsed.hostname.includes("%")) return false;
+    return true;
   } catch {
     return false;
   }
@@ -154,6 +175,13 @@ export function ReceiptCard({ receipt }: ReceiptCardProps) {
 
   const upstreamUrl = receipt.upstream_url;
   const upstreamIsLink = isSafeUpstreamUrl(upstreamUrl);
+  // Defense in depth (B-1b): assertValidBody now rejects malformed
+  // receipts, but a receipt can still reach this card from any other
+  // caller — so every rendered field is total over non-string values.
+  // A number/object receipt_id, sha or fetched_at renders "—", never
+  // throws and never hands React an object child.
+  const receiptId = typeof receipt.receipt_id === "string" ? receipt.receipt_id : "—";
+  const sha = typeof receipt.raw_response_sha256 === "string" ? receipt.raw_response_sha256 : undefined;
 
   return (
     <section style={styles.card} aria-label="Verification receipt">
@@ -163,7 +191,7 @@ export function ReceiptCard({ receipt }: ReceiptCardProps) {
       </div>
       <div style={styles.row}>
         <span style={styles.label}>Receipt ID</span>
-        <span style={{ ...styles.value, ...styles.mono }}>{receipt.receipt_id ?? "—"}</span>
+        <span style={{ ...styles.value, ...styles.mono }}>{receiptId}</span>
       </div>
       <div style={styles.row}>
         <span style={styles.label}>Upstream</span>
@@ -185,7 +213,7 @@ export function ReceiptCard({ receipt }: ReceiptCardProps) {
       <div style={styles.row}>
         <span style={styles.label}>Response SHA-256</span>
         <span>
-          <code style={styles.mono} title={receipt.raw_response_sha256}>
+          <code style={styles.mono} title={sha}>
             {shortenSha(receipt.raw_response_sha256)}
           </code>
           <button type="button" style={styles.copyBtn} onClick={copySha}>
