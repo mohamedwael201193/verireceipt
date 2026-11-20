@@ -322,7 +322,7 @@ export default function Docs() {
             </tbody>
           </table>
         </div>
-        <p className="vr-muted vr-small">
+        <p className="vr-muted vr-small" style={{ overflowWrap: 'anywhere' }}>
           To verify, recompute the hash the miner actually hashed — the method differs per
           endpoint, and the /receipts page does each one in your browser: tx replays the exact
           JSON-RPC <span className="vr-mono">eth_getTransactionReceipt</span> call against the
@@ -345,7 +345,7 @@ export default function Docs() {
         <h2 className="vr-h2">
           <span className="vr-mono">GET /health</span>
         </h2>
-        <p className="vr-muted">
+        <p className="vr-muted" style={{ overflowWrap: 'anywhere' }}>
           Returns <span className="vr-mono">{'{"status":"ok","service":"verireceipt","uptime_s":N,"upstreams":{}}'}</span>.
           Uptime counts seconds since the last service restart.
         </p>
@@ -547,7 +547,7 @@ curl "$BASE/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2026-11-2
 }
 
 const PAGE_CSS = `
-.vr-page{max-width:1340px;margin:0 auto;padding:28px 24px 64px;color:var(--text,#F3F2EE);font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px;line-height:1.55}
+.vr-page{max-width:1340px;margin:0 auto;padding:28px 24px 64px;color:var(--text,#F3F2EE);font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px;line-height:1.55;overflow-wrap:anywhere}
 .vr-kicker{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;color:var(--muted,#8F8E8A);margin-bottom:6px}
 .vr-h1{font-size:clamp(1.9rem,3.2vw,2.6rem);font-weight:300;letter-spacing:-.03em;line-height:1.08;margin:0 0 10px}
 .vr-h1 .serif-i,.serif-i{font-family:'Newsreader',Georgia,serif;font-style:italic;font-weight:400}
