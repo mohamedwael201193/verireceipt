@@ -8,7 +8,7 @@
 // not expected with the current miner, so no browser verification is
 // promised). Copy curl builds a real GET curl.
 import { useRef, useState } from "react";
-import { ApiError } from "../../lib/api";
+import { ApiError, assertValidParam } from "../../lib/api";
 import { ReceiptCard } from "../../components/ReceiptCard";
 import { INTENTS, PRESETS, TRAP_PRESETS, type IntentKey } from "./data";
 import { callLive, type AnyResponse } from "./calls";
@@ -53,6 +53,17 @@ export function Probe() {
       return;
     }
     const params = parsed as Record<string, string>;
+    // Client-side param validation BEFORE any fetch: an oversize (or
+    // empty / non-string) param is a FORM error, exactly like malformed
+    // JSON above — the same assertValidParam the lib runs, surfaced here
+    // instead of as an INVALID_PARAM error pane after a zero-fetch throw.
+    // A genuine server-side 400 still renders as the error pane.
+    try {
+      for (const [name, value] of Object.entries(params)) assertValidParam(value, name);
+    } catch (err) {
+      setFormError(err instanceof ApiError ? err.message : errorMessage(err));
+      return;
+    }
     setFormError(null);
     const id = ++reqRef.current;
     setLoading(true);
@@ -83,13 +94,21 @@ export function Probe() {
     void run(key, JSON.stringify(p));
   }
 
+  // Mid-run guard (J2 R2 M2): the select/mode buttons are disabled while
+  // loading, but a programmatic change dispatch (native setter +
+  // dispatchEvent) bypasses `disabled` and used to retarget the run
+  // mid-flight — the VerifyBadge URL was then built from the NEW intent
+  // with the OLD run's params. A no-op while loading closes it; real
+  // users cannot reach this path without devtools.
   function onIntentChange(key: IntentKey) {
+    if (loading) return;
     setIntent(key);
     const p = force422 ? TRAP_PRESETS[key] : PRESETS[key];
     setPayload(JSON.stringify(p));
   }
 
   function onModeChange(trap: boolean) {
+    if (loading) return;
     setForce422(trap);
     const p = trap ? TRAP_PRESETS[intent] : PRESETS[intent];
     setPayload(JSON.stringify(p));
@@ -248,7 +267,8 @@ export function Probe() {
                     {error ? `${error.status || "ERR"} ${error.status === 422 ? "UNPROCESSABLE" : "ERROR"}` : "200 OK"}
                   </span>
                   <span style={{ color: "#8F8E8A" }}>
-                    {ms ?? "—"} ms · {error ? "unbilled refusal" : "live response"}
+                    {ms ?? "—"} ms ·{" "}
+                    {error ? (error.status === 422 ? "unbilled refusal" : "error") : "live response"}
                   </span>
                 </div>
               </div>
@@ -261,7 +281,9 @@ export function Probe() {
               )}
               {error && (
                 <div style={{ padding: "0 14px 14px", fontSize: 12, color: "#8F8E8A", lineHeight: 1.6 }}>
-                  The oracle refused this input instead of guessing — no receipt is issued for a refusal.
+                  {error.status === 422
+                    ? "The oracle refused this input instead of guessing — no receipt is issued for a refusal."
+                    : "The live call failed — no receipt was issued for a failed call."}
                 </div>
               )}
             </div>

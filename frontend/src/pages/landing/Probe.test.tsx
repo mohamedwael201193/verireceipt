@@ -179,3 +179,131 @@ describe("Probe — chip race guard (M2)", () => {
     }
   });
 });
+
+describe("Probe — programmatic retarget mid-run is a no-op (J2 R2 M2)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("a dispatched change reaches the handler when idle (control for the repro)", () => {
+    mockFetch();
+    render(<Probe />);
+
+    // Same dispatch mechanism as the repro below, but while idle: the
+    // handler MUST run — this proves the mid-run test below is not
+    // passing vacuously because the dispatch never reaches React.
+    const select = screen.getByRole("combobox") as HTMLSelectElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLSelectElement.prototype,
+      "value",
+    )!.set!;
+    setter.call(select, "sec");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(screen.getByLabelText("Payload JSON")).toHaveValue(
+      JSON.stringify({ entity: "AAPL", period: "last 6 months" }),
+    );
+  });
+
+  it("a dispatched change on the disabled select mid-run does not retarget the run", async () => {
+    const { fetchMock, pending } = mockFetch();
+    const { container } = render(<Probe />);
+
+    // Start a TVL chip run.
+    fireEvent.click(screen.getByRole("button", { name: "TVL: aave-v3" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("combobox")).toBeDisabled();
+
+    // J2's exact repro: native setter + dispatchEvent on the disabled
+    // select. The old code moved intent tx -> sec mid-run, so after the
+    // TVL run resolved the VerifyBadge URL was built from the sec intent
+    // with the TVL run's params (/v1/filings?protocol=aave-v3).
+    const select = screen.getByRole("combobox") as HTMLSelectElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLSelectElement.prototype,
+      "value",
+    )!.set!;
+    setter.call(select, "sec");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+
+    // No second run started, intent did not move: the payload box still
+    // holds the TVL preset (the handler would have swapped in the sec
+    // preset). The select's own DOM value is not asserted — React only
+    // restores a controlled value on re-render, and the guard correctly
+    // causes no re-render.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("Payload JSON")).toHaveValue(
+      JSON.stringify({ protocol: "aave-v3" }),
+    );
+
+    pending[0].resolve(TVL_BODY);
+    await waitFor(() =>
+      expect(container.querySelector("#pr-out")?.textContent).toContain("aave-v3"),
+    );
+
+    // The VerifyBadge URL is the TVL run's, not the filings URL.
+    fireEvent.click(screen.getByRole("button", { name: "Compute envelope digest" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(String(fetchMock.mock.calls[1][0])).toBe("/api/v1/tvl?protocol=aave-v3");
+  });
+
+  it("a dispatched mode change mid-run does not retarget the run", async () => {
+    const { fetchMock, pending } = mockFetch();
+    render(<Probe />);
+
+    // Control: the same dispatched click DOES toggle the mode while idle,
+    // so the mid-run assertion below is not vacuous.
+    const modeButton = screen.getByRole("button", { name: "422 Refusal" });
+    modeButton.dispatchEvent(new Event("click", { bubbles: true }));
+    expect(modeButton).toHaveAttribute("aria-pressed", "true");
+
+    // The TVL chip resets the mode to 200 OK and starts a run.
+    fireEvent.click(screen.getByRole("button", { name: "TVL: aave-v3" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(modeButton).toHaveAttribute("aria-pressed", "false");
+
+    // Same dispatch mid-run: the guard must block it.
+    modeButton.dispatchEvent(new Event("click", { bubbles: true }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(modeButton).toHaveAttribute("aria-pressed", "false");
+
+    pending[0].resolve(TVL_BODY);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "422 Refusal" })).not.toBeDisabled(),
+    );
+  });
+});
+
+describe("Probe — oversize param is a form error, zero fetches (J2 R2 M6)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("600-char protocol renders a form error and sends no fetch", async () => {
+    const { fetchMock } = mockFetch();
+    render(<Probe />);
+
+    fireEvent.change(screen.getByLabelText("Payload JSON"), {
+      target: { value: JSON.stringify({ protocol: "x".repeat(600) }) },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run live probe →" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/exceeds 512 characters/);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByText(/INVALID_PARAM/)).toBeNull();
+  });
+
+  it("malformed JSON still renders a form error with zero fetches", async () => {
+    const { fetchMock } = mockFetch();
+    render(<Probe />);
+
+    fireEvent.change(screen.getByLabelText("Payload JSON"), {
+      target: { value: "{not json" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run live probe →" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/not valid JSON/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
