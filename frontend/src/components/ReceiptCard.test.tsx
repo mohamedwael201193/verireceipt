@@ -352,3 +352,20 @@ describe("upstream URL userinfo / encoding tricks (J2 R2 M-3)", () => {
     expect(isSafeUpstreamUrl("https://EXAMPLE.com/upstream")).toBe(true);
   });
 });
+
+describe("legit IPv6 upstream URL (J1 R3 m2)", () => {
+  it("renders https://[::1]:8443/ as a link", () => {
+    const { container } = render(
+      <ReceiptCard receipt={receiptWithUrl("https://[::1]:8443/")} />,
+    );
+    const link = screen.getByRole("link");
+    expect(link.getAttribute("href")).toBe("https://[::1]:8443/");
+    expect(container.textContent).toContain("https://[::1]:8443/");
+  });
+
+  it("isSafeUpstreamUrl accepts legit IPv6 hosts, with and without a port", () => {
+    expect(isSafeUpstreamUrl("https://[::1]:8443/")).toBe(true);
+    expect(isSafeUpstreamUrl("https://[2001:db8::1]/path")).toBe(true);
+    expect(isSafeUpstreamUrl("https://[::1]/")).toBe(true);
+  });
+});

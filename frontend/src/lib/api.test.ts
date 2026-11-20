@@ -899,6 +899,21 @@ describe("response-body size cap (J2 R3)", () => {
       expect((err as Error).message).toContain("exceeds");
     }
   });
+
+  it("accepts a body of exactly 1,048,576 bytes (J1 R3 m1 — exact boundary)", async () => {
+    // Only the over-cap rejection was tested before; the cap itself is
+    // `> MAX`, so a body of exactly 1 MiB must parse.
+    const base = { status: "ok", service: "verireceipt", uptime_s: 1, upstreams: {} };
+    const baseLen = new TextEncoder().encode(JSON.stringify(base)).length;
+    // Adding a "pad" key inserts `,"pad":"<pad>"` (9 chars + pad) before
+    // the closing brace; all-ASCII, so chars == bytes.
+    const padLen = 1_048_576 - baseLen - 9;
+    const text = JSON.stringify({ ...base, pad: "x".repeat(padLen) });
+    expect(new TextEncoder().encode(text).length).toBe(1_048_576);
+    fetchMock.mockResolvedValue(jsonResponse(JSON.parse(text)));
+    const res = await getHealth();
+    expect(res.status).toBe("ok");
+  });
 });
 
 describe("payload fields beyond the receipt (J2 R3 §8b)", () => {
