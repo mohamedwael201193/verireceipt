@@ -30,13 +30,27 @@ export interface ReceiptVerification {
  * arrayBuffer in some environments), exactly the trap the Uint8Array
  * check already avoids with ArrayBuffer.isView. Object.prototype.toString
  * reads the object's internal class tag instead of its prototype chain.
+ *
+ * toString alone is NOT enough (J2 R4 M-2): any plain object can spoof
+ * the tag via `[Symbol.toStringTag]: "ArrayBuffer"`, and toBytes then
+ * did `new Uint8Array(spoof)` — an array-like with no length, silently
+ * yielding empty bytes — so a spoofed body hashed as the empty string
+ * and faked verified:true against the sha256("") digest. The identity
+ * check closes it: a real ArrayBuffer is its own view's buffer
+ * (`new Uint8Array(buf).buffer === buf`); a spoof's is a fresh empty
+ * buffer. Identity is realm-independent, so cross-realm real buffers
+ * still pass; pooled views and DataViews never reach here (they take
+ * the ArrayBuffer.isView path); a detached buffer fails closed to
+ * {verified:false} instead of throwing out of toBytes.
  */
 function isArrayBuffer(value: unknown): value is ArrayBuffer {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    Object.prototype.toString.call(value) === "[object ArrayBuffer]"
-  );
+  if (value === null || typeof value !== "object") return false;
+  if (Object.prototype.toString.call(value) !== "[object ArrayBuffer]") return false;
+  try {
+    return new Uint8Array(value as ArrayBuffer).buffer === value;
+  } catch {
+    return false;
+  }
 }
 
 function toBytes(data: string | Uint8Array | ArrayBuffer): Uint8Array {

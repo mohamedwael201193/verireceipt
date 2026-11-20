@@ -51,6 +51,17 @@ describe("sha256Hex", () => {
       "0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
     );
   });
+
+  it("rejects a Symbol.toStringTag-spoofed 'ArrayBuffer' instead of hashing empty bytes (J2 R4 M-2)", async () => {
+    const spoof = { [Symbol.toStringTag]: "ArrayBuffer" } as unknown as ArrayBuffer;
+    await expect(sha256Hex(spoof)).rejects.toThrow(TypeError);
+    // A spoof carrying a length must not pass either.
+    const spoofWithLength = {
+      [Symbol.toStringTag]: "ArrayBuffer",
+      length: 3,
+    } as unknown as ArrayBuffer;
+    await expect(sha256Hex(spoofWithLength)).rejects.toThrow(TypeError);
+  });
 });
 
 describe("verifyReceipt", () => {
@@ -102,6 +113,48 @@ describe("verifyReceipt", () => {
     );
     expect(result.verified).toBe(false);
     expect(result.computedSha).not.toBe("");
+  });
+
+  it("returns { verified: false } for a Symbol.toStringTag-spoofed 'ArrayBuffer' (J2 R4 M-2)", async () => {
+    // J2's repro: a plain object claiming the ArrayBuffer tag used to
+    // hash as empty bytes (new Uint8Array(spoof) yields length 0), so
+    // it faked verified:true against the sha256("") digest.
+    const emptyDigest =
+      "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    const spoof = { [Symbol.toStringTag]: "ArrayBuffer" } as unknown as ArrayBuffer;
+    await expect(verifyReceipt(receiptWith(emptyDigest), spoof)).resolves.toEqual({
+      verified: false,
+      computedSha: "",
+    });
+    const spoofWithLength = {
+      [Symbol.toStringTag]: "ArrayBuffer",
+      length: 3,
+    } as unknown as ArrayBuffer;
+    await expect(verifyReceipt(receiptWith(emptyDigest), spoofWithLength)).resolves.toEqual({
+      verified: false,
+      computedSha: "",
+    });
+  });
+
+  it("verifies a real empty ArrayBuffer against the empty-string digest (J2 R4 M-2)", async () => {
+    const result = await verifyReceipt(
+      receiptWith("0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+      new ArrayBuffer(0),
+    );
+    expect(result.verified).toBe(true);
+    expect(result.computedSha).toBe(
+      "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    );
+  });
+
+  it("verifies a DataView body — views must not regress (J2 R4 M-2)", async () => {
+    const bytes = new TextEncoder().encode("abc");
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const result = await verifyReceipt(
+      receiptWith("0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
+      view as unknown as ArrayBuffer,
+    );
+    expect(result.verified).toBe(true);
   });
 
   it("fails when the recorded digest is empty", async () => {
