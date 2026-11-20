@@ -437,8 +437,15 @@ export function IntentIde() {
                 {run.error && (
                   <div className="mono" style={{ fontSize: 12, color: "var(--warn)", lineHeight: 1.6 }} role="alert">
                     {run.error.status ? `HTTP ${run.error.status}` : "Request failed"} — {errorMessage(run.error)}
-                    <br />
-                    <span style={{ color: "var(--muted)" }}>Unbilled refusal: the oracle never fabricates missing data.</span>
+                    {/* Only a real 422 is an unbilled refusal (J2 R2 M4):
+                        a 500, timeout, or network error rendered this line
+                        too, which mislabelled every failure as unbilled. */}
+                    {run.error.status === 422 && (
+                      <>
+                        <br />
+                        <span style={{ color: "var(--muted)" }}>Unbilled refusal: the oracle never fabricates missing data.</span>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

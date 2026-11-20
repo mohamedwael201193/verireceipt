@@ -210,3 +210,54 @@ describe("IntentIde — one live call per switch (M1)", () => {
     expect(screen.queryByText("verified")).toBeNull();
   });
 });
+
+describe("IntentIde — 'Unbilled refusal' line is 422-only (J2 R2 M4)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function mockErrorFetch(status: number, body: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+  }
+
+  it("a 500 error does NOT render the 'Unbilled refusal' line", async () => {
+    mockErrorFetch(500, { error: "upstream boom" });
+    render(<IntentIde />);
+    await waitFor(() => expect(screen.getByText(/HTTP 500/)).toBeInTheDocument(), {
+      timeout: 15000,
+    });
+    expect(screen.queryByText(/Unbilled refusal/)).toBeNull();
+  });
+
+  it("a network failure does NOT render the 'Unbilled refusal' line", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      }),
+    );
+    render(<IntentIde />);
+    await waitFor(() => expect(screen.getByText(/Request failed/)).toBeInTheDocument(), {
+      timeout: 15000,
+    });
+    expect(screen.queryByText(/Unbilled refusal/)).toBeNull();
+  });
+
+  it("a 422 error DOES render the 'Unbilled refusal' line", async () => {
+    mockErrorFetch(422, { error: "interval_in_future" });
+    render(<IntentIde />);
+    await waitFor(() => expect(screen.getByText(/HTTP 422/)).toBeInTheDocument(), {
+      timeout: 15000,
+    });
+    expect(screen.getByText(/Unbilled refusal/)).toBeInTheDocument();
+  });
+});
