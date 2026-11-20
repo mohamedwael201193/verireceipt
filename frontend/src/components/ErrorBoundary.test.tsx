@@ -66,6 +66,34 @@ describe("ErrorBoundary", () => {
     expect(screen.getByText("custom fallback")).toBeTruthy();
     expect(screen.queryByText("Something went wrong")).toBeNull();
   });
+
+  it("Retry re-throws when the child still fails (fallback reappears, ported from RouteErrorBoundary)", () => {
+    render(
+      <ErrorBoundary>
+        <Bomb shouldThrow />
+      </ErrorBoundary>,
+    );
+    expect(screen.getByRole("alert")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    // The child still throws: the boundary catches again.
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(screen.getByText("boom in render")).toBeTruthy();
+  });
+
+  it("the Reload page button reloads the page (C3 — stale-chunk recovery)", () => {
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: { reload },
+      writable: true,
+    });
+    render(
+      <ErrorBoundary>
+        <Bomb shouldThrow />
+      </ErrorBoundary>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Reload page/ }));
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("resetKeys (J2 R2 M-7)", () => {

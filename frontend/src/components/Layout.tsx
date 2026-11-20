@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { ErrorBoundary } from "./ErrorBoundary";
 import {
   API_BASE,
   BOND_DISPLAY,
@@ -113,6 +114,7 @@ function Wordmark() {
 
 export default function Layout() {
   const { theme, toggleTheme } = useTheme();
+  const { pathname } = useLocation();
 
   return (
     <div className="app-shell">
@@ -146,7 +148,17 @@ export default function Layout() {
         </div>
       </header>
 
-      <Outlet />
+      {/* The boundary wraps ONLY the routed page (J2 R2 B1/B2): Layout —
+          nav, health pill, UTC clock, footer — lives outside it and keeps
+          its state across navigations, so a click never resets the health
+          pill to "checking…". resetKeys={[pathname]} clears
+          a render error when the user navigates away WITHOUT remounting
+          (PLAN.md C3) — the old key={pathname} remount dropped the page's
+          state on every nav, including /receipts → /receipts/:id. The
+          nav stays usable to navigate away from a failed page. */}
+      <ErrorBoundary resetKeys={[pathname]}>
+        <Outlet />
+      </ErrorBoundary>
 
       <footer className="giant-footer">
         <div className="container">

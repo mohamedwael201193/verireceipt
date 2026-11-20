@@ -13,30 +13,49 @@ import { Component, type ReactNode } from "react";
  * new query or refetching recovers automatically. The Retry button
  * still works as a manual reset. Without resetKeys the old behaviour
  * (reset only via Retry) is unchanged.
+ *
+ * Route use (PLAN.md C3): Layout wraps <Outlet/> in this boundary with
+ * `resetKeys={[location.pathname]}` — a page render error shows this
+ * fallback while the nav/footer stay mounted (no remount, so the
+ * page's state survives a navigation that recovers). The fallback
+ * offers both Retry (in-place reset) and Reload page (full reload,
+ * the recovery for a stale chunk after a redeploy).
  */
 
 const styles: Record<string, React.CSSProperties> = {
   box: {
-    background: "#12161D",
-    border: "1px solid #5A2320",
+    background: "var(--surface)",
+    border: "1px solid var(--border-strong)",
     borderRadius: 12,
     padding: 16,
     fontFamily: "'Inter', system-ui, sans-serif",
-    color: "#E6E9EE",
+    color: "var(--text)",
     fontSize: 13,
   },
-  title: { color: "#FF8A65", fontWeight: 600, marginBottom: 4 },
+  title: { color: "var(--accent)", fontWeight: 600, marginBottom: 4 },
   detail: {
     fontFamily: "'JetBrains Mono', ui-monospace, monospace",
     fontSize: 12,
-    color: "#C7CDD6",
+    color: "var(--muted)",
     overflowWrap: "anywhere",
     marginBottom: 12,
   },
+  btnRow: { display: "flex", gap: 8, flexWrap: "wrap" },
   retryBtn: {
-    background: "#FF5722",
+    background: "var(--accent)",
     color: "#FFFFFF",
     border: "none",
+    borderRadius: 8,
+    padding: "8px 16px",
+    fontSize: 13,
+    fontWeight: 600,
+    fontFamily: "'Inter', system-ui, sans-serif",
+    cursor: "pointer",
+  },
+  reloadBtn: {
+    background: "transparent",
+    color: "var(--text)",
+    border: "1px solid var(--border-strong)",
     borderRadius: 8,
     padding: "8px 16px",
     fontSize: 13,
@@ -105,6 +124,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     this.setState({ error: null });
   };
 
+  private handleReload = (): void => {
+    window.location.reload();
+  };
+
   render(): ReactNode {
     if (this.state.error) {
       if (this.props.fallback !== undefined) return this.props.fallback;
@@ -112,9 +135,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         <div style={styles.box} role="alert">
           <div style={styles.title}>Something went wrong</div>
           <div style={styles.detail}>{this.state.error.message}</div>
-          <button type="button" style={styles.retryBtn} onClick={this.handleReset}>
-            Retry
-          </button>
+          <div style={styles.btnRow}>
+            <button type="button" style={styles.retryBtn} onClick={this.handleReset}>
+              Retry
+            </button>
+            <button type="button" style={styles.reloadBtn} onClick={this.handleReload}>
+              Reload page
+            </button>
+          </div>
         </div>
       );
     }
