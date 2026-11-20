@@ -35,7 +35,8 @@
 // logged and the other sources still run. No mocks, no LLM.
 
 import { inflateRawSync } from "zlib";
-import { saveGridPrice } from "../core/db";
+import { getDb } from "../core/db";
+import { recordJobSkipped, startJob } from "../core/loopLag";
 
 export interface GridZoneInfo {
   market: string;
@@ -150,6 +151,68 @@ export function gridFallbackUrl(nodeOrZone: string, intervalStartIso: string): s
 
 const FETCH_TIMEOUT_MS = 20000;
 const USER_AGENT = "Mozilla/5.0 (compatible; VeriReceipt/2.0 grid-ingester)";
+/**
+ * Yield cadence for the NYISO row loop (see ingestNyiso): one
+ * setImmediate yield per 250 processed CSV lines, so /health can
+ * interleave during the parse. The yield check is unconditional —
+ * it counts every processed line, including unknown-interface lines
+ * and bad rows (round-2 M3). The saves themselves are deferred to
+ * one transaction per day-file batch (saveGridPriceBatch), so the
+ * synchronous work between two yields is parse only.
+ */
+const NYISO_YIELD_EVERY_LINES = 250;
+
+/** One grid-price row, ready to write (see saveGridPriceBatch). */
+export interface GridPriceRow {
+  node: string;
+  intervalStart: string;
+  lmp: number;
+  market: string;
+  ingestedAt: string;
+  upstreamUrl: string;
+}
+
+/**
+ * Write a batch of grid-price rows in ONE better-sqlite3 transaction,
+ * with the INSERT prepared once for the whole batch (not once per row).
+ *
+ * RENDER-SLOWNESS ROUND 2 (2026-11-20): the round-1 fix left the
+ * dominant cost untouched. saveGridPrice() prepares a fresh statement
+ * AND commits its own WAL transaction per call: measured on disk
+ * 205–628 us/call (fresh and used DBs), i.e. 1.7–5.3 s per ~8,470
+ * inserts — the per-insert autocommit WAL transaction is the cost,
+ * not the prepare (J1's isolation: cached statement + autocommit
+ * 354 us/call; cached statement inside ONE transaction 6.27 us/call,
+ * 53 ms total). One transaction per batch cuts the same 8,492 inserts
+ * to ~120–190 ms (re-measured round 2, on disk — see JUDGE.md §12.4).
+ * The SQL is intentionally identical to saveGridPrice() in
+ * src/core/db.ts (INSERT OR REPLACE into grid_cache); keep them in sync.
+ *
+ * Atomicity: better-sqlite3 rolls the whole transaction back if any
+ * single row throws (e.g. a NULL in a NOT NULL column), so a failing
+ * insert never half-commits its batch — the throw propagates to the
+ * caller, runIngesterOnce() logs the source failure and continues to
+ * the next source. Batch granularity is one source batch (Elering:
+ * the whole source; NYISO: one day file; CAISO: one node): a single
+ * transaction cannot span the awaits between files/nodes, and
+ * per-batch preserves the existing failure isolation (a later
+ * file/node failing does not lose an earlier batch).
+ */
+export function saveGridPriceBatch(rows: GridPriceRow[]): void {
+  if (rows.length === 0) return;
+  const db = getDb();
+  const stmt = db.prepare(
+    `INSERT OR REPLACE INTO grid_cache
+     (node_or_zone, interval_start, lmp_usd_per_mwh, market, ingested_at, upstream_url)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  const runBatch = db.transaction((rs: GridPriceRow[]) => {
+    for (const r of rs) {
+      stmt.run(r.node, r.intervalStart, r.lmp, r.market, r.ingestedAt, r.upstreamUrl);
+    }
+  });
+  runBatch(rows);
+}
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -212,12 +275,12 @@ async function ingestElering(eurUsd: number): Promise<{ count: number; failed: s
   }
   const zoneKeyToNode: Record<string, string> = { ee: "EE", fi: "FI", lv: "LV", lt: "LT" };
   const ingestedAt = new Date().toISOString();
-  let count = 0;
+  const rows: GridPriceRow[] = [];
   const perZoneCounts: Record<string, number> = { ee: 0, fi: 0, lv: 0, lt: 0 };
-  for (const [key, rows] of Object.entries(data as Record<string, unknown>)) {
+  for (const [key, rows_] of Object.entries(data as Record<string, unknown>)) {
     const node = zoneKeyToNode[key];
-    if (!node || !Array.isArray(rows)) continue;
-    for (const row of rows as Array<Record<string, unknown>>) {
+    if (!node || !Array.isArray(rows_)) continue;
+    for (const row of rows_ as Array<Record<string, unknown>>) {
       const ts = row?.timestamp;
       const priceEur = row?.price;
       if (typeof ts !== "number" || typeof priceEur !== "number") continue;
@@ -227,30 +290,58 @@ async function ingestElering(eurUsd: number): Promise<{ count: number; failed: s
       const intervalStart = new Date(ts * 1000).toISOString();
       const lmp = priceEur * eurUsd;
       if (!Number.isFinite(lmp)) continue;
-      saveGridPrice(node, intervalStart, lmp, SUPPORTED_ZONES[node].market, ingestedAt, ELERING_URL);
-      count++;
+      rows.push({
+        node,
+        intervalStart,
+        lmp,
+        market: SUPPORTED_ZONES[node].market,
+        ingestedAt,
+        upstreamUrl: ELERING_URL,
+      });
       perZoneCounts[key] = (perZoneCounts[key] ?? 0) + 1;
     }
   }
+  // One transaction for the whole source batch (see saveGridPriceBatch).
+  saveGridPriceBatch(rows);
+  const count = rows.length;
   const failed = eleringMissingZones(perZoneCounts);
   for (const msg of failed) console.error("[grid-ingester] " + msg);
   if (count === 0) throw new Error("Elering returned no usable price rows");
   return { count, failed };
 }
 
-/** Offset (ms) of a named IANA zone from UTC at a given UTC instant. */
-function tzOffsetMs(timeZone: string, utcMs: number): number {
-  const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-  const parts = dtf.formatToParts(new Date(utcMs));
+/**
+ * Shared America/New_York wall-clock formatter, constructed ONCE.
+ *
+ * RENDER-SLOWNESS (2026-11-20, corrected round 2): tzOffsetMs() and
+ * nyWallString() used to construct a fresh Intl.DateTimeFormat on EVERY
+ * call, and nyWallToUtcMs() calls tzOffsetMs() 2-6x per CSV row. The
+ * measured per-call cost of the fresh-formatter shape is load-dependent
+ * and wide (141-1,197 us/call across round-1/round-2 measurements on
+ * this VM), so a ~4,200-row cycle spent roughly 0.6-5.0 s in tz
+ * conversion alone — the largest KNOWN in-process contributor to the
+ * stalls, not an established sole cause (minute-scale stalls remain
+ * unexplained; see JUDGE.md §12.3). Hoisting the construction (same
+ * locale, options and time zone, so behaviour is identical) cuts a call
+ * to ~24–79 us/call on this VM, load-dependent (~0.1–0.3 s per cycle).
+ * DateTimeFormat instances are reusable and stateless across
+ * formatToParts calls. The hoist is pinned by a perf-budget test
+ * (tests/grid.test.ts).
+ */
+const NY_TZ_FORMAT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hourCycle: "h23",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
+/** Offset (ms) of America/New_York from UTC at a given UTC instant. */
+function tzOffsetMs(utcMs: number): number {
+  const parts = NY_TZ_FORMAT.formatToParts(new Date(utcMs));
   const v = (t: string): number => Number(parts.find((p) => p.type === t)?.value ?? 0);
   const asUtc = Date.UTC(v("year"), v("month") - 1, v("day"), v("hour"), v("minute"), v("second"));
   return asUtc - utcMs;
@@ -258,17 +349,7 @@ function tzOffsetMs(timeZone: string, utcMs: number): number {
 
 /** "MM/DD/YYYY HH:MM:SS" wall time in America/New_York for a UTC instant. */
 export function nyWallString(utcMs: number): string {
-  const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-  const parts = dtf.formatToParts(new Date(utcMs));
+  const parts = NY_TZ_FORMAT.formatToParts(new Date(utcMs));
   const v = (t: string): string => parts.find((p) => p.type === t)?.value ?? "00";
   return v("month") + "/" + v("day") + "/" + v("year") + " " + v("hour") + ":" + v("minute") + ":" + v("second");
 }
@@ -289,9 +370,9 @@ export function nyWallToUtcMs(wall: string): number | null {
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4}) (\d{1,2}):(\d{2}):(\d{2})$/.exec(wall.trim());
   if (!m) return null;
   const wallAsUtc = Date.UTC(Number(m[3]), Number(m[1]) - 1, Number(m[2]), Number(m[4]), Number(m[5]), Number(m[6]));
-  let utcMs = wallAsUtc - tzOffsetMs("America/New_York", wallAsUtc);
+  let utcMs = wallAsUtc - tzOffsetMs(wallAsUtc);
   for (let i = 0; i < 4; i++) {
-    const next = wallAsUtc - tzOffsetMs("America/New_York", utcMs);
+    const next = wallAsUtc - tzOffsetMs(utcMs);
     if (next === utcMs) break;
     utcMs = next;
   }
@@ -310,7 +391,7 @@ export function nyWallToUtcMs(wall: string): number | null {
     ":" +
     m[6];
   if (
-    tzOffsetMs("America/New_York", utcMs) !== tzOffsetMs("America/New_York", utcMs + 3600_000) &&
+    tzOffsetMs(utcMs) !== tzOffsetMs(utcMs + 3600_000) &&
     nyWallString(utcMs + 3600_000) === wallNorm
   ) {
     utcMs += 3600_000;
@@ -319,14 +400,16 @@ export function nyWallToUtcMs(wall: string): number | null {
 }
 
 /** "YYYY-MM-DD" in America/New_York for a UTC instant. */
+const NY_DATE_FORMAT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 function nyDateString(utcMs: number): string {
-  const dtf = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return dtf.format(new Date(utcMs)).replace(/-/g, "");
+  // Round-2 M5: hoisted (was a fresh formatter per call, 2x/cycle).
+  return NY_DATE_FORMAT.format(new Date(utcMs)).replace(/-/g, "");
 }
 
 /** Minimal CSV row split honoring double-quoted fields. */
@@ -394,21 +477,49 @@ async function ingestNyiso(): Promise<number> {
       continue;
     }
     const ingestedAt = new Date().toISOString();
-    for (const line of lines.slice(1)) {
+    // RENDER-SLOWNESS (2026-11-20, corrected round 2): this loop used
+    // to run all ~4,400 lines of a day file with no yield and one
+    // autocommit SQLite write per row — the two costs stacked into
+    // multi-second unbroken synchronous work per cycle, starving the
+    // event loop and /health. Round 2 splits the work: rows are parsed
+    // here (yielding every NYISO_YIELD_EVERY_LINES processed lines so
+    // requests interleave) and written by ONE transaction per day-file
+    // batch at the end of the file (saveGridPriceBatch). A parse chunk
+    // is 250 lines; the per-file flush is a single transaction of a few
+    // thousand rows. Measured chunk/flush maxima are in JUDGE.md §12.4
+    // (round-2 numbers, on disk) — the round-1 "tens of ms" claim for
+    // the old parse+save chunks did NOT reproduce and is withdrawn.
+    const rows = lines.slice(1);
+    const pending: GridPriceRow[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const line = rows[i];
       const cols = splitCsvLine(line);
       const name = (cols[nameIdx] ?? "").trim();
       const keys = NYISO_ZONE_NAMES[name];
-      if (!keys) continue; // interfaces (H Q, NPX, O H, PJM) are not load zones
-      const utcMs = nyWallToUtcMs(cols[tsIdx] ?? "");
-      const lbmp = Number((cols[lbmpIdx] ?? "").trim());
-      // A price of exactly 0 is real; only NaN/non-finite prices are refused.
-      if (utcMs === null || !Number.isFinite(lbmp)) continue;
-      const intervalStart = new Date(utcMs).toISOString();
-      for (const key of keys) {
-        saveGridPrice(key, intervalStart, lbmp, "NYISO", ingestedAt, url);
-        count++;
+      if (keys) {
+        const utcMs = nyWallToUtcMs(cols[tsIdx] ?? "");
+        const lbmp = Number((cols[lbmpIdx] ?? "").trim());
+        // A price of exactly 0 is real; only NaN/non-finite prices are refused.
+        if (utcMs !== null && Number.isFinite(lbmp)) {
+          const intervalStart = new Date(utcMs).toISOString();
+          for (const key of keys) {
+            pending.push({ node: key, intervalStart, lmp: lbmp, market: "NYISO", ingestedAt, upstreamUrl: url });
+          }
+        }
+      }
+      // Round-2 M3: the yield check is UNCONDITIONAL — it counts every
+      // processed line, including unknown-interface lines and bad rows
+      // that contribute nothing. (Before, bad rows `continue`d past
+      // the check, so an all-bad file never yielded.)
+      if ((i + 1) % NYISO_YIELD_EVERY_LINES === 0) {
+        await new Promise((resolve) => setImmediate(resolve));
       }
     }
+    // One transaction for this file's batch (see saveGridPriceBatch):
+    // a failing row rolls the file's batch back and throws to
+    // runIngesterOnce(), which logs it and continues to the next source.
+    saveGridPriceBatch(pending);
+    count += pending.length;
   }
   // No "NYISO: " prefix here: runIngesterOnce() adds it (a prefix in both
   // places produced "NYISO: NYISO: ..." in failed[]).
@@ -511,6 +622,8 @@ async function ingestCaiso(): Promise<number> {
       errors.push(node + ": unexpected CSV header");
       continue;
     }
+    const ingestedAt = new Date().toISOString();
+    const pending: GridPriceRow[] = [];
     for (const line of lines.slice(1)) {
       const cols = line.split(",");
       if ((cols[itemIdx] ?? "").trim() !== "LMP_PRC") continue;
@@ -520,9 +633,11 @@ async function ingestCaiso(): Promise<number> {
       // A price of exactly 0 is real; only NaN/non-finite prices are refused.
       if (Number.isNaN(startMs) || !Number.isFinite(lmp)) continue;
       const intervalStart = new Date(startMs).toISOString();
-      saveGridPrice(node, intervalStart, lmp, "CAISO", new Date().toISOString(), url);
-      count++;
+      pending.push({ node, intervalStart, lmp, market: "CAISO", ingestedAt, upstreamUrl: url });
     }
+    // One transaction for this node's batch (see saveGridPriceBatch).
+    saveGridPriceBatch(pending);
+    count += pending.length;
   }
   // No "CAISO: " prefix here: runIngesterOnce() adds it (a prefix in both
   // places produced "CAISO: CAISO: ..." in failed[]).
@@ -578,14 +693,52 @@ export async function runIngesterOnce(): Promise<{ fetched: number; failed: stri
   return { fetched, failed };
 }
 
-export function startIngester(intervalMs: number = 5 * 60 * 1000): NodeJS.Timeout {
-  void runIngesterOnce().catch((err) => {
+/**
+ * One guarded ingester run: times the cycle in the job registry (the
+ * completion line + /health `jobs` entry are what make the next stall
+ * diagnosable) and never overlaps itself.
+ *
+ * RENDER-SLOWNESS (2026-11-20): startIngester() used to fire
+ * runIngesterOnce() on a bare setInterval with no overlap guard. A
+ * cycle whose upstreams hang near their 20 s timeouts runs for
+ * minutes (sources are sequential: FX + Elering + 2x NYISO + 3x
+ * CAISO), so a slow cycle could still be running when the next tick
+ * fired, stacking two CPU-heavy parse bursts. A skipped tick is
+ * recorded (jobs["grid-ingester"].skipped) and logged, never silent.
+ */
+let ingesterRunning = false;
+
+async function runIngesterOnceGuarded(): Promise<void> {
+  if (ingesterRunning) {
+    recordJobSkipped("grid-ingester");
+    return;
+  }
+  ingesterRunning = true;
+  const run = startJob("grid-ingester");
+  try {
+    await runIngesterOnce();
+  } catch (err) {
+    // runIngesterOnce() catches per-source failures itself; this is
+    // belt-and-braces for an unexpected throw.
     console.error("[grid-ingester] run failed: " + errMsg(err));
-  });
+  } finally {
+    // Round-2 M1: clear the flag FIRST — if run.end() ever throws, the
+    // flag must already be false or the ingester is permanently dead
+    // (every later tick skipped). run.end() errors are logged, never
+    // allowed to kill the guard.
+    ingesterRunning = false;
+    try {
+      run.end();
+    } catch (err) {
+      console.error("[grid-ingester] job end failed: " + errMsg(err));
+    }
+  }
+}
+
+export function startIngester(intervalMs: number = 5 * 60 * 1000): NodeJS.Timeout {
+  void runIngesterOnceGuarded();
   const timer = setInterval(() => {
-    void runIngesterOnce().catch((err) => {
-      console.error("[grid-ingester] run failed: " + errMsg(err));
-    });
+    void runIngesterOnceGuarded();
   }, intervalMs);
   if (typeof timer.unref === "function") timer.unref();
   return timer;
