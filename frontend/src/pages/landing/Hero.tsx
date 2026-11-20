@@ -818,7 +818,7 @@ export function Hero() {
               served Always-Warm on Render with strict fail-closed refusals.
             </p>
             <div className="hero-cta-row">
-              <a href="#probe" className="btn-solid-accent">
+              <a href="/#probe" className="btn-solid-accent" aria-label="Start a probe — explore the live oracle">
                 Start a probe
               </a>
             </div>
