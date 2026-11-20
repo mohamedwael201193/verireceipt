@@ -39,6 +39,26 @@ export function isSafeUpstreamUrl(value: unknown): value is string {
     const authority = value.trim().match(/^[^:]+:\/\/([^/?#]*)/)?.[1] ?? "";
     if (authority.includes("%")) return false;
     if (parsed.hostname.includes("%")) return false;
+    // Triple-slash bypass (J2 R3 M-3): Node's WHATWG parser treats
+    // "https:///evil.com" and "https://///evil.com/" as host evil.com
+    // while the raw-authority regex above captures "" — so a bare
+    // "%"-check passes and the URL renders as a link to evil.com.
+    // The raw authority must therefore be non-empty AND its host part
+    // must equal the parsed hostname (case-insensitive, brackets
+    // stripped for IPv6). A mismatch means the parser normalised
+    // something the raw text did not say (e.g. "evil%2ecom" -> "evil.com"
+    // or extra slashes swallowing the authority) — plain text, never a
+    // link. The port, if any, is the part after the first ":" (or after
+    // the "]" for IPv6) and is not compared: "example.com:8443" is legit.
+    if (authority.length === 0) return false;
+    const rawHost = authority.startsWith("[")
+      ? (authority.match(/^\[[^\]]*\]/)?.[0] ?? "")
+      : (authority.split(":")[0] ?? "");
+    const stripBrackets = (h: string) => h.replace(/^\[|\]$/g, "");
+    if (rawHost.length === 0) return false;
+    if (stripBrackets(rawHost).toLowerCase() !== stripBrackets(parsed.hostname).toLowerCase()) {
+      return false;
+    }
     return true;
   } catch {
     return false;

@@ -269,4 +269,29 @@ describe("upstream URL userinfo / encoding tricks (J2 R2 M-3)", () => {
     expect(isSafeUpstreamUrl("https://example.com/upstream?x=1&y=2")).toBe(true);
     expect(isSafeUpstreamUrl("https://example.com:8443/upstream")).toBe(true);
   });
+
+  it.each([
+    "https:///evil.com",
+    "https://///evil.com/",
+    "https://evil%2ecom/",
+    "https://evil%2Ecom/path",
+    "https:///evil.com/path?x=1",
+  ])("renders %s as plain text, never a link (J2 R3 M-3 triple-slash / encoded host)", (url) => {
+    const { container } = render(<ReceiptCard receipt={receiptWithUrl(url)} />);
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.textContent).toContain(url);
+  });
+
+  it("isSafeUpstreamUrl rejects triple-slash and %-encoded hosts but keeps legit https (J2 R3 M-3)", () => {
+    expect(isSafeUpstreamUrl("https:///evil.com")).toBe(false);
+    expect(isSafeUpstreamUrl("https://///evil.com/")).toBe(false);
+    expect(isSafeUpstreamUrl("https://evil%2ecom/")).toBe(false);
+    expect(isSafeUpstreamUrl("https://evil%2Ecom/")).toBe(false);
+    // Raw authority must equal the parsed hostname: legit https with a
+    // query string or a non-standard port still passes.
+    expect(isSafeUpstreamUrl("https://example.com/upstream?x=1&y=2")).toBe(true);
+    expect(isSafeUpstreamUrl("https://example.com:8443/upstream")).toBe(true);
+    expect(isSafeUpstreamUrl("https://EXAMPLE.com/upstream")).toBe(true);
+  });
 });
