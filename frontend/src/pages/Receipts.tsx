@@ -198,7 +198,14 @@ function readStored(): { entries: StoredReceipt[]; corrupt: boolean } {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return { entries: [], corrupt: true };
     // Invalid entries are dropped, never rendered; the ledger is capped.
-    return { entries: parsed.filter(isValidStoredReceipt).slice(0, LEDGER_CAP), corrupt: false };
+    const entries = parsed.filter(isValidStoredReceipt).slice(0, LEDGER_CAP);
+    // A parseable array that validates to ZERO entries is corrupt, not
+    // empty: a non-empty stored array of invalid entries (e.g. [1,2,3])
+    // must take the same path as unparseable data — corrupt notice + backup
+    // — never a silent rewrite to []. A stored [] is a legitimate empty
+    // ledger and stays non-corrupt.
+    if (parsed.length > 0 && entries.length === 0) return { entries: [], corrupt: true };
+    return { entries, corrupt: false };
   } catch {
     // Unparseable JSON: corrupt, not empty — the caller must not overwrite it.
     return { entries: [], corrupt: true };
@@ -708,8 +715,9 @@ export default function Receipts() {
   }, [health.refetch]);
   const [storedInit] = useState(readStored);
   const [stored, setStored] = useState<StoredReceipt[]>(storedInit.entries);
-  // True when the saved value was unparseable (or not an array): the corrupt
-  // value is left untouched (M6) and a backup copy is kept under BACKUP_KEY.
+  // True when the saved value was unparseable, not an array, or a
+  // non-empty array with zero valid entries: the corrupt value is left
+  // untouched (M6) and a backup copy is kept under BACKUP_KEY.
   const [storedCorrupt, setStoredCorrupt] = useState<boolean>(storedInit.corrupt);
   const [values, setValues] = useState<Record<string, string>>(() => ({
     tx_hash: SAMPLE_TX_HASH,
