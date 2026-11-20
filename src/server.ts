@@ -13,6 +13,7 @@ import { handleFilings } from "./handlers/filings";
 import { handleTvl } from "./handlers/tvl";
 import { handleRoute } from "./handlers/optimalRoute";
 import { handleGridPrice } from "./handlers/gridPrice";
+import { handleValidator } from "./handlers/validator";
 import { ApiError, errorBody } from "./core/errors";
 import { getDb } from "./core/db";
 
@@ -69,6 +70,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/tvl", async (request) => handleTvl(asQuery(request.query)));
   app.get("/v1/route", async (request) => handleRoute(asQuery(request.query)));
   app.get("/v1/grid-price", async (request) => handleGridPrice(asQuery(request.query)));
+  app.get("/v1/validator", async (request) => handleValidator(asQuery(request.query)));
 
   return app;
 }
