@@ -30,8 +30,24 @@ describe("ApiState", () => {
     expect(screen.getByRole("alert")).toBeTruthy();
     expect(screen.getByText("Request failed (502)")).toBeTruthy();
     expect(screen.getByText("no cached price for X")).toBeTruthy();
+    expect(screen.queryByText(/retry after/i)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces retry_after_sec from a 422 ApiError", () => {
+    render(
+      <ApiState
+        loading={false}
+        error={new ApiError("no settlement data yet for this interval", 422, "GRID_NO_DATA", 30)}
+        empty={false}
+        onRetry={() => {}}
+      >
+        <p>child</p>
+      </ApiState>,
+    );
+    expect(screen.getByText("Request failed (422)")).toBeTruthy();
+    expect(screen.getByText("Retry after 30s")).toBeTruthy();
   });
 
   it("shows the empty state with a retry button", () => {

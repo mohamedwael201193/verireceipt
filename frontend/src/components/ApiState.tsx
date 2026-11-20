@@ -78,6 +78,8 @@ export function ApiState({ loading, error, empty, onRetry, children }: ApiStateP
 
   if (error) {
     const status = error instanceof ApiError ? error.status : null;
+    const retryAfter =
+      error instanceof ApiError ? (error.retry_after_sec ?? null) : null;
     return (
       <div style={styles.wrap}>
         <div style={styles.center}>
@@ -86,6 +88,9 @@ export function ApiState({ loading, error, empty, onRetry, children }: ApiStateP
               {status ? `Request failed (${status})` : "Request failed"}
             </div>
             <div style={styles.errorDetail}>{error.message}</div>
+            {retryAfter !== null && (
+              <div style={styles.errorDetail}>Retry after {retryAfter}s</div>
+            )}
           </div>
           <button type="button" style={styles.retryBtn} onClick={onRetry}>
             Retry
