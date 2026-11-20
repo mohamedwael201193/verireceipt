@@ -210,13 +210,14 @@ export const SPRINT_COLUMN_LABELS = [
  * here carries a canned result, cost, or hash.
  *
  * - Item 01 (M13 Treasury Diligence): 4 live checks; APPROVE only if all
- *   four return verified data.
+ *   four return live data with receipts.
  * - Item 02 (M13 Counterparty Check): live tx lookup; REJECT only if the
  *   looked-up tx is actually reverted, CLEAR if confirmed.
  * - Items 03/04 (M12 power gates): live grid LMP for CAISO NP15 and NYISO
- *   Zone J; verdict is VERIFIED when the call returns verified data. No
- *   threshold and no curtailment claim (the design's $65/$85 thresholds
- *   and ERCOT $118.40 figure were fabricated).
+ *   Zone J; verdict is RECEIPTED when the call returns live data with a
+ *   receipt (no SHA-256 recompute happens here, so "VERIFIED" would
+ *   overstate). No threshold and no curtailment claim (the design's
+ *   $65/$85 thresholds and ERCOT $118.40 figure were fabricated).
  * - Item 05 (M13 422 guardrail): live future-interval grid call; the real
  *   422 refusal is the result.
  */

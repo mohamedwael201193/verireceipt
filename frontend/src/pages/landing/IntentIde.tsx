@@ -66,7 +66,7 @@ function TxVisual({ data }: { data: TxResponse }) {
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8F8E8A" }}>
         <span>ARCHIVE RPC QUORUM</span>
         <span style={{ color: "#22C55E" }}>
-          {typeof data.receipt.quorum_votes === "string" ? data.receipt.quorum_votes : "verified"} · #{data.block_number}
+          {typeof data.receipt.quorum_votes === "string" ? data.receipt.quorum_votes : "receipted"} · #{data.block_number}
         </span>
       </div>
       {[
@@ -136,7 +136,7 @@ function TvlVisual({ data, scattered }: { data: TvlResponse; scattered: boolean 
             {data.protocol_or_chain} · {formatUsd(data.tvl_usd)} TVL
           </span>
           <span id="tvl-dock-lbl" style={{ color: "#FF5722" }}>
-            {scattered ? "scattered chain payloads" : "docked · verified portal"}
+            {scattered ? "scattered chain payloads" : "docked · receipted portal"}
           </span>
         </div>
         <div className="tvl-cards-grid">
@@ -188,7 +188,7 @@ function GridVisual({ data }: { data: GridPriceResponse }) {
     <div className="mono" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12, flex: 1, justifyContent: "center" }}>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8F8E8A" }}>
         <span>WHOLESALE LMP · LIVE CACHE ROW</span>
-        <span style={{ color: "#22C55E" }}>verified</span>
+        <span style={{ color: "#22C55E" }}>live grid response</span>
       </div>
       <div style={{ padding: 13, borderRadius: 8, border: "1px solid #FF5722", background: "rgba(255,87,34,0.12)" }}>
         <div style={{ fontSize: 10, color: "#8F8E8A" }}>

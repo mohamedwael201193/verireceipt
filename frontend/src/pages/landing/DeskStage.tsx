@@ -126,8 +126,11 @@ export function DeskStage() {
       const g = outcomes[0];
       if (g.data) {
         const d = g.data as { lmp_usd_per_mwh?: number; node_or_zone?: string; market?: string };
+        // Same rationale as item 01 (see above): no SHA-256 recompute
+        // happens here, so "VERIFIED" would overstate — the live
+        // response arrived with a receipt.
         return {
-          label: "VERIFIED",
+          label: "RECEIPTED",
           cls: "b-ok",
           msg: `Live LMP ${d.node_or_zone ?? ""} $${(d.lmp_usd_per_mwh ?? 0).toFixed(2)}/MWh (${d.market ?? ""}) — live response with receipt, no threshold applied`,
         };
@@ -206,7 +209,7 @@ export function DeskStage() {
         <div>
           <div className="kicker">// desk logs</div>
           <h2 className="sec-h2">
-            Real calls, <span className="it">verified in the open.</span>
+            Real calls, <span className="it">receipted in the open.</span>
           </h2>
         </div>
         <a href="#probe" className="mono" style={{ fontSize: 12, color: "var(--text)" }}>
