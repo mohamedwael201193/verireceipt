@@ -135,4 +135,62 @@ describe("IntentIde — one live call per switch (M1)", () => {
     expect(screen.getByText(/AAPL — 3 filings/)).toBeInTheDocument();
     expect(screen.queryByText(/confirmed · block 15725067/)).toBeNull();
   });
+
+  it("IDE visuals never claim verification (J2 B1)", async () => {
+    // Per-intent bodies: the tx body here carries NO quorum_votes, so
+    // the TxVisual fallback renders ("receipted", not "verified").
+    const TVL_BODY = {
+      protocol_or_chain: "aave-v3",
+      tvl_usd: 12345678901,
+      chain_tvl_usd: 1234567890,
+      as_of: "2026-11-20T00:00:00Z",
+      receipt: RECEIPT,
+    };
+    const GRID_BODY = {
+      lmp_usd_per_mwh: 32.5,
+      node_or_zone: "TH_NP15_GEN-APND",
+      market: "CAISO",
+      interval_start: "2026-11-20T05:00:00Z",
+      currency: "USD",
+      receipt: RECEIPT,
+    };
+    const TX_NO_QUORUM = { ...TX_BODY, receipt: RECEIPT };
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = String(url);
+      const body = u.includes("/v1/filings")
+        ? SEC_BODY
+        : u.includes("/v1/tvl")
+          ? TVL_BODY
+          : u.includes("/v1/grid-price")
+            ? GRID_BODY
+            : TX_NO_QUORUM;
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<IntentIde />);
+
+    // Tx visual: quorum fallback is "receipted", never "verified".
+    await waitFor(() => expect(screen.getByText(/receipted · #15725067/)).toBeInTheDocument(), {
+      timeout: 15000,
+    });
+    expect(screen.queryByText("verified")).toBeNull();
+
+    // TVL visual: docked portal is "receipted".
+    fireEvent.click(screen.getByRole("tab", { name: /tvl-oracle/ }));
+    await waitFor(() => expect(screen.getByText("docked · receipted portal")).toBeInTheDocument(), {
+      timeout: 15000,
+    });
+    expect(screen.queryByText("verified")).toBeNull();
+    expect(screen.queryByText("docked · verified portal")).toBeNull();
+
+    // Grid visual: "live grid response".
+    fireEvent.click(screen.getByRole("tab", { name: /grid-lmp/ }));
+    await waitFor(() => expect(screen.getByText("live grid response")).toBeInTheDocument(), {
+      timeout: 15000,
+    });
+    expect(screen.queryByText("verified")).toBeNull();
+  });
 });
