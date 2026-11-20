@@ -11,6 +11,19 @@ function receiptWith(sha: string): Receipt {
   };
 }
 
+/**
+ * An ArrayBuffer holding exactly the UTF-8 bytes of `text`, as
+ * `await res.arrayBuffer()` returns. NOT `encode(text).buffer` directly:
+ * a TextEncoder may hand back a view into a pooled, larger buffer, so
+ * the raw .buffer would hash trailing pool bytes instead of the text.
+ * Slicing to the view's exact byte range keeps the bytes exact while
+ * still exercising the cross-realm ArrayBuffer path.
+ */
+function arrayBufferOf(text: string): ArrayBuffer {
+  const bytes = new TextEncoder().encode(text);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+
 describe("sha256Hex", () => {
   it("matches the known SHA-256 vector for 'abc'", async () => {
     await expect(sha256Hex("abc")).resolves.toBe(
@@ -28,6 +41,15 @@ describe("sha256Hex", () => {
     const fromString = await sha256Hex("abc");
     const fromBytes = await sha256Hex(new TextEncoder().encode("abc"));
     expect(fromBytes).toBe(fromString);
+  });
+
+  it("hashes an ArrayBuffer identically to its string form (J2 R3)", async () => {
+    const fromString = await sha256Hex("abc");
+    const fromBuffer = await sha256Hex(arrayBufferOf("abc"));
+    expect(fromBuffer).toBe(fromString);
+    expect(fromBuffer).toBe(
+      "0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    );
   });
 });
 
@@ -60,6 +82,26 @@ describe("verifyReceipt", () => {
     expect(result.computedSha).not.toBe(
       "0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
     );
+  });
+
+  it("verifies an ArrayBuffer body instead of false-negativing on it (J2 R3)", async () => {
+    const result = await verifyReceipt(
+      receiptWith("0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
+      arrayBufferOf("abc"),
+    );
+    expect(result.verified).toBe(true);
+    expect(result.computedSha).toBe(
+      "0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    );
+  });
+
+  it("fails (not throws) when an ArrayBuffer body does not match the digest", async () => {
+    const result = await verifyReceipt(
+      receiptWith("0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
+      arrayBufferOf("different body"),
+    );
+    expect(result.verified).toBe(false);
+    expect(result.computedSha).not.toBe("");
   });
 
   it("fails when the recorded digest is empty", async () => {

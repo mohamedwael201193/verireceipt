@@ -24,12 +24,31 @@ export interface ReceiptVerification {
   computedSha: string;
 }
 
-function toBytes(data: string | Uint8Array): Uint8Array {
+/**
+ * Cross-realm ArrayBuffer check: `instanceof ArrayBuffer` fails for a
+ * buffer from another realm (jsdom's TextEncoder / a Response's
+ * arrayBuffer in some environments), exactly the trap the Uint8Array
+ * check already avoids with ArrayBuffer.isView. Object.prototype.toString
+ * reads the object's internal class tag instead of its prototype chain.
+ */
+function isArrayBuffer(value: unknown): value is ArrayBuffer {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    Object.prototype.toString.call(value) === "[object ArrayBuffer]"
+  );
+}
+
+function toBytes(data: string | Uint8Array | ArrayBuffer): Uint8Array {
   if (typeof data === "string") return new TextEncoder().encode(data);
+  // ArrayBuffer bodies (e.g. `await res.arrayBuffer()`) are a natural
+  // way to hand a fetched upstream body to verification (J2 R3) — accept
+  // them instead of silently failing the verification.
+  if (isArrayBuffer(data)) return new Uint8Array(data);
   // ArrayBuffer.isView (not instanceof) — jsdom TextEncoder returns a
   // Uint8Array from another realm, which fails instanceof.
   if (ArrayBuffer.isView(data)) return data as Uint8Array;
-  throw new TypeError("sha256Hex expects a string or Uint8Array");
+  throw new TypeError("sha256Hex expects a string, Uint8Array or ArrayBuffer");
 }
 
 function normalizeHash(hash: string): string {
@@ -37,7 +56,7 @@ function normalizeHash(hash: string): string {
 }
 
 /** SHA-256 of `data`, returned 0x-prefixed to match receipt digests. */
-export async function sha256Hex(data: string | Uint8Array): Promise<string> {
+export async function sha256Hex(data: string | Uint8Array | ArrayBuffer): Promise<string> {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) {
     throw new Error(
@@ -57,15 +76,15 @@ export async function sha256Hex(data: string | Uint8Array): Promise<string> {
  * case). Returns `{ verified, computedSha }`.
  *
  * Malformed input (null / non-object receipt, non-string recorded hash,
- * non-string / non-Uint8Array body) returns `{ verified: false,
- * computedSha: "" }` instead of throwing — a bad receipt is a failed
- * verification, not a crash. The ONE exception is WebCrypto being
- * unavailable: sha256Hex still throws, because returning a verdict
- * without a real hash would be a fake result.
+ * non-string / non-Uint8Array / non-ArrayBuffer body) returns
+ * `{ verified: false, computedSha: "" }` instead of throwing — a bad
+ * receipt is a failed verification, not a crash. The ONE exception is
+ * WebCrypto being unavailable: sha256Hex still throws, because returning
+ * a verdict without a real hash would be a fake result.
  */
 export async function verifyReceipt(
   receipt: Receipt | null | undefined,
-  rawBody: string | Uint8Array | null | undefined,
+  rawBody: string | Uint8Array | ArrayBuffer | null | undefined,
 ): Promise<ReceiptVerification> {
   // Check WebCrypto FIRST: unavailable crypto must throw even for
   // malformed input — never a silent verdict without a real hash.
@@ -79,7 +98,9 @@ export async function verifyReceipt(
     receipt === undefined ||
     typeof receipt !== "object" ||
     typeof receipt.raw_response_sha256 !== "string" ||
-    (typeof rawBody !== "string" && !ArrayBuffer.isView(rawBody))
+    (typeof rawBody !== "string" &&
+      !ArrayBuffer.isView(rawBody) &&
+      !isArrayBuffer(rawBody))
   ) {
     return { verified: false, computedSha: "" };
   }
