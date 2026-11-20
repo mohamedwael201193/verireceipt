@@ -12,10 +12,8 @@
 // - Doc snippets use the real GET endpoints and the real miner.yaml
 //   (id 774921, slug verireceipt); grid is /v1/grid-price (§8 A1/A2).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx } from "../../lib/api";
-import { useLiveQuery } from "../../lib/hooks";
-import type { HealthResponse } from "../../lib/types";
 import { DOC_SNIPPETS, DOC_TABS, type DocTabId } from "./docs";
 import type { LiveReceipt, ScopeSamples, ScopeSeriesKey } from "./types";
 import {
@@ -32,9 +30,6 @@ import {
 interface StatusDocsProps {
   /** Whether the status view is the visible tab (canvas redraws on activation). */
   active: boolean;
-  health: HealthResponse | null;
-  healthError: Error | null;
-  lastHealthCheck: string | null;
   receipts: LiveReceipt[];
   samples: ScopeSamples;
   onRecord: (receipt: LiveReceipt) => void;
@@ -52,7 +47,7 @@ interface EndpointDef {
   intent: string;
   query: string;
   requestUrl: string;
-  fetcher: () => Promise<unknown>;
+  fetcher: (signal?: AbortSignal) => Promise<unknown>;
 }
 
 /** Sample inputs are valid, live-verified inputs (see presets.ts). */
@@ -67,7 +62,7 @@ function endpointDefs(): EndpointDef[] {
       intent: "ONCHAIN_TX_LOOKUP_GENERAL",
       query: `${CONFIRMED_TX.slice(0, 8)}…${CONFIRMED_TX.slice(-4)} (ethereum)`,
       requestUrl: directUrl("/v1/tx", { tx_hash: CONFIRMED_TX, chain: "ethereum" }),
-      fetcher: () => getTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" }),
+      fetcher: (signal) => getTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" }, signal),
     },
     {
       key: "filings",
@@ -77,7 +72,7 @@ function endpointDefs(): EndpointDef[] {
       intent: "REGULATORY_FILING_MONITOR_GENERAL",
       query: "AAPL · last 12 months",
       requestUrl: directUrl("/v1/filings", { entity: "AAPL", period: "last 12 months" }),
-      fetcher: () => getFilings({ entity: "AAPL", period: "last 12 months" }),
+      fetcher: (signal) => getFilings({ entity: "AAPL", period: "last 12 months" }, signal),
     },
     {
       key: "tvl",
@@ -87,7 +82,7 @@ function endpointDefs(): EndpointDef[] {
       intent: "TVL_LOOKUP_GENERAL",
       query: "protocol=aave-v3",
       requestUrl: directUrl("/v1/tvl", { protocol: "aave-v3" }),
-      fetcher: () => getTvl({ protocol: "aave-v3" }),
+      fetcher: (signal) => getTvl({ protocol: "aave-v3" }, signal),
     },
     {
       key: "route",
@@ -97,7 +92,7 @@ function endpointDefs(): EndpointDef[] {
       intent: "OPTIMAL_EXECUTION_ROUTE_GENERAL",
       query: "pair=ETH/USDC",
       requestUrl: directUrl("/v1/route", { pair: "ETH/USDC" }),
-      fetcher: () => getRoute({ pair: "ETH/USDC" }),
+      fetcher: (signal) => getRoute({ pair: "ETH/USDC" }, signal),
     },
     {
       key: "grid",
@@ -107,7 +102,7 @@ function endpointDefs(): EndpointDef[] {
       intent: "GRID_POWER_PRICE_GENERAL",
       query: `TH_NP15_GEN-APND · ${gridInterval}`,
       requestUrl: directUrl("/v1/grid-price", { node_or_zone: "TH_NP15_GEN-APND", interval_start: gridInterval }),
-      fetcher: () => getGridPrice({ node_or_zone: "TH_NP15_GEN-APND", interval_start: gridInterval }),
+      fetcher: (signal) => getGridPrice({ node_or_zone: "TH_NP15_GEN-APND", interval_start: gridInterval }, signal),
     },
     {
       key: "health",
@@ -117,7 +112,7 @@ function endpointDefs(): EndpointDef[] {
       intent: "HEALTH",
       query: "GET /health",
       requestUrl: directUrl("/health", {}),
-      fetcher: () => getHealth(),
+      fetcher: (signal) => getHealth(signal),
     },
     {
       key: "mcp",
@@ -130,8 +125,12 @@ function endpointDefs(): EndpointDef[] {
       // The miner serves no GET /api/mcp route yet (server.ts has no MCP
       // route); this probe reports the live status honestly instead of
       // assuming the endpoint exists.
-      fetcher: async () => {
-        const res = await fetch("/api/api/mcp", { headers: { Accept: "application/json" } });
+      // 15s timeout + abort: the raw fetch previously had neither, so a
+      // hung MCP probe could block the row forever.
+      fetcher: async (signal) => {
+        const timeout = AbortSignal.timeout(15_000);
+        const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+        const res = await fetch("/api/api/mcp", { headers: { Accept: "application/json" }, signal: combined });
         const text = await res.text();
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 120)}`);
         return JSON.parse(text) as unknown;
@@ -145,6 +144,13 @@ interface RowProbe {
   status: number;
 }
 
+/**
+ * One endpoint row. Probes ON DEMAND (Ping button) — never on mount:
+ * mounting this view used to fire 7 auto-probes (including the slow
+ * /v1/route) on every Dashboard load. The fetcher receives the ping's
+ * AbortSignal; unmount aborts the in-flight probe so it can never call
+ * onRecord/setState afterwards.
+ */
 function HealthRow({
   def,
   onRecord,
@@ -156,28 +162,44 @@ function HealthRow({
 }) {
   const [last, setLast] = useState<RowProbe | null>(null);
   const [latencies, setLatencies] = useState<number[]>([]);
-  const defRef = useRef(def);
-  defRef.current = def;
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const controllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
 
-  const fetcher = useCallback(async () => {
-    const d = defRef.current;
-    const outcome = await probe(d.fetcher);
-    const receipt = toLiveReceipt(d.intent, d.query, d.requestUrl, outcome);
-    onRecord(receipt);
-    setLast({ latencyMs: outcome.latencyMs, status: receipt.status });
-    setLatencies((prev) => [...prev, outcome.latencyMs].slice(-20));
-    if (!outcome.ok) {
-      throw new Error(`HTTP ${receipt.status || "—"}: ${receipt.errorMessage ?? "request failed"}`);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      controllerRef.current?.abort();
+    };
+  }, []);
+
+  async function ping() {
+    if (loading) return;
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    setLoading(true);
+    setError(null);
+    try {
+      const outcome = await probe((signal) => def.fetcher(signal), controller.signal);
+      if (!mountedRef.current || controller.signal.aborted) return;
+      const receipt = toLiveReceipt(def.intent, def.query, def.requestUrl, outcome);
+      onRecord(receipt);
+      setLast({ latencyMs: outcome.latencyMs, status: receipt.status });
+      setLatencies((prev) => [...prev, outcome.latencyMs].slice(-20));
+      if (!outcome.ok) {
+        setError(`HTTP ${receipt.status || "—"}: ${receipt.errorMessage ?? "request failed"}`);
+      }
+    } finally {
+      if (mountedRef.current) setLoading(false);
+      if (controllerRef.current === controller) controllerRef.current = null;
     }
-    return outcome.body;
-  }, [onRecord]);
-
-  const q = useLiveQuery<unknown>(`health-${def.key}`, fetcher);
+  }
 
   const p50 = median(latencies);
   const stateBadge = (() => {
-    if (q.loading && !last) return { cls: "b-dim", label: "PROBING…" };
-    if (q.error) return { cls: "b-err", label: last?.status ? `HTTP ${last.status}` : "DOWN" };
+    if (loading && !last) return { cls: "b-dim", label: "PROBING…" };
+    if (error) return { cls: "b-err", label: last?.status ? `HTTP ${last.status}` : "DOWN" };
     if (last?.status === 200) return { cls: "b-ok", label: "UP" };
     if (last) return { cls: "b-warn", label: `HTTP ${last.status}` };
     return { cls: "b-dim", label: "NOT PROBED" };
@@ -205,12 +227,12 @@ function HealthRow({
           className="btn-ghost"
           style={{ padding: "4px 10px", fontSize: 10.5 }}
           onClick={() => {
-            q.refetch();
+            void ping();
             showToast(`Probing ${def.path}…`);
           }}
-          disabled={q.loading}
+          disabled={loading}
         >
-          {q.loading ? "…" : "Ping"}
+          {loading ? "…" : "Ping"}
         </button>
       </td>
     </tr>
@@ -226,9 +248,6 @@ const SCOPE_SERIES: Array<{ key: ScopeSeriesKey; col: string; label: string }> =
 
 export default function StatusDocs({
   active,
-  health,
-  healthError,
-  lastHealthCheck,
   receipts,
   samples,
   onRecord,
@@ -239,6 +258,21 @@ export default function StatusDocs({
   const scopeRef = useRef<HTMLCanvasElement | null>(null);
   const samplesRef = useRef(samples);
   samplesRef.current = samples;
+
+  // /health state comes from the session ledger (the last on-demand
+  // /health Ping or B02 probe) — this page runs no health poller of its
+  // own; the shell's health pill already polls every 30s.
+  const lastHealth = useMemo(() => {
+    const r = receipts.find((x) => x.intent === "HEALTH") ?? null;
+    if (!r) return null;
+    const body = r.body as { status?: unknown; uptime_s?: unknown } | null;
+    return {
+      httpStatus: r.status,
+      ok: r.status === 200 && (body === null || body === undefined || body.status === "ok"),
+      uptime_s: typeof body?.uptime_s === "number" ? body.uptime_s : null,
+      ts: r.ts,
+    };
+  }, [receipts]);
 
   const answeredEndpoints = useMemo(() => {
     const intents = new Set(
@@ -332,8 +366,9 @@ export default function StatusDocs({
           <div className="kpi-lbl">Compute Runtime</div>
           <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 3 }}>Render Virginia · Node 20</div>
           <div className="kpi-sub">
-            {health ? `/health ${health.status} · uptime ${health.uptime_s}s` : healthError ? `/health error: ${healthError.message}` : "awaiting first /health poll…"}
-            {lastHealthCheck ? ` · checked ${lastHealthCheck}` : ""}
+            {lastHealth
+              ? `/health ${lastHealth.ok ? "ok" : `HTTP ${lastHealth.httpStatus}`}${lastHealth.uptime_s !== null ? ` · uptime ${lastHealth.uptime_s}s` : ""} · probed ${relativeAge(lastHealth.ts)}`
+              : "not probed yet — use the /health Ping row below"}
           </div>
         </div>
         <div className="card" style={{ padding: "15px 17px" }}>
@@ -379,7 +414,7 @@ export default function StatusDocs({
       <div className="card" style={{ overflow: "hidden", marginBottom: 22 }}>
         <div style={{ padding: "13px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span className="mono" style={{ fontSize: 11.5, fontWeight: 500 }}>// live endpoint health &amp; probe state</span>
-          <span className="mono" style={{ fontSize: 10.5, color: "var(--muted)" }}>auto-probed on open · click Ping to re-probe</span>
+          <span className="mono" style={{ fontSize: 10.5, color: "var(--muted)" }}>probed on demand · click Ping to probe</span>
         </div>
         <div className="tbl-wrap">
           <table className="hl-tbl">
