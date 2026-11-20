@@ -44,14 +44,23 @@ const CHIP_LABELS = [
 ];
 
 interface DeferredResponse {
-  promise: Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>;
+  promise: Promise<Response>;
   resolve: (body: unknown) => void;
 }
 
 function deferredResponse(): DeferredResponse {
   let resolve!: (body: unknown) => void;
-  const promise = new Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>((r) => {
-    resolve = (body: unknown) => r({ ok: true, status: 200, json: async () => body });
+  // Real Response: lib/api.ts reads the body via res.text() — a
+  // hand-rolled {ok, status, json} mock has no text() and fails with
+  // INVALID_RESPONSE (see IntentIde.test.tsx).
+  const promise = new Promise<Response>((r) => {
+    resolve = (body: unknown) =>
+      r(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
   });
   return { promise, resolve };
 }

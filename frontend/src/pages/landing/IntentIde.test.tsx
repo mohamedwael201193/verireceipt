@@ -41,9 +41,16 @@ const SEC_BODY = {
 };
 
 function mockFetch() {
+  // Real Response objects (as datalayer api.test.ts does): lib/api.ts
+  // reads the body via res.text(), so a hand-rolled {ok, status, json}
+  // mock has no text() — text() throws, the client swallows it to
+  // body = null, and assertValidBody throws INVALID_RESPONSE.
   const fetchMock = vi.fn(async (url: string) => {
     const body = String(url).includes("/v1/filings") ? SEC_BODY : TX_BODY;
-    return { ok: true, status: 200, json: async () => body };
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
@@ -58,33 +65,36 @@ describe("IntentIde — one live call per switch (M1)", () => {
     vi.restoreAllMocks();
   });
 
+  // M4: generous waits — the 1 s waitFor defaults flaked twice under
+  // CPU load (slow chunk transform), so each wait gets 15 s and the
+  // test itself 60 s. No production-code change.
   it("fires exactly one fetch on mount, per mode switch, per re-run, and per tab switch", async () => {
     const fetchMock = mockFetch();
     render(<IntentIde />);
 
     // Mount: one call for the default (tx) tab.
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1), { timeout: 15000 });
 
     // Mode switch to the 422 trap: exactly one more call, to the trap params.
     fireEvent.click(screen.getByRole("button", { name: "Test 422 trap" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), { timeout: 15000 });
     expect(String(fetchMock.mock.calls[1][0])).toContain("tx_hash=0x0000000000000000000000000000000000000000000000000000000000000000");
 
     // Mode switch back to 200 OK: exactly one more call.
     fireEvent.click(screen.getByRole("button", { name: "Run 200 OK" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3), { timeout: 15000 });
 
     // Re-run in the same mode: still exactly one call (not zero, not two).
     fireEvent.click(screen.getByRole("button", { name: "Run 200 OK" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4), { timeout: 15000 });
 
     // Tab switch: exactly one call for the new tab. (The accessible name
     // has a space — "sec-filing .ts" — because the extension is a
     // separate span; match on the file part.)
     fireEvent.click(screen.getByRole("tab", { name: /sec-filing/ }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5), { timeout: 15000 });
     expect(String(fetchMock.mock.calls[4][0])).toContain("/v1/filings");
-  });
+  }, 60000);
 
   it("ignores a stale response that resolves after a newer run", async () => {
     // Tabs are not disabled while loading, so two runs CAN overlap here:
@@ -94,8 +104,15 @@ describe("IntentIde — one live call per switch (M1)", () => {
     const pending: { resolve: (body: unknown) => void }[] = [];
     const fetchMock = vi.fn((url: string) => {
       let resolve!: (body: unknown) => void;
-      const promise = new Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>((r) => {
-        resolve = (body: unknown) => r({ ok: true, status: 200, json: async () => body });
+      // Real Response: lib/api.ts reads the body via res.text().
+      const promise = new Promise<Response>((r) => {
+        resolve = (body: unknown) =>
+          r(
+            new Response(JSON.stringify(body), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
       });
       pending.push({ resolve });
       void url;
