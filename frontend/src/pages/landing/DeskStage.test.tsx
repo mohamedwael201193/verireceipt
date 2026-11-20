@@ -42,11 +42,15 @@ function mockGridFetch(body: unknown) {
   return fetchMock;
 }
 
-async function runItem(title: RegExp, body: unknown) {
-  mockGridFetch(body);
+function selectAndPlay(title: RegExp) {
   render(<DeskStage />);
   fireEvent.click(screen.getByRole("button", { name: title }));
   fireEvent.click(screen.getByRole("button", { name: /Run .* live checks/ }));
+}
+
+async function runItem(title: RegExp, body: unknown) {
+  mockGridFetch(body);
+  selectAndPlay(title);
   await waitFor(() => expect(screen.getByText("RECEIPTED")).toBeInTheDocument(), {
     timeout: 15000,
   });
@@ -70,5 +74,46 @@ describe("DeskStage — no VERIFIED verdict for grid items (J2 B1)", () => {
     await runItem(/NYISO Zone J/, GRID_NYISO_BODY);
     expect(screen.queryByText("VERIFIED")).toBeNull();
     expect(screen.getByText(/receipted in the open\./)).toBeInTheDocument();
+  });
+});
+
+describe("DeskStage — stream rows name the real failure (J2 minor 3)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("a 500 labels the row 'HTTP 500', never 422", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(JSON.stringify({ error: "upstream boom" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+    selectAndPlay(/CAISO NP15/);
+    // The sig cell reads "<ms> · HTTP 500" (the outcome cell also
+    // starts "HTTP 500 …", so match the sig's "·" prefix specifically).
+    await waitFor(() => expect(screen.getByText(/· HTTP 500/)).toBeInTheDocument(), {
+      timeout: 15000,
+    });
+    expect(screen.queryByText(/422/)).toBeNull();
+    expect(screen.getByText("CHECK FAILED")).toBeInTheDocument();
+  });
+
+  it("a network failure labels the row 'network', never 422", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      }),
+    );
+    selectAndPlay(/CAISO NP15/);
+    await waitFor(() => expect(screen.getByText(/· network/)).toBeInTheDocument(), {
+      timeout: 15000,
+    });
+    expect(screen.queryByText(/422/)).toBeNull();
   });
 });

@@ -61,6 +61,20 @@ interface Verdict {
   msg: string;
 }
 
+/**
+ * Stream-row sig for a failed call: it must name the REAL failure. The
+ * old code labelled every failure "unbilled (422)", so a 45 s timeout
+ * rendered as "Request timed out after 45s (TIMEOUT) · unbilled (422)"
+ * — a timeout is not a 422. Only a real 422 is unbilled.
+ */
+function sigFor(err: ApiError): string {
+  if (err.code === "TIMEOUT") return "timeout";
+  if (err.code === "NETWORK_ERROR") return "network";
+  if (err.status === 422) return "unbilled (422)";
+  if (err.status) return `HTTP ${err.status}`;
+  return "failed";
+}
+
 export function DeskStage() {
   const [cur, setCur] = useState(0);
   const [phase, setPhase] = useState<"cover" | "running" | "done">("cover");
@@ -189,7 +203,7 @@ export function DeskStage() {
             intent: INTENTS.find((i) => i.key === key)?.name ?? key,
             ms,
             out: `${apiErr.status ? `HTTP ${apiErr.status} ` : ""}${errorMessage(apiErr)}`,
-            sig: "unbilled (422)",
+            sig: sigFor(apiErr),
             ok: false,
           },
         ]);
