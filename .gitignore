@@ -7,5 +7,6 @@ dist-check/
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+data/
 .DS_Store
 coverage/

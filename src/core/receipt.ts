@@ -32,10 +32,18 @@ export function makeReceipt(
   quorumVotes: string,
 ): Receipt {
   const receipt_id = newReceiptId();
-  const baseUrl = (process.env.PUBLIC_BASE_URL || "https://verireceipt.onrender.com").replace(
-    /\/+$/,
-    "",
-  );
+  // Validate PUBLIC_BASE_URL: an unparseable base falls back to the default,
+  // and a valid base contributes only its origin (any path is stripped, so
+  // e.g. "https://example.com/api" cannot produce a likely-404 audit path).
+  // Empty string still means "use the default".
+  const DEFAULT_BASE_URL = "https://verireceipt.onrender.com";
+  const rawBase = (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "") || DEFAULT_BASE_URL;
+  let baseUrl: string;
+  try {
+    baseUrl = new URL(rawBase).origin;
+  } catch {
+    baseUrl = DEFAULT_BASE_URL;
+  }
   return {
     receipt_id,
     intent,
@@ -53,6 +61,12 @@ export function envelope(
   receipt: Receipt,
   meta: { answer: string; verdict: string; confidence: number; source: string },
 ): Record<string, unknown> {
+  const RESERVED = ["answer", "verdict", "confidence", "source", "checked_at", "receipt"];
+  for (const key of RESERVED) {
+    if (Object.prototype.hasOwnProperty.call(fields, key)) {
+      throw new Error(`envelope field collides with reserved key: ${key}`);
+    }
+  }
   return {
     ...fields,
     answer: meta.answer,

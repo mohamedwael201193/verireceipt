@@ -28,15 +28,19 @@ export function upstreamUnavailable(code: string, message: string): ApiError {
 }
 
 function errorNameFor(err: ApiError): string {
-  if (err.status === 400) return "invalid_params";
-  if (err.status === 422) return "unverifiable_input";
-  if (err.status === 502) return "upstream_unavailable";
-  // Fallback: snake_case of the code (e.g. RATE_LIMITED -> rate_limited).
-  return err.code
+  // Derive the `error` label from the code (snake_case), not the status:
+  // e.g. 400/RATE_LIMITED must be "rate_limited", not "invalid_params".
+  // The three status names survive only as fallbacks when the code is empty.
+  const fromCode = err.code
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .replace(/[^A-Za-z0-9]+/g, "_")
     .toLowerCase()
     .replace(/^_+|_+$/g, "");
+  if (fromCode) return fromCode;
+  if (err.status === 400) return "invalid_params";
+  if (err.status === 422) return "unverifiable_input";
+  if (err.status === 502) return "upstream_unavailable";
+  return "upstream_unavailable";
 }
 
 export function errorBody(err: unknown): {

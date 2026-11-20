@@ -82,7 +82,7 @@ export class CircuitBreaker {
     const now = Date.now();
     let state = this.states.get(key);
     if (!state) {
-      state = { failures: 0, openedAt: null };
+      state = { failures: 0, openedAt: null, halfOpenTrial: false };
       this.states.set(key, state);
     }
     if (state.openedAt !== null) {
@@ -93,19 +93,37 @@ export class CircuitBreaker {
           `circuit open for ${key}; retry after cooldown`,
         );
       }
-      // Cooldown elapsed: half-open trial — reset and allow one attempt.
-      state.failures = 0;
-      state.openedAt = null;
+      // Cooldown elapsed: half-open. Exactly ONE caller becomes the trial;
+      // the flag is set synchronously before any await, so concurrent
+      // callers see it and get CIRCUIT_OPEN instead of running as trials.
+      // The breaker is NOT reset here: a failed trial re-opens at once
+      // (openedAt = now) instead of counting as 1/threshold.
+      if (state.halfOpenTrial) {
+        throw new ApiError(
+          502,
+          "CIRCUIT_OPEN",
+          `circuit half-open trial in flight for ${key}; retry after cooldown`,
+        );
+      }
+      state.halfOpenTrial = true;
     }
     try {
       const result = await fn();
       state.failures = 0;
       state.openedAt = null;
+      state.halfOpenTrial = false;
       return result;
     } catch (err) {
-      state.failures += 1;
-      if (state.failures >= this.threshold) {
+      if (state.halfOpenTrial) {
+        // Trial failed: re-open immediately, do not count toward threshold.
+        state.halfOpenTrial = false;
+        state.failures = 0;
         state.openedAt = Date.now();
+      } else {
+        state.failures += 1;
+        if (state.failures >= this.threshold) {
+          state.openedAt = Date.now();
+        }
       }
       throw err;
     }
