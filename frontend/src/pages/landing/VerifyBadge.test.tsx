@@ -5,7 +5,9 @@
 // appears only on a real byte-exact match.
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../../lib/api";
 import { VerifyBadge } from "./VerifyBadge";
+import { fetchAndVerify } from "./verify";
 
 const RECORDED_DIGEST = "b".repeat(64);
 
@@ -52,5 +54,46 @@ describe("VerifyBadge — neutral steady state (J1)", () => {
     // …but the recorded digest and the truthful explanation are still shown.
     expect(screen.getByText(RECORDED_DIGEST)).toBeInTheDocument();
     expect(screen.getByText(/not expected to be equal/)).toBeInTheDocument();
+  });
+
+  it("budgets 45s for cold starts — still pending at 20s, TIMEOUT at 45s (J2 minor 2)", async () => {
+    // The old 20 s budget timed the badge out on every cold start (J2
+    // measured live cold starts of 25–56 s) while the 45 s data path
+    // beside it loaded fine. A fetch that hangs until its signal aborts
+    // must stay pending past 20 s and fail only at 45 s.
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn((_url: string, opts?: { signal?: AbortSignal }) => {
+        return new Promise<never>((_resolve, reject) => {
+          opts?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("The operation was aborted.", "AbortError")),
+            { once: true },
+          );
+        });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      let settled = false;
+      let failure: unknown = null;
+      const p = fetchAndVerify("/api/v1/tx?tx_hash=0x00&chain=ethereum").then(
+        () => {
+          settled = true;
+        },
+        (e) => {
+          settled = true;
+          failure = e;
+        },
+      );
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(25_000);
+      await p;
+      expect(settled).toBe(true);
+      expect(failure).toBeInstanceOf(ApiError);
+      expect((failure as ApiError).code).toBe("TIMEOUT");
+      expect((failure as ApiError).message).toContain("45s");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

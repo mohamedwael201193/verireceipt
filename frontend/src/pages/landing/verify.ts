@@ -41,7 +41,11 @@ export interface VerifiedFetch<T> {
   verify: VerifyState;
 }
 
-const REQUEST_TIMEOUT_MS = 20_000;
+// Same 45 s budget as the data path (lib/api.ts): cold starts on the
+// free tier are documented at 25–56 s (J2 measured 25 s, 34 s, 39–42 s,
+// 56 s), so the old 20 s budget made the badge time out on every cold
+// start while the IDE data beside it loaded fine.
+const REQUEST_TIMEOUT_MS = 45_000;
 
 /**
  * Fetch a same-origin /api URL as raw text, parse it, and verify the
