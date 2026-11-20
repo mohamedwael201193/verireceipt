@@ -347,7 +347,7 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
 
           <div className="card" style={{ overflow: "hidden" }}>
             <div style={{ padding: "13px 16px", borderBottom: "1px solid var(--border)", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <span className="mono" style={{ fontSize: 11.5, color: "var(--text)", fontWeight: 500 }}>// settled proofs for this run (click row to inspect &amp; verify SHA-256)</span>
+              <span className="mono" style={{ fontSize: 11.5, color: "var(--text)", fontWeight: 500 }}>// settled proofs for this run (click row to inspect)</span>
               <span className="mono" style={{ fontSize: 10.5, color: "var(--muted)" }}>live calls · receipts + refusals</span>
             </div>
             <div className="tbl-wrap">

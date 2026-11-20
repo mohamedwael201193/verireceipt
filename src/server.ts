@@ -15,6 +15,8 @@ import { handleRoute } from "./handlers/optimalRoute";
 import { handleGridPrice } from "./handlers/gridPrice";
 import { ApiError, errorBody } from "./core/errors";
 import { getDb } from "./core/db";
+import { verifyReceipt, isHash } from "./desk/verify";
+import { handleMcpRequest } from "./desk/mcp";
 
 const startedAtMs = Date.now();
 
@@ -69,6 +71,51 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/tvl", async (request) => handleTvl(asQuery(request.query)));
   app.get("/v1/route", async (request) => handleRoute(asQuery(request.query)));
   app.get("/v1/grid-price", async (request) => handleGridPrice(asQuery(request.query)));
+
+  // Desk receipt verification (src/desk/verify.ts): the signal (answer)
+  // and, when the ask recorded one, the delivery (payment). signal_hash
+  // and receipt_hash are different hashes — never reuse one for the
+  // other. A delivery lookup before the epoch closes returns status
+  // "pending", never a broken 404 link.
+  app.get("/api/desk/verify", async (request, reply) => {
+    const query = asQuery(request.query);
+    const signalHash = query["signal_hash"];
+    if (typeof signalHash !== "string" || !isHash(signalHash)) {
+      return reply.status(400).send({
+        error: "signal_hash query param must be 0x + 64 hex characters",
+      });
+    }
+    const receiptHash = query["receipt_hash"];
+    if (
+      receiptHash !== undefined &&
+      (typeof receiptHash !== "string" || !isHash(receiptHash))
+    ) {
+      return reply.status(400).send({
+        error: "receipt_hash query param must be 0x + 64 hex characters",
+      });
+    }
+    const epochRaw = query["epoch"];
+    let epoch: number | null = null;
+    if (epochRaw !== undefined) {
+      // Strict digits-only: Number() would accept "" as 0, "0x18" as 24
+      // and "1e3" as 1000 — all of them must be refused with 400.
+      if (!/^\d+$/.test(epochRaw)) {
+        return reply.status(400).send({
+          error: "epoch query param must be a non-negative integer (digits only)",
+        });
+      }
+      epoch = Number(epochRaw);
+    }
+    return verifyReceipt({
+      signal_hash: signalHash,
+      receipt_hash: receiptHash ?? null,
+      epoch,
+    });
+  });
+
+  // Desk MCP surface (src/desk/mcp.ts): keyless Streamable HTTP,
+  // JSON-RPC 2.0. Tools: verify_receipt (more register in mcp.ts).
+  app.post("/api/mcp", async (request) => handleMcpRequest(request.body));
 
   return app;
 }

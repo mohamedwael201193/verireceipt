@@ -66,28 +66,65 @@ services outside the judge's control. The contract is:
 - A 502 is a fail-closed refusal, not a wrong answer: the request can
   simply be retried.
 
-## 4. 30-second receipt recomputation
+## 4. Receipt recomputation — per intent (no single re-curl works)
 
 Every answer is receipted: `receipt.raw_response_sha256` is the SHA-256 of
-the raw upstream response the answer was derived from.
+the exact bytes the answer was derived from at fetch time. There is NO
+one procedure that re-checks every intent — each digest covers different
+bytes, and a plain `curl <receipt.upstream_url> | sha256sum` is the WRONG
+check for most of them (it hashes the wrong bytes and a mismatch proves
+nothing about the receipt). Use the procedure for the intent:
 
+- **tx — POST replay.** The digest covers the POST
+  `eth_getTransactionReceipt` response text, not a GET of the RPC URL
+  (a GET of an RPC URL can never return the POST response bytes):
+  ```bash
+  curl -s -X POST -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"eth_getTransactionReceipt","params":["<tx_hash>"]}' \
+    "<receipt.upstream_url>" | sha256sum
+  # Compare with receipt.raw_response_sha256.
+  ```
+- **grid — canonical rebuild, no fetch.** The digest covers
+  `JSON.stringify({node_or_zone, interval_start, lmp_usd_per_mwh,
+  market})` built from the answer fields. The CAISO zip bytes were
+  never hashed, so fetching the zip can never match:
+  ```bash
+  printf '%s' '{"node_or_zone":"<node>","interval_start":"<interval>","lmp_usd_per_mwh":<lmp>,"market":"<market>"}' | sha256sum
+  # Compare with receipt.raw_response_sha256 (no trailing newline).
+  ```
+- **tvl / filings — stored bytes only.** The digest covers the exact
+  upstream body as fetched at answer time. DeFiLlama / SEC EDGAR
+  return fresh data on every fetch, so a live re-fetch can never
+  reproduce the fetch-time bytes: a re-fetch mismatch proves nothing
+  about the receipt, and neither would a match. Verify only via the
+  stored bytes (see below); do NOT re-curl the upstream URL.
+- **route — not reproducible from the answer.** The digest covers the
+  winning quoter's raw request/response, which the API response does
+  not carry. No browser or curl procedure can re-hash it; verify only
+  via the stored bytes below.
+
+**Stored-bytes re-hash (the check that works for every intent):**
+once the miner ships `GET /receipts/:id/raw` (see CONTRACT.md — NOT
+yet live as of 2026-11-20), fetch the exact stored bytes and hash them:
 ```bash
-# Fetch the same upstream URL the receipt names, hash it, compare:
-curl -s "<receipt.upstream_url>" | sha256sum
-# Compare the output with receipt.raw_response_sha256 from the answer.
-# A match proves the answer was derived from that exact upstream response.
+curl -s "https://verireceipt.onrender.com/receipts/<receipt_id>/raw" | sha256sum
+# Compare with receipt.raw_response_sha256. A match proves the answer
+# was derived from those exact bytes; a mismatch is a real failure.
 ```
+Until that endpoint ships, a tvl/filings/route receipt cannot be
+independently re-hashed — its re-hash story is UNPROVEN, not failed.
+The Desk's "Recompute from stored bytes" control performs this check
+in the browser.
 
 Notes:
 
 - The upstream URL is named in the receipt (`receipt.upstream_url`) and the
   fetch time in `receipt.fetched_at`.
-- Some upstreams (e.g. RPC quorums) return a fresh response on each fetch,
-  so a recomputation minutes later may legitimately differ. The receipt
-  proves the response *at fetch time*; the strongest check is to recompute
-  immediately after receiving the answer.
-- For the `/v1/tx` quorum, the receipt covers the quorum's aggregated raw
-  response; the same procedure applies.
+- A mismatch from the WRONG procedure (e.g. a plain GET re-curl of a tx
+  RPC URL, a zip re-fetch for grid, or a live re-fetch of a mutable
+  tvl/filings upstream) proves nothing about the receipt — it proves
+  only that the wrong bytes were hashed. Only the procedure above, or
+  the stored-bytes re-hash, is a verification.
 
 ## 5. What is NOT claimed
 

@@ -37,12 +37,13 @@
 // The router/shell wraps this page in Layout (nav/footer chrome); this file
 // renders page content only.
 
-import { Component, useCallback, useEffect, useMemo, useState } from 'react';
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, ApiError } from '../lib/api';
+import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, ApiError, REQUEST_TIMEOUT_MS } from '../lib/api';
 import { useHealth } from '../lib/hooks';
 import type { Receipt } from '../lib/types';
 import { ReceiptCard, isSafeUpstreamUrl } from '../components/ReceiptCard';
+import { AuditRehashControl } from '../components/AuditRehashControl';
 
 // ---------------------------------------------------------------------------
 // Types (structural; the lib returns the miner's flat JSON envelope)
@@ -259,23 +260,85 @@ interface VerifyData extends Record<string, unknown> {
   market?: unknown;
 }
 
-function verifyMethodNote(endpoint: EndpointKey): string {
+function verifyMethodNote(
+  endpoint: EndpointKey,
+  mode: 'snapshot_raw_digest' | 'immutable_live_recheck' = 'snapshot_raw_digest',
+): string {
   if (endpoint === 'tx') {
-    return 'Replays the miner’s exact JSON-RPC call — POST {"jsonrpc":"2.0","id":1,"method":"eth_getTransactionReceipt","params":[txHash]} to the receipt’s upstream RPC URL — and hashes the exact response text.';
+    return 'Replays the miner’s exact JSON-RPC call — POST {"jsonrpc":"2.0","id":1,"method":"eth_getTransactionReceipt","params":[txHash]} to the receipt’s upstream RPC URL — and hashes the exact response text. (immutable_live_recheck construction: a deterministic replay.)';
   }
   if (endpoint === 'grid') {
-    return 'Re-hashes the canonical evidence JSON the miner hashed: JSON.stringify({node_or_zone, interval_start, lmp_usd_per_mwh, market}) built from the answer fields. (The CAISO zip bytes are NOT what was hashed, so re-fetching the zip can never match.)';
+    return 'Re-hashes the canonical evidence JSON the miner hashed: JSON.stringify({node_or_zone, interval_start, lmp_usd_per_mwh, market}) built from the answer fields. (The CAISO zip bytes are NOT what was hashed, so re-fetching the zip can never match.) (immutable_live_recheck construction: a canonical rebuild.)';
   }
   if (endpoint === 'route') {
     return 'The receipt hash covers the winning quoter’s raw request/response, which the API response does not carry — so this receipt cannot be re-hashed in the browser.';
   }
-  return 'Re-fetches the receipt’s upstream URL and hashes the exact bytes with WebCrypto, then compares with the receipt hash. Verified only on a match.';
+  if (mode === 'immutable_live_recheck') {
+    return 'Re-fetches the receipt’s upstream URL and hashes the exact bytes with WebCrypto, then compares with the receipt hash. Verified only on a match. (immutable_live_recheck: the miner guarantees a live re-fetch reproduces the receipt bytes.)';
+  }
+  return 'Informational only — this receipt is snapshot_raw_digest: the digest covers the exact bytes fetched at answer time, and live upstream data has moved since. A re-fetch mismatch here proves nothing about this receipt, and a re-fetch match would prove nothing either. Verification is via “Recompute from stored bytes” below.';
+}
+
+/**
+ * Fetch upstream bytes with a fail-closed budget (round-3 F3).
+ *
+ * The old VerifyPanel code had NO AbortController, NO timeout, and NO
+ * cancel on any fetch: `await fetch(...)` then a plain
+ * `await res.arrayBuffer()` — a hung upstream left "Verifying…" stuck
+ * indefinitely with the button disabled. This helper races BOTH the
+ * fetch AND the body read against the same budget (the same shape as
+ * the server-side fetchJson race), and races both against the caller's
+ * cancel signal, so a signal-ignoring fetch whose body never resolves
+ * still fails closed within the budget, and Cancel resolves promptly.
+ * The timer is cleared only after the body read settles.
+ */
+async function fetchUpstreamBytes(
+  url: string,
+  init: RequestInit,
+  budgetMs: number,
+  externalSignal?: AbortSignal,
+): Promise<{ status: number; ok: boolean; bytes: ArrayBuffer }> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutError = new Error(
+    `timed out after ${budgetMs / 1000}s — the upstream did not answer.`,
+  );
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(timeoutError);
+    }, budgetMs);
+  });
+  const aborted = new Promise<never>((_resolve, reject) => {
+    if (!externalSignal) return; // never settles; harmless in the race
+    if (externalSignal.aborted) {
+      reject(new DOMException('The operation was aborted.', 'AbortError'));
+      return;
+    }
+    externalSignal.addEventListener(
+      'abort',
+      () => reject(new DOMException('The operation was aborted.', 'AbortError')),
+      { once: true },
+    );
+  });
+  try {
+    const res = await Promise.race([
+      fetch(url, { ...init, signal: controller.signal }),
+      timeout,
+      aborted,
+    ]);
+    const bytes = await Promise.race([res.arrayBuffer(), timeout, aborted]);
+    return { status: res.status, ok: res.ok, bytes };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 async function verifyReceipt(
   receipt: Receipt,
   endpoint: EndpointKey,
   data?: VerifyData,
+  opts?: { signal?: AbortSignal },
 ): Promise<VerifyState> {
   // --- /v1/route: evidence not carried by the API response. ---
   if (endpoint === 'route') {
@@ -341,23 +404,28 @@ async function verifyReceipt(
       };
     }
     try {
-      const res = await fetch(receipt.upstream_url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'eth_getTransactionReceipt',
-          params: [txHash],
-        }),
-      });
-      if (!res.ok) {
+      const { status, ok, bytes } = await fetchUpstreamBytes(
+        receipt.upstream_url,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'eth_getTransactionReceipt',
+            params: [txHash],
+          }),
+        },
+        REQUEST_TIMEOUT_MS,
+        opts?.signal,
+      );
+      if (!ok) {
         return {
           kind: 'unverifiable',
-          reason: `RPC replay returned HTTP ${res.status} — the hash was not checked, not confirmed.`,
+          reason: `RPC replay returned HTTP ${status} — the hash was not checked, not confirmed.`,
         };
       }
-      const computed = await sha256Hex(await res.arrayBuffer());
+      const computed = await sha256Hex(bytes);
       if (normaliseHash(computed) === normaliseHash(receipt.raw_response_sha256)) {
         return { kind: 'verified', computed, method: 'JSON-RPC replay' };
       }
@@ -367,9 +435,11 @@ async function verifyReceipt(
       return {
         kind: 'unverifiable',
         reason:
-          /Failed to fetch|NetworkError|CORS|blocked/i.test(msg) || err instanceof TypeError
-            ? 'RPC replay was blocked by the browser (CORS / network) — the hash was not checked, not confirmed.'
-            : `RPC replay failed: ${msg} — the hash was not checked, not confirmed.`,
+          /timed out/i.test(msg)
+            ? `RPC replay ${msg} — the hash was not checked, not confirmed.`
+            : /Failed to fetch|NetworkError|CORS|blocked/i.test(msg) || err instanceof TypeError
+              ? 'RPC replay was blocked by the browser (CORS / network) — the hash was not checked, not confirmed.'
+              : `RPC replay failed: ${msg} — the hash was not checked, not confirmed.`,
       };
     }
   }
@@ -383,14 +453,18 @@ async function verifyReceipt(
     };
   }
   try {
-    const res = await fetch(receipt.upstream_url);
-    if (!res.ok) {
+    const { status, ok, bytes } = await fetchUpstreamBytes(
+      receipt.upstream_url,
+      {},
+      REQUEST_TIMEOUT_MS,
+      opts?.signal,
+    );
+    if (!ok) {
       return {
         kind: 'unverifiable',
-        reason: `Upstream re-fetch returned HTTP ${res.status} — the hash was not checked, not confirmed.`,
+        reason: `Upstream re-fetch returned HTTP ${status} — the hash was not checked, not confirmed.`,
       };
     }
-    const bytes = await res.arrayBuffer();
     const computed = await sha256Hex(bytes);
     if (normaliseHash(computed) === normaliseHash(receipt.raw_response_sha256)) {
       return { kind: 'verified', computed, method: 'Upstream re-fetch' };
@@ -399,14 +473,16 @@ async function verifyReceipt(
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'fetch failed';
     const reason =
-      /Failed to fetch|NetworkError|CORS|blocked/i.test(msg) || err instanceof TypeError
-        ? 'Upstream fetch was blocked by the browser (CORS / network) — the hash was not checked, not confirmed.'
-        : `Upstream re-fetch failed: ${msg} — the hash was not checked, not confirmed.`;
+      /timed out/i.test(msg)
+        ? `Upstream re-fetch ${msg} — the hash was not checked, not confirmed.`
+        : /Failed to fetch|NetworkError|CORS|blocked/i.test(msg) || err instanceof TypeError
+          ? 'Upstream fetch was blocked by the browser (CORS / network) — the hash was not checked, not confirmed.'
+          : `Upstream re-fetch failed: ${msg} — the hash was not checked, not confirmed.`;
     return { kind: 'unverifiable', reason };
   }
 }
 
-function VerifyPanel({
+export function VerifyPanel({
   receipt,
   endpoint,
   data,
@@ -422,13 +498,83 @@ function VerifyPanel({
   stored?: boolean;
 }) {
   const [state, setState] = useState<VerifyState>({ kind: 'idle' });
+  // Round-3 F3: the panel used to have no AbortController, no timeout
+  // and no cancel — a hung upstream left "Verifying…" stuck
+  // indefinitely with the button disabled. run() now passes a cancel
+  // signal into verifyReceipt (whose fetch AND body read race the 45s
+  // budget), and Cancel aborts it promptly. Unmount aborts too, so a
+  // late settlement can never setState on an unmounted panel.
+  const verifyController = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      verifyController.current?.abort();
+      verifyController.current = null;
+    };
+  }, []);
+  // Effective verification mode for THIS panel's method (CONTRACT.md):
+  // tx/grid are immutable_live_recheck constructions by method
+  // (deterministic JSON-RPC replay / canonical evidence re-hash);
+  // filings/tvl re-fetch the live upstream, so their mode comes from
+  // the receipt label — absent means snapshot_raw_digest (the default).
+  const effectiveMode: 'snapshot_raw_digest' | 'immutable_live_recheck' =
+    endpoint === 'tx' || endpoint === 'grid'
+      ? 'immutable_live_recheck'
+      : receipt.verification_mode === 'immutable_live_recheck'
+        ? 'immutable_live_recheck'
+        : 'snapshot_raw_digest';
+  // For a snapshot filings/tvl receipt the upstream re-fetch is NOT a
+  // verification: live data has moved since fetch time, so a mismatch
+  // proves nothing and a match proves nothing either. The panel offers
+  // no re-fetch button and no MATCH / MISMATCH verdict for these
+  // receipts — verification is the stored-bytes re-hash below. This is
+  // the gate CONTRACT.md requires: the panel is a verification verdict
+  // ONLY for immutable_live_recheck receipts.
+  const upstreamRefetchIsInformational =
+    (endpoint === 'tvl' || endpoint === 'filings') &&
+    effectiveMode !== 'immutable_live_recheck';
   const run = useCallback(async () => {
+    verifyController.current?.abort();
+    const controller = new AbortController();
+    verifyController.current = controller;
     setState({ kind: 'checking' });
-    setState(await verifyReceipt(receipt, endpoint, data));
+    const result = await verifyReceipt(receipt, endpoint, data, {
+      signal: controller.signal,
+    });
+    if (!mountedRef.current) return;
+    // User-cancelled: back to idle, never a "could not verify" verdict
+    // for a check the user stopped.
+    if (controller.signal.aborted) {
+      setState({ kind: 'idle' });
+      return;
+    }
+    setState(result);
   }, [receipt, endpoint, data]);
 
   return (
     <div className="vr-verify">
+      {upstreamRefetchIsInformational ? (
+        <>
+          <div className="vr-verify-head">
+            <span className="vr-kicker" style={{ marginBottom: 0 }}>
+              // receipt verification · upstream re-fetch is informational only
+            </span>
+          </div>
+          <p className="vr-muted vr-small">
+            verification_mode: <span className="vr-mono">snapshot_raw_digest</span> — the
+            digest covers the exact bytes fetched at answer time. Live upstream data has
+            moved since {fmtTime(receipt.fetched_at)}, so a live re-fetch can never
+            reproduce the receipt bytes: a mismatch here would prove nothing about this
+            receipt, and neither would a match. This panel is therefore{' '}
+            <strong>informational only — never a verification verdict</strong>. Verify
+            this receipt with “Recompute from stored bytes” below, which hashes the
+            exact bytes the miner stored.
+          </p>
+        </>
+      ) : (
+        <>
       <div className="vr-verify-head">
         <span className="vr-kicker" style={{ marginBottom: 0 }}>
           // receipt verification · real re-hash, not a badge
@@ -441,7 +587,22 @@ function VerifyPanel({
         >
           {state.kind === 'checking' ? 'Verifying…' : 'Recompute SHA-256 in browser'}
         </button>
+        {state.kind === 'checking' && (
+          <button
+            type="button"
+            className="vr-btn-ghost"
+            onClick={() => verifyController.current?.abort()}
+          >
+            Cancel
+          </button>
+        )}
       </div>
+      <p className="vr-muted vr-small">
+        verification_mode: <span className="vr-mono">{effectiveMode}</span>
+        {effectiveMode === 'immutable_live_recheck'
+          ? ' — a live re-fetch reproduces the receipt bytes, so this panel is a verification verdict.'
+          : ''}
+      </p>
       {stored && (
         <p className="vr-muted vr-small">
           Stored entry — restored from this browser’s storage, not from a live call just now.
@@ -449,7 +610,7 @@ function VerifyPanel({
         </p>
       )}
       {state.kind === 'idle' && (
-        <p className="vr-muted vr-small">{verifyMethodNote(endpoint)}</p>
+        <p className="vr-muted vr-small">{verifyMethodNote(endpoint, effectiveMode)}</p>
       )}
       {state.kind === 'checking' && <p className="vr-muted vr-small">Verifying…</p>}
       {state.kind === 'verified' && (
@@ -523,6 +684,13 @@ function VerifyPanel({
           </p>
         </div>
       )}
+        </>
+      )}
+      {/* Stored-bytes re-hash (Desk verification): hashes the exact raw
+          bytes the miner stored for this receipt via GET /receipts/:id/raw.
+          Until the miner ships that endpoint this control honestly reports
+          UNAVAILABLE — it never presents a missing proof as a mismatch. */}
+      <AuditRehashControl receipt={receipt} />
       <p className="vr-muted vr-small">
         Recorded audit URL:{' '}
         <span className="vr-mono">
@@ -628,7 +796,9 @@ function TryItCard(props: TryItProps) {
           {running ? 'Calling live API…' : 'Run live call →'}
         </button>
         {result && !result.error && (
-          <span className="vr-badge vr-b-ok">200 OK · {result.latencyMs} ms</span>
+          <span className="vr-badge vr-b-dim">
+            HTTP 200 · {result.latencyMs} ms — request status only, not a verification result
+          </span>
         )}
       </div>
       {result?.error && (

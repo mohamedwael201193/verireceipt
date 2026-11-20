@@ -9,6 +9,18 @@ export interface Receipt {
   upstream_url: string;
   raw_response_sha256: string;
   fetched_at: string;
+  /**
+   * Verification mode (CONTRACT.md). The miner MUST carry this per
+   * receipt; a receipt without the label is treated as
+   * "snapshot_raw_digest" (default, ALL five intents): the digest covers
+   * the exact raw bytes as fetched at answer time, and a live upstream
+   * re-fetch can never reproduce them — so the upstream re-fetch panel
+   * (VerifyPanel) is informational only for these receipts, never a
+   * verification verdict. Only "immutable_live_recheck" receipts (bytes
+   * a live re-fetch is guaranteed to reproduce byte-identically) may be
+   * verified by an upstream re-fetch.
+   */
+  verification_mode?: "snapshot_raw_digest" | "immutable_live_recheck";
   // Live receipts also carry intent, quorum_votes, audit_url, etc.
   [key: string]: unknown;
 }
