@@ -91,12 +91,14 @@ export function mockFetch(url: string) {
     body = { error: "not_found" };
   }
   const text = JSON.stringify(body);
-  return Promise.resolve({
-    ok: status >= 200 && status < 300,
-    status,
-    json: () => Promise.resolve(JSON.parse(text) as unknown),
-    text: () => Promise.resolve(text),
-  });
+  // Real Response (not a hand-rolled stub): the data-layer lib reads
+  // res.text() AND res.headers (Retry-After fallback in lib/api.ts) on
+  // every non-ok response, and a real fetch Response always has headers.
+  // A stub without `headers` throws inside the lib and surfaces as a
+  // NETWORK_ERROR with status 0 (round-2 B1: R03/F02 failed this way).
+  return Promise.resolve(
+    new Response(text, { status, headers: { "Content-Type": "application/json" } }),
+  );
 }
 
 /** A fetch that never resolves unless its signal aborts (Cancel tests). */
