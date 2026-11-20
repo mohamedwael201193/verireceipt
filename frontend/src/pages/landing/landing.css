@@ -461,6 +461,16 @@
     .paper-card[data-d="3"], .paper-card[data-d="4"], .paper-card[data-d="5"] {
       z-index: 10; pointer-events: none; transform: translate3d(0,22px,0) scale(0.95); opacity: 0;
     }
+    /* Phones (J2 R2 M5): the stacked card's +8px x-offset + 1.7deg
+       rotation pushed its top-right corner to x=361 at 360px, 391 at
+       390px, ~321 at 320px — a 1px overflow. Zero the offset here; the
+       rotation + scale still read as a stack, and the drag transform is
+       inline so the interaction is untouched. This block MUST stay
+       after the base [data-d] rules above (same specificity — source
+       order decides). */
+    @media (max-width: 540px) {
+      .paper-card[data-d="1"] { transform: translate3d(0,10px,0) rotate(1.7deg) scale(0.985); }
+    }
     .v-seal {
       width: 48px; height: 48px; border-radius: 999px; background: var(--accent); color: #FFFFFF;
       display: flex; align-items: center; justify-content: center; flex-shrink: 0;
@@ -478,7 +488,16 @@
     /* =========================================================================
        10. 8x6 SPRINT MATRIX
        ========================================================================= */
-    .sprint-cols { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
+    /* minmax(0, 1fr) — NOT repeat(8, 1fr): a bare 1fr track cannot shrink
+       below its min-content, and the label words ("growth", "ranked",
+       "submit" ~38px at 10.5px mono) forced the 8 tracks to ~408px, so
+       .sprint-cols spanned to x=343.9 at a 320px viewport (J2 R2 B4:
+       document scrollWidth 344). With a 0 minimum the tracks stay
+       inside the container; the label spans break instead (below).
+       At <=400px the gap tightens so fewer labels need to wrap. */
+    .sprint-cols { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; }
+    .sprint-cols > span { min-width: 0; overflow-wrap: anywhere; }
+    @media (max-width: 400px) { .sprint-cols { gap: 4px; } }
     .scell {
       aspect-ratio: 1 / 1; border-radius: 7px; border: 1px solid var(--border);
       transition: transform 0.15s ease, background-color 0.25s ease, box-shadow 0.2s ease, border-color 0.2s ease;
