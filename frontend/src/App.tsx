@@ -5,6 +5,7 @@ import ScrollToHash from "./components/ScrollToHash";
 
 const Landing = lazy(() => import("./pages/Landing"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Desk = lazy(() => import("./pages/Desk"));
 const Receipts = lazy(() => import("./pages/Receipts"));
 const Benchmarks = lazy(() => import("./pages/Benchmarks"));
 const Status = lazy(() => import("./pages/Status"));
@@ -22,6 +23,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<Landing />} />
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="desk" element={<Desk />} />
           <Route path="receipts" element={<Receipts />} />
           <Route path="benchmarks" element={<Benchmarks />} />
           <Route path="status" element={<Status />} />

@@ -17,6 +17,7 @@ import ThemeToggle from "./ThemeToggle";
 const NAV_LINKS = [
   { to: "/", label: "Home", end: true },
   { to: "/dashboard", label: "Dashboard" },
+  { to: "/desk", label: "Desk" },
   { to: "/receipts", label: "Receipts" },
   { to: "/benchmarks", label: "Benchmarks" },
   { to: "/status", label: "Status" },

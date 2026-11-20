@@ -1,12 +1,23 @@
 // /docs — API documentation rendered from the miner.yaml contracts.
 //
-// STATIC TEXT FROM miner.yaml ONLY. Every endpoint, parameter, type, and
-// error code below comes from miner.yaml + the handler source
-// (src/core/errors.ts, src/handlers/*). Every example is a REAL callable
-// request against the live base URL, and each one links to its live try-it
-// form on /receipts. No invented endpoints: only the six routes the server
-// actually serves (GET /health + five GET /v1/*) are listed — there is no
-// /api/mcp route in this build, so none is documented.
+// STATIC TEXT FROM miner.yaml ONLY (miner routes). Every endpoint,
+// parameter, type, and error code below comes from miner.yaml + the
+// handler source (src/core/errors.ts, src/handlers/*). Every example is
+// a REAL callable request against the live base URL, and each one links
+// to its live try-it form on /receipts. No invented endpoints: only the
+// six routes the server actually serves (GET /health + five GET /v1/*)
+// are listed as miner routes.
+//
+// The VeriReceipt Desk section at the bottom documents the Desk backend
+// contract (POST /desk/run + Streamable HTTP MCP at /mcp, blueprint
+// §7.2): those tools are served by the Desk backend, not by the miner,
+// and the snippets are the copy-paste integration for them.
+//
+// POST-REMOUNT PATHS, NOT YET LIVE: the backend currently mounts at
+// /api/desk/* + /api/mcp and is being remounted to /desk/* + /mcp
+// (coordinator-owned alignment change, pending). The paths below are
+// the POST-REMOUNT paths. Until that backend deploy lands the Desk
+// endpoints 404 — nothing in this section is presented as callable-live.
 //
 // Registration snippet uses the real repo and the real commit SHA:
 // github.com/mohamedwael201193/verireceipt @
@@ -211,6 +222,54 @@ rate_limit_per_sec: 20
 circuit_threshold: 5
 circuit_cooldown_seconds: 30`;
 
+const MCP_CURL_SNIPPET = `MCP=https://verireceipt.onrender.com/mcp
+
+# NOT YET LIVE — the Desk backend has not deployed the /mcp remount yet;
+# these curls 404 until it does. Do not run them expecting a live answer.
+
+# 1. List the Desk MCP tools
+curl -s -X POST "$MCP" \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+
+# 2. Run an M13 allocation check (ranked escrow, Test USDC)
+curl -s -X POST "$MCP" \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_m13_allocation_check","arguments":{"protocol":"aave-v3","tx_hash":"0x1b9e2b48eb3510ee1a8aae2fc402139784f32d43b76d5853387cacb484a9a9d3","chain":"ethereum","issuer_entity":"AAPL","period":"last 12 months","trade_pair":"ETH/USDC"}}}'
+
+# 3. Run an M12 dispatch check
+curl -s -X POST "$MCP" \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"run_m12_dispatch_check","arguments":{"node_or_zone":"TH_NP15_GEN-APND","interval_start":"2026-11-20T06:00:00Z","breakeven_usd_per_mwh":45}}}'
+
+# 4. Verify one receipt by signal_hash
+curl -s -X POST "$MCP" \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"verify_receipt","arguments":{"signal_hash":"<signal_hash>"}}}'
+
+# 5. Read the Desk ledger (page 1)
+curl -s -X POST "$MCP" \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
+  -d '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_ledger","arguments":{"limit":20,"offset":0}}}'`;
+
+const MCP_CURSOR_SNIPPET = `{
+  "mcpServers": {
+    "verireceipt-desk": {
+      "url": "https://verireceipt.onrender.com/mcp",
+      "transport": "http"
+    }
+  }
+}`;
+
+const MCP_CLAUDE_SNIPPET = `claude mcp add --transport http verireceipt-desk https://verireceipt.onrender.com/mcp`;
+
+const MCP_NPX_SNIPPET = `npx -y mcp-remote https://verireceipt.onrender.com/mcp`;
+
 const CAST_SNIPPET = `# Register VeriReceipt (Sepolia) — fill $YOUR_ADDRESS and $KEY first.
 # Bond: $1.00 + 4 x $0.10 = $1.40 Test USDC.
 # NOTE: the registerMiner amount unit below (10000) is NOT confirmed in
@@ -245,6 +304,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 
 export default function Docs() {
   const [tab, setTab] = useState<'curl' | 'yaml' | 'cast'>('curl');
+  const [mcpTab, setMcpTab] = useState<'curl' | 'cursor' | 'claude' | 'npx'>('curl');
 
   return (
     <div className="vr-page vr-docs">
@@ -256,9 +316,11 @@ export default function Docs() {
             Status &amp; <span className="serif-i">30-Second Docs.</span>
           </h1>
           <p className="vr-lede">
-            The VeriReceipt API, as registered in miner.yaml. Every example below is a real
-            callable request against the live base URL — each links to its live try-it form on
-            /receipts.
+            The VeriReceipt API, as registered in miner.yaml. Every miner-API example below
+            is a real callable request against the live base URL — each links to its live
+            try-it form on /receipts. The VeriReceipt Desk section at the bottom is NOT
+            YET LIVE (pending backend deploy): its examples are the post-remount paths,
+            not callable requests today.
           </p>
         </div>
         <div className="vr-head-side">
@@ -537,10 +599,115 @@ curl "$BASE/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2026-11-2
         )}
       </section>
 
+      {/* ---- Desk MCP tools ---- */}
+      <section className="vr-card" aria-label="VeriReceipt Desk MCP tools">
+        <div className="vr-kicker">// desk · track 3 · streamable http mcp · no wallet, no login</div>
+        <h2 className="vr-h2">VeriReceipt Desk — MCP tools</h2>
+        <p className="vr-muted" role="status" style={{ border: "1px solid var(--border-strong, rgba(255,255,255,.22))", borderRadius: 8, padding: "10px 12px" }}>
+          <strong style={{ color: "var(--text, #F3F2EE)" }}>NOT YET LIVE — pending backend deploy.</strong>{" "}
+          The Desk backend is not deployed yet, and its endpoints are being remounted from
+          /api/desk/* + /api/mcp to /desk/* + /mcp (coordinator-owned, pending). Until that
+          deploy lands, every Desk endpoint below 404s. The paths and snippets here are the
+          post-remount integration — do not run them expecting a live answer.
+        </p>
+        <p className="vr-muted">
+          The Desk workbench at <a className="vr-link" href="/desk">/desk</a> is also an MCP
+          server: the same ranked-escrow checks the UI runs, callable from any MCP client.
+          Endpoint (post-remount): <span className="vr-mono">https://verireceipt.onrender.com/mcp</span>{" "}
+          (Streamable HTTP, auth: none). Calls settle in Test USDC on Sepolia testnet through
+          the ranked router and are labeled related-party / internal test traffic — see the
+          disclosure in the /desk footer.
+        </p>
+        <p className="vr-muted vr-small">
+          Desk REST (post-remount, not yet live):{" "}
+          <span className="vr-mono">GET https://verireceipt.onrender.com/desk/stats</span>,{" "}
+          <span className="vr-mono">GET https://verireceipt.onrender.com/desk/ledger?page=1&amp;limit=20</span>,{" "}
+          <span className="vr-mono">POST https://verireceipt.onrender.com/desk/run</span>.
+        </p>
+        <div className="vr-tbl-wrap">
+          <table className="vr-tbl">
+            <thead>
+              <tr>
+                <th>Tool</th>
+                <th>What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="vr-mono">run_m13_allocation_check</td>
+                <td>Runs a Mission 13 pre-allocation / counterparty gate and returns APPROVE / HOLD / REJECT with why entries and per-call receipts.</td>
+              </tr>
+              <tr>
+                <td className="vr-mono">run_m12_dispatch_check</td>
+                <td>Runs a Mission 12 mining dispatch gate and returns MINE / CURTAIL / HOLD with why entries and per-call receipts.</td>
+              </tr>
+              <tr>
+                <td className="vr-mono">verify_receipt</td>
+                <td>Verify a Desk signal_hash against the Telegraph node (GET /engine/v1/signal/&lt;hash&gt;). Returns verified=true only when verification.verified is true, and records the outcome in the ledger.</td>
+              </tr>
+              <tr>
+                <td className="vr-mono">get_ledger</td>
+                <td>Returns the paginated Desk run ledger (same data as the run history on /desk).</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div className="vr-tabs" role="tablist" aria-label="Desk MCP snippet tabs" style={{ marginTop: 16 }}>
+          <button type="button" role="tab" aria-selected={mcpTab === 'curl'} className={`vr-tab ${mcpTab === 'curl' ? 'active' : ''}`} onClick={() => setMcpTab('curl')}>curl</button>
+          <button type="button" role="tab" aria-selected={mcpTab === 'cursor'} className={`vr-tab ${mcpTab === 'cursor' ? 'active' : ''}`} onClick={() => setMcpTab('cursor')}>Cursor</button>
+          <button type="button" role="tab" aria-selected={mcpTab === 'claude'} className={`vr-tab ${mcpTab === 'claude' ? 'active' : ''}`} onClick={() => setMcpTab('claude')}>Claude Code</button>
+          <button type="button" role="tab" aria-selected={mcpTab === 'npx'} className={`vr-tab ${mcpTab === 'npx' ? 'active' : ''}`} onClick={() => setMcpTab('npx')}>npx</button>
+        </div>
+        {mcpTab === 'curl' && (
+          <div>
+            <div className="vr-code">
+              <pre>{MCP_CURL_SNIPPET}</pre>
+            </div>
+            <div className="vr-doc-actions">
+              <CopyButton text={MCP_CURL_SNIPPET} label="Copy Desk MCP curl snippets" />
+            </div>
+          </div>
+        )}
+        {mcpTab === 'cursor' && (
+          <div>
+            <p className="vr-muted vr-small">Add to <span className="vr-mono">.cursor/mcp.json</span> in your project:</p>
+            <div className="vr-code">
+              <pre>{MCP_CURSOR_SNIPPET}</pre>
+            </div>
+            <div className="vr-doc-actions">
+              <CopyButton text={MCP_CURSOR_SNIPPET} label="Copy Cursor MCP config" />
+            </div>
+          </div>
+        )}
+        {mcpTab === 'claude' && (
+          <div>
+            <p className="vr-muted vr-small">Register the Desk MCP server with Claude Code:</p>
+            <div className="vr-code">
+              <pre>{MCP_CLAUDE_SNIPPET}</pre>
+            </div>
+            <div className="vr-doc-actions">
+              <CopyButton text={MCP_CLAUDE_SNIPPET} label="Copy Claude Code MCP command" />
+            </div>
+          </div>
+        )}
+        {mcpTab === 'npx' && (
+          <div>
+            <p className="vr-muted vr-small">Bridge the Streamable HTTP endpoint into a local stdio MCP client:</p>
+            <div className="vr-code">
+              <pre>{MCP_NPX_SNIPPET}</pre>
+            </div>
+            <div className="vr-doc-actions">
+              <CopyButton text={MCP_NPX_SNIPPET} label="Copy npx MCP bridge command" />
+            </div>
+          </div>
+        )}
+      </section>
+
       <p className="vr-muted vr-small">
-        Only the six routes on this page are served by this build. The design drafts also named
-        /api/mcp and POST /v1/* paths — none of those exist in the server, so they are not
-        documented here.
+        Only the six miner routes on this page are served by the miner in this build. The design
+        drafts also named POST /v1/* paths — none of those exist in the server, so they are not
+        documented here. The Desk MCP tools above are served by the Desk backend
+        (/desk/* + /mcp after the pending remount, NOT YET LIVE), not by the miner.
       </p>
     </div>
   );

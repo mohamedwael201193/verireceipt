@@ -39,10 +39,38 @@ describe("routes (merge): real page content per route", () => {
     ["/benchmarks", /Latency Benchmarks/, /measured round-trips, never simulated/],
     ["/status", /Service Status/, /live probes only/],
     ["/docs", /30-Second Docs/, /as registered in miner\.yaml/],
+    ["/desk", /VeriReceipt Desk\./, /zero-wallet workbench/],
   ])("renders %s with its own heading and note", async (path, heading, note) => {
     renderAt(path);
     expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
     expect(screen.getByText(note)).toBeInTheDocument();
+  });
+});
+
+// Desk nav — NO jsdom regression test here, deliberately (J2 finding 4).
+//
+// The previous "desk nav regression" test (click the Desk nav link in
+// jsdom, assert the Desk heading appears and the landing heading goes
+// away) was THEATRE: it passed in jsdom while the real bug — in-app nav
+// changes the URL but the old page stays, reproduced 4/4 in a real
+// browser — was still present. The diff that added the test touched only
+// App.tsx (+2: Desk lazy import + /desk route) and Layout.tsx (+1: nav
+// link); Router / Outlet / Suspense / ScrollToHash were untouched, and
+// no in-source root cause for the real-browser failure was identified in
+// this tree (main.tsx BrowserRouter + App Routes/Outlet + Layout NavLink
+// are all structurally standard). A jsdom test cannot discriminate a
+// bug that only reproduces in a real browser, so keeping it would certify
+// a fix that does not exist.
+//
+// Desk nav correctness therefore depends on the shell routing fix owned
+// by the frontend fix agent, and must be proven by a REAL-BROWSER
+// click-test (load /, click Desk, assert the Desk page renders and the
+// landing content is gone), not by jsdom. Do NOT re-add a jsdom nav test
+// here unless it is first shown to FAIL on the unfixed shell.
+describe("desk nav (J2 finding 4): no jsdom nav test — see the comment above", () => {
+  it("the /desk route itself renders (route existence only — NOT a nav proof)", async () => {
+    renderAt("/desk");
+    expect(await screen.findByRole("heading", { name: /VeriReceipt Desk\./ })).toBeInTheDocument();
   });
 });
 
