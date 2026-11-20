@@ -1,0 +1,68 @@
+// "Verify in browser" — real receipt verification UI.
+//
+// Fetches the same-origin endpoint as raw text, recomputes SHA-256 over
+// those exact bytes, and compares with the receipt's recorded digest from
+// the SAME response. MATCH VERIFIED is shown ONLY on a byte-exact match.
+// A mismatch is reported honestly: the miner's receipt covers the
+// upstream raw bytes (not the envelope the browser receives), so the two
+// digests are not expected to be equal with the current miner.
+import { useState } from "react";
+import { verifyEndpoint, type VerifyState } from "./verify";
+
+export function VerifyBadge({ url, label = "Verify in browser" }: { url: string; label?: string }) {
+  const [state, setState] = useState<VerifyState>({ status: "idle" });
+
+  async function run() {
+    setState({ status: "running" });
+    setState(await verifyEndpoint(url));
+  }
+
+  return (
+    <div className="mono" style={{ fontSize: 11.5, lineHeight: 1.6 }}>
+      {state.status === "idle" && (
+        <button type="button" className="micro-btn" style={{ padding: "4px 10px", fontSize: 11 }} onClick={run}>
+          {label}
+        </button>
+      )}
+      {state.status === "running" && <span style={{ color: "var(--muted)" }}>Hashing response body…</span>}
+      {state.status === "done" &&
+        (state.match ? (
+          <span className="badge b-ok">MATCH VERIFIED ✓</span>
+        ) : (
+          <span>
+            <span className="badge b-warn">DIGESTS DIFFER — SEE NOTE</span>
+            <span style={{ display: "block", marginTop: 8, color: "var(--muted)" }}>
+              Computed (SHA-256 of the response body this browser received):
+              <br />
+              <span style={{ color: "var(--text)", overflowWrap: "anywhere" }}>0x{state.computedDigest}</span>
+              <br />
+              Recorded in receipt {state.receiptId}:
+              <br />
+              <span style={{ color: "var(--text)", overflowWrap: "anywhere" }}>{state.recordedDigest}</span>
+              <br />
+              The receipt covers the miner&apos;s upstream raw bytes, not this
+              envelope — so the two digests are not expected to be equal. The
+              computed digest above is the SHA-256 of the exact bytes your
+              browser received.
+            </span>
+          </span>
+        ))}
+      {state.status === "done" && state.match && (
+        <span style={{ display: "block", marginTop: 8, color: "var(--muted)" }}>
+          SHA-256 of the response body matches receipt {state.receiptId}.
+        </span>
+      )}
+      {state.status === "no-receipt" && (
+        <span style={{ color: "var(--muted)" }}>No receipt in this response — nothing to verify.</span>
+      )}
+      {state.status === "error" && <span style={{ color: "var(--bad)" }}>Verification refused: {state.message}</span>}
+      {state.status !== "idle" && state.status !== "running" && (
+        <span style={{ display: "block", marginTop: 6 }}>
+          <button type="button" className="micro-btn" style={{ padding: "3px 9px", fontSize: 10.5 }} onClick={run}>
+            Re-verify
+          </button>
+        </span>
+      )}
+    </div>
+  );
+}
