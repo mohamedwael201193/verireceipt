@@ -41,9 +41,17 @@ function createHeroEngine(
   captionEl: HTMLElement,
   onMorph: (fig: number, style: StyleMode) => void,
 ): EngineApi {
-  // getContext("2d") on a <canvas> element does not return null in practice.
-  const dCtx = dCanvas.getContext("2d")!;
-  const sCtx = sCanvas.getContext("2d")!;
+  // getContext("2d") on a <canvas> element does not return null in real
+  // browsers — but it DOES in jsdom (no canvas implementation). The hero
+  // is decorative, so a null context runs a no-op engine instead of
+  // crashing the page (this also keeps the app smoke test renderable).
+  const dCtxRaw = dCanvas.getContext("2d");
+  const sCtxRaw = sCanvas.getContext("2d");
+  if (!dCtxRaw || !sCtxRaw) {
+    return { setStyle: () => {}, setFig: () => {}, destroy: () => {} };
+  }
+  const dCtx = dCtxRaw;
+  const sCtx = sCtxRaw;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const MW = 360;
   const MH = 440;
@@ -691,7 +699,35 @@ function createHeroEngine(
     sCtx.fill();
     sCtx.restore();
 
-    raf = requestAnimationFrame(drawHero);
+    // Pause the loop while the hero is off-screen: the dither + sculpture
+    // passes cost ~1.6k–29k ops/frame and there is nothing to show.
+    // Only schedule the next frame while visible; the observer restarts
+    // the loop when the hero scrolls back into view.
+    if (visible) raf = requestAnimationFrame(drawHero);
+  }
+
+  // Visibility gate for the rAF loop (IntersectionObserver is absent in
+  // jsdom/test runtimes — the loop then simply runs unpaused, as before).
+  let visible = true;
+  let observer: IntersectionObserver | null = null;
+  const heroSection = dCanvas.closest("section");
+  if (heroSection && typeof IntersectionObserver !== "undefined") {
+    observer = new IntersectionObserver(
+      (entries) => {
+        const nowVisible = entries[0] ? entries[0].isIntersecting : true;
+        if (nowVisible === visible) return;
+        visible = nowVisible;
+        if (visible && !destroyed) {
+          autoTimer = performance.now();
+          cancelAnimationFrame(raf);
+          raf = requestAnimationFrame(drawHero);
+        } else {
+          cancelAnimationFrame(raf);
+        }
+      },
+      { threshold: 0 },
+    );
+    observer.observe(heroSection);
   }
 
   rightBox.addEventListener("mousemove", onMouseMove, { passive: true });
@@ -714,6 +750,7 @@ function createHeroEngine(
     destroy: () => {
       destroyed = true;
       cancelAnimationFrame(raf);
+      observer?.disconnect();
       rightBox.removeEventListener("mousemove", onMouseMove);
       rightBox.removeEventListener("mouseleave", onMouseLeave);
       rightBox.removeEventListener("click", onClick);
