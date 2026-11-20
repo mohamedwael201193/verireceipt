@@ -7,8 +7,8 @@
 // SKIP (F04, B03) because the public API has no fault-injection parameter —
 // see benchmarks.ts. The suite runs sequentially to stay gentle on the miner.
 
-import { useMemo, useRef, useState } from "react";
-import { BENCH_CASES, BENCH_RUNNABLE_COUNT, BENCH_TOTAL_COUNT, catLabel, type BenchResult } from "./benchmarks";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BENCH_CASES, BENCH_RUNNABLE_COUNT, BENCH_SKIPPED_COUNT, BENCH_TOTAL_COUNT, catLabel, type BenchResult } from "./benchmarks";
 import type { LiveReceipt } from "./types";
 import { formatMs } from "./utils";
 
@@ -25,9 +25,15 @@ const FILTERS = [
   { key: "burst", label: "4 Burst Concurrency" },
 ];
 
-/** Bucket measured latencies into 7 histogram bins. */
+/** Bucket measured latencies into 7 histogram bins.
+ *
+ * Axis labels are the design's 20ms / 300ms+ (DESIGN-SPEC §6 D-09): the
+ * first bin edge is 20ms and the last open bin starts at 300ms, so the
+ * labels sit on real bin boundaries instead of the 0ms/500ms+ the
+ * previous bins implied.
+ */
 function histogramBins(latencies: number[]): number[] {
-  const edges = [50, 100, 150, 200, 300, 500, Infinity];
+  const edges = [20, 50, 100, 150, 200, 300, Infinity];
   const bins = [0, 0, 0, 0, 0, 0, 0];
   for (const ms of latencies) {
     const idx = edges.findIndex((e) => ms < e);
@@ -44,6 +50,22 @@ export default function Benchmarks({ onRecord, showToast }: BenchmarksProps) {
   const [filter, setFilter] = useState("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const runToken = useRef(0);
+  const runAbort = useRef<AbortController | null>(null);
+
+  // Unmount cancels the in-flight suite: the fetches abort and no
+  // onRecord/setState runs afterwards.
+  useEffect(() => {
+    return () => {
+      runToken.current += 1;
+      runAbort.current?.abort();
+      runAbort.current = null;
+    };
+  }, []);
+
+  function cancelSuite() {
+    runToken.current += 1;
+    runAbort.current?.abort();
+  }
 
   const runnableResults = useMemo(
     () => BENCH_CASES.filter((c) => c.runnable).map((c) => results[c.id]).filter(Boolean),
@@ -76,6 +98,8 @@ export default function Benchmarks({ onRecord, showToast }: BenchmarksProps) {
   async function runSuite() {
     if (running) return;
     const token = ++runToken.current;
+    const controller = new AbortController();
+    runAbort.current = controller;
     setRunning(true);
     setResults({});
     setDone(0);
@@ -84,30 +108,61 @@ export default function Benchmarks({ onRecord, showToast }: BenchmarksProps) {
     let passedCount = 0;
     let failedCount = 0;
     let http503Count = 0;
-    for (const c of BENCH_CASES) {
-      if (runToken.current !== token) return;
-      if (!c.runnable) {
-        setResults((prev) => ({
-          ...prev,
-          [c.id]: { verdict: "SKIP", http: null, latencyMs: null, actual: c.skipReason ?? "not runnable via the public API", note: c.skipReason },
-        }));
+    // try/finally: a throwing case must never wedge the UI with the Run
+    // button permanently disabled and runningId stuck on a case.
+    try {
+      for (const c of BENCH_CASES) {
+        if (runToken.current !== token) return;
+        if (!c.runnable) {
+          setResults((prev) => ({
+            ...prev,
+            [c.id]: { verdict: "SKIP", http: null, latencyMs: null, actual: c.skipReason ?? "not runnable via the public API", note: c.skipReason },
+          }));
+          completed += 1;
+          setDone(completed);
+          continue;
+        }
+        setRunningId(c.id);
+        // The record callback is token-guarded: a case that settles after
+        // Cancel/unmount must never append to the session ledger.
+        const ctx = {
+          record: (receipt: LiveReceipt) => {
+            if (runToken.current === token) onRecord(receipt);
+          },
+          signal: controller.signal,
+        };
+        let result: BenchResult;
+        try {
+          result = await c.run(ctx);
+        } catch (err) {
+          // A case that throws (e.g. an unparseable value) is a FAIL of
+          // that case, never a wedged suite.
+          result = {
+            verdict: "FAIL",
+            http: null,
+            latencyMs: null,
+            actual: `case threw instead of returning a result: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
+        if (runToken.current !== token) return;
+        setRunningId(null);
+        if (result.verdict === "PASS") passedCount += 1;
+        if (result.verdict === "FAIL") failedCount += 1;
+        if (result.http === 503) http503Count += 1;
+        setResults((prev) => ({ ...prev, [c.id]: result }));
         completed += 1;
         setDone(completed);
-        continue;
       }
-      setRunningId(c.id);
-      const result = await c.run({ record: onRecord });
-      if (runToken.current !== token) return;
+      showToast(`Benchmark suite finished — ${passedCount} passed, ${failedCount} failed, ${http503Count} HTTP 503s`);
+    } finally {
+      // Always reset the running state — including on Cancel, on unmount
+      // (a no-op then), and if any case throws. A new run cannot have
+      // started while this one was running (the button is disabled), so
+      // unconditionally clearing here can never clobber a fresh run.
+      setRunning(false);
       setRunningId(null);
-      if (result.verdict === "PASS") passedCount += 1;
-      if (result.verdict === "FAIL") failedCount += 1;
-      if (result.http === 503) http503Count += 1;
-      setResults((prev) => ({ ...prev, [c.id]: result }));
-      completed += 1;
-      setDone(completed);
+      if (runAbort.current === controller) runAbort.current = null;
     }
-    setRunning(false);
-    showToast(`Benchmark suite finished — ${passedCount} passed, ${failedCount} failed, ${http503Count} HTTP 503s`);
   }
 
   function verdictBadge(r: BenchResult | undefined, id: string): { cls: string; label: string } {
@@ -127,9 +182,16 @@ export default function Benchmarks({ onRecord, showToast }: BenchmarksProps) {
             24-Case <span className="serif-i">Benchmarks.</span>
           </h1>
         </div>
-        <button type="button" className="btn-accent" onClick={runSuite} disabled={running}>
-          {running ? "Running… (live calls)" : "Run 24-Case Adversarial Suite ▶"}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" className="btn-accent" onClick={runSuite} disabled={running}>
+            {running ? "Running… (live calls)" : "Run 24-Case Adversarial Suite ▶"}
+          </button>
+          {running && (
+            <button type="button" className="btn-ghost" onClick={cancelSuite}>
+              Cancel suite
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="bench-prog-wrap">
@@ -140,12 +202,12 @@ export default function Benchmarks({ onRecord, showToast }: BenchmarksProps) {
         <div className="card" style={{ padding: "16px 18px" }}>
           <div className="kpi-lbl">Pass Rate</div>
           <div className="kpi-val mono" style={{ color: failed > 0 ? "var(--err)" : "var(--ok)" }}>
-            {hasRun ? `${passed} / ${BENCH_RUNNABLE_COUNT}` : "— / 22"}
+            {hasRun ? `${passed} / ${BENCH_RUNNABLE_COUNT}` : `— / ${BENCH_RUNNABLE_COUNT}`}
           </div>
           <div className="kpi-sub">
             {hasRun
-              ? `${failed} failed · 2 skipped (not executable via public API)`
-              : "22 runnable · 2 skipped (F04, B03)"}
+              ? `${failed} failed · ${BENCH_SKIPPED_COUNT} skipped (not executable via public API)`
+              : `${BENCH_RUNNABLE_COUNT} runnable · ${BENCH_SKIPPED_COUNT} skipped (T01–T10 base-sepolia, F04, B03)`}
           </div>
         </div>
         <div className="card" style={{ padding: "16px 18px" }}>
@@ -172,8 +234,8 @@ export default function Benchmarks({ onRecord, showToast }: BenchmarksProps) {
               const opacity = i === 2 ? 1 : i === 1 || i === 3 ? 0.72 : 0.45;
               return <rect key={i} x={6 + i * 14} y={48 - h} width="10" height={h} rx="2" fill={fill} fillOpacity={opacity} />;
             })}
-            <text x="6" y="54" fontSize="6.5" fill="var(--muted)" fontFamily="JetBrains Mono,monospace">0ms</text>
-            <text x="80" y="54" fontSize="6.5" fill="var(--muted)" fontFamily="JetBrains Mono,monospace">500ms+</text>
+            <text x="6" y="54" fontSize="6.5" fill="var(--muted)" fontFamily="JetBrains Mono,monospace">20ms</text>
+            <text x="80" y="54" fontSize="6.5" fill="var(--muted)" fontFamily="JetBrains Mono,monospace">300ms+</text>
           </svg>
         </div>
       </div>
@@ -237,7 +299,7 @@ export default function Benchmarks({ onRecord, showToast }: BenchmarksProps) {
             <div className="expand-grid mono" style={{ fontSize: 11 }}>
               <div>
                 <div style={{ color: "var(--muted)", fontSize: 10, marginBottom: 4 }}>PROBE PAYLOAD</div>
-                <div style={{ color: "var(--text)", wordBreak: "break-all" }}>{c.probe}</div>
+                <div style={{ color: "var(--text)", wordBreak: "break-all" }}>{r?.probe ?? c.probe()}</div>
               </div>
               <div>
                 <div style={{ color: "var(--muted)", fontSize: 10, marginBottom: 4 }}>ASSERTION RULE</div>
