@@ -117,3 +117,48 @@ describe("DeskStage — stream rows name the real failure (J2 minor 3)", () => {
     expect(screen.queryByText(/422/)).toBeNull();
   });
 });
+
+describe("DeskStage — item 02 verdict accounts for all calls (J2 R2 M3)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("confirmed tx + failed 2nd (tvl) call is CHECK FAILED, never CLEAR", async () => {
+    const TX_CONFIRMED_BODY = {
+      tx_hash: "0x1a1467893eaed124a13164b589f1ed7a70ec203257084a7be27eee8f93bd8ba9",
+      status: "confirmed",
+      from: "0x1111111111111111111111111111111111111111",
+      to: "0x2222222222222222222222222222222222222222",
+      block_number: 26454411,
+      value_eth: "0.01",
+      source: "archive-rpc-quorum",
+      receipt: { ...RECEIPT, receipt_id: "rcpt-test-tx" },
+    };
+    // J2's exact repro: mock tx confirmed + tvl 500. The old verdict
+    // read only outcomes[0], so it rendered CLEAR while a stream row
+    // showed HTTP 500.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).includes("/v1/tvl")) {
+          return new Response(JSON.stringify({ error: "upstream boom" }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify(TX_CONFIRMED_BODY), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+    selectAndPlay(/Counterparty hash, checked\./);
+    await waitFor(() => expect(screen.getByText("CHECK FAILED")).toBeInTheDocument(), {
+      timeout: 15000,
+    });
+    expect(screen.queryByText("CLEAR")).toBeNull();
+    expect(screen.getByText(/· HTTP 500/)).toBeInTheDocument();
+    expect(screen.getByText(/Live check failed: tvl/)).toBeInTheDocument();
+  });
+});

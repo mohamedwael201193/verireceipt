@@ -124,6 +124,18 @@ export function DeskStage() {
       return { label: "CHECK FAILED", cls: "b-bad", msg: failed ? `Live check failed: ${failed}` : "A live check did not verify — see rows above" };
     }
     if (itemIdx === 1) {
+      // Every call counts (J2 R2 M3): the old code read only outcomes[0],
+      // so a confirmed tx + a failed 2nd (tvl) call still rendered CLEAR
+      // while a stream row showed HTTP 500. Any failed call fails the
+      // check, exactly like item 01's all-four rule.
+      const failed = outcomes.filter((o) => !o.data).map((o) => o.key);
+      if (failed.length > 0) {
+        return {
+          label: "CHECK FAILED",
+          cls: "b-bad",
+          msg: `Live check failed: ${failed.join(", ")}`,
+        };
+      }
       const txRes = outcomes[0];
       const status = (txRes.data as { status?: string } | null)?.status;
       if (status === "reverted") {
