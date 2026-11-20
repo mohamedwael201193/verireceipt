@@ -20,6 +20,24 @@ const usd = new Intl.NumberFormat("en-US", {
  *   marks U+061C, U+0600–U+0605, U+06DD, U+070F, U+0890–U+0891,
  *   U+08E2, shorthand U+1BCA0–U+1BCA3, U+1D173, U+13430,
  *   interlinear U+FFF9–U+FFFB, tags U+E0001, U+E007F.
+ * - `\p{Cc}` (control characters, J2 R7 B-1): all 65 — U+0000–U+001F,
+ *   U+007F–U+009F. The 5 White_Space ones (U+0009–U+000D) were
+ *   already caught by trim(); the other 60 passed as "visible" and
+ *   rendered blank. Controls have no glyph by definition, and a
+ *   control-only receipt field / param is never legitimate content.
+ * - `\p{Default_Ignorable_Code_Point}` (J2 R7 open item, measured in
+ *   real Chromium 156 headless): renderers MUST ignore these by
+ *   Unicode definition. Full-class canvas-width enumeration in that
+ *   Chromium: all 4,174 DICP code points measure ZERO width except
+ *   the 8 already stripped above (Hangul fillers U+115F/U+1160/
+ *   U+3164/U+FFA0 + shorthand U+1BCA0–U+1BCA3); spot pixel-ink
+ *   counts are 0 for U+2065, U+17B4, U+17B5, U+FFF0, U+E0000,
+ *   U+E0080. This retires the R6 keep-list for U+2065, U+17B4,
+ *   U+17B5 — the "renders visibly (tofu / dotted circle)" claim was
+ *   false in real Chromium (0.00 width, 0 ink px at 16px and 64px).
+ *   The newly-covered remainder is 3,771 code points: U+17B4–U+17B5,
+ *   U+2065, U+FFF0–U+FFF8, U+E0000, U+E0002–U+E001F, U+E0080–U+E00FF,
+ *   U+E01F0–U+E0FFF.
  * - Variation selectors + CGJ (Mn, but ONLY these — a blanket `\p{Mn}`
  *   would also strip lone combining marks, which render visibly):
  *   U+180B–U+180D, U+180F, U+FE00–U+FE0F, U+E0100–U+E01EF, U+034F.
@@ -29,16 +47,22 @@ const usd = new Intl.NumberFormat("en-US", {
  *   not strip it, and it renders as an empty cell).
  *
  * Deliberately NOT stripped (verified keep-list, see format.test.ts):
- * U+2065 (unassigned, Cn — renders as a visible tofu box) and lone
- * combining marks U+0301, U+0610, U+17B4, U+17B5 (Mn — Chrome renders
- * them with a dotted-circle placeholder, i.e. visibly).
+ * lone combining marks U+0301, U+0610 (Mn — they draw a small mark
+ * even alone: 57 / 95 ink px at 64px in Chromium 156, zero advance
+ * width, no dotted circle; documented residual, NOT a class — the
+ * full Mn class is not deterministically invisible: 1,075 of 2,059
+ * Mn code points have non-zero advance width in the same Chromium,
+ * so no blanket `\p{Mn}` strip). PUA, noncharacters, unassigned Cn
+ * and lone Mc marks render as visible tofu / glyphs (12.00–12.31px
+ * advance, 444 ink px at 64px) and are NOT stripped; lone
+ * surrogates render as U+FFFD (16.02px, 1,543 ink px).
  *
  * Unicode property escapes need ES2018+ (project target ES2022,
  * Node 24, modern browsers) — verified in Node 24 and in the
  * jsdom/vitest suite against every code point above.
  */
 const INVISIBLE_FORMAT_CHARS =
-  /[\p{Cf}\u180B-\u180D\u180F\uFE00-\uFE0F\u{E0100}-\u{E01EF}\u034F\u115F\u1160\u3164\uFFA0\u2800]/gu;
+  /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u180B-\u180D\u180F\uFE00-\uFE0F\u{E0100}-\u{E01EF}\u034F\u115F\u1160\u3164\uFFA0\u2800]/gu;
 
 /** True when `value` is a string containing at least one visible character. */
 export function hasVisibleCharacter(value: unknown): boolean {

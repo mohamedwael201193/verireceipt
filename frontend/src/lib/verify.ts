@@ -59,6 +59,12 @@ function isArrayBuffer(value: unknown): value is ArrayBuffer {
  * it — a real SharedArrayBuffer is its own view's buffer, a spoof's
  * is a fresh empty buffer. A SharedArrayBuffer can never be detached,
  * so there is no B-2 interaction here.
+ *
+ * Tag-leg gap (J2 R7 M-3): a SAB whose tag is spoofed to
+ * "ArrayBuffer" fails THIS check (and passes isArrayBuffer instead,
+ * which used to hand the raw SAB view to subtle.digest — a false
+ * negative). The tag-independent isBufferLike below is the backstop:
+ * the gate accepts it, and toBytes copies bare buffers unconditionally.
  */
 function isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer {
   if (value === null || typeof value !== "object") return false;
@@ -70,18 +76,43 @@ function isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer {
   }
 }
 
+/**
+ * Tag-independent buffer check (J2 R7 M-3): a real ArrayBuffer /
+ * SharedArrayBuffer — any realm, ANY Symbol.toStringTag — is its own
+ * view's buffer (`new Uint8Array(buf).buffer === buf`); a spoof's is
+ * a fresh empty buffer. The tag plays no part here, so a SAB whose
+ * tag is spoofed to "ArrayBuffer" (or to anything else) still passes,
+ * and a cross-realm buffer passes too (instanceof fails across
+ * realms, identity does not). A detached buffer throws inside the
+ * probe and fails closed, exactly like the tag-based checks.
+ */
+function isBufferLike(value: unknown): value is ArrayBuffer | SharedArrayBuffer {
+  if (value === null || typeof value !== "object") return false;
+  try {
+    return new Uint8Array(value as ArrayBuffer).buffer === value;
+  } catch {
+    return false;
+  }
+}
+
 function toBytes(data: string | Uint8Array | ArrayBuffer | SharedArrayBuffer): Uint8Array {
   if (typeof data === "string") return new TextEncoder().encode(data);
-  // ArrayBuffer bodies (e.g. `await res.arrayBuffer()`) are a natural
-  // way to hand a fetched upstream body to verification (J2 R3) — accept
-  // them instead of silently failing the verification.
-  if (isArrayBuffer(data)) return new Uint8Array(data);
-  // A bare SharedArrayBuffer (J2 R6 M-3): WebCrypto rejects a view on
-  // one with TypeError, so copy its bytes into a fresh ArrayBuffer.
-  // The tag + identity check above keeps spoofs out, exactly as for
-  // ArrayBuffer; a SharedArrayBuffer can never be detached, so the
-  // B-2 fail-closed guarantee is untouched.
-  if (isSharedArrayBuffer(data)) return new Uint8Array(data).slice();
+  // Bare buffers (J2 R7 M-3): the tag-independent identity check
+  // accepts a real ArrayBuffer / SharedArrayBuffer from any realm
+  // with any toStringTag. Bytes are ALWAYS copied into a fresh plain
+  // ArrayBuffer here: a SAB-backed view makes subtle.digest throw
+  // TypeError, and a SAB spoofed as "ArrayBuffer" used to pass
+  // isArrayBuffer and reach the digest uncopied (false negative even
+  // with the correct digest). Copying a plain ArrayBuffer is
+  // harmless; a spoof still fails the identity check above and never
+  // reaches this branch. A detached buffer throws inside the probe,
+  // which verifyReceipt turns into {verified:false} (B-2).
+  if (isBufferLike(data)) {
+    const src = new Uint8Array(data as ArrayBuffer);
+    const copy = new Uint8Array(src.byteLength);
+    copy.set(src);
+    return copy;
+  }
   // ArrayBuffer.isView (not instanceof) — jsdom TextEncoder returns a
   // Uint8Array from another realm, which fails instanceof.
   if (ArrayBuffer.isView(data)) {
@@ -102,19 +133,29 @@ function toBytes(data: string | Uint8Array | ArrayBuffer | SharedArrayBuffer): U
     } catch {
       throw new TypeError("sha256Hex: cannot hash a view of a detached ArrayBuffer");
     }
-    // SharedArrayBuffer-backed views (J2 R6 M-3): WebCrypto throws
-    // TypeError for a view on a SharedArrayBuffer, so a SAB-backed
-    // body could never verify even when the bytes matched — a false
-    // negative. Copy the view's own bytes (byteOffset/byteLength, so
-    // offset views and DataViews hash exactly their own bytes) into a
-    // fresh ArrayBuffer. Only SAB-backed views copy: a plain
-    // ArrayBuffer-backed view keeps the zero-copy path. The detached
-    // probe above still runs first — a detached view throws before
-    // any copy — so the B-2 guarantee is unchanged.
-    if (Object.prototype.toString.call(data.buffer) === "[object SharedArrayBuffer]") {
-      return new Uint8Array(
-        new Uint8Array(data.buffer as ArrayBuffer, data.byteOffset, data.byteLength),
+    // SharedArrayBuffer-backed views (J2 R6 M-3, R7 M-3): WebCrypto
+    // throws TypeError for a view on a SharedArrayBuffer, so a
+    // SAB-backed body could never verify even when the bytes matched
+    // — a false negative. Copy the view's own bytes (byteOffset /
+    // byteLength, so offset views and DataViews hash exactly their own
+    // bytes) into a fresh ArrayBuffer. The SAB test is tag-independent
+    // (`instanceof ArrayBuffer`, not the toString tag): a SAB whose
+    // tag is spoofed to "ArrayBuffer" is still not an ArrayBuffer
+    // instance, so it is copied; a cross-realm plain-ArrayBuffer view
+    // also fails instanceof and is copied too, which is correct either
+    // way. Only a same-realm plain-ArrayBuffer view keeps the
+    // zero-copy path. The detached probe above still runs first — a
+    // detached view throws before any copy — so the B-2 guarantee is
+    // unchanged.
+    if (!(data.buffer instanceof ArrayBuffer)) {
+      const src = new Uint8Array(
+        data.buffer as unknown as ArrayBuffer,
+        data.byteOffset,
+        data.byteLength,
       );
+      const copy = new Uint8Array(src.byteLength);
+      copy.set(src);
+      return copy;
     }
     return data as Uint8Array;
   }
@@ -177,7 +218,12 @@ export async function verifyReceipt(
     (typeof rawBody !== "string" &&
       !ArrayBuffer.isView(rawBody) &&
       !isArrayBuffer(rawBody) &&
-      !isSharedArrayBuffer(rawBody))
+      !isSharedArrayBuffer(rawBody) &&
+      // Tag-independent backstop (J2 R7 M-3): a real buffer whose
+      // Symbol.toStringTag is spoofed to anything else still passes
+      // here via identity, and toBytes copies it; spoofs fail the
+      // identity check and are rejected exactly as before.
+      !isBufferLike(rawBody))
   ) {
     return { verified: false, computedSha: "" };
   }

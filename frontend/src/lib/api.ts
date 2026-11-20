@@ -307,6 +307,22 @@ function isNonEmptyReceiptString(value: unknown, maxLength = Number.POSITIVE_INF
 }
 
 /**
+ * First candidate that is a string with a visible character (J2 R7
+ * M-1b): an empty / whitespace-only / invisible-only candidate is
+ * skipped, so a blank `message` can never hide a real `error`, and a
+ * body with no usable message falls back to the caller's default.
+ * Non-strings are skipped (a JSON body may carry `message: 123`).
+ */
+function firstVisibleMessage(...candidates: unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && hasVisibleCharacter(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Cross-realm-safe error message (J2 R5 m2): `err instanceof Error`
  * fails for an Error thrown from another realm (a vm context, an
  * iframe, jsdom's fetch), so such an error fell through to UNKNOWN
@@ -320,7 +336,12 @@ function isNonEmptyReceiptString(value: unknown, maxLength = Number.POSITIVE_INF
  * usable message", so it returns undefined exactly like a missing one.
  * Empty / whitespace-only messages (J2 R6 M-1) are absent too:
  * fetch() throwing `{message: ""}` used to surface NETWORK_ERROR with
- * an empty message; it is UNKNOWN instead.
+ * an empty message; it is UNKNOWN instead. Invisible-only messages
+ * (J2 R7 M-1a) are absent the same way: trim() does not strip U+200B
+ * etc., so hasVisibleCharacter decides, not trim(). U+FEFF still
+ * reaches UNKNOWN — it is Cf, stripped by hasVisibleCharacter.
+ * (api.ts already imports hasVisibleCharacter from format.ts;
+ * format.ts imports nothing from api.ts, so there is no cycle.)
  */
 function errorMessage(err: unknown): string | undefined {
   let message: unknown;
@@ -332,7 +353,7 @@ function errorMessage(err: unknown): string | undefined {
   } catch {
     return undefined;
   }
-  if (typeof message !== "string" || message.trim().length === 0) return undefined;
+  if (typeof message !== "string" || !hasVisibleCharacter(message)) return undefined;
   return message;
 }
 
@@ -451,8 +472,16 @@ async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promis
           message?: string;
           retry_after_sec?: unknown;
         } | null;
+        // First candidate with a visible character wins (J2 R7 M-1b):
+        // `??` let an empty / whitespace-only / invisible-only
+        // `message` through verbatim ("" / "   " / "\u200B"), and let
+        // a blank `message` hide a real `error` ("  " over "Real
+        // error"). Non-string candidates are skipped the same way.
+        // When no candidate has a visible character, the default
+        // status message is used — never an invisible one.
         const message =
-          err?.message ?? err?.error ?? `Request failed with status ${res.status}`;
+          firstVisibleMessage(err?.message, err?.error) ??
+          `Request failed with status ${res.status}`;
         // 422 bodies carry retry_after_sec: surface it instead of dropping
         // it, so the UI can tell the user how long to wait. Only a finite
         // non-negative number within the sane bound counts (shared
