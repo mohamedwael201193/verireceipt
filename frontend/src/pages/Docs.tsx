@@ -123,7 +123,7 @@ const ENDPOINTS: EndpointDoc[] = [
     path: '/v1/route',
     intent: 'OPTIMAL_EXECUTION_ROUTE_GENERAL',
     description:
-      'Returns block-pinned Ethereum mainnet execution quote (amount_out in 6-decimal USDC base units) for selling exactly 1 ETH for USDC across Uniswap V2/V3, SushiSwap V2, and Curve pools with a SHA-256 receipt.',
+      'Returns block-pinned Ethereum mainnet execution quote (amount_out in 6-decimal USDC base units) for selling exactly 1 ETH for USDC across Uniswap V2/V3 and SushiSwap V2 pools with a SHA-256 receipt.',
     params: [
       {
         name: 'pair',
