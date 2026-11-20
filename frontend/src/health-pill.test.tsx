@@ -3,11 +3,22 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Layout from "./components/Layout";
 
-// Health-pill hardening (J2 M1): 10s AbortSignal.timeout, no stacked polls,
-// stale responses ignored (sequence number — only the latest check updates
-// state). The in-flight guard makes true overlap unreachable through the
-// public API, so the sequence guard is defense-in-depth; these tests prove
-// the observable halves (timeout + no stacking) and the state transitions.
+// Health-pill hardening (J2 M1, re-review M3/M4): 10s AbortSignal.timeout
+// on subsequent polls, 60s on the FIRST check (cold Render starts can
+// take 25–55s to answer /health), and no stacked polls (a check already
+// in flight makes the interval tick a no-op).
+//
+// Two corrections from the re-review (M4):
+// - There is NO sequence guard any more. The in-flight guard plus a
+//   timeout shorter than the poll interval make overlap unreachable, so
+//   a seq number could never drop a stale response — it was dead code
+//   implying a guarantee it cannot provide. These tests prove only the
+//   observable behaviour (timeouts + no stacking).
+// - The old "headers arrive, body hangs forever, pill stays checking"
+//   scenario was a fiction: in a real browser the abort kills the hung
+//   body read too, so the pill goes "unreachable" when the timeout
+//   fires. The mock below wires the abort to the body as well, and the
+//   test asserts the REAL outcome.
 //
 // Layout is rendered directly (not through the lazy App routes) so the
 // mount is synchronous: no Suspense chunk loading under fake timers, and
@@ -38,11 +49,13 @@ function renderLayout() {
   );
 }
 
-/** Mock fetch whose pending promise rejects when its signal aborts,
- *  like a real fetch. Each call gets a fresh deferred for the Response
- *  and one for its json() body, so tests can hang the body separately
- *  from the response (the in-flight guard only matters while json()
- *  is pending — a 10s-timeout fetch can never overlap the 30s tick). */
+/** Mock fetch whose pending promise rejects when its signal aborts, like
+ *  a real fetch — including a hung BODY: aborting after the headers have
+ *  arrived kills the body stream, so a pending json() rejects too.
+ *  Each call gets a fresh deferred for the Response and one for its
+ *  json() body, so tests can hang the body separately from the response.
+ *  The body is only rejected on abort once json() has actually been
+ *  called (otherwise the rejection would be unobserved). */
 function installAbortableFetch() {
   type Entry = {
     // Resolving `response` delivers the Response (ok flag); the body is
@@ -56,7 +69,14 @@ function installAbortableFetch() {
       const response = deferred<{ ok: boolean }>();
       const json = deferred<HealthJson>();
       pending.push({ response, json });
-      const body = { ok: true, json: () => json.promise };
+      let jsonConsumed = false;
+      const body = {
+        ok: true,
+        json: () => {
+          jsonConsumed = true;
+          return json.promise;
+        },
+      };
       if (!opts?.signal) return response.promise.then(() => body);
       if (opts.signal.aborted) {
         return Promise.reject(new DOMException("aborted", "AbortError"));
@@ -64,7 +84,11 @@ function installAbortableFetch() {
       return new Promise((resolve, reject) => {
         opts.signal!.addEventListener(
           "abort",
-          () => reject(new DOMException("aborted", "AbortError")),
+          () => {
+            reject(new DOMException("aborted", "AbortError"));
+            // Real fetch: aborting after headers kills the body read.
+            if (jsonConsumed) json.reject(new DOMException("aborted", "AbortError"));
+          },
           { once: true },
         );
         response.promise.then(
@@ -96,8 +120,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("health pill hardening (J2 M1)", () => {
-  it("passes an AbortSignal and marks down when the miner never answers within 10s", async () => {
+describe("health pill hardening (J2 M1, re-review M3/M4)", () => {
+  it("first check gets a 60s timeout (cold start): still checking at 10s, unreachable at 60s", async () => {
     const { fetchMock } = installAbortableFetch();
     renderLayout();
 
@@ -106,32 +130,60 @@ describe("health pill hardening (J2 M1)", () => {
     expect(signal).toBeInstanceOf(AbortSignal);
     expect(screen.getByText("checking…")).toBeInTheDocument();
 
+    // The old flat 10s timeout would have shown "unreachable" here for
+    // a live miner still warming up.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(screen.getByText("checking…")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50_000);
+    });
+    expect(screen.getByText("unreachable")).toBeInTheDocument();
+  });
+
+  it("subsequent polls abort at 10s: a hung second check goes unreachable fast", async () => {
+    const { fetchMock, pending } = installAbortableFetch();
+    renderLayout();
+
+    // First check succeeds quickly.
+    pending[0].response.resolve({ ok: true });
+    pending[0].json.resolve({ status: "ok" });
+    await flush();
+    expect(screen.getByText(/live/)).toBeInTheDocument();
+
+    // Second check (30s tick) hangs: it must abort at 10s, not 60s.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
     expect(screen.getByText("unreachable")).toBeInTheDocument();
   });
 
-  it("never stacks polls: interval ticks while a check is in flight are skipped", async () => {
+  it("never stacks polls: interval ticks while the first (60s) check is in flight are skipped", async () => {
     const { fetchMock, pending } = installAbortableFetch();
     renderLayout();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    // The response arrives but its body hangs: the check stays in flight
-    // (the 10s abort is a no-op once the fetch promise has settled).
-    pending[0].response.resolve({ ok: true });
-    await flush();
+    // The first check is still in flight at the 30s tick (its timeout
+    // is 60s), so the tick must be a no-op — this is the one window in
+    // which the in-flight guard is actually reachable.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(25_000);
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    // The body finally arrives: pill goes live, and only then does the
-    // next interval tick start a fresh check.
+    // The check finally succeeds: pill goes live, and the next tick
+    // (60s mark, now past the in-flight check) starts a fresh check.
+    pending[0].response.resolve({ ok: true });
     pending[0].json.resolve({ status: "ok" });
     await flush();
     expect(screen.getByText(/live/)).toBeInTheDocument();
@@ -139,6 +191,32 @@ describe("health pill hardening (J2 M1)", () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("a hung body aborts: headers arrive, body hangs, pill goes unreachable at the timeout", async () => {
+    const { fetchMock, pending } = installAbortableFetch();
+    renderLayout();
+
+    // Headers arrive but the body never does: the 60s first-check abort
+    // kills the hung json() read (real-browser behaviour — the old test
+    // asserted the pill would stay "checking…" here, which cannot
+    // happen). The pill must read "unreachable", not "checking…".
+    pending[0].response.resolve({ ok: true });
+    await flush();
+    expect(screen.getByText("checking…")).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(screen.getByText("unreachable")).toBeInTheDocument();
+
+    // Polling resumes: a later interval tick starts a fresh check. The
+    // exact count depends on whether the 60s tick or the 60s abort fires
+    // first, so assert resumption, not an exact number.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("unreachable")).toBeInTheDocument();
   });
 
   it("marks down on a non-ok response", async () => {

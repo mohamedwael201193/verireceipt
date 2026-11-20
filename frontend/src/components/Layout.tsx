@@ -26,35 +26,45 @@ const NAV_LINKS = [
 type HealthState = "checking" | "ok" | "down";
 
 /** Live health pill: GET /api/health (proxied to the Render miner).
- *  Hardened: each check races a 10s AbortSignal.timeout, polls never stack
- *  (a check already in flight makes the interval tick a no-op), and a
- *  sequence number drops stale responses — only the latest check updates
- *  state. */
+ *  Hardened: each check races an AbortSignal.timeout and polls never
+ *  stack (a check already in flight makes the interval tick a no-op).
+ *  The FIRST check gets a 60s timeout: a cold Render start can take
+ *  25–55s to answer /health, and the old flat 10s timeout showed a live
+ *  miner as "unreachable" for ~60s on first visit (J2 re-review minor
+ *  3). Subsequent polls keep 10s — a dead API must read as down within
+ *  one poll interval (30s) plus the timeout, not a minute.
+ *  There is deliberately NO sequence guard here: the in-flight guard
+ *  plus a timeout shorter than the poll interval make overlap
+ *  unreachable, so a seq number could never drop a stale response —
+ *  it was dead code implying a guarantee it cannot provide
+ *  (J2 re-review minor 4). */
 function HealthPill() {
   const [health, setHealth] = useState<HealthState>("checking");
   const inFlightRef = useRef(false);
-  const seqRef = useRef(0);
+  const firstCheckRef = useRef(true);
 
   useEffect(() => {
     let cancelled = false;
     const check = async () => {
       if (inFlightRef.current) return;
       inFlightRef.current = true;
-      const seq = ++seqRef.current;
+      // First check (cold start) gets 60s; every later poll gets 10s.
+      const timeoutMs = firstCheckRef.current ? 60000 : 10000;
+      firstCheckRef.current = false;
       try {
         const res = await fetch(`${API_BASE}/health`, {
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(timeoutMs),
         });
-        if (cancelled || seq !== seqRef.current) return;
+        if (cancelled) return;
         if (!res.ok) {
           setHealth("down");
           return;
         }
         const data = (await res.json()) as { status?: string };
-        if (cancelled || seq !== seqRef.current) return;
+        if (cancelled) return;
         setHealth(data.status === "ok" ? "ok" : "down");
       } catch {
-        if (!cancelled && seq === seqRef.current) setHealth("down");
+        if (!cancelled) setHealth("down");
       } finally {
         inFlightRef.current = false;
       }
