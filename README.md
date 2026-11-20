@@ -18,7 +18,7 @@ came from the stated source, unaltered.
 | `REGULATORY_FILING_MONITOR_GENERAL` | `GET /v1/filings` | SEC EDGAR + Federal Register filings for an entity over a period |
 | `TVL_LOOKUP_GENERAL` | `GET /v1/tvl` | DeFi TVL (USD) for a protocol or chain, via DeFiLlama |
 | `OPTIMAL_EXECUTION_ROUTE_GENERAL` | `GET /v1/route` | Block-pinned quote for selling exactly 1 ETH for USDC on Ethereum mainnet (Uniswap V2/V3, SushiSwap V2, Curve) |
-| `GRID_POWER_PRICE_GENERAL` | `GET /v1/grid-price` | Wholesale locational marginal price (USD/MWh) from official ISO feeds (CAISO, ERCOT, NYISO, MISO, ENTSO-E/Elering) |
+| `GRID_POWER_PRICE_GENERAL` | `GET /v1/grid-price` | Wholesale locational marginal price (USD/MWh) from official ISO feeds (CAISO, NYISO, ENTSO-E/Elering) |
 
 Every response includes `receipt.raw_response_sha256` — the SHA-256 of the raw
 upstream response the answer was derived from. See
@@ -111,5 +111,13 @@ npm ci
 npm run build
 npm start
 ```
+
+> **Node version for local tests:** run tests with Node 24 (the default
+> `node`, v24.22.1). The prebuilt `better-sqlite3` binding targets Node 24;
+> under Node 20 the grid tests fail at `new Database` (binding compiled for
+> NODE_MODULE_VERSION 137, Node 20 needs 115). Production is unaffected:
+> Render runs `npm ci` at deploy and rebuilds the binding natively for its
+> own Node version. Do not run `npm rebuild better-sqlite3` locally — other
+> test runs depend on the Node 24 binding.
 
 See [`JUDGE.md`](JUDGE.md) for the independent 2-minute verification guide.
