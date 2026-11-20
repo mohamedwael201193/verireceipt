@@ -10,7 +10,7 @@
 // a first run after the service idles can include a Render cold start —
 // that is real latency and is shown as measured, not hidden.
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, ApiError } from '../lib/api';
 import { useLiveQuery } from '../lib/hooks';
 
@@ -50,7 +50,7 @@ interface Probe {
   key: string;
   label: string;
   methodPath: string;
-  run: () => Promise<unknown>;
+  run: (signal: AbortSignal) => Promise<unknown>;
 }
 
 interface EndpointStats {
@@ -73,80 +73,108 @@ export default function Benchmarks() {
   const [doneAt, setDoneAt] = useState<string | null>(null);
   const [runStartedAt, setRunStartedAt] = useState<string | null>(null);
   const cancelled = useRef(false);
+  // AbortController for the in-flight call (M7) + mounted guard: no
+  // setState after unmount, and Cancel actually aborts the current call
+  // instead of waiting up to ~60 s for it.
+  const runController = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      runController.current?.abort();
+    };
+  }, []);
 
   const probes: Probe[] = [
-    { key: 'health', label: 'GET /health', methodPath: '/health', run: () => getHealth() },
+    { key: 'health', label: 'GET /health', methodPath: '/health', run: (signal) => getHealth(signal) },
     {
       key: 'tx',
       label: 'GET /v1/tx',
       methodPath: '/v1/tx?tx_hash=…&chain=ethereum',
-      run: () => getTx({ tx_hash: SAMPLE_TX_HASH, chain: 'ethereum' }),
+      run: (signal) => getTx({ tx_hash: SAMPLE_TX_HASH, chain: 'ethereum' }, signal),
     },
     {
       key: 'filings',
       label: 'GET /v1/filings',
       methodPath: '/v1/filings?entity=Apple&period=last 12 months',
-      run: () => getFilings({ entity: 'Apple', period: 'last 12 months' }),
+      run: (signal) => getFilings({ entity: 'Apple', period: 'last 12 months' }, signal),
     },
     {
       key: 'tvl',
       label: 'GET /v1/tvl',
       methodPath: '/v1/tvl?protocol=aave-v3',
-      run: () => getTvl({ protocol: 'aave-v3' }),
+      run: (signal) => getTvl({ protocol: 'aave-v3' }, signal),
     },
     {
       key: 'route',
       label: 'GET /v1/route',
       methodPath: '/v1/route?pair=ETH/USDC',
-      run: () => getRoute({ pair: 'ETH/USDC' }),
+      run: (signal) => getRoute({ pair: 'ETH/USDC' }, signal),
     },
     {
       key: 'grid-price',
       label: 'GET /v1/grid-price',
       methodPath: '/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=…',
-      run: () =>
-        getGridPrice({ node_or_zone: 'TH_NP15_GEN-APND', interval_start: defaultGridInterval() }),
+      run: (signal) =>
+        getGridPrice({ node_or_zone: 'TH_NP15_GEN-APND', interval_start: defaultGridInterval() }, signal),
     },
   ];
 
   const runBenchmark = useCallback(async () => {
+    const controller = new AbortController();
+    runController.current = controller;
     cancelled.current = false;
     setRunning(true);
     setDoneAt(null);
     const next: Record<string, EndpointStats> = {};
     setRunStartedAt(new Date().toISOString());
-    for (const probe of probes) {
-      const startedAt = new Date().toISOString();
-      const runs: (number | null)[] = [];
-      let error: string | null = null;
-      for (let i = 0; i < RUNS_PER_ENDPOINT; i++) {
-        if (cancelled.current) break;
-        setProgress(`${probe.label} — run ${i + 1} of ${RUNS_PER_ENDPOINT}`);
-        const t0 = performance.now();
-        try {
-          await probe.run();
-          runs.push(Math.round(performance.now() - t0));
-        } catch (err) {
-          runs.push(null);
-          error = errText(err);
+    try {
+      for (const probe of probes) {
+        const startedAt = new Date().toISOString();
+        const runs: (number | null)[] = [];
+        let error: string | null = null;
+        for (let i = 0; i < RUNS_PER_ENDPOINT; i++) {
+          if (cancelled.current || !mounted.current) break;
+          setProgress(`${probe.label} — run ${i + 1} of ${RUNS_PER_ENDPOINT}`);
+          const t0 = performance.now();
+          try {
+            await probe.run(controller.signal);
+            if (!mounted.current) return;
+            runs.push(Math.round(performance.now() - t0));
+          } catch (err) {
+            if (!mounted.current) return;
+            // An aborted call lands here as a failed run — honest: the
+            // measurement was aborted, not completed.
+            runs.push(null);
+            error = errText(err);
+          }
+          if (!mounted.current) return;
+          // Live partial update so the table fills in as measurements land.
+          next[probe.key] = { runs: [...runs], error, startedAt, finishedAt: new Date().toISOString() };
+          setResults({ ...next });
         }
-        // Live partial update so the table fills in as measurements land.
-        next[probe.key] = { runs: [...runs], error, startedAt, finishedAt: new Date().toISOString() };
+        if (cancelled.current || !mounted.current) break;
+        next[probe.key] = { runs, error, startedAt, finishedAt: new Date().toISOString() };
         setResults({ ...next });
       }
-      if (cancelled.current) break;
-      next[probe.key] = { runs, error, startedAt, finishedAt: new Date().toISOString() };
-      setResults({ ...next });
+    } finally {
+      runController.current = null;
+      if (mounted.current) {
+        setProgress('');
+        if (!cancelled.current) setDoneAt(new Date().toISOString());
+        setRunning(false);
+      }
     }
-    setProgress('');
-    if (!cancelled.current) setDoneAt(new Date().toISOString());
-    setRunning(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const cancel = useCallback(() => {
+    // Abort the in-flight call now — Cancel no longer waits for it.
+    runController.current?.abort();
     cancelled.current = true;
-    setProgress('Cancelling after the current call…');
+    setProgress('Aborting the current call…');
   }, []);
 
   const allRuns = results ? Object.values(results).flatMap((s) => s.runs) : [];
@@ -189,7 +217,7 @@ export default function Benchmarks() {
           </button>
           {running && (
             <button type="button" className="vr-btn-ghost" onClick={cancel}>
-              Cancel
+              Abort run
             </button>
           )}
           {doneAt && !running && (
@@ -312,7 +340,7 @@ export default function Benchmarks() {
 }
 
 const PAGE_CSS = `
-.vr-page{max-width:1340px;margin:0 auto;padding:28px 24px 64px;color:var(--text,#F3F2EE);font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px;line-height:1.55}
+.vr-page{max-width:1340px;margin:0 auto;padding:28px 24px 64px;color:var(--text,#F3F2EE);font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px;line-height:1.55;overflow-wrap:anywhere}
 .vr-kicker{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;color:var(--muted,#8F8E8A);margin-bottom:6px}
 .vr-h1{font-size:clamp(1.9rem,3.2vw,2.6rem);font-weight:300;letter-spacing:-.03em;line-height:1.08;margin:0 0 10px}
 .vr-h1 .serif-i,.serif-i{font-family:'Newsreader',Georgia,serif;font-style:italic;font-weight:400}
