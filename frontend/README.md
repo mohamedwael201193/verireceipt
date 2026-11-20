@@ -39,6 +39,6 @@ walk-up copy (the merged tree has none and `tsc` fails without it).
 - The Google Fonts stylesheet loads non-blockingly (`preload` + `media=print`
   `onload` swap in `index.html`); the render-blocking form must not return.
 - The landing page's Probe section must carry `id="probe"`, and the
-  Roadmap/Manifesto sections `id="sprint-matrix"` / `id="manifesto"` — the
+  Roadmap/Manifesto sections `id="roadmap"` / `id="manifesto"` — the
   nav CTA and footer sitemap link to those anchors. Those sections belong to
   the landing page worker; confirm the ids at integration.

@@ -57,7 +57,7 @@ describe("footer copy (J1-5)", () => {
 
     expect(screen.getByRole("link", { name: "Intents" })).toHaveAttribute("href", "/docs");
     expect(screen.getByRole("link", { name: "Guarantees" })).toHaveAttribute("href", "/docs");
-    expect(screen.getByRole("link", { name: "Roadmap" })).toHaveAttribute("href", "/#sprint-matrix");
+    expect(screen.getByRole("link", { name: "Roadmap" })).toHaveAttribute("href", "/#roadmap");
     expect(screen.getByRole("link", { name: "Manifesto" })).toHaveAttribute("href", "/#manifesto");
   });
 });

@@ -170,7 +170,7 @@ export default function Layout() {
                 <Link to="/docs">Intents</Link>
                 <Link to="/docs">Guarantees</Link>
                 <Link to="/dashboard">Desk logs ↗</Link>
-                <Link to="/#sprint-matrix">Roadmap</Link>
+                <Link to="/#roadmap">Roadmap</Link>
                 <Link to="/#manifesto">Manifesto</Link>
               </div>
             </div>
