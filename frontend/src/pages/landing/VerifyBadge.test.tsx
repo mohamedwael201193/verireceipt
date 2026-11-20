@@ -23,7 +23,11 @@ function mockEnvelope() {
     },
   };
   const rawText = JSON.stringify(body);
-  const fetchMock = vi.fn(async () => ({ ok: true, status: 200, text: async () => rawText }));
+  // Real Response (J2 R2 M5): the old hand-rolled {ok, status, text}
+  // stub had no headers and contradicted the "all mocks are real
+  // Response" claim — fetchAndVerify never reads headers, but the stub
+  // should still be a real Response.
+  const fetchMock = vi.fn(async () => new Response(rawText, { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
   return { fetchMock, rawText };
 }
