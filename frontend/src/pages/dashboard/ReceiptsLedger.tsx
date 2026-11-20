@@ -7,7 +7,7 @@
 // from those rows; "Escrow Spend" is $0.00 because direct probes are
 // unbilled; the median is the median of measured latencies (or "—").
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { LiveReceipt } from "./types";
 import { downloadText, formatDate, formatMs, median, shortHash } from "./utils";
 
@@ -30,6 +30,11 @@ const FILTERS = [
 export default function ReceiptsLedger({ receipts, onInspect, showToast }: ReceiptsLedgerProps) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+
+  // Paginate rendering: at most PAGE_SIZE rows mount at once, however long
+  // the session ledger grows (the ledger itself is capped at 200 rows).
+  const PAGE_SIZE = 50;
 
   const kpis = useMemo(() => {
     const total = receipts.length;
@@ -52,6 +57,14 @@ export default function ReceiptsLedger({ receipts, onInspect, showToast }: Recei
       return true;
     });
   }, [receipts, filter, search]);
+
+  // A new filter/search restarts at page 1; a shrinking ledger clamps the page.
+  useEffect(() => {
+    setPage(0);
+  }, [filter, search]);
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const pageRows = rows.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
 
   function exportJsonl() {
     const lines = receipts
@@ -172,8 +185,8 @@ export default function ReceiptsLedger({ receipts, onInspect, showToast }: Recei
                   </td>
                 </tr>
               ) : (
-                rows.map((r) => (
-                  <tr key={r.id} className="clickable" onClick={() => onInspect(r)}>
+                pageRows.map((r) => (
+                  <tr key={r.key} className="clickable" onClick={() => onInspect(r)}>
                     <td className="mono" style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap" }}>{formatDate(r.ts)}</td>
                     <td className="mono" style={{ fontSize: 11, fontWeight: 500 }}>{r.intent.replace("_GENERAL", "")}</td>
                     <td className="mono" style={{ fontSize: 11, color: "var(--soft)", maxWidth: 190, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.query}</td>
@@ -196,6 +209,21 @@ export default function ReceiptsLedger({ receipts, onInspect, showToast }: Recei
             </tbody>
           </table>
         </div>
+        {rows.length > PAGE_SIZE && (
+          <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <span className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
+              Page {safePage + 1} of {pageCount} · {rows.length} matching rows · {PAGE_SIZE} per page
+            </span>
+            <span style={{ display: "flex", gap: 6 }}>
+              <button type="button" className="btn-ghost" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => setPage(safePage - 1)} disabled={safePage === 0}>
+                ← Prev
+              </button>
+              <button type="button" className="btn-ghost" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => setPage(safePage + 1)} disabled={safePage >= pageCount - 1}>
+                Next →
+              </button>
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
