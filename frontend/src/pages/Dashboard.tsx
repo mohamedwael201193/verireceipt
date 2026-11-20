@@ -9,9 +9,21 @@
 // The page owns the session ledger: every live call from any view appends a
 // real receipt here (newest first). Nothing is seeded. The four views are
 // internal tabs of this page, exactly as designed.
+//
+// THEME (single owner): the shell Layout owns the theme via useTheme /
+// ThemeToggle (localStorage key `verireceipt-theme`, dark default). This
+// page keeps NO theme state and renders NO theme toggle — an earlier
+// duplicate toggle desynced from the shell's. Theme-dependent drawing
+// (dither ribbon, oscilloscope) reads document.documentElement's
+// data-theme attribute at draw time.
+// BRANCH BUILDABILITY (J2 M10, integration-owned): this branch carries
+// only the dashboard pages; the app shell (Layout, ThemeToggle, useTheme),
+// the data-layer lib and the vite/vitest harness live on the
+// frontend/scaffold and frontend/data-layer branches. This branch is NOT
+// independently buildable on its own — that is by the merge design, not a
+// defect of this page; do not restructure it to be standalone.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useHealth } from "../lib/hooks";
 import AuthDrawer from "./dashboard/AuthDrawer";
 import Benchmarks from "./dashboard/Benchmarks";
 import MissionDesk from "./dashboard/MissionDesk";
@@ -20,9 +32,8 @@ import ReceiptsLedger from "./dashboard/ReceiptsLedger";
 import StatusDocs from "./dashboard/StatusDocs";
 import "./dashboard/dashboard.css";
 import type { AuthMode, DashboardView, LiveReceipt, ScopeSamples, ScopeSeriesKey } from "./dashboard/types";
-import { DIAMOND_SHORT, utcClock } from "./dashboard/utils";
+import { DIAMOND_SHORT, LEDGER_CAP, appendToLedger, utcClock } from "./dashboard/utils";
 
-const HEALTH_POLL_MS = 30_000;
 const SCOPE_CAP = 48;
 
 const VIEW_TABS: Array<{ id: DashboardView; num: string; label: string }> = [
@@ -42,9 +53,6 @@ function seriesForIntent(intent: string): ScopeSeriesKey | null {
 
 export default function Dashboard() {
   const [view, setView] = useState<DashboardView>("desk");
-  const [theme, setTheme] = useState<"dark" | "light">(
-    () => (document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"),
-  );
   const [receipts, setReceipts] = useState<LiveReceipt[]>([]);
   const [samples, setSamples] = useState<ScopeSamples>({ tx: [], grid: [], tvl: [], route: [] });
   const [inspected, setInspected] = useState<LiveReceipt | null>(null);
@@ -52,7 +60,6 @@ export default function Dashboard() {
   const [authMode, setAuthMode] = useState<AuthMode>("sponsored");
   const [toast, setToast] = useState<string | null>(null);
   const [utcNow, setUtcNow] = useState(() => utcClock());
-  const [lastHealthCheck, setLastHealthCheck] = useState<string | null>(null);
 
   const toastTimer = useRef<number | null>(null);
   const scrollBarRef = useRef<HTMLDivElement | null>(null);
@@ -60,17 +67,24 @@ export default function Dashboard() {
   const ringRef = useRef<HTMLDivElement | null>(null);
   const ditherRef = useRef<HTMLCanvasElement | null>(null);
 
-  const health = useHealth();
-
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2200);
   }, []);
 
+  // Clear the toast timer on unmount so a pending timeout never fires
+  // setState on an unmounted page.
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
+    };
+  }, []);
+
   // Record a live receipt in the session ledger (+ oscilloscope sample).
+  // The ledger is capped at the latest LEDGER_CAP receipts.
   const onRecord = useCallback((receipt: LiveReceipt) => {
-    setReceipts((prev) => [receipt, ...prev]);
+    setReceipts((prev) => appendToLedger(prev, receipt));
     const series = seriesForIntent(receipt.intent);
     if (series) {
       setSamples((prev) => ({
@@ -79,18 +93,6 @@ export default function Dashboard() {
       }));
     }
   }, []);
-
-  // /health polling (useHealth fetches once; the page re-polls every 30s).
-  useEffect(() => {
-    const t = window.setInterval(() => health.refetch(), HEALTH_POLL_MS);
-    return () => window.clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // "Last checked" = wall time the last /health attempt settled.
-  useEffect(() => {
-    if (!health.loading) setLastHealthCheck(`${utcClock()} UTC`);
-  }, [health.data, health.error, health.loading]);
 
   // Live UTC clock.
   useEffect(() => {
@@ -106,19 +108,6 @@ export default function Dashboard() {
       document.title = prev;
     };
   }, []);
-
-  // Theme toggle (persists under the scaffold's verireceipt-theme key).
-  function toggleTheme() {
-    const next = theme === "light" ? "dark" : "light";
-    setTheme(next);
-    document.documentElement.setAttribute("data-theme", next);
-    try {
-      localStorage.setItem("verireceipt-theme", next);
-    } catch {
-      // Storage unavailable: theme still applies for this session.
-    }
-    showToast(next === "light" ? "Light Stone theme" : "Dark Obsidian theme");
-  }
 
   // Scroll progress bar.
   useEffect(() => {
@@ -249,16 +238,31 @@ export default function Dashboard() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  const healthLabel = health.loading
-    ? "/health: polling…"
-    : health.data
-      ? `/health: ${health.data.status} · uptime ${health.data.uptime_s}s`
-      : health.error
-        ? `/health: error — ${health.error.message}`
-        : "/health: —";
+  // /health state comes from the session ledger (the last on-demand
+  // /health Ping or B02 probe). This page runs no health poller: the
+  // shell's health pill already polls /health every 30s, and a second
+  // (plus a third in StatusDocs) poller per route was pure duplication.
+  const lastHealthReceipt = receipts.find((r) => r.intent === "HEALTH") ?? null;
+  const healthLabel = lastHealthReceipt
+    ? lastHealthReceipt.status === 200
+      ? `/health: ok · uptime ${(() => {
+          const b = lastHealthReceipt.body as { uptime_s?: unknown } | null;
+          return typeof b?.uptime_s === "number" ? `${b.uptime_s}s` : "—";
+        })()}`
+      : `/health: HTTP ${lastHealthReceipt.status}`
+    : "/health: not probed yet";
 
-  const authPillLabel =
-    authMode === "sponsored" ? "Sponsored" : authMode === "byok" ? "BYO Key · Active" : "MCP / CLI";
+  const authPillLabel = authMode === "sponsored" ? "Sponsored" : "MCP / CLI";
+
+  // The two drawers are mutually exclusive: opening one closes the other.
+  function openReceipt(receipt: LiveReceipt | null) {
+    setInspected(receipt);
+    if (receipt !== null) setAuthOpen(false);
+  }
+  function openAuth() {
+    setAuthOpen(true);
+    setInspected(null);
+  }
 
   return (
     <div className="vr-dashboard">
@@ -292,17 +296,9 @@ export default function Dashboard() {
           </nav>
 
           <div className="nav-actions">
-            <button type="button" className="auth-pill" onClick={() => setAuthOpen(true)} title="Configure Auth & Payment Mode">
+            <button type="button" className="auth-pill" onClick={openAuth} title="Configure Auth & Payment Mode">
               <span style={{ width: 6, height: 6, borderRadius: 999, background: "var(--accent)" }} />
               <span>{authPillLabel}</span>
-            </button>
-            <button type="button" className="theme-switch" onClick={toggleTheme} aria-label="Toggle Dark Obsidian and Light Stone theme" title="Toggle theme">
-              <span className="theme-knob">
-                <svg viewBox="0 0 16 16" width="11" height="11" fill="none" aria-hidden="true">
-                  <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.35" />
-                  <path d="M8 2 A6 6 0 0 1 8 14 Z" fill="currentColor" />
-                </svg>
-              </span>
             </button>
           </div>
         </div>
@@ -341,37 +337,42 @@ export default function Dashboard() {
             <span>
               Session receipts: <strong style={{ color: "var(--accent)" }}>{receipts.length}</strong>
             </span>
-            {lastHealthCheck && (
+            {receipts.length >= LEDGER_CAP && (
               <>
                 <span className="sep">|</span>
-                <span>health checked {lastHealthCheck}</span>
+                <span>capped at latest {LEDGER_CAP}</span>
               </>
             )}
           </div>
         </div>
       </div>
 
-      <section className={`view${view === "desk" ? " active" : ""}`} aria-label="Mission Desk">
-        <MissionDesk onRecord={onRecord} onInspect={setInspected} showToast={showToast} />
-      </section>
-      <section className={`view${view === "receipts" ? " active" : ""}`} aria-label="Receipts">
-        <ReceiptsLedger receipts={receipts} onInspect={setInspected} showToast={showToast} />
-      </section>
-      <section className={`view${view === "benchmarks" ? " active" : ""}`} aria-label="Benchmarks">
-        <Benchmarks onRecord={onRecord} showToast={showToast} />
-      </section>
-      <section className={`view${view === "status" ? " active" : ""}`} aria-label="Status and Docs">
-        <StatusDocs
-          active={view === "status"}
-          health={health.data}
-          healthError={health.error}
-          lastHealthCheck={lastHealthCheck}
-          receipts={receipts}
-          samples={samples}
-          onRecord={onRecord}
-          showToast={showToast}
-        />
-      </section>
+      {view === "desk" && (
+        <section className="view active" aria-label="Mission Desk">
+          <MissionDesk onRecord={onRecord} onInspect={openReceipt} showToast={showToast} />
+        </section>
+      )}
+      {view === "receipts" && (
+        <section className="view active" aria-label="Receipts">
+          <ReceiptsLedger receipts={receipts} onInspect={openReceipt} showToast={showToast} />
+        </section>
+      )}
+      {view === "benchmarks" && (
+        <section className="view active" aria-label="Benchmarks">
+          <Benchmarks onRecord={onRecord} showToast={showToast} />
+        </section>
+      )}
+      {view === "status" && (
+        <section className="view active" aria-label="Status and Docs">
+          <StatusDocs
+            active={view === "status"}
+            receipts={receipts}
+            samples={samples}
+            onRecord={onRecord}
+            showToast={showToast}
+          />
+        </section>
+      )}
 
       <div
         className={`backdrop${inspected !== null || authOpen ? " open" : ""}`}
@@ -382,6 +383,7 @@ export default function Dashboard() {
       />
       <ReceiptDrawer receipt={inspected} onClose={() => setInspected(null)} showToast={showToast} />
       <AuthDrawer open={authOpen} authMode={authMode} onSelectMode={setAuthMode} onClose={() => setAuthOpen(false)} showToast={showToast} />
+
 
       <div id="toast" role="status" aria-live="polite" className={toast ? "show" : ""}>
         {toast ?? ""}
