@@ -13,6 +13,7 @@
 // e35fb0ac303ee2c2477030c22329bf2b0195d299 (base commit carrying miner.yaml).
 
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 
 const API_BASE_URL = 'https://verireceipt.onrender.com';
 const REPO_URL = 'https://github.com/mohamedwael201193/verireceipt';
@@ -89,9 +90,9 @@ const ENDPOINTS: EndpointDoc[] = [
       { name: 'filings' },
       { name: 'urls' },
     ],
-    exampleLabel: 'Apple Inc. filings, last 12 months (live 2026-11-20)',
-    exampleUrl: `${API_BASE_URL}/v1/filings?entity=Apple%20Inc&period=last%2012%20months`,
-    exampleCurl: `curl "${API_BASE_URL}/v1/filings?entity=Apple%20Inc&period=last%2012%20months"`,
+    exampleLabel: 'AAPL filings, last 12 months (live 2026-11-20)',
+    exampleUrl: `${API_BASE_URL}/v1/filings?entity=AAPL&period=last%2012%20months`,
+    exampleCurl: `curl "${API_BASE_URL}/v1/filings?entity=AAPL&period=last%2012%20months"`,
   },
   {
     key: 'tvl',
@@ -323,16 +324,23 @@ export default function Docs() {
           </table>
         </div>
         <p className="vr-muted vr-small" style={{ overflowWrap: 'anywhere' }}>
-          To verify, recompute the hash the miner actually hashed — the method differs per
-          endpoint, and the /receipts page does each one in your browser: tx replays the exact
-          JSON-RPC <span className="vr-mono">eth_getTransactionReceipt</span> call against the
-          receipt’s upstream RPC URL; filings and TVL re-fetch the upstream URL and hash the exact
-          bytes (filings reproduces the hash byte-for-byte; TVL can legitimately mismatch because
-          the upstream serves different bytes per edge); grid re-hashes the canonical evidence
-          JSON <span className="vr-mono">{'{"node_or_zone","interval_start","lmp_usd_per_mwh","market"}'}</span>{' '}
-          built from the answer fields; route cannot be re-hashed in-browser because the evidence
-          includes quoter request/response data the API does not carry. Only a match counts as
-          verified.
+          To verify, recompute the hash the miner actually hashed. The browser verifier
+          (one verifier for the whole site, /receipts page + dashboard inspector + landing
+          badge) fetches the stored raw bytes first —{' '}
+          <span className="vr-mono">GET /api/receipts/:id/raw</span> — and hashes them
+          against the recorded digest. While the miner does not serve that endpoint yet
+          (live check 2026-11-20: HTTP 404), it falls back to a live re-check whose method
+          differs per endpoint: tx replays the exact JSON-RPC{' '}
+          <span className="vr-mono">eth_getTransactionReceipt</span> call against the
+          receipt’s upstream RPC URL; filings and TVL re-fetch the upstream URL and hash the
+          exact bytes (filings reproduces the hash byte-for-byte; TVL can legitimately
+          mismatch because the upstream serves different bytes per edge); grid re-hashes the
+          canonical evidence JSON{' '}
+          <span className="vr-mono">{'{"node_or_zone","interval_start","lmp_usd_per_mwh","market"}'}</span>{' '}
+          built from the answer fields; route cannot be re-hashed in-browser because the
+          evidence includes quoter request/response data the API does not carry — until the
+          miner serves /raw, when route becomes verifiable too. Only a match counts as
+          verified, and the method used is always named.
         </p>
       </section>
 
@@ -407,9 +415,9 @@ export default function Docs() {
             <a className="vr-btn-ghost vr-link-btn" href={ep.exampleUrl} target="_blank" rel="noreferrer">
               Open live response ↗
             </a>
-            <a className="vr-btn-accent vr-link-btn" href="/receipts">
+            <Link className="vr-btn-accent vr-link-btn" to="/receipts">
               Try it live on /receipts →
-            </a>
+            </Link>
             <CopyButton text={ep.exampleCurl} label={`Copy ${ep.path} example curl`} />
           </div>
         </section>
@@ -489,7 +497,7 @@ export default function Docs() {
 curl "$BASE/v1/tx?tx_hash=0xafdbc83c485355d90f79fd660bcd12713402aa78922d966657d1005f59e92902&chain=ethereum"
 
 # 2. Filings for an entity over a period
-curl "$BASE/v1/filings?entity=Apple%20Inc&period=last%2012%20months"
+curl "$BASE/v1/filings?entity=AAPL&period=last%2012%20months"
 
 # 3. TVL for a protocol
 curl "$BASE/v1/tvl?protocol=aave-v3"
@@ -501,9 +509,9 @@ curl "$BASE/v1/route?pair=ETH%2FUSDC"
 curl "$BASE/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2026-11-20T06%3A00%3A00Z"`}</pre>
             </div>
             <div className="vr-doc-actions">
-              <a className="vr-btn-accent vr-link-btn" href="/receipts">
+              <Link className="vr-btn-accent vr-link-btn" to="/receipts">
                 Try them live on /receipts →
-              </a>
+              </Link>
             </div>
           </div>
         )}

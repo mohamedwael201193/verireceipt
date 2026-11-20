@@ -15,11 +15,11 @@ const RECEIPT = {
 };
 
 const TX_BODY = {
-  tx_hash: "0x8c3f442fc6d640a6ff3ea0b12be64f1d4609ea94edd2966f42c01cd9bdcf04b5",
+  tx_hash: "0xafdbc83c485355d90f79fd660bcd12713402aa78922d966657d1005f59e92902",
   status: "confirmed",
   from: "0x1111111111111111111111111111111111111111",
   to: "0x2222222222222222222222222222222222222222",
-  block_number: 15725067,
+  block_number: 26454869,
   value_eth: "0.01",
   source: "archive-rpc-quorum",
   receipt: { ...RECEIPT, quorum_votes: "2-of-3" },
@@ -142,14 +142,16 @@ describe("IntentIde — one live call per switch (M1)", () => {
     fireEvent.click(screen.getByRole("tab", { name: /sec-filing/ }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 
-    // Newest run (sec) resolves first…
+    // Newest run (sec) resolves first… (the visual carries the
+    // window: "AAPL — 3 filings · last 12 months", not a bare count —
+    // filings J2 R3 M3).
     pending[1].resolve(SEC_BODY);
-    await waitFor(() => expect(screen.getByText(/AAPL — 3 filings/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/AAPL — 3 filings · last 12 months/)).toBeInTheDocument());
     // …then the stale tx run resolves late: it must not overwrite.
     pending[0].resolve(TX_BODY);
     await new Promise((r) => setTimeout(r, 50));
-    expect(screen.getByText(/AAPL — 3 filings/)).toBeInTheDocument();
-    expect(screen.queryByText(/confirmed · block 15725067/)).toBeNull();
+    expect(screen.getByText(/AAPL — 3 filings · last 12 months/)).toBeInTheDocument();
+    expect(screen.queryByText(/confirmed · block 26454869/)).toBeNull();
   });
 
   it("IDE visuals never claim verification (J2 B1)", async () => {
@@ -189,7 +191,7 @@ describe("IntentIde — one live call per switch (M1)", () => {
     render(<IntentIde />);
 
     // Tx visual: quorum fallback is "receipted", never "verified".
-    await waitFor(() => expect(screen.getByText(/receipted · #15725067/)).toBeInTheDocument(), {
+    await waitFor(() => expect(screen.getByText(/receipted · #26454869/)).toBeInTheDocument(), {
       timeout: 15000,
     });
     expect(screen.queryByText("verified")).toBeNull();

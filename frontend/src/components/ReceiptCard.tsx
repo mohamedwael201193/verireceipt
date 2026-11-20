@@ -115,6 +115,7 @@ export function isSafeUpstreamUrl(value: unknown): value is string {
   }
 }
 
+
 // Theme: every colour is a design token (tokens.css, scaffold branch:
 // html[data-theme="light"] = Light Stone, :root = dark). NO hardcoded
 // theme colours here — the card must follow whichever theme the page

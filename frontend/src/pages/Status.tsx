@@ -86,9 +86,9 @@ const PROBES: ProbeDef[] = [
   {
     key: 'filings',
     label: 'GET /v1/filings',
-    methodPath: '/v1/filings?entity=Apple&period=last 12 months',
+    methodPath: '/v1/filings?entity=AAPL&period=last 12 months',
     intent: 'REGULATORY_FILING_MONITOR_GENERAL',
-    run: () => getFilings({ entity: 'Apple', period: 'last 12 months' }),
+    run: () => getFilings({ entity: 'AAPL', period: 'last 12 months' }),
   },
   {
     key: 'tvl',
@@ -114,12 +114,22 @@ const PROBES: ProbeDef[] = [
   },
 ];
 
-function probeDetail(key: string, data: unknown): string | null {
+function probeDetail(key: string, data: unknown, methodPath?: string): string | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
   if (key === 'health') return `status ${String(d.status ?? '—')}`;
   if (key === 'tx') return `block ${String(d.block_number ?? '—')} · ${String(d.status ?? '—')}`;
-  if (key === 'filings') return `${String(d.filing_count ?? '—')} filings`;
+  if (key === 'filings') {
+    // The count carries its window (filings J1 R3 M1): the filings
+    // probe asks AAPL · last 12 months — read the entity + period from
+    // the probe's own query string, never hardcode them, and omit the
+    // window only if the probe genuinely asked without one.
+    const q = new URLSearchParams(methodPath?.split('?')[1] ?? '');
+    const entity = q.get('entity');
+    const period = q.get('period');
+    const count = String(d.filing_count ?? '—');
+    return `${count} filings${entity ? ` · ${entity}` : ''}${period ? ` · ${period}` : ''}`;
+  }
   if (key === 'tvl') return `TVL $${Number(d.tvl_usd ?? 0).toLocaleString('en-US')}`;
   if (key === 'route') return `amount_out ${String(d.amount_out ?? '—')}`;
   if (key === 'grid-price') return `LMP $${String(d.lmp_usd_per_mwh ?? '—')}/MWh`;
@@ -191,7 +201,7 @@ export default function Status() {
               latencyMs: Math.round(performance.now() - t0),
               checkedAt: new Date().toISOString(),
               error: null,
-              detail: probeDetail(probe.key, data),
+              detail: probeDetail(probe.key, data, probe.methodPath),
             },
           }));
         } catch (err) {

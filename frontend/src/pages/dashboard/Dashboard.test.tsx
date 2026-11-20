@@ -118,7 +118,7 @@ function hangingFetch(_url: string, init?: { signal?: AbortSignal }) {
 function makeReceipt(overrides: Partial<LiveReceipt> & { intent: string }): LiveReceipt {
   const outcome =
     overrides.status === 200 || overrides.status === undefined
-      ? { ok: true as const, body: { receipt: RECEIPT }, receipt: RECEIPT, latencyMs: 42 }
+      ? { ok: true as const, body: { receipt: RECEIPT }, receipt: RECEIPT, latencyMs: 42, ledgerGenAtStart: 0 }
       : { ok: false as const, body: { error: "x" }, latencyMs: 42, status: overrides.status ?? 422 };
   return toLiveReceipt(overrides.intent, overrides.query ?? "q", "https://example.com", outcome);
 }
@@ -328,6 +328,7 @@ describe("Dashboard page", () => {
       if (m) expect(supported.has(m[1])).toBe(true);
     }
   });
+
 });
 
 describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
@@ -351,7 +352,15 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
 
   /** A fetch that hangs on the drawer upstream URL only (M-2). */
   function hangingUpstreamFetch(url: string, init?: { signal?: AbortSignal }) {
-    if (String(url).includes("example.com/upstream")) return hangingFetch(url, init);
+    // The recompute fetches the raw endpoint first (/api/receipts/:id/raw)
+    // and the upstream second — both must hang for the cancel/timeout
+    // tests to exercise the verifier's shared 45s budget.
+    if (
+      String(url).includes("example.com/upstream") ||
+      String(url).includes("/api/receipts/")
+    ) {
+      return hangingFetch(url, init);
+    }
     return mockFetch(url);
   }
 
@@ -674,6 +683,7 @@ describe("J2 R6 — latent minors (verified receipt, missing field)", () => {
       body,
       receipt: RECEIPT as unknown as Receipt,
       latencyMs: 1,
+      ledgerGenAtStart: 0,
     });
   }
 

@@ -99,6 +99,20 @@ function txStatusOf(r: DeskCheckResult): string | null {
   return b && typeof b.status === "string" ? b.status : null;
 }
 
+/** Period of the filings question actually asked, parsed from the call's
+ *  request URL (the envelope carries no period, and evaluate() does not
+ *  close over buildChecks()' locals). "" when unknown — the why-card
+ *  then omits the window rather than printing a placeholder. */
+function filingsPeriodOf(result: DeskCheckResult | undefined): string {
+  const url = result?.receipt?.requestUrl;
+  if (typeof url !== "string" || !url) return "";
+  try {
+    return new URL(url).searchParams.get("period") ?? "";
+  } catch {
+    return "";
+  }
+}
+
 // NOTE (J2 R4 B1): there is deliberately NO bare `status === 200`
 // helper in this file anymore. Every "ok" check below keys on the
 // shared isVerified() predicate (200 AND a receipt, utils.ts) — a
@@ -174,6 +188,7 @@ export const DESK_PRESETS: DeskPreset[] = [
       const filingsBody = filings ? bodyOf<FilingsResponse>(filings) : null;
       const filingsOk =
         !!filings && isVerified(filings.receipt) && typeof filingsBody?.filing_count === "number" && filingsBody.filing_count > 0;
+      const filingsPeriod = filingsPeriodOf(filings);
       const routeBody = route ? bodyOf<RouteResponse>(route) : null;
       const routeOk = !!route && isVerified(route.receipt) && typeof routeBody?.amount_out === "number" && routeBody.amount_out > 0;
       const passes = [txOk, tvlOk, filingsOk, routeOk].filter(Boolean).length;
@@ -197,10 +212,12 @@ export const DESK_PRESETS: DeskPreset[] = [
           // `filingsBody ?` is truthy on ANY refusal and rendered
           // "undefined filings for undefined". Render the count only
           // on a verified receipt with a typed filing_count (a
-          // verified 0 is a real answer) and a typed entity.
+          // verified 0 is a real answer) and a typed entity. The count
+          // carries its window (J2 R3 B3): "95 filings" is the
+          // last-12-months answer, "52" the last-6-months one.
           v:
             filings && isVerified(filings.receipt) && typeof filingsBody?.filing_count === "number" && typeof filingsBody?.entity === "string"
-              ? `${filingsBody.filing_count} filings for ${filingsBody.entity}`
+              ? `${filingsBody.filing_count} filings for ${filingsBody.entity}${filingsPeriod ? ` in ${filingsPeriod}` : ""}`
               : "no live filings returned",
           ok: filingsOk,
         },
@@ -341,6 +358,7 @@ export const DESK_PRESETS: DeskPreset[] = [
       const filingsBody = filings ? bodyOf<FilingsResponse>(filings) : null;
       const filingsOk =
         !!filings && isVerified(filings.receipt) && typeof filingsBody?.filing_count === "number" && filingsBody.filing_count > 0;
+      const filingsPeriod = filingsPeriodOf(filings);
       const routeBody = route ? bodyOf<RouteResponse>(route) : null;
       const routeOk = !!route && isVerified(route.receipt) && typeof routeBody?.amount_out === "number" && routeBody.amount_out > 0;
       const why: WhyCard[] = [
@@ -348,9 +366,11 @@ export const DESK_PRESETS: DeskPreset[] = [
           k: "Official EDGAR",
           // (J2 R5 B2) Same refusal-body trap as m13-defi "SEC
           // Compliance": gate on a verified receipt + typed fields.
+          // The count carries its window (J2 R3 B3): an earlier
+          // version rendered a literal unfinished placeholder here.
           v:
             filings && isVerified(filings.receipt) && typeof filingsBody?.filing_count === "number" && typeof filingsBody?.entity === "string"
-              ? `${filingsBody.filing_count} filings for ${filingsBody.entity} in period`
+              ? `${filingsBody.filing_count} filings for ${filingsBody.entity}${filingsPeriod ? ` in ${filingsPeriod}` : ""}`
               : "no live filings returned",
           ok: filingsOk,
         },

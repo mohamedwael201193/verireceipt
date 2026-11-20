@@ -198,7 +198,7 @@ export function DeskStage() {
           {
             intent: INTENTS.find((i) => i.key === key)?.name ?? key,
             ms,
-            out: outcomeFor(key, data),
+            out: outcomeFor(key, data, params[key]),
             sig: shortHash(data.receipt.raw_response_sha256),
             ok: true,
           },

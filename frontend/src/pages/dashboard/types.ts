@@ -50,6 +50,14 @@ export interface LiveReceipt {
   body: unknown;
   /** The receipt block, or null when the call was refused before receipting. */
   receipt: Receipt | null;
+  /**
+   * The shared-ledger clear generation captured when the probe started
+   * (J2 R6 cross-tab): persistLiveReceiptToSessionLedger drops the row
+   * when the ledger was cleared — in this tab or another — while the
+   * call was in flight. Undefined for rows built before this field
+   * existed (treated as current: no gate).
+   */
+  ledgerGenAtStart?: number;
   /** Short error code from the API error body / lib ApiError, if any. */
   errorCode?: string;
   /** Human-readable error message, if any. */
@@ -58,7 +66,14 @@ export interface LiveReceipt {
 
 /** One live probe outcome, before it is recorded as a LiveReceipt. */
 export type ProbeOutcome =
-  | { ok: true; body: unknown; receipt: Receipt | null; latencyMs: number }
+  | {
+      ok: true;
+      body: unknown;
+      receipt: Receipt | null;
+      latencyMs: number;
+      /** Shared-ledger clear generation at probe start (J2 R6 cross-tab). */
+      ledgerGenAtStart: number;
+    }
   | {
       ok: false;
       body: unknown;

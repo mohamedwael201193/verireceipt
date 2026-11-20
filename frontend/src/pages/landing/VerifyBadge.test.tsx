@@ -1,103 +1,134 @@
-// J1 regression test: the VerifyBadge steady state for the EXPECTED
-// digest mismatch (envelope bytes vs upstream receipt bytes) must be
-// NEUTRAL — it is not a failed verification, and the old amber
-// "DIGESTS DIFFER — SEE NOTE" badge read as one. MATCH VERIFIED still
-// appears only on a real byte-exact match.
+// Tests for the VerifyBadge — the landing badge for THE ONE verifier
+// (lib/verifyReceipt.ts, PLAN.md C2). The old envelope-digest badge
+// (deleted with landing/verify.ts) could never verify anything: it
+// hashed the miner envelope, which can never match the recorded
+// upstream digest. These tests pin the real paths: raw_bytes first,
+// live re-check while the miner does not serve /raw.
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "../../lib/api";
+import { sha256Hex } from "../../lib/receipt";
+import type { Receipt } from "../../lib/types";
 import { VerifyBadge } from "./VerifyBadge";
-import { fetchAndVerify } from "./verify";
 
-const RECORDED_DIGEST = "b".repeat(64);
-
-function mockEnvelope() {
-  const body = {
-    tx_hash: "0x8c3f442fc6d640a6ff3ea0b12be64f1d4609ea94edd2966f42c01cd9bdcf04b5",
-    status: "confirmed",
-    receipt: {
-      receipt_id: "rcpt-test-1",
-      upstream_url: "https://example.com/upstream",
-      raw_response_sha256: RECORDED_DIGEST,
-      fetched_at: "2026-11-20T00:00:00Z",
-    },
+function makeReceipt(overrides: Partial<Receipt> = {}): Receipt {
+  return {
+    receipt_id: "rcpt-test-1",
+    upstream_url: "https://example.com/upstream",
+    raw_response_sha256: "a".repeat(64),
+    fetched_at: "2026-11-20T00:00:00Z",
+    ...overrides,
   };
-  const rawText = JSON.stringify(body);
-  // Real Response (J2 R2 M5): the old hand-rolled {ok, status, text}
-  // stub had no headers and contradicted the "all mocks are real
-  // Response" claim — fetchAndVerify never reads headers, but the stub
-  // should still be a real Response.
-  const fetchMock = vi.fn(async () => new Response(rawText, { status: 200 }));
-  vi.stubGlobal("fetch", fetchMock);
-  return { fetchMock, rawText };
 }
 
-describe("VerifyBadge — neutral steady state (J1)", () => {
+async function digestOf(body: string): Promise<string> {
+  return `0x${await sha256Hex(body)}`;
+}
+
+describe("VerifyBadge (C2 — ONE verifier)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
-  it("shows a neutral (not warning-styled) envelope digest when the digests differ", async () => {
-    mockEnvelope();
-    const { container } = render(
-      <VerifyBadge url="/api/v1/tx?tx_hash=0x8c3f442fc6d640a6ff3ea0b12be64f1d4609ea94edd2966f42c01cd9bdcf04b5&chain=ethereum" />,
+  it("raw MATCH: stored bytes hash to the recorded digest — MATCH VERIFIED + Stored raw bytes + evidence kind", async () => {
+    const bytes = "the exact upstream bytes";
+    const receipt = makeReceipt({ raw_response_sha256: await digestOf(bytes) });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(bytes, { status: 200, headers: { "x-evidence-kind": "upstream" } }),
+      ),
     );
-
-    fireEvent.click(screen.getByRole("button", { name: "Compute envelope digest" }));
-
+    render(<VerifyBadge receipt={receipt} endpoint="filings" data={{}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Verify receipt" }));
     await waitFor(() =>
-      expect(
-        screen.getByText("ENVELOPE DIGEST — NOT COMPARABLE TO UPSTREAM RECEIPT"),
-      ).toBeInTheDocument(),
+      expect(screen.getByText("SHA-256 MATCH VERIFIED ✓")).toBeInTheDocument(),
     );
-    // Neutral presentation: no warning styling anywhere, no failure copy.
-    expect(container.querySelector(".b-warn")).toBeNull();
-    expect(screen.queryByText("DIGESTS DIFFER — SEE NOTE")).toBeNull();
-    expect(screen.queryByText(/MATCH VERIFIED/)).toBeNull();
-    // …but the recorded digest and the truthful explanation are still shown.
-    expect(screen.getByText(RECORDED_DIGEST)).toBeInTheDocument();
-    expect(screen.getByText(/not expected to be equal/)).toBeInTheDocument();
+    expect(screen.getByText(/Stored raw bytes/)).toBeInTheDocument();
+    expect(screen.getByText(/evidence: upstream/)).toBeInTheDocument();
   });
 
-  it("budgets 45s for cold starts — still pending at 20s, TIMEOUT at 45s (J2 minor 2)", async () => {
-    // The old 20 s budget timed the badge out on every cold start (J2
-    // measured live cold starts of 25–56 s) while the 45 s data path
-    // beside it loaded fine. A fetch that hangs until its signal aborts
-    // must stay pending past 20 s and fail only at 45 s.
-    vi.useFakeTimers();
-    try {
-      const fetchMock = vi.fn((_url: string, opts?: { signal?: AbortSignal }) => {
-        return new Promise<never>((_resolve, reject) => {
-          opts?.signal?.addEventListener(
-            "abort",
-            () => reject(new DOMException("The operation was aborted.", "AbortError")),
-            { once: true },
-          );
-        });
-      });
-      vi.stubGlobal("fetch", fetchMock);
-      let settled = false;
-      let failure: unknown = null;
-      const p = fetchAndVerify("/api/v1/tx?tx_hash=0x00&chain=ethereum").then(
-        () => {
-          settled = true;
-        },
-        (e) => {
-          settled = true;
-          failure = e;
-        },
-      );
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(settled).toBe(false);
-      await vi.advanceTimersByTimeAsync(25_000);
-      await p;
-      expect(settled).toBe(true);
-      expect(failure).toBeInstanceOf(ApiError);
-      expect((failure as ApiError).code).toBe("TIMEOUT");
-      expect((failure as ApiError).message).toContain("45s");
-    } finally {
-      vi.useRealTimers();
-    }
+  it("raw 404 → tx fallback MATCH: JSON-RPC replay (live re-check)", async () => {
+    const rpcText = JSON.stringify({ jsonrpc: "2.0", id: 1, result: { blockNumber: "0x1" } });
+    const receipt = makeReceipt({
+      upstream_url: "https://rpc.example/tx",
+      raw_response_sha256: await digestOf(rpcText),
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).startsWith("/api/receipts/")) {
+          return new Response("not found", { status: 404 });
+        }
+        return new Response(rpcText, { status: 200 });
+      }),
+    );
+    render(<VerifyBadge receipt={receipt} endpoint="tx" data={{ tx_hash: "0xabc" }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Verify receipt" }));
+    await waitFor(() =>
+      expect(screen.getByText("SHA-256 MATCH VERIFIED ✓")).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/JSON-RPC replay \(live re-check\)/)).toBeInTheDocument();
   });
+
+  it("raw 404 → filings fallback MISMATCH names the live re-check path (not a tampering verdict)", async () => {
+    const receipt = makeReceipt({ raw_response_sha256: await digestOf("miner bytes") });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).startsWith("/api/receipts/")) {
+          return new Response("not found", { status: 404 });
+        }
+        return new Response("moved bytes", { status: 200 });
+      }),
+    );
+    render(<VerifyBadge receipt={receipt} endpoint="filings" />);
+    fireEvent.click(screen.getByRole("button", { name: "Verify receipt" }));
+    await waitFor(() => expect(screen.getByText("DIGEST MISMATCH")).toBeInTheDocument());
+    expect(screen.getByText(/upstream data can move/)).toBeInTheDocument();
+    expect(screen.getByText(/Upstream re-fetch \(live re-check\)/)).toBeInTheDocument();
+  });
+
+  it("route with no /raw is NOT REPRODUCIBLE IN BROWSER", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("not found", { status: 404 })));
+    render(<VerifyBadge receipt={makeReceipt()} endpoint="route" />);
+    fireEvent.click(screen.getByRole("button", { name: "Verify receipt" }));
+    await waitFor(() =>
+      expect(screen.getByText("NOT REPRODUCIBLE IN BROWSER")).toBeInTheDocument(),
+    );
+  });
+
+  it("raw 404 + upstream 500 is COULD NOT VERIFY (not a mismatch)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).startsWith("/api/receipts/")) {
+          return new Response("not found", { status: 404 });
+        }
+        return new Response("error", { status: 500 });
+      }),
+    );
+    render(<VerifyBadge receipt={makeReceipt()} endpoint="filings" />);
+    fireEvent.click(screen.getByRole("button", { name: "Verify receipt" }));
+    await waitFor(() =>
+      expect(screen.getByText("COULD NOT VERIFY IN BROWSER")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("DIGEST MISMATCH")).toBeNull();
+  });
+
+  it("Re-verify runs the check again", async () => {
+    const bytes = "bytes";
+    const receipt = makeReceipt({ raw_response_sha256: await digestOf(bytes) });
+    const fetchMock = vi.fn(async () => new Response(bytes, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<VerifyBadge receipt={receipt} endpoint="filings" />);
+    fireEvent.click(screen.getByRole("button", { name: "Verify receipt" }));
+    await waitFor(() =>
+      expect(screen.getByText("SHA-256 MATCH VERIFIED ✓")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Re-verify receipt" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+
 });

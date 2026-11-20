@@ -28,8 +28,15 @@ export async function callLive(key: IntentKey, p: Record<string, string>): Promi
   }
 }
 
-/** One-line live outcome for a response (used in desk stream rows). */
-export function outcomeFor(key: IntentKey, data: AnyResponse): string {
+/** One-line live outcome for a response (used in desk stream rows).
+ *  The sec outcome carries its window: the params form that shows the
+ *  period renders only in the cover phase, so once a run starts the
+ *  stream row is the only place the question is visible (J2 R3 B2). */
+export function outcomeFor(
+  key: IntentKey,
+  data: AnyResponse,
+  params?: Record<string, string>,
+): string {
   switch (key) {
     case "tx": {
       const d = data as TxResponse;
@@ -37,7 +44,8 @@ export function outcomeFor(key: IntentKey, data: AnyResponse): string {
     }
     case "sec": {
       const d = data as FilingsResponse;
-      return `${d.entity} · ${d.filing_count} filings`;
+      const period = typeof params?.period === "string" ? params.period : "";
+      return `${d.entity} · ${d.filing_count} filings${period ? ` · ${period}` : ""}`;
     }
     case "tvl": {
       const d = data as TvlResponse;

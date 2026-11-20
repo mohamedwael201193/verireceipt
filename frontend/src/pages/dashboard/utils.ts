@@ -2,6 +2,12 @@
 
 import { useEffect, useRef, type RefObject } from "react";
 import { ApiError } from "../../lib/api";
+import {
+  appendSessionReceipt,
+  readLedgerGeneration,
+  type SessionReceipt,
+  type SessionReceiptEndpoint,
+} from "../../lib/sessionReceipts";
 import type { LiveReceipt, ProbeOutcome, Receipt } from "./types";
 
 /** Live miner origin (the /api proxy rewrites to this in dev and production). */
@@ -122,6 +128,10 @@ export async function probe<T>(
   fetcher: (signal?: AbortSignal) => Promise<T>,
   signal?: AbortSignal,
 ): Promise<ProbeOutcome> {
+  // The shared-ledger clear generation at probe start (J2 R6 cross-tab):
+  // a Clear — in this tab or another — while this call is in flight must
+  // drop its row instead of resurrecting it into the cleared ledger.
+  const ledgerGenAtStart = readLedgerGeneration();
   const start = performance.now();
   try {
     const body = (await fetcher(signal)) as unknown;
@@ -130,7 +140,7 @@ export async function probe<T>(
       body !== null && typeof body === "object" && "receipt" in body
         ? ((body as { receipt?: unknown }).receipt as Receipt | null) ?? null
         : null;
-    return { ok: true, body, receipt, latencyMs };
+    return { ok: true, body, receipt, latencyMs, ledgerGenAtStart };
   } catch (err) {
     const latencyMs = performance.now() - start;
     if (err instanceof ApiError) {
@@ -203,16 +213,183 @@ export function appendToLedger(prev: LiveReceipt[], next: LiveReceipt): LiveRece
   return [next, ...prev].slice(0, LEDGER_CAP);
 }
 
+/**
+ * Dashboard intent → /receipts ledger endpoint. Only the five receipted
+ * intents map; /health, MCP probes and anything else have no receipt
+ * block and are never written to the shared ledger (they stay in the
+ * dashboard's own in-memory ledger only).
+ */
+const INTENT_TO_LEDGER_ENDPOINT: Record<string, SessionReceiptEndpoint> = {
+  ONCHAIN_TX_LOOKUP_GENERAL: "tx",
+  REGULATORY_FILING_MONITOR_GENERAL: "filings",
+  TVL_LOOKUP_GENERAL: "tvl",
+  OPTIMAL_EXECUTION_ROUTE_GENERAL: "route",
+  GRID_POWER_PRICE_GENERAL: "grid",
+};
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : null;
+}
+
+function summaryFor(endpoint: SessionReceiptEndpoint, body: unknown, query?: string): string {
+  const b = asRecord(body);
+  const answer = b?.answer;
+  // Live bodies always carry answer (filings J2 R5 N2): the filings
+  // branch below is fallback-only, for an answer-less response.
+  if (typeof answer === "string" && answer.length > 0) return answer;
+  if (!b) return `${endpoint} — live call`;
+  if (endpoint === "filings" && typeof b.filing_count === "number") {
+    // The count carries its window (filings J1 R3 M1): read the entity
+    // + period from the call's own query string (the dashboard filings
+    // preset asks entity=AAPL&period=last 12 months) and omit the
+    // window only if the call genuinely asked without one.
+    // Shape first (filings J2 R6): the query is EITHER a real query
+    // string ("entity=AAPL&period=last 12 months", from a parseable
+    // requestUrl) OR the human-readable form ("AAPL · last 12
+    // months", receipt.query when the URL is unparseable) — and the
+    // two shapes must never be mixed. URLSearchParams decodes %3D to
+    // `=` and splits on `&`, so parsing the human form as params
+    // invents values: "AAPL · last 12 months&entity=MSFT" yields
+    // entity MSFT from a trailing fragment, and "entity%3DAAPL · last
+    // 12 months" yields a key the old guard could not see. A query
+    // string is therefore only recognised when EVERY `&`-separated
+    // segment is a key=value pair; anything else is the human form
+    // and is parsed only as `entity · period`.
+    const rawQuery = query ?? "";
+    const isQueryString =
+      rawQuery !== "" && rawQuery.split("&").every((seg) => seg.includes("="));
+    const q = isQueryString ? new URLSearchParams(rawQuery) : null;
+    let entity = q?.get("entity") ?? null;
+    let period = q?.get("period") ?? null;
+    if (!entity || !period) {
+      // Fallback for the human-readable query form ("AAPL · last 12
+      // months"): persistLiveReceiptToSessionLedger falls back to
+      // receipt.query when requestUrl is unparseable, and that string
+      // has no `=` pairs for URLSearchParams — without this, the
+      // summary would render a bare count (filings J1/J2 R4 M1).
+      // Parse it as `entity · period` instead.
+      const parts = rawQuery
+        .split("·")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      // Guard (filings J2 R5 N1 + J2 R6): the human form is exactly two
+      // segments with no `=` — a segment containing `=` is a query
+      // string fragment, not an entity/period, and filling from it
+      // would silently misattribute the window (e.g. "period=last ·
+      // 12 months" → entity "period=last"). The check covers the
+      // percent-encoded form too: URLSearchParams decodes %3D to `=`,
+      // so "foo%3Dbar" is the same fragment as "foo=bar" and is
+      // rejected the same way. Anything else falls through to a bare
+      // count — honest rather than wrong.
+      if (
+        parts.length === 2 &&
+        !parts.some((p) => p.includes("=") || /%3d/i.test(p))
+      ) {
+        entity = entity ?? parts[0];
+        period = period ?? parts[1];
+      }
+    }
+    return `${b.filing_count} filings${entity ? ` · ${entity}` : ""}${period ? ` · ${period}` : ""}`;
+  }
+  if (endpoint === "tvl" && typeof b.tvl_usd === "number")
+    return `TVL $${Number(b.tvl_usd).toLocaleString("en-US")}`;
+  if (endpoint === "route" && b.amount_out !== undefined)
+    return `amount_out ${String(b.amount_out)}`;
+  if (endpoint === "grid" && b.lmp_usd_per_mwh !== undefined)
+    return `LMP $${String(b.lmp_usd_per_mwh)}/MWh`;
+  if (endpoint === "tx")
+    return `status ${String(b.status ?? "—")}, block ${String(b.block_number ?? "—")}`;
+  return `${endpoint} — live call`;
+}
+
+/**
+ * Persist a dashboard LiveReceipt into the SHARED session ledger
+ * (src/lib/sessionReceipts.ts) so it appears on /receipts after
+ * navigation. Before this, dashboard receipts lived in React state only
+ * and never reached the ledger — the /receipts page showed "0 receipts
+ * this session" after a dashboard run despite promising the ledger
+ * "survives navigation" (2026-11-20 browser click-test, defect 2).
+ * Returns 'persisted' on success, 'skipped' when there is nothing
+ * persistable (no receipt block, or an unmapped intent such as HEALTH),
+ * or when the ledger was cleared — in this tab or another — while the
+ * call was in flight (J2 R6 cross-tab: the row's ledgerGenAtStart
+ * predates the current stored generation; 'skipped', not 'failed', so
+ * the caller stays silent), and 'failed' when the shared ledger
+ * refused the write (corrupt stored value, unavailable storage, or a
+ * full quota) — the caller surfaces 'failed' (J2 R2 M2), the
+ * dashboard's own in-memory ledger is unaffected in every case.
+ */
+export function persistLiveReceiptToSessionLedger(
+  receipt: LiveReceipt,
+): "persisted" | "skipped" | "failed" {
+  if (!receipt.receipt) return "skipped";
+  const endpoint = INTENT_TO_LEDGER_ENDPOINT[receipt.intent];
+  if (!endpoint) return "skipped";
+  // Cross-tab Clear gate (J2 R6): a Clear in another tab while this
+  // call was in flight bumps the stored generation; persisting now
+  // would resurrect the receipt into a ledger the user just cleared.
+  if (
+    receipt.ledgerGenAtStart !== undefined &&
+    receipt.ledgerGenAtStart !== readLedgerGeneration()
+  ) {
+    return "skipped";
+  }
+  let params = receipt.query;
+  try {
+    params = new URL(receipt.requestUrl).search.slice(1) || receipt.query;
+  } catch {
+    // Unparseable request URL — the human-readable query is the params;
+    // summaryFor parses its "entity · period" form (filings J1/J2 R4 M1).
+  }
+  const b = asRecord(receipt.body);
+  const verifyData =
+    endpoint === "tx"
+      ? { tx_hash: typeof b?.tx_hash === "string" ? b.tx_hash : undefined }
+      : endpoint === "grid"
+        ? {
+            node_or_zone: typeof b?.node_or_zone === "string" ? b.node_or_zone : undefined,
+            interval_start:
+              typeof b?.interval_start === "string" ? b.interval_start : undefined,
+            lmp_usd_per_mwh:
+              typeof b?.lmp_usd_per_mwh === "number" ? b.lmp_usd_per_mwh : undefined,
+            market: typeof b?.market === "string" ? b.market : undefined,
+          }
+        : undefined;
+  const entry: SessionReceipt = {
+    // The dashboard's LiveReceipt.key is unique per call (lr-<tab>-<seq>-…,
+    // per-tab random id + counter): dedupe is by key, never by receipt_id
+    // — two legitimate calls can share one receipt_id (same not_found
+    // answer, bursts) and must not collapse to one row (J2 R2 B1).
+    key: receipt.key,
+    endpoint,
+    label: `${endpoint} ${receipt.query}`,
+    params,
+    fetchedAt: receipt.ts,
+    receipt: receipt.receipt,
+    summary: summaryFor(endpoint, receipt.body, params),
+    verifyData,
+  };
+  return appendSessionReceipt(entry) ? "persisted" : "failed";
+}
+
 let refusalSeq = 0;
 let liveReceiptSeq = 0;
+
+/** Random per-tab id, same reason as SESSION_TAB_ID in
+ *  lib/sessionReceipts.ts: the counter alone is per module instance, so
+ *  two tabs could mint the same lr- key for the same receipt_id and the
+ *  shared ledger's dedupe would drop a legitimate receipt. */
+const LIVE_RECEIPT_TAB_ID = Math.random().toString(36).slice(2, 10);
 
 /**
  * Build a session-ledger row from a probe outcome.
  *
- * The row key is client-generated (a per-session counter + the server
- * receipt_id): the server receipt_id alone must never be a React key —
- * two calls can legitimately share one receipt_id (e.g. the same
- * not_found answer), which duplicates keys and drops rows.
+ * The row key is client-generated (a per-tab random id + per-session
+ * counter + the server receipt_id): the server receipt_id alone must
+ * never be a React key — two calls can legitimately share one receipt_id
+ * (e.g. the same not_found answer), which duplicates keys and drops rows.
  */
 export function toLiveReceipt(
   intent: string,
@@ -225,7 +402,7 @@ export function toLiveReceipt(
     const receipt = outcome.receipt;
     const serverId = receipt ? receipt.receipt_id : null;
     return {
-      key: `lr-${liveReceiptSeq}-${serverId ?? "ok"}`,
+      key: `lr-${LIVE_RECEIPT_TAB_ID}-${liveReceiptSeq}-${serverId ?? "ok"}`,
       id: serverId ?? `ok-${Date.now().toString(36)}`,
       ts: receipt ? receipt.fetched_at : new Date().toISOString(),
       intent,
@@ -235,11 +412,12 @@ export function toLiveReceipt(
       latencyMs: outcome.latencyMs,
       body: outcome.body,
       receipt,
+      ledgerGenAtStart: outcome.ledgerGenAtStart,
     };
   }
   refusalSeq += 1;
   return {
-    key: `lr-${liveReceiptSeq}-refusal-${refusalSeq}`,
+    key: `lr-${LIVE_RECEIPT_TAB_ID}-${liveReceiptSeq}-refusal-${refusalSeq}`,
     id: `refusal-${Date.now().toString(36)}-${refusalSeq}`,
     ts: new Date().toISOString(),
     intent,
@@ -270,6 +448,7 @@ export function p95(values: number[]): number | null {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
 }
+
 
 /**
  * SHA-256 of raw bytes via Web Crypto. Returns null when Web Crypto is

@@ -1,13 +1,20 @@
 // /receipts — the receipt ledger.
 //
 // LIVE DATA ONLY. Every receipt on this page comes from a real call made
-// through this page in the current browser session (try-it forms below).
+// in the current browser session — through this page's try-it forms or
+// through the dashboard's live checks (both append to the same shared
+// session ledger, src/lib/sessionReceipts.ts).
 // Receipts persist in localStorage so they survive navigation, and are
 // labelled as "this browser session". There is no seeded ledger: with no
 // calls yet the page shows a real empty state.
 //
-// Receipt verification is real, not a badge. The method depends on what the
-// miner actually hashed (read from src/handlers/* + proven live 2026-11-20):
+// Receipt verification is real, not a badge — and there is exactly ONE
+// verifier (src/lib/verifyReceipt.ts, PLAN.md C2). It tries the stored
+// raw bytes first (GET /api/receipts/:id/raw, SHA-256 vs the recorded
+// digest) and falls back to the per-endpoint live re-check while the
+// miner does not serve /raw yet (live check 2026-11-20: HTTP 404 for
+// fresh receipts — miner C1 not landed). The live re-check methods,
+// proven live 2026-11-20:
 // - /v1/tx: replay the exact JSON-RPC call the miner made —
 //   POST {"jsonrpc":"2.0","id":1,"method":"eth_getTransactionReceipt",
 //   "params":[txHash]} to receipt.upstream_url — and hash the exact
@@ -23,26 +30,59 @@
 //   match. The panel re-hashes JSON.stringify({node_or_zone, interval_start,
 //   lmp_usd_per_mwh, market}) from the answer fields. MATCH proven live
 //   (0x6f3f1c29…655d6).
-// - /v1/route: NOT reproducible in-browser. The evidence includes the
-//   winning quoter's raw request/response, which the API response does not
-//   carry — so the panel says so, never "verified".
+// - /v1/route: NOT reproducible in-browser by live re-check. The evidence
+//   includes the winning quoter's raw request/response, which the API
+//   response does not carry — so the panel says so, never "verified".
+//   (Once the miner serves /raw, route becomes verifiable — the stored
+//   bytes ARE the quoter bytes the miner hashed.)
 // A mismatch does not by itself prove tampering (upstream bytes can move or
 // differ by edge after the receipt was issued); only a match counts as
-// verified, and the method used is always named.
+// verified, and the method used is always named — including whether the
+// bytes came from /raw or from a live re-check, because a raw_bytes
+// mismatch (stored bytes do not hash to the recorded digest) means
+// something different from a live_recheck mismatch (upstream moved).
+// For grid, per-intent stored-bytes semantics must be confirmed with the
+// miner team (C1): the miner hashed canonical evidence JSON, not the
+// CAISO zip, so a raw_bytes grid check against zip bytes would mismatch
+// a receipt the live re-check matches.
 // The receipt's audit_url is recorded text only: the API does not serve
 // /receipts/:id in this build (live check 2026-11-20 returned HTTP 404).
+// The receipts/:id route deep-links into the session ledger instead: an
+// id matching a receipt collected in this browser session opens that
+// entry; any other id shows an honest not-found notice (see below).
 //
 // Design: VeriReceipt dark obsidian, accent #FF5722, Inter / JetBrains Mono /
 // Newsreader italic — same tokens as the showcase landing + proof hub.
 // The router/shell wraps this page in Layout (nav/footer chrome); this file
 // renders page content only.
 
-import { Component, useCallback, useEffect, useMemo, useState } from 'react';
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { Link, useParams } from 'react-router-dom';
 import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, ApiError } from '../lib/api';
 import { useHealth } from '../lib/hooks';
+import {
+  SESSION_RECEIPTS_CAP as LEDGER_CAP,
+  SESSION_RECEIPTS_CORRUPT_BACKUP_KEY as BACKUP_KEY,
+  SESSION_RECEIPTS_KEY,
+  appendSessionReceipt,
+  backupCorruptSessionReceipts,
+  bumpLedgerGeneration,
+  clearSessionReceipts,
+  readLedgerGeneration,
+  readSessionReceipts,
+  uniqueSessionReceiptKey,
+  type SessionReceipt as StoredReceipt,
+  type SessionReceiptEndpoint,
+} from '../lib/sessionReceipts';
 import type { Receipt } from '../lib/types';
-import { ReceiptCard, isSafeUpstreamUrl } from '../components/ReceiptCard';
+import {
+  verifyMethodNote,
+  verifyReceipt,
+  type VerifyData,
+  type VerifyResult,
+} from '../lib/verifyReceipt';
+import { ReceiptCard } from '../components/ReceiptCard';
 
 // ---------------------------------------------------------------------------
 // Types (structural; the lib returns the miner's flat JSON envelope)
@@ -57,27 +97,7 @@ type Envelope = Record<string, unknown> & {
   receipt: Receipt;
 };
 
-interface StoredReceipt {
-  key: string;
-  endpoint: string;
-  label: string;
-  params: string;
-  fetchedAt: string;
-  receipt: Receipt;
-  summary: string;
-  // Minimal fields the verifier needs for endpoints whose hash is not a
-  // plain upstream re-fetch (tx hash for the JSON-RPC replay; the four grid
-  // evidence fields for the canonical re-hash).
-  verifyData?: {
-    tx_hash?: string;
-    node_or_zone?: string;
-    interval_start?: string;
-    lmp_usd_per_mwh?: number;
-    market?: string;
-  };
-}
-
-type EndpointKey = 'tx' | 'filings' | 'tvl' | 'route' | 'grid';
+type EndpointKey = SessionReceiptEndpoint;
 
 interface TryItResult {
   endpoint: EndpointKey | 'health';
@@ -92,11 +112,9 @@ interface TryItResult {
 // ---------------------------------------------------------------------------
 
 const API_BASE_URL = 'https://verireceipt.onrender.com';
-const STORAGE_KEY = 'verireceipt.session-receipts.v1';
-// A corrupt stored value is preserved here instead of being overwritten.
-const BACKUP_KEY = 'verireceipt.session-receipts.v1.corrupt-backup';
-// Cap the session ledger: the newest 200 receipts, same as the dashboard.
-const LEDGER_CAP = 200;
+// Session ledger storage lives in src/lib/sessionReceipts.ts (shared with
+// the dashboard since 2026-11-20: dashboard receipts persist to the same
+// key so they appear here after navigation).
 
 // Real confirmed Ethereum tx (block 26454869, checked live 2026-11-20).
 const SAMPLE_TX_HASH = '0xafdbc83c485355d90f79fd660bcd12713402aa78922d966657d1005f59e92902';
@@ -134,82 +152,15 @@ function fmtTime(iso: string): string {
 }
 
 // Stored entries are UNTRUSTED input: localStorage can hold anything, so
-// every stored entry is fully validated on load (bad entries are dropped),
-// ledger fields render through string guards, the list sits behind an
-// error boundary, and a receipt restored from storage never shows a bare
-// VERIFIED badge — it is labelled as a stored entry.
-function isNonEmptyString(v: unknown): v is string {
-  return typeof v === 'string' && v.length > 0;
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-function isValidReceipt(v: unknown): v is Receipt {
-  if (!isRecord(v)) return false;
-  return (
-    isNonEmptyString(v.receipt_id) &&
-    isNonEmptyString(v.upstream_url) &&
-    isNonEmptyString(v.raw_response_sha256) &&
-    isNonEmptyString(v.fetched_at)
-  );
-}
-
-function isValidStoredReceipt(v: unknown): v is StoredReceipt {
-  if (!isRecord(v)) return false;
-  if (!isNonEmptyString(v.key)) return false;
-  if (
-    v.endpoint !== 'tx' &&
-    v.endpoint !== 'filings' &&
-    v.endpoint !== 'tvl' &&
-    v.endpoint !== 'route' &&
-    v.endpoint !== 'grid'
-  ) {
-    return false;
-  }
-  if (!isNonEmptyString(v.label) || !isNonEmptyString(v.params) || !isNonEmptyString(v.summary)) {
-    return false;
-  }
-  if (!isNonEmptyString(v.fetchedAt) || Number.isNaN(Date.parse(v.fetchedAt))) return false;
-  if (!isValidReceipt(v.receipt)) return false;
-  if (v.verifyData !== undefined) {
-    if (!isRecord(v.verifyData)) return false;
-    const vd = v.verifyData;
-    if (vd.tx_hash !== undefined && typeof vd.tx_hash !== 'string') return false;
-    if (vd.node_or_zone !== undefined && typeof vd.node_or_zone !== 'string') return false;
-    if (vd.interval_start !== undefined && typeof vd.interval_start !== 'string') return false;
-    if (vd.lmp_usd_per_mwh !== undefined && typeof vd.lmp_usd_per_mwh !== 'number') return false;
-    if (vd.market !== undefined && typeof vd.market !== 'string') return false;
-  }
-  return true;
-}
+// every stored entry is fully validated on load — see
+// src/lib/sessionReceipts.ts (isValidSessionReceipt). A receipt restored
+// from storage never shows a bare VERIFIED badge — it is labelled as a
+// stored entry.
 
 // Defense in depth for rendering: a non-string renders as "—", never as a
 // React child (an object child throws React error #31 and unmounts the page).
 function asText(value: unknown): string {
   return typeof value === 'string' ? value : '—';
-}
-
-function readStored(): { entries: StoredReceipt[]; corrupt: boolean } {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { entries: [], corrupt: false };
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return { entries: [], corrupt: true };
-    // Invalid entries are dropped, never rendered; the ledger is capped.
-    const entries = parsed.filter(isValidStoredReceipt).slice(0, LEDGER_CAP);
-    // A parseable array that validates to ZERO entries is corrupt, not
-    // empty: a non-empty stored array of invalid entries (e.g. [1,2,3])
-    // must take the same path as unparseable data — corrupt notice + backup
-    // — never a silent rewrite to []. A stored [] is a legitimate empty
-    // ledger and stays non-corrupt.
-    if (parsed.length > 0 && entries.length === 0) return { entries: [], corrupt: true };
-    return { entries, corrupt: false };
-  } catch {
-    // Unparseable JSON: corrupt, not empty — the caller must not overwrite it.
-    return { entries: [], corrupt: true };
-  }
 }
 
 function asEnvelope(value: unknown): Envelope {
@@ -221,190 +172,15 @@ function asEnvelope(value: unknown): Envelope {
 }
 
 // ---------------------------------------------------------------------------
-// Real receipt verification (see file header)
+// Receipt verification — THE ONE verifier lives in
+// src/lib/verifyReceipt.ts (PLAN.md C2). The panel below only renders
+// its result: verified / mismatch / unverifiable / not-reproducible /
+// no-crypto. A cancelled check (no signal is passed here, so it cannot
+// happen from this panel) goes back to idle.
 // ---------------------------------------------------------------------------
 
-type VerifyState =
-  | { kind: 'idle' }
-  | { kind: 'checking' }
-  | { kind: 'verified'; computed: string; method: string }
-  | { kind: 'mismatch'; computed: string; method: string }
-  | { kind: 'unverifiable'; reason: string }
-  | { kind: 'not-reproducible'; reason: string };
-
-async function sha256Hex(input: ArrayBuffer | string): Promise<string> {
-  if (!window.crypto?.subtle) {
-    throw new Error('WebCrypto (crypto.subtle) is unavailable in this browser context');
-  }
-  const bytes =
-    typeof input === 'string' ? new TextEncoder().encode(input) : new Uint8Array(input);
-  const digest = await window.crypto.subtle.digest('SHA-256', bytes as BufferSource);
-  const hex = Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-  return `0x${hex}`;
-}
-
-function normaliseHash(hash: string): string {
-  return hash.trim().toLowerCase();
-}
-
-// Fields the verifier reads from a full response envelope (try-it results)
-// or from a stored receipt's verifyData (ledger rows).
-interface VerifyData extends Record<string, unknown> {
-  tx_hash?: unknown;
-  node_or_zone?: unknown;
-  interval_start?: unknown;
-  lmp_usd_per_mwh?: unknown;
-  market?: unknown;
-}
-
-function verifyMethodNote(endpoint: EndpointKey): string {
-  if (endpoint === 'tx') {
-    return 'Replays the miner’s exact JSON-RPC call — POST {"jsonrpc":"2.0","id":1,"method":"eth_getTransactionReceipt","params":[txHash]} to the receipt’s upstream RPC URL — and hashes the exact response text.';
-  }
-  if (endpoint === 'grid') {
-    return 'Re-hashes the canonical evidence JSON the miner hashed: JSON.stringify({node_or_zone, interval_start, lmp_usd_per_mwh, market}) built from the answer fields. (The CAISO zip bytes are NOT what was hashed, so re-fetching the zip can never match.)';
-  }
-  if (endpoint === 'route') {
-    return 'The receipt hash covers the winning quoter’s raw request/response, which the API response does not carry — so this receipt cannot be re-hashed in the browser.';
-  }
-  return 'Re-fetches the receipt’s upstream URL and hashes the exact bytes with WebCrypto, then compares with the receipt hash. Verified only on a match.';
-}
-
-async function verifyReceipt(
-  receipt: Receipt,
-  endpoint: EndpointKey,
-  data?: VerifyData,
-): Promise<VerifyState> {
-  // --- /v1/route: evidence not carried by the API response. ---
-  if (endpoint === 'route') {
-    return {
-      kind: 'not-reproducible',
-      reason:
-        'The receipt hash covers the winning quoter’s raw request/response at the pinned block (src/handlers/optimalRoute.ts), which the API response does not carry — so this receipt cannot be independently re-hashed in the browser.',
-    };
-  }
-
-  // --- /v1/grid-price: canonical evidence re-hash (proven MATCH live). ---
-  if (endpoint === 'grid') {
-    const node = data?.node_or_zone;
-    const interval = data?.interval_start;
-    const lmp = data?.lmp_usd_per_mwh;
-    const market = data?.market;
-    if (
-      typeof node !== 'string' ||
-      typeof interval !== 'string' ||
-      typeof lmp !== 'number' ||
-      typeof market !== 'string'
-    ) {
-      return {
-        kind: 'unverifiable',
-        reason:
-          'The grid evidence fields (node_or_zone, interval_start, lmp_usd_per_mwh, market) are missing from this record, so the canonical evidence JSON cannot be rebuilt.',
-      };
-    }
-    try {
-      const canonical = JSON.stringify({
-        node_or_zone: node,
-        interval_start: interval,
-        lmp_usd_per_mwh: lmp,
-        market,
-      });
-      const computed = await sha256Hex(canonical);
-      if (normaliseHash(computed) === normaliseHash(receipt.raw_response_sha256)) {
-        return { kind: 'verified', computed, method: 'Canonical evidence re-hash' };
-      }
-      return { kind: 'mismatch', computed, method: 'Canonical evidence re-hash' };
-    } catch (err) {
-      return {
-        kind: 'unverifiable',
-        reason: `Canonical re-hash failed: ${err instanceof Error ? err.message : 'unknown error'}`,
-      };
-    }
-  }
-
-  // --- /v1/tx: exact JSON-RPC replay (proven MATCH live). ---
-  if (endpoint === 'tx') {
-    const txHash = data?.tx_hash;
-    if (typeof txHash !== 'string' || !txHash) {
-      return {
-        kind: 'unverifiable',
-        reason: 'The transaction hash is missing from this record, so the JSON-RPC call cannot be replayed.',
-      };
-    }
-    if (!isSafeUpstreamUrl(receipt.upstream_url)) {
-      return {
-        kind: 'unverifiable',
-        reason:
-          'The receipt’s upstream URL is not a safe https URL, so the replay was refused — nothing was fetched. (A data:, http:, or otherwise unsafe upstream can never verify.)',
-      };
-    }
-    try {
-      const res = await fetch(receipt.upstream_url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'eth_getTransactionReceipt',
-          params: [txHash],
-        }),
-      });
-      if (!res.ok) {
-        return {
-          kind: 'unverifiable',
-          reason: `RPC replay returned HTTP ${res.status} — the hash was not checked, not confirmed.`,
-        };
-      }
-      const computed = await sha256Hex(await res.arrayBuffer());
-      if (normaliseHash(computed) === normaliseHash(receipt.raw_response_sha256)) {
-        return { kind: 'verified', computed, method: 'JSON-RPC replay' };
-      }
-      return { kind: 'mismatch', computed, method: 'JSON-RPC replay' };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'fetch failed';
-      return {
-        kind: 'unverifiable',
-        reason:
-          /Failed to fetch|NetworkError|CORS|blocked/i.test(msg) || err instanceof TypeError
-            ? 'RPC replay was blocked by the browser (CORS / network) — the hash was not checked, not confirmed.'
-            : `RPC replay failed: ${msg} — the hash was not checked, not confirmed.`,
-      };
-    }
-  }
-
-  // --- /v1/filings + /v1/tvl: upstream GET re-fetch. ---
-  if (!isSafeUpstreamUrl(receipt.upstream_url)) {
-    return {
-      kind: 'unverifiable',
-      reason:
-        'The receipt’s upstream URL is not a safe https URL, so the re-fetch was refused — nothing was fetched. (A data:, http:, or otherwise unsafe upstream can never verify.)',
-    };
-  }
-  try {
-    const res = await fetch(receipt.upstream_url);
-    if (!res.ok) {
-      return {
-        kind: 'unverifiable',
-        reason: `Upstream re-fetch returned HTTP ${res.status} — the hash was not checked, not confirmed.`,
-      };
-    }
-    const bytes = await res.arrayBuffer();
-    const computed = await sha256Hex(bytes);
-    if (normaliseHash(computed) === normaliseHash(receipt.raw_response_sha256)) {
-      return { kind: 'verified', computed, method: 'Upstream re-fetch' };
-    }
-    return { kind: 'mismatch', computed, method: 'Upstream re-fetch' };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'fetch failed';
-    const reason =
-      /Failed to fetch|NetworkError|CORS|blocked/i.test(msg) || err instanceof TypeError
-        ? 'Upstream fetch was blocked by the browser (CORS / network) — the hash was not checked, not confirmed.'
-        : `Upstream re-fetch failed: ${msg} — the hash was not checked, not confirmed.`;
-    return { kind: 'unverifiable', reason };
-  }
-}
+// Panel state: idle / checking plus the verifier's result kinds.
+type VerifyState = { kind: "idle" } | { kind: "checking" } | VerifyResult;
 
 function VerifyPanel({
   receipt,
@@ -424,7 +200,14 @@ function VerifyPanel({
   const [state, setState] = useState<VerifyState>({ kind: 'idle' });
   const run = useCallback(async () => {
     setState({ kind: 'checking' });
-    setState(await verifyReceipt(receipt, endpoint, data));
+    const result = await verifyReceipt(receipt, endpoint, data);
+    // A cancelled check goes back to idle (no signal is passed here, so
+    // this cannot happen from this panel — it is the verifier's contract).
+    if (result.kind === 'cancelled') {
+      setState({ kind: 'idle' });
+      return;
+    }
+    setState(result);
   }, [receipt, endpoint, data]);
 
   return (
@@ -455,7 +238,19 @@ function VerifyPanel({
       {state.kind === 'verified' && (
         <div>
           {stored ? (
-            endpoint === 'grid' ? (
+            state.mode === 'raw_bytes' ? (
+              <>
+                <span className="vr-badge vr-b-warn">STORED ENTRY — STORED BYTES HASH TO THE STORED DIGEST</span>
+                <p className="vr-muted vr-small" style={{ marginTop: 8 }}>
+                  Method: {state.method}
+                  {state.evidenceKind ? ` · evidence: ${state.evidenceKind}` : ''}. The bytes
+                  stored for this receipt hash to the digest stored beside them — but both
+                  came from this browser's storage, so this proves only self-consistency,
+                  not provenance: anyone can write matching bytes to localStorage. This entry
+                  is <strong>not live-verified</strong>. Re-run the live call to verify.
+                </p>
+              </>
+            ) : endpoint === 'grid' ? (
               <>
                 <span className="vr-badge vr-b-warn">STORED ENTRY — HASH MATCHES STORED FIELDS</span>
                 <p className="vr-muted vr-small" style={{ marginTop: 8 }}>
@@ -479,7 +274,8 @@ function VerifyPanel({
             <>
               <span className="vr-badge vr-b-ok">SHA-256 MATCH VERIFIED ✓</span>
               <p className="vr-muted vr-small" style={{ marginTop: 8 }}>
-                Method: {state.method}.
+                Method: {state.method}
+                {state.evidenceKind ? ` · evidence: ${state.evidenceKind}` : ''}.
               </p>
             </>
           )}
@@ -494,11 +290,24 @@ function VerifyPanel({
         <div>
           <span className="vr-badge vr-b-warn">DIGEST MISMATCH</span>
           <p className="vr-muted vr-small" style={{ marginTop: 8 }}>
-            Method: {state.method}. The bytes checked now differ from the bytes the miner hashed
-            at {fmtTime(receipt.fetched_at)}. Upstream data can move after the receipt is issued,
-            or the upstream can serve different bytes than the miner saw (CDN/edge drift — proven
-            for DeFiLlama TVL) — so this does not by itself prove tampering, but the receipt is{' '}
-            <strong>not verified</strong>.
+            Method: {state.method}
+            {state.evidenceKind ? ` · evidence: ${state.evidenceKind}` : ''}.{' '}
+            {state.mode === 'raw_bytes' ? (
+              <>
+                The stored bytes do not hash to the recorded digest — the miner recorded a
+                digest that does not match the bytes it stored for this receipt (or the
+                stored bytes changed after issue). The receipt is{' '}
+                <strong>not verified</strong>.
+              </>
+            ) : (
+              <>
+                The bytes checked now differ from the bytes the miner hashed at{' '}
+                {fmtTime(receipt.fetched_at)}. Upstream data can move after the receipt is
+                issued, or the upstream can serve different bytes than the miner saw
+                (CDN/edge drift — proven for DeFiLlama TVL) — so this does not by itself
+                prove tampering, but the receipt is <strong>not verified</strong>.
+              </>
+            )}
           </p>
           <p className="vr-muted vr-small vr-mono">
             computed {state.computed}
@@ -523,6 +332,15 @@ function VerifyPanel({
           </p>
         </div>
       )}
+      {state.kind === 'no-crypto' && (
+        <div>
+          <span className="vr-badge vr-b-dim">WEB CRYPTO UNAVAILABLE</span>
+          <p className="vr-muted vr-small" style={{ marginTop: 8 }}>
+            This browser cannot compute SHA-256, so the receipt was not verified — never
+            a fake hash.
+          </p>
+        </div>
+      )}
       <p className="vr-muted vr-small">
         Recorded audit URL:{' '}
         <span className="vr-mono">
@@ -531,6 +349,8 @@ function VerifyPanel({
         — the API does
         not serve <span className="vr-mono">/receipts/:id</span> in this build (live check
         2026-11-20: HTTP 404), so it is shown as recorded text, not a working link.
+        Verification above tries <span className="vr-mono">/api/receipts/:id/raw</span> first
+        and falls back to a live re-check while the miner does not serve it.
       </p>
     </div>
   );
@@ -598,10 +418,15 @@ interface TryItProps {
   onRun: () => void;
   running: boolean;
   result: TryItResult | null;
+  /** The last successful run's receipt was dropped from the ledger
+   *  because the ledger was cleared while the call was in flight
+   *  (J2 R6 minor D) — the card shows the live result either way, so
+   *  the ledger outcome is named here. */
+  ledgerDropped?: boolean;
 }
 
 function TryItCard(props: TryItProps) {
-  const { endpoint, title, intent, methodPath, fields, values, onChange, onRun, running, result } =
+  const { endpoint, title, intent, methodPath, fields, values, onChange, onRun, running, result, ledgerDropped } =
     props;
   const data = result?.data ?? null;
   return (
@@ -634,6 +459,11 @@ function TryItCard(props: TryItProps) {
       {result?.error && (
         <p className="vr-err" role="alert">
           Live call failed: {result.error}
+        </p>
+      )}
+      {result && !result.error && ledgerDropped && (
+        <p className="vr-muted vr-small">
+          Not added to the session ledger — the ledger was cleared while this call was in flight.
         </p>
       )}
       {data && (
@@ -699,6 +529,34 @@ const ENDPOINT_META: Record<EndpointKey, { title: string; intent: string; path: 
   grid: { title: 'Grid power price', intent: 'GRID_POWER_PRICE_GENERAL', path: '/v1/grid-price' },
 };
 
+/** Merge persisted entries with memory-only ones for display, newest
+ *  first by fetchedAt (ISO strings sort lexicographically), deduped by
+ *  key, capped. Memory-only entries are first-class rows (J2 R3 B1/B2):
+ *  they are never dropped by a re-read, a later successful append, or
+ *  Discard — only by an explicit Clear of the whole session ledger.
+ *  Cap rule (J2 R3 M1): memory-only rows have no other copy, so they
+ *  are never the ones the cap drops — keep every memory-only row and
+ *  fill the remaining slots with the newest persisted rows, total
+ *  still ≤ LEDGER_CAP. (The old slice() dropped whichever rows sorted
+ *  last, which could hide a memory-only receipt that exists nowhere
+ *  else.) The cap is applied to the memory-first partition, then the
+ *  DISPLAY is sorted globally newest-first (J2 R4 minor): without
+ *  that final sort the whole memory-only block would render above
+ *  newer persisted rows, contradicting "newest first". */
+function mergeLedgerDisplay(
+  persisted: StoredReceipt[],
+  memoryOnly: StoredReceipt[],
+): StoredReceipt[] {
+  const memKeys = new Set(memoryOnly.map((e) => e.key));
+  const merged = [...memoryOnly, ...persisted.filter((e) => !memKeys.has(e.key))];
+  merged.sort((a, b) => (a.fetchedAt < b.fetchedAt ? 1 : a.fetchedAt > b.fetchedAt ? -1 : 0));
+  const mem = merged.filter((e) => memKeys.has(e.key));
+  const rest = merged.filter((e) => !memKeys.has(e.key));
+  const display = [...mem, ...rest].slice(0, LEDGER_CAP);
+  display.sort((a, b) => (a.fetchedAt < b.fetchedAt ? 1 : a.fetchedAt > b.fetchedAt ? -1 : 0));
+  return display;
+}
+
 export default function Receipts() {
   const health = useHealth();
   // "Last checked" is page state, not a hook field: the real useHealth
@@ -713,16 +571,149 @@ export default function Receipts() {
     const id = window.setInterval(() => health.refetch(), 30000);
     return () => window.clearInterval(id);
   }, [health.refetch]);
-  const [storedInit] = useState(readStored);
+  const [storedInit] = useState(readSessionReceipts);
   const [stored, setStored] = useState<StoredReceipt[]>(storedInit.entries);
+  // Receipts that could not be persisted (corrupt/unavailable storage,
+  // or an entry the ledger refused as invalid): they are displayed with
+  // a "memory only" badge and are NEVER silently discarded — not by the
+  // next successful append, not by Discard (J2 R3 B1/B2). On every
+  // successful append the backlog is retried, so a transient cause
+  // (e.g. corrupt storage since discarded) heals itself; permanently
+  // invalid entries stay memory-only, visibly.
+  const [memoryOnly, setMemoryOnly] = useState<StoredReceipt[]>([]);
+  // Ref mirror of the memory-only backlog. It is updated SYNCHRONOUSLY
+  // at every mutation site (addReceipt, clearStored) — never during
+  // render — so concurrent addReceipt calls see each other's entries
+  // instead of sharing one stale closure snapshot (J2 R3 B1 race), and
+  // the once-mounted storage listener sees the current backlog. A
+  // render-time assignment here would clobber the ref with stale state
+  // whenever a render landed between two concurrent appends.
+  const memoryOnlyRef = useRef<StoredReceipt[]>([]);
+  // Clear generation (J2 R5 B1): "Clear session ledger" promises the
+  // WHOLE ledger is gone. A try-it in flight across a Clear used to
+  // complete through addReceipt and resurrect its receipt into the
+  // freshly cleared ledger. runEndpoint captures the generation at
+  // call start; addReceipt drops entries whose call predates the
+  // latest Clear. Discard does NOT bump it: its promise is narrow
+  // (only the corrupt stored value goes) and an in-flight receipt
+  // must survive it (J2 R4 B1). The dashboard path IS gated — on the
+  // persist side: persistLiveReceiptToSessionLedger returns "skipped"
+  // for a row whose call predates a Clear. Navigating away from
+  // /dashboard also aborts its in-flight fetches, so no dashboard
+  // call can complete after a Clear here.
+  // Cross-tab (J2 R6): the in-memory ref is per tab — a try-it in
+  // flight in ANOTHER tab would still resurrect its receipt after a
+  // Clear here. Clear also bumps the STORED generation
+  // (lib/sessionReceipts.ts SESSION_RECEIPTS_GEN_KEY), and addReceipt
+  // checks both: the ref covers this tab (and storage-unavailable),
+  // the stored counter covers every other tab sharing this ledger.
+  const clearGenRef = useRef(0);
+  const memoryOnlyKeys = useMemo(
+    () => new Set(memoryOnly.map((e) => e.key)),
+    [memoryOnly],
+  );
+  // Deep link (Gemini line-by-line verdict 2026-11-20): the
+  // receipts/:id route renders this page with the id in the URL. An id
+  // matching a receipt in this browser session opens that entry and
+  // scrolls it into view; any other id shows an honest not-found
+  // notice below. No backend fetch is attempted — the API does not
+  // serve /receipts/:id in this build (live check 2026-11-20:
+  // HTTP 404), so a receipt from another session cannot be loaded.
+  const { id: deepLinkId } = useParams();
+  const deepLinkEntry = useMemo(
+    () =>
+      deepLinkId !== undefined
+        ? stored.find((e) => e.receipt.receipt_id === deepLinkId)
+        : undefined,
+    [deepLinkId, stored],
+  );
+  const deepLinkRef = useRef<HTMLLIElement | null>(null);
+  // Scroll once per deep-link id (gemini J2 R5 B1): deepLinkEntry gets
+  // a new identity on every storage re-read (fresh JSON.parse), so an
+  // effect on [deepLinkEntry] re-fired — and yanked the viewport —
+  // whenever the ledger grew. The id is the stable identity: same id,
+  // no re-scroll; a new id, or an entry arriving late, scrolls once.
+  const scrolledForRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!deepLinkEntry || !deepLinkRef.current) return;
+    if (scrolledForRef.current === deepLinkId) return;
+    scrolledForRef.current = deepLinkId;
+    // jsdom has no scrollIntoView — guard so tests don't throw.
+    deepLinkRef.current.scrollIntoView?.({ block: 'nearest' });
+  }, [deepLinkEntry, deepLinkId]);
+  // Rows the user closed by hand (gemini J2 R5 B1): a <details open>
+  // prop is only re-applied on remount — and the ledger list remounts
+  // whenever its length changes (key={stored.length} on the boundary)
+  // — so a user-closed deep-linked row was forced back open by the
+  // next ledger growth. Closed entry keys are remembered and the prop
+  // stops forcing those rows open; re-opening a row clears its key.
+  // Reset on id change: a fresh deep link opens its rows again.
+  const [closedDeepLinkKeys, setClosedDeepLinkKeys] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    setClosedDeepLinkKeys(new Set());
+  }, [deepLinkId]);
+  // Reset when the entry LEAVES (gemini J2 R6): the closed set and the
+  // scroll-once ref were reset only on deepLinkId change, so after a
+  // Clear the next entry with the same id never scrolled (stale
+  // scrolledForRef) and a restored entry with a previously-closed key
+  // stayed closed (stale closed set). The entry leaving is the reset
+  // signal; the entry staying present (ledger growth) is not — the B1
+  // test above still pins that a close survives growth.
+  useEffect(() => {
+    if (deepLinkEntry === undefined) {
+      setClosedDeepLinkKeys(new Set());
+      scrolledForRef.current = undefined;
+    }
+  }, [deepLinkEntry]);
+  // How many ledger rows match the deep-link id (usually 1; duplicates
+  // share one receipt_id — dedupe is by per-call key, never by id).
+  const deepLinkMatchCount = useMemo(
+    () =>
+      deepLinkId === undefined
+        ? 0
+        : stored.filter((e) => e.receipt.receipt_id === deepLinkId).length,
+    [deepLinkId, stored],
+  );
+  // How many of the matching rows are ACTUALLY open (gemini J2 R6 F2):
+  // after round 6 made rows closable, the notice unconditionally
+  // claimed all matches "are open" — false the moment the user closes
+  // one. Same predicate the row itself uses (keyless rows force-open).
+  const deepLinkOpenCount = useMemo(
+    () =>
+      deepLinkId === undefined
+        ? 0
+        : stored.filter((e) => {
+            if (e.receipt.receipt_id !== deepLinkId) return false;
+            const rowKey = typeof e.key === "string" ? e.key : null;
+            return rowKey === null || !closedDeepLinkKeys.has(rowKey);
+          }).length,
+    [deepLinkId, stored, closedDeepLinkKeys],
+  );
+  function deepLinkOpenNotice(): string {
+    if (deepLinkOpenCount === deepLinkMatchCount) {
+      return deepLinkMatchCount === 1
+        ? "the matching entry below is open."
+        : `${deepLinkMatchCount} matching entries below are open.`;
+    }
+    if (deepLinkOpenCount === 0) {
+      return deepLinkMatchCount === 1
+        ? "the matching entry below is closed — click it to reopen it."
+        : `all ${deepLinkMatchCount} matching entries below are closed — click one to reopen it.`;
+    }
+    return `${deepLinkOpenCount} of ${deepLinkMatchCount} matching entries below are open.`;
+  }
   // True when the saved value was unparseable, not an array, or a
   // non-empty array with zero valid entries: the corrupt value is left
   // untouched (M6) and a backup copy is kept under BACKUP_KEY.
   const [storedCorrupt, setStoredCorrupt] = useState<boolean>(storedInit.corrupt);
+  // True when browser storage itself threw on read (e.g. private mode):
+  // nothing is known to be corrupt — receipts stay in memory only, and
+  // the page must say "unavailable", never "corrupt" (J2 R2 M1).
+  const [storedUnavailable, setStoredUnavailable] = useState<boolean>(storedInit.unavailable);
   const [values, setValues] = useState<Record<string, string>>(() => ({
     tx_hash: SAMPLE_TX_HASH,
     chain: 'ethereum',
-    entity: 'Apple',
+    entity: 'AAPL',
     period: 'last 12 months',
     protocol: 'aave-v3',
     pair: 'ETH/USDC',
@@ -742,39 +733,122 @@ export default function Receipts() {
     });
   }, []);
   const [results, setResults] = useState<Partial<Record<EndpointKey | 'health', TryItResult>>>({});
+  // Endpoints whose last successful try-it call was dropped from the
+  // ledger because the ledger was cleared while the call was in flight
+  // (J2 R6 minor D): the try-it card still shows "200 OK" and the
+  // receipt, so without this the user cannot tell it was not saved.
+  // Cleared by the endpoint's next successful persisted run.
+  const [ledgerDropped, setLedgerDropped] = useState<ReadonlySet<EndpointKey>>(new Set());
   const [healthError, setHealthError] = useState<string | null>(null);
   const [healthMs, setHealthMs] = useState<number | null>(null);
-
-  useEffect(() => {
-    // M6: never silently overwrite corrupt stored data with [].
-    if (storedCorrupt) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
-    } catch {
-      // storage full/unavailable — receipts stay in memory for the session
-    }
-  }, [stored, storedCorrupt]);
 
   // M6: preserve a corrupt stored value under a backup key on mount.
   useEffect(() => {
     if (!storedCorrupt) return;
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw !== null) localStorage.setItem(BACKUP_KEY, raw);
-    } catch {
-      // ignore — the corrupt value itself is left untouched either way
-    }
+    backupCorruptSessionReceipts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const addReceipt = useCallback((entry: StoredReceipt) => {
-    setStored((prev) =>
-      [entry, ...prev.filter((r) => r.receipt.receipt_id !== entry.receipt.receipt_id)].slice(
-        0,
-        LEDGER_CAP,
-      ),
-    );
+  // Two-tab sync (J2 R2 M3): when another tab writes the shared ledger,
+  // re-read it here. localStorage.setItem in THIS tab does not fire the
+  // event, so our own writes are unaffected. e.key === null means
+  // another tab CLEARED storage (J2 R3 M2): re-read too — our stored
+  // rows are gone, memory-only rows stay. The read-modify-write race
+  // between two tabs appending at once remains — a rare lost write, not
+  // a corrupted ledger (the store only ever holds validated entries).
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== null && e.key !== SESSION_RECEIPTS_KEY) return;
+      const { entries, corrupt, unavailable } = readSessionReceipts();
+      setStored(mergeLedgerDisplay(entries, memoryOnlyRef.current));
+      setStoredCorrupt(corrupt);
+      setStoredUnavailable(unavailable);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
+
+  // Single write path: appendSessionReceipt is the only writer of the
+  // shared ledger (the dashboard writes through it too). Dedupe is by
+  // the per-call entry key, never by receipt_id — two legitimate calls
+  // can share one receipt_id and must not collapse to one row (J2 R2 B1).
+  //
+  // Memory-only entries are first-class rows (J2 R3 B1/B2): a refused
+  // entry is displayed with a "memory only" badge, and every successful
+  // append retries persisting the backlog — so a transient cause heals
+  // itself — while the display is ALWAYS rebuilt as
+  // merge(storage, memoryOnly), never as a bare re-read that would
+  // silently drop the backlog.
+  //
+  // No flag gate (J2 R4 B1): the append is ALWAYS attempted, even when
+  // the storedCorrupt / storedUnavailable flags say storage is broken.
+  // appendSessionReceipt re-reads and re-validates storage on every
+  // call, so its return value is authoritative AT CALL TIME — while the
+  // flags are a render-time snapshot. A try-it in flight across a
+  // Discard used to complete through the stale pre-recovery
+  // addReceipt and land memory-only without ever attempting the
+  // append, even though storage had healed. The Discard direction
+  // needs no gate: healthy→corrupt mid-flight lands memory-only
+  // because the append attempt itself fails. The Clear direction DOES
+  // have a gate (J2 R5 B1 + J2 R6 cross-tab): the generation check
+  // below drops entries whose call predates the latest Clear —
+  // otherwise an in-flight call would resurrect its receipt into a
+  // ledger the user just explicitly cleared. The flags still drive the
+  // UI notices; they just never gate a write.
+  // Returns false when the entry was dropped as stale (the caller
+  // shows the "not added to the ledger" note, J2 R6 minor D), true
+  // when the entry was attempted (persisted or memory-only).
+  // Deps are []: it reads only refs and module functions,
+  // so the identity is stable — an in-flight runEndpoint always calls
+  // the current logic, never a stale snapshot.
+  const addReceipt = useCallback(
+    (entry: StoredReceipt, clearGenAtStart: number, ledgerGenAtStart: number): boolean => {
+      // A Clear that landed while this call was in flight discards its
+      // entry (J2 R5 B1 / J2 R6 cross-tab): the entry's call predates
+      // the latest Clear, so persisting it would resurrect a receipt
+      // into a ledger the user just explicitly cleared. Either
+      // generation going stale drops it — the in-memory ref for a Clear
+      // in this tab, the stored counter for a Clear in another tab.
+      // The call's result still shows in its try-it card (setResults
+      // runs before addReceipt); only the ledger write is skipped.
+      // The backlog is still retried (J2 R6 minor B): it may hold
+      // post-Clear memory-only entries whose own calls started after
+      // the Clear and must not be stranded by this stale completion —
+      if (
+        clearGenAtStart !== clearGenRef.current ||
+        ledgerGenAtStart !== readLedgerGeneration()
+      ) {
+        const nextMemory = memoryOnlyRef.current.filter((m) => !appendSessionReceipt(m));
+        memoryOnlyRef.current = nextMemory;
+        setMemoryOnly(nextMemory);
+        setStored(mergeLedgerDisplay(readSessionReceipts().entries, nextMemory));
+        return false;
+      }
+      // Read the backlog from the ref, never from the closure snapshot
+      // (J2 R3 B1 race): two try-its in flight at once share one stale
+      // `memoryOnly` value, and the later setMemoryOnly overwrote the
+      // earlier receipt. The ref is updated synchronously below, so a
+      // concurrent call sees the entry this call just added — before
+      // any re-render.
+      const current = memoryOnlyRef.current;
+      let nextMemory: StoredReceipt[];
+      if (appendSessionReceipt(entry)) {
+        // Entry persisted: retry the backlog (a transient cause may
+        // have healed). Permanently invalid entries stay memory-only.
+        nextMemory = current.filter((m) => !appendSessionReceipt(m));
+      } else {
+        nextMemory = [entry, ...current.filter((r) => r.key !== entry.key)].slice(
+          0,
+          LEDGER_CAP,
+        );
+      }
+      memoryOnlyRef.current = nextMemory;
+      setMemoryOnly(nextMemory);
+      setStored(mergeLedgerDisplay(readSessionReceipts().entries, nextMemory));
+      return true;
+    },
+    [],
+  );
 
   const setValue = useCallback((name: string, value: string) => {
     setValues((prev) => ({ ...prev, [name]: value }));
@@ -782,6 +856,14 @@ export default function Receipts() {
 
   const runEndpoint = useCallback(
     async (endpoint: EndpointKey) => {
+      // The generation at call start (J2 R5 B1): if the user clears
+      // the ledger while this call is in flight, addReceipt drops
+      // the entry instead of resurrecting it into the cleared ledger.
+      // Both generations are captured: the in-memory ref for a Clear
+      // in this tab, the stored counter for a Clear in another tab
+      // (J2 R6 cross-tab).
+      const clearGenAtStart = clearGenRef.current;
+      const ledgerGenAtStart = readLedgerGeneration();
       // The button is disabled while its own call is in flight; this guard
       // covers any other path that calls runEndpoint twice for one endpoint.
       if (running.has(endpoint)) return;
@@ -803,7 +885,11 @@ export default function Receipts() {
           label = `filings ${values.entity.trim()} · ${values.period.trim()}`;
           params = `entity=${values.entity.trim()}&period=${values.period.trim()}`;
           const d = asEnvelope(raw);
-          summary = d.answer ?? `${String(d.filing_count ?? '—')} filings`;
+          // The count carries its window (filings J1 R3 M1): the
+          // fallback is only reached when the live answer (which
+          // carries the window) is absent, so the entity + period the
+          // call actually asked for are folded in here too.
+          summary = d.answer ?? `${String(d.filing_count ?? '—')} filings · ${values.entity.trim()} · ${values.period.trim()}`;
         } else if (endpoint === 'tvl') {
           raw = await getTvl({ protocol: values.protocol.trim() });
           label = `tvl ${values.protocol.trim()}`;
@@ -834,19 +920,27 @@ export default function Receipts() {
         }));
         // Keep the minimal fields the verifier needs for tx (hash for the
         // JSON-RPC replay) and grid (the four canonical evidence fields).
+        // typeof-guarded, never bare casts: api.ts does not validate the
+        // types of these fields, and an unguarded non-string would poison
+        // the shared ledger until the user discards it (J2 R2 B2).
         const verifyData =
           endpoint === 'tx'
-            ? { tx_hash: data.tx_hash as string | undefined }
+            ? { tx_hash: typeof data.tx_hash === 'string' ? data.tx_hash : undefined }
             : endpoint === 'grid'
               ? {
-                  node_or_zone: data.node_or_zone as string | undefined,
-                  interval_start: data.interval_start as string | undefined,
-                  lmp_usd_per_mwh: data.lmp_usd_per_mwh as number | undefined,
-                  market: data.market as string | undefined,
+                  node_or_zone:
+                    typeof data.node_or_zone === 'string' ? data.node_or_zone : undefined,
+                  interval_start:
+                    typeof data.interval_start === 'string' ? data.interval_start : undefined,
+                  lmp_usd_per_mwh:
+                    typeof data.lmp_usd_per_mwh === 'number' ? data.lmp_usd_per_mwh : undefined,
+                  market: typeof data.market === 'string' ? data.market : undefined,
                 }
               : undefined;
-        addReceipt({
-          key: `${endpoint}-${data.receipt.receipt_id}`,
+        const added = addReceipt({
+          // Per-call unique key (session counter): dedupe is by key, never
+          // by receipt_id — two identical calls must both appear (J2 R2 B1).
+          key: uniqueSessionReceiptKey(endpoint, data.receipt.receipt_id),
           endpoint,
           label,
           params,
@@ -854,6 +948,15 @@ export default function Receipts() {
           receipt: data.receipt,
           summary,
           verifyData,
+        }, clearGenAtStart, ledgerGenAtStart);
+        // Dropped entries (J2 R6 minor D): the try-it card shows the
+        // live result either way, so the ledger outcome is named here
+        // instead of silently vanishing.
+        setLedgerDropped((prev) => {
+          const next = new Set(prev);
+          if (added) next.delete(endpoint);
+          else next.add(endpoint);
+          return next;
         });
       } catch (err) {
         const latencyMs = Math.round(performance.now() - started);
@@ -900,14 +1003,39 @@ export default function Receipts() {
     }
   }, [running, markRunning]);
 
+  // "Clear session ledger": the explicit whole-ledger action — clears
+  // storage (ledger + backup), the memory-only backlog, and the flags.
+  // The ref is cleared synchronously with the state (J2 R3 B1 race):
+  // a later concurrent append must not resurrect cleared rows from a
+  // stale ref. In-flight calls are dropped by the generation check in
+  // addReceipt (J2 R5 B1) — clearing the ref alone did not stop a
+  // NEW entry minted after the clear from landing.
   const clearStored = useCallback(() => {
+    // Bump the generations FIRST: any try-it in flight when this runs
+    // has its entry dropped by addReceipt (J2 R5 B1) — the in-memory
+    // ref for this tab, the stored counter for every other tab sharing
+    // this ledger (J2 R6 cross-tab).
+    clearGenRef.current += 1;
+    bumpLedgerGeneration();
     setStored([]);
+    memoryOnlyRef.current = [];
+    setMemoryOnly([]);
     setStoredCorrupt(false);
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // ignore
-    }
+    setStoredUnavailable(false);
+    clearSessionReceipts();
+  }, []);
+
+  // "Discard corrupt stored data": removes ONLY the corrupt stored value
+  // (and its backup). Memory-only receipts collected since the
+  // corruption are legitimate, were never persisted, and have no backup
+  // — deleting them would destroy the only copy (J2 R3 B1). They stay
+  // displayed; the next append retries persisting them now that storage
+  // is empty again. Reads the backlog from the ref (same race reason
+  // as addReceipt) so a concurrent append is not lost.
+  const discardCorruptStored = useCallback(() => {
+    clearSessionReceipts();
+    setStoredCorrupt(false);
+    setStored(mergeLedgerDisplay(readSessionReceipts().entries, memoryOnlyRef.current));
   }, []);
 
   const healthStatus = useMemo(() => {
@@ -923,7 +1051,7 @@ export default function Receipts() {
       { name: 'chain', label: 'chain — ethereum, base, arbitrum, optimism, polygon, sepolia', placeholder: 'ethereum' },
     ],
     filings: [
-      { name: 'entity', label: 'entity — company name, ticker, CIK, or agency', placeholder: 'Apple' },
+      { name: 'entity', label: 'entity — company name, ticker, CIK, or agency', placeholder: 'AAPL' },
       { name: 'period', label: 'period — e.g. last 12 months, 2026', placeholder: 'last 12 months' },
     ],
     tvl: [
@@ -948,9 +1076,10 @@ export default function Receipts() {
             Receipts <span className="serif-i">Ledger.</span>
           </h1>
           <p className="vr-lede">
-            Every receipt below was obtained from a live call made on this page — nothing is
-            seeded, and no totals are claimed beyond what this session actually fetched. Each
-            receipt carries its upstream URL and SHA-256 digest, re-hashable in your browser.
+            Every receipt below was obtained from a live call made in this browser session —
+            on this page or on the dashboard — nothing is seeded, and no totals are claimed
+            beyond what this session actually fetched. Each receipt carries its upstream URL
+            and SHA-256 digest, re-hashable in your browser.
           </p>
         </div>
         <div className="vr-head-side">
@@ -983,17 +1112,49 @@ export default function Receipts() {
               Nothing was deleted; a copy was kept under{' '}
               <span className="vr-mono">{BACKUP_KEY}</span>. The page keeps working.
             </p>
-            <button type="button" className="vr-btn-ghost" onClick={clearStored}>
+            <button type="button" className="vr-btn-ghost" onClick={discardCorruptStored}>
               Discard corrupt stored data
             </button>
+          </div>
+        )}
+        {storedUnavailable && (
+          <div className="vr-notice" role="alert">
+            <p>
+              Browser storage is unavailable in this context — receipts are kept in memory
+              for this session only and will not survive navigation. Nothing was deleted;
+              the saved data was never read, so it is not corrupt.
+            </p>
+          </div>
+        )}
+        {deepLinkId !== undefined && (
+          <div className="vr-notice" role="status">
+            {deepLinkEntry ? (
+              <p>
+                Showing receipt <span className="vr-mono">{deepLinkId}</span> from this
+                browser session's ledger — {deepLinkOpenNotice()}
+              </p>
+            ) : (
+              <p>
+                No receipt <span className="vr-mono">{deepLinkId}</span> in this browser
+                session's ledger. Receipts are kept per browser session — run a live call
+                on the dashboard or below to collect one. The API does not serve{' '}
+                <span className="vr-mono">/receipts/:id</span> in this build (live check
+                2026-11-20: HTTP 404), so a receipt from another session cannot be loaded
+                here.
+              </p>
+            )}
+            <Link to="/receipts" className="vr-btn-ghost">
+              Show the full ledger
+            </Link>
           </div>
         )}
         {stored.length === 0 ? (
           <div className="vr-empty">
             <p className="vr-empty-title">No receipts yet in this browser session.</p>
             <p className="vr-muted">
-              Run any probe below — each successful live call adds its real receipt here with its
-              upstream URL and SHA-256 digest. Nothing is shown until a call actually happens.
+              Run any probe below, or run a live check on the dashboard — each successful
+              live call adds its real receipt here with its upstream URL and SHA-256 digest.
+              Nothing is shown until a call actually happens.
             </p>
           </div>
         ) : (
@@ -1003,12 +1164,65 @@ export default function Receipts() {
           // after an error shows the list again instead of a stuck fallback.
           <LedgerErrorBoundary key={stored.length} onClear={clearStored}>
             <ol className="vr-ledger-list">
-              {stored.slice(0, LEDGER_CAP).map((entry, i) => (
-                <li key={typeof entry.key === 'string' ? entry.key : `row-${i}`} className="vr-ledger-row">
-                  <details>
+              {stored.slice(0, LEDGER_CAP).map((entry, i) => {
+                const isDeepLink =
+                  deepLinkId !== undefined && entry.receipt.receipt_id === deepLinkId;
+                // The scroll target is the FIRST matching row only
+                // (gemini J2 R5 A-scroll): deepLinkEntry is .find() —
+                // the first match — but the ref used to attach to EVERY
+                // matching row, so it ended on the last one and the
+                // scroll landed on the wrong match.
+                const isScrollTarget = entry === deepLinkEntry;
+                // A keyless row cannot be tracked in the closed set, so
+                // it keeps the old force-open behaviour; every validated
+                // stored entry carries a string key.
+                const rowKey = typeof entry.key === "string" ? entry.key : null;
+                const deepLinkOpen =
+                  isDeepLink && (rowKey === null || !closedDeepLinkKeys.has(rowKey));
+                return (
+                <li
+                  key={typeof entry.key === 'string' ? entry.key : `row-${i}`}
+                  className="vr-ledger-row"
+                  ref={isScrollTarget ? deepLinkRef : undefined}
+                >
+                  <details
+                    open={deepLinkOpen || undefined}
+                    onToggle={
+                      isDeepLink && rowKey !== null
+                        ? (e) => {
+                            const open = e.currentTarget.open;
+                            setClosedDeepLinkKeys((prev) => {
+                              const next = new Set(prev);
+                              if (open) next.delete(rowKey);
+                              else next.add(rowKey);
+                              return next;
+                            });
+                          }
+                        : undefined
+                    }
+                  >
                     <summary>
                       <span className="vr-badge vr-b-acc">{asText(entry.endpoint)}</span>
                       <span className="vr-ledger-label">{asText(entry.label)}</span>
+                      {/* Memory-only rows say so (J2 R3 B2): a refused
+                          receipt must never look persisted. It lives in
+                          memory only and will not survive navigation. */}
+                      {memoryOnlyKeys.has(entry.key) && (
+                        <span
+                          className="vr-badge vr-b-err"
+                          title="This receipt could not be saved to browser storage — it lives in memory only and will not survive navigation."
+                        >
+                          memory only
+                        </span>
+                      )}
+                      {isDeepLink && (
+                        <span
+                          className="vr-badge vr-b-acc"
+                          title="Opened from the /receipts/:id deep link."
+                        >
+                          linked receipt
+                        </span>
+                      )}
                       <span className="vr-mono vr-small vr-muted">
                         {typeof entry.fetchedAt === 'string' ? fmtTime(entry.fetchedAt) : '—'}
                       </span>
@@ -1024,7 +1238,8 @@ export default function Receipts() {
                     />
                   </details>
                 </li>
-              ))}
+                );
+              })}
             </ol>
           </LedgerErrorBoundary>
         )}
@@ -1086,6 +1301,7 @@ export default function Receipts() {
             onRun={() => runEndpoint(key)}
             running={running.has(key)}
             result={results[key] ?? null}
+            ledgerDropped={ledgerDropped.has(key)}
           />
         ))}
       </div>

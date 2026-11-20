@@ -96,249 +96,253 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
 
   yaml:
     'version: "1"\n' +
-    "kind: miner\n" +
-    "protocol: generic\n" +
-    "id: 774921\n" +
-    "slug: verireceipt\n" +
-    "name: VeriReceipt Deterministic Oracle\n" +
-    "description: >-\n" +
-    "  Zero-LLM, cryptographically receipted deterministic provider for on-chain\n" +
-    "  transactions, SEC/Federal Register filings, DeFi TVL, block-pinned ETH/USDC\n" +
-    "  execution routing, and wholesale grid power prices. Every answer includes a\n" +
-    "  verifiable source hash and fails closed rather than guessing.\n" +
-    "base_url: https://verireceipt.onrender.com\n" +
-    "\n" +
-    "auth:\n" +
-    "  type: none\n" +
-    "\n" +
-    "cache_ttl_sec: 10\n" +
-    "rate_limit_per_sec: 20\n" +
-    "circuit_threshold: 5\n" +
-    "circuit_cooldown_seconds: 30\n" +
-    "\n" +
-    "docs:\n" +
-    "  website: https://verireceipt.onrender.com\n" +
-    "  documentation: https://verireceipt.onrender.com/docs\n" +
-    "  repository: https://github.com/mohamedwael201193/verireceipt\n" +
-    "\n" +
-    "limitations:\n" +
-    "  - code: MAX_PARAM_SIZE\n" +
-    "    message: Input parameter length must not exceed 512 characters.\n" +
-    "    param: entity\n" +
-    "    property: length\n" +
-    "    value_num: 512\n" +
-    "    operator: lte\n" +
-    "\n" +
-    "semantics:\n" +
-    "  supported_intents:\n" +
-    "    - ONCHAIN_TX_LOOKUP_GENERAL\n" +
-    "    - REGULATORY_FILING_MONITOR_GENERAL\n" +
-    "    - TVL_LOOKUP_GENERAL\n" +
-    "    - OPTIMAL_EXECUTION_ROUTE_GENERAL\n" +
-    "    - GRID_POWER_PRICE_GENERAL\n" +
-    "  signal_mapping:\n" +
-    "    confidence_field: confidence\n" +
-    "    label_field: verdict\n" +
-    "    reason_field: source\n" +
-    "\n" +
-    "endpoints:\n" +
-    "  - path: /v1/tx\n" +
-    "    external_path: /v1/tx\n" +
-    "    method: GET\n" +
-    "    description: >-\n" +
-    "      Looks up an EVM transaction hash on a specified chain using a 2-of-3\n" +
-    "      archive-RPC quorum (including OP-stack L1 data fee) and returns exact\n" +
-    "      tx_hash, status, from, to, block_number, value_eth, and a SHA-256 receipt.\n" +
-    "    intents:\n" +
-    "      - ONCHAIN_TX_LOOKUP_GENERAL\n" +
-    "    params:\n" +
-    "      query:\n" +
-    "        required:\n" +
-    "          - name: tx_hash\n" +
-    "            type: string\n" +
+    'kind: miner\n' +
+    'protocol: generic\n' +
+    'id: 774921\n' +
+    'slug: verireceipt\n' +
+    'name: VeriReceipt Deterministic Oracle\n' +
+    'description: >-\n' +
+    '  Zero-LLM, cryptographically receipted deterministic provider for on-chain\n' +
+    '  transactions, SEC/Federal Register filings, DeFi TVL, block-pinned ETH/USDC\n' +
+    '  execution routing, and wholesale grid power prices. Every answer includes a\n' +
+    '  verifiable source hash and fails closed rather than guessing.\n' +
+    'base_url: https://verireceipt.onrender.com\n' +
+    '\n' +
+    'auth:\n' +
+    '  type: none\n' +
+    '\n' +
+    'cache_ttl_sec: 10\n' +
+    'rate_limit_per_sec: 20\n' +
+    'circuit_threshold: 5\n' +
+    'circuit_cooldown_seconds: 30\n' +
+    '\n' +
+    'docs:\n' +
+    '  website: https://verireceipt.onrender.com\n' +
+    '  documentation: https://verireceipt.onrender.com/docs\n' +
+    '  repository: https://github.com/mohamedwael201193/verireceipt\n' +
+    '\n' +
+    'limitations:\n' +
+    '  - code: MAX_PARAM_SIZE\n' +
+    '    message: Input parameter length must not exceed 512 characters.\n' +
+    '    param: entity\n' +
+    '    property: length\n' +
+    '    value_num: 512\n' +
+    '    operator: lte\n' +
+    '\n' +
+    'semantics:\n' +
+    '  supported_intents:\n' +
+    '    - ONCHAIN_TX_LOOKUP_GENERAL\n' +
+    '    - REGULATORY_FILING_MONITOR_GENERAL\n' +
+    '    - TVL_LOOKUP_GENERAL\n' +
+    '    - OPTIMAL_EXECUTION_ROUTE_GENERAL\n' +
+    '    - GRID_POWER_PRICE_GENERAL\n' +
+    '  signal_mapping:\n' +
+    '    confidence_field: confidence\n' +
+    '    label_field: verdict\n' +
+    '    reason_field: source\n' +
+    '\n' +
+    'endpoints:\n' +
+    '  - path: /v1/tx\n' +
+    '    external_path: /v1/tx\n' +
+    '    method: GET\n' +
+    '    description: >-\n' +
+    '      Looks up an EVM transaction hash on a specified chain using a 2-of-N\n' +
+    '      archive-RPC quorum (N = configured RPCs per chain), including the\n' +
+    '      OP-stack L1 data fee, and returns exact tx_hash, status, from, to,\n' +
+    '      block_number, value_eth, and a SHA-256 receipt.\n' +
+    '    intents:\n' +
+    '      - ONCHAIN_TX_LOOKUP_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '          - name: tx_hash\n' +
+    '            type: string\n' +
     '            intents: ["ONCHAIN_TX_LOOKUP_GENERAL"]\n' +
-    "            description: Complete 0x-prefixed 64-hex-character transaction hash.\n" +
-    "          - name: chain\n" +
-    "            type: string\n" +
+    '            description: Complete 0x-prefixed 64-hex-character transaction hash.\n' +
+    '          - name: chain\n' +
+    '            type: string\n' +
     '            intents: ["ONCHAIN_TX_LOOKUP_GENERAL"]\n' +
-    "            description: EVM chain name (ethereum, base, arbitrum, optimism, polygon, sepolia).\n" +
-    "\n" +
-    "  - path: /v1/filings\n" +
-    "    external_path: /v1/filings\n" +
-    "    method: GET\n" +
-    "    description: >-\n" +
-    "      Queries SEC EDGAR Submissions API and Federal Register API for an entity\n" +
-    "      over a specified period and returns entity, filing_count, filings list,\n" +
-    "      urls list, and a SHA-256 receipt.\n" +
-    "    intents:\n" +
-    "      - REGULATORY_FILING_MONITOR_GENERAL\n" +
-    "    params:\n" +
-    "      query:\n" +
-    "        required:\n" +
-    "          - name: entity\n" +
-    "            type: string\n" +
+    '            description: EVM chain name (ethereum, base, arbitrum, optimism, polygon, sepolia, base-sepolia).\n' +
+    '\n' +
+    '  - path: /v1/filings\n' +
+    '    external_path: /v1/filings\n' +
+    '    method: GET\n' +
+    '    description: >-\n' +
+    '      Queries SEC EDGAR Submissions API and Federal Register API for an entity\n' +
+    '      over a specified period and returns entity, filing_count, filings list,\n' +
+    '      urls list, and a SHA-256 receipt.\n' +
+    '    intents:\n' +
+    '      - REGULATORY_FILING_MONITOR_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '          - name: entity\n' +
+    '            type: string\n' +
     '            intents: ["REGULATORY_FILING_MONITOR_GENERAL"]\n' +
-    "            description: Company name, ticker symbol, CIK, or federal agency.\n" +
-    "          - name: period\n" +
-    "            type: string\n" +
+    '            description: Company name, ticker symbol, CIK, or federal agency.\n' +
+    '          - name: period\n' +
+    '            type: string\n' +
     '            intents: ["REGULATORY_FILING_MONITOR_GENERAL"]\n' +
-    "            description: Search period such as last 12 months, 2026, or YYYY-MM-DD..YYYY-MM-DD.\n" +
-    "\n" +
-    "  - path: /v1/tvl\n" +
-    "    external_path: /v1/tvl\n" +
-    "    method: GET\n" +
-    "    description: >-\n" +
-    "      Queries DeFiLlama keyless APIs with protocol normalization and returns\n" +
-    "      protocol_or_chain, tvl_usd, chain_tvl_usd, as_of timestamp, and a SHA-256 receipt.\n" +
-    "    intents:\n" +
-    "      - TVL_LOOKUP_GENERAL\n" +
-    "    params:\n" +
-    "      query:\n" +
-    "        required:\n" +
-    "          - name: protocol\n" +
-    "            type: string\n" +
+    '            description: Search period such as last 12 months, 2026, or YYYY-MM-DD..YYYY-MM-DD.\n' +
+    '\n' +
+    '  - path: /v1/tvl\n' +
+    '    external_path: /v1/tvl\n' +
+    '    method: GET\n' +
+    '    description: >-\n' +
+    '      Queries DeFiLlama keyless APIs with protocol normalization and returns\n' +
+    '      protocol_or_chain, tvl_usd, chain_tvl_usd, as_of timestamp, and a SHA-256 receipt.\n' +
+    '    intents:\n' +
+    '      - TVL_LOOKUP_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '          - name: protocol\n' +
+    '            type: string\n' +
     '            intents: ["TVL_LOOKUP_GENERAL"]\n' +
-    "            description: DeFi protocol slug/name or blockchain name (e.g., aave-v3, uniswap, ethereum).\n" +
-    "\n" +
-    "  - path: /v1/route\n" +
-    "    external_path: /v1/route\n" +
-    "    method: GET\n" +
-    "    description: >-\n" +
-    "      Returns block-pinned Ethereum mainnet execution quote (amount_out in\n" +
-    "      6-decimal USDC base units) for selling exactly 1 ETH for USDC across\n" +
-    "      Uniswap V2/V3, SushiSwap V2, and Curve pools with a SHA-256 receipt.\n" +
-    "    intents:\n" +
-    "      - OPTIMAL_EXECUTION_ROUTE_GENERAL\n" +
-    "    params:\n" +
-    "      query:\n" +
-    "        required:\n" +
-    "          # pair is declared as type string: the miner-config param types are\n" +
-    "          # only string/integer/number/boolean/array/object (no enum type).\n" +
-    "          # Live registered OPTIMAL miners declare pair as type string with\n" +
+    '            description: DeFi protocol slug/name or blockchain name (e.g., aave-v3, uniswap, ethereum).\n' +
+    '\n' +
+    '  - path: /v1/route\n' +
+    '    external_path: /v1/route\n' +
+    '    method: GET\n' +
+    '    description: >-\n' +
+    '      Returns block-pinned Ethereum mainnet execution quote (amount_out in\n' +
+    '      6-decimal USDC base units) for selling exactly 1 ETH for USDC across\n' +
+    '      Uniswap V2/V3, SushiSwap V2, with a SHA-256 receipt.\n' +
+    '    intents:\n' +
+    '      - OPTIMAL_EXECUTION_ROUTE_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '          # pair is declared as type string: the miner-config param types are\n' +
+    '          # only string/integer/number/boolean/array/object (no enum type).\n' +
+    '          # Live registered OPTIMAL miners declare pair as type string with\n' +
     '          # enum ["ETH/USDC"] in their input_schema; the enum is expressed\n' +
-    "          # here in the description instead.\n" +
-    "          - name: pair\n" +
-    "            type: string\n" +
+    '          # here in the description instead.\n' +
+    '          - name: pair\n' +
+    '            type: string\n' +
     '            intents: ["OPTIMAL_EXECUTION_ROUTE_GENERAL"]\n' +
-    "            description: Must be ETH/USDC (sell exactly 1 ETH for USDC on Ethereum mainnet).\n" +
-    "\n" +
-    "  - path: /v1/grid-price\n" +
-    "    external_path: /v1/grid-price\n" +
-    "    method: GET\n" +
-    "    description: >-\n" +
-    "      Returns wholesale electricity locational marginal price (lmp_usd_per_mwh)\n" +
-    "      from official public ISO feeds (CAISO, ERCOT, NYISO, MISO, ENTSO-E/Elering)\n" +
-    "      for a node_or_zone and interval_start datetime with a SHA-256 receipt.\n" +
-    "    intents:\n" +
-    "      - GRID_POWER_PRICE_GENERAL\n" +
-    "    params:\n" +
-    "      query:\n" +
-    "        required:\n" +
-    "          - name: node_or_zone\n" +
-    "            type: string\n" +
+    '            description: Must be ETH/USDC (sell exactly 1 ETH for USDC on Ethereum mainnet).\n' +
+    '\n' +
+    '  - path: /v1/grid-price\n' +
+    '    external_path: /v1/grid-price\n' +
+    '    method: GET\n' +
+    '    description: >-\n' +
+    '      Returns wholesale electricity locational marginal price (lmp_usd_per_mwh)\n' +
+    '      from official public ISO feeds (CAISO, NYISO, ENTSO-E/Elering)\n' +
+    '      for a node_or_zone and interval_start datetime with a SHA-256 receipt.\n' +
+    '    intents:\n' +
+    '      - GRID_POWER_PRICE_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '          - name: node_or_zone\n' +
+    '            type: string\n' +
     '            intents: ["GRID_POWER_PRICE_GENERAL"]\n' +
-    "            description: Pricing node or bidding zone (e.g., TH_NP15_GEN-APND, HB_NORTH, ZONE_J).\n" +
-    "          - name: interval_start\n" +
-    "            type: string\n" +
+    '            description: Pricing node or bidding zone (e.g., TH_NP15_GEN-APND, ZONE_J).\n' +
+    '          - name: interval_start\n' +
+    '            type: string\n' +
     '            intents: ["GRID_POWER_PRICE_GENERAL"]\n' +
-    "            description: ISO-8601 UTC start datetime of the settlement interval.\n" +
-    "\n" +
-    "intent_mapping:\n" +
-    "  ONCHAIN_TX_LOOKUP_GENERAL:\n" +
-    "    endpoint: /v1/tx\n" +
-    "    input:\n" +
-    "      tx_hash:\n" +
-    "        from: tx_hash\n" +
+    '            description: ISO-8601 UTC start datetime of the settlement interval.\n' +
+    '\n' +
+    'intent_mapping:\n' +
+    '  ONCHAIN_TX_LOOKUP_GENERAL:\n' +
+    '    endpoint: /v1/tx\n' +
+    '    input:\n' +
+    '      tx_hash:\n' +
+    '        from: tx_hash\n' +
     '        how: "Copy the complete 0x-prefixed 64-hex-character transaction hash verbatim."\n' +
-    "      chain:\n" +
-    "        from: chain\n" +
-    '        how: "Normalize chain name to lowercase (ethereum, base, arbitrum, optimism, polygon, sepolia)."\n' +
-    "    output:\n" +
-    "      tx_hash:\n" +
-    "        path: tx_hash\n" +
-    "      status:\n" +
-    "        path: status\n" +
-    "      from:\n" +
-    "        path: from\n" +
-    "      to:\n" +
-    "        path: to\n" +
-    "      block_number:\n" +
-    "        path: block_number\n" +
+    '      chain:\n' +
+    '        from: chain\n' +
+    '        how: "Normalize chain name to lowercase (ethereum, base, arbitrum, optimism, polygon, sepolia, base-sepolia)."\n' +
+    '    output:\n' +
+    '      tx_hash:\n' +
+    '        path: tx_hash\n' +
+    '      status:\n' +
+    '        path: status\n' +
+    '      from:\n' +
+    '        path: from\n' +
+    '      to:\n' +
+    '        path: to\n' +
+    '      block_number:\n' +
+    '        path: block_number\n' +
     '        unit: "block height"\n' +
-    "      value_eth:\n" +
-    "        path: value_eth\n" +
+    '      value_eth:\n' +
+    '        path: value_eth\n' +
     '        unit: "whole native units"\n' +
-    "\n" +
-    "  REGULATORY_FILING_MONITOR_GENERAL:\n" +
-    "    endpoint: /v1/filings\n" +
-    "    input:\n" +
-    "      entity:\n" +
-    "        from: entity\n" +
+    '      l1_fee_eth:\n' +
+    '        path: l1_fee_eth\n' +
+    '        unit: "whole native units"\n' +
+    '\n' +
+    '  REGULATORY_FILING_MONITOR_GENERAL:\n' +
+    '    endpoint: /v1/filings\n' +
+    '    input:\n' +
+    '      entity:\n' +
+    '        from: entity\n' +
     '        how: "Pass the exact company name, ticker, CIK, or agency requested."\n' +
-    "      period:\n" +
-    "        from: period\n" +
+    '      period:\n' +
+    '        from: period\n' +
     '        how: "Pass the requested time period verbatim (e.g., last 12 months, 2026)."\n' +
-    "    output:\n" +
-    "      entity:\n" +
-    "        path: entity\n" +
-    "      filing_count:\n" +
-    "        path: filing_count\n" +
+    '    output:\n' +
+    '      entity:\n' +
+    '        path: entity\n' +
+    '      filing_count:\n' +
+    '        path: filing_count\n' +
     '        unit: "filings"\n' +
-    "      filings:\n" +
-    "        path: filings\n" +
-    "      urls:\n" +
-    "        path: urls\n" +
-    "\n" +
-    "  TVL_LOOKUP_GENERAL:\n" +
-    "    endpoint: /v1/tvl\n" +
-    "    input:\n" +
-    "      protocol:\n" +
-    "        from: protocol\n" +
+    '      filings:\n' +
+    '        path: filings\n' +
+    '      urls:\n' +
+    '        path: urls\n' +
+    '\n' +
+    '  TVL_LOOKUP_GENERAL:\n' +
+    '    endpoint: /v1/tvl\n' +
+    '    input:\n' +
+    '      protocol:\n' +
+    '        from: protocol\n' +
     '        how: "Pass the DeFi protocol or chain name cleanly without extra prose."\n' +
-    "    output:\n" +
-    "      protocol_or_chain:\n" +
-    "        path: protocol_or_chain\n" +
-    "      tvl_usd:\n" +
-    "        path: tvl_usd\n" +
+    '    output:\n' +
+    '      protocol_or_chain:\n' +
+    '        path: protocol_or_chain\n' +
+    '      tvl_usd:\n' +
+    '        path: tvl_usd\n' +
     '        unit: "USD"\n' +
-    "      chain_tvl_usd:\n" +
-    "        path: chain_tvl_usd\n" +
+    '      chain_tvl_usd:\n' +
+    '        path: chain_tvl_usd\n' +
     '        unit: "USD"\n' +
-    "      as_of:\n" +
-    "        path: as_of\n" +
-    "\n" +
-    "  OPTIMAL_EXECUTION_ROUTE_GENERAL:\n" +
-    "    endpoint: /v1/route\n" +
-    "    input:\n" +
-    "      pair:\n" +
-    "        from: pair\n" +
+    '      as_of:\n' +
+    '        path: as_of\n' +
+    '\n' +
+    '  OPTIMAL_EXECUTION_ROUTE_GENERAL:\n' +
+    '    endpoint: /v1/route\n' +
+    '    input:\n' +
+    '      pair:\n' +
+    '        from: pair\n' +
     '        how: "Must be ETH/USDC."\n' +
-    "    output:\n" +
-    "      amount_out:\n" +
-    "        path: amount_out\n" +
+    '    output:\n' +
+    '      amount_out:\n' +
+    '        path: amount_out\n' +
     '        unit: "USDC base units (6 decimals)"\n' +
-    "\n" +
-    "  GRID_POWER_PRICE_GENERAL:\n" +
-    "    endpoint: /v1/grid-price\n" +
-    "    input:\n" +
-    "      node_or_zone:\n" +
-    "        from: node_or_zone\n" +
+    '\n' +
+    '  GRID_POWER_PRICE_GENERAL:\n' +
+    '    endpoint: /v1/grid-price\n' +
+    '    input:\n' +
+    '      node_or_zone:\n' +
+    '        from: node_or_zone\n' +
     '        how: "Extract the exact pricing node or bidding zone identifier."\n' +
-    "      interval_start:\n" +
-    "        from: interval_start\n" +
+    '      interval_start:\n' +
+    '        from: interval_start\n' +
     '        how: "Format settlement interval start as ISO-8601 UTC datetime."\n' +
-    "    output:\n" +
-    "      lmp_usd_per_mwh:\n" +
-    "        path: lmp_usd_per_mwh\n" +
+    '    output:\n' +
+    '      lmp_usd_per_mwh:\n' +
+    '        path: lmp_usd_per_mwh\n' +
     '        unit: "USD per MWh"\n' +
-    "      node_or_zone:\n" +
-    "        path: node_or_zone\n" +
-    "      market:\n" +
-    "        path: market\n" +
-    "      interval_start:\n" +
-    "        path: interval_start\n" +
-    "      currency:\n" +
-    "        path: currency\n",
+    '      node_or_zone:\n' +
+    '        path: node_or_zone\n' +
+    '      market:\n' +
+    '        path: market\n' +
+    '      interval_start:\n' +
+    '        path: interval_start\n' +
+    '      currency:\n' +
+    '        path: currency\n',
 
   cast:
     "# Sepolia Registration Commands (Active Diamond — Nov 17 Migration)\n" +

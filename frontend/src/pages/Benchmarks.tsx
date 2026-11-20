@@ -98,8 +98,8 @@ export default function Benchmarks() {
     {
       key: 'filings',
       label: 'GET /v1/filings',
-      methodPath: '/v1/filings?entity=Apple&period=last 12 months',
-      run: (signal) => getFilings({ entity: 'Apple', period: 'last 12 months' }, signal),
+      methodPath: '/v1/filings?entity=AAPL&period=last 12 months',
+      run: (signal) => getFilings({ entity: 'AAPL', period: 'last 12 months' }, signal),
     },
     {
       key: 'tvl',

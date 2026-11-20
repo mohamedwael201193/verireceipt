@@ -69,7 +69,7 @@ export const MAX_RECEIPT_SHA_LENGTH = 128;
  * small JSON envelope — never the 16 MB upstream payload it hashes —
  * so an unbounded parse lets a garbage / hostile multi-MB body through
  * to JSON.parse and the UI. 1 MiB is comfortably above the largest legit
- * live envelope, measured live 2026-11-20: filings (the largest, 94
+ * live envelope, measured live 2026-11-20: filings (the largest, 95
  * filings) is 25,709 bytes; tvl 726, route 808, grid 795, health 70 —
  * so the cap is ~40x the largest legit envelope and no legit live
  * response can trip it. Anything larger is INVALID_RESPONSE.
@@ -253,7 +253,7 @@ function assertValidBody(
   // to a consumer that iterates filings. Only type checks that are
   // clearly safe are applied — "if present, it must be the declared
   // type" — and every one was verified against live responses
-  // 2026-11-20 (filings is a 94-item array, urls a string array,
+  // 2026-11-20 (filings is a 95-item array, urls a string array,
   // filing_count/tvl_usd/amount_out/lmp_usd_per_mwh finite numbers,
   // chain_tvl_usd/block_number numbers or null). Nested entry shapes
   // are NOT validated: that would be over-engineering for fields no

@@ -20,7 +20,7 @@ import { INTENTS, PRESETS, TRAP_PRESETS, type IntentKey } from "./data";
 import { callLive, type AnyResponse } from "./calls";
 import { errorMessage, formatLmp, formatUsdcBaseUnits, hlJSON, shortHash } from "./utils";
 import { VerifyBadge } from "./VerifyBadge";
-import { apiUrlFor } from "./utils";
+import { endpointForIntent } from "../../lib/verifyReceipt";
 
 interface RunState {
   loading: boolean;
@@ -33,7 +33,7 @@ interface RunState {
   key: IntentKey | null;
 }
 
-function metricFor(key: IntentKey, data: AnyResponse | null): string {
+function metricFor(key: IntentKey, data: AnyResponse | null, period?: string): string {
   if (!data) return "Querying the live endpoint…";
   switch (key) {
     case "tx": {
@@ -43,7 +43,12 @@ function metricFor(key: IntentKey, data: AnyResponse | null): string {
     }
     case "sec": {
       const d = data as FilingsResponse;
-      return `${d.filing_count} filings · ${d.entity}`;
+      // The count carries its window: "95 filings" is the last-12-months
+      // answer, "52" the last-6-months one — the headline used to render
+      // the windowless `${count} filings · ${entity}`, the exact string
+      // shape of the 2026-11-20 defect (J2 R3 B1). The envelope carries
+      // no period, so the tab preset supplies it.
+      return `${d.filing_count} filings · ${d.entity}${period ? ` · ${period}` : ""}`;
     }
     case "tvl": {
       const d = data as TvlResponse;
@@ -90,7 +95,7 @@ function TxVisual({ data }: { data: TxResponse }) {
   );
 }
 
-function SecVisual({ data }: { data: FilingsResponse }) {
+function SecVisual({ data, period }: { data: FilingsResponse; period: string }) {
   const top = data.filings.slice(0, 3);
   return (
     <div style={{ padding: 18, flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -100,7 +105,12 @@ function SecVisual({ data }: { data: FilingsResponse }) {
           <span style={{ color: "#FF5722", fontWeight: 600 }}>VERBATIM JSON</span>
         </div>
         <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 12 }}>
-          {data.entity} — {data.filing_count} filings
+          {/* The count is meaningless without its window: "95 filings" is
+              the last-12-months answer, "52" the last-6-months one — the
+              2026-11-20 landing/dashboard mismatch was exactly this
+              (filings J2 minor 1). The envelope carries no period, so the
+              tab preset supplies it. */}
+          {data.entity} — {data.filing_count} filings · {period}
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }} className="mono">
           {top.map((f) => (
@@ -332,7 +342,10 @@ export function IntentIde() {
     ? { error: run.error.message, code: run.error.code ?? null, status: run.error.status }
     : dataForTab;
 
-  const verifyUrl = apiUrlFor(meta.key, is422 ? TRAP_PRESETS[meta.key] : PRESETS[meta.key]);
+  // The badge verifies the DISPLAYED run: dataForTab is already tied
+  // to this tab (run.key === meta.key), so the tab's own key is the
+  // run's intent.
+  const badgeEndpoint = endpointForIntent(meta.key);
 
   return (
     <section id="intents" className="ide-scroll-track" ref={trackRef}>
@@ -375,7 +388,7 @@ export function IntentIde() {
                   <div>
                     <div className="mono" style={{ fontSize: 11, color: "var(--muted)", marginBottom: 5 }}>// result</div>
                     <h3 style={{ fontSize: "clamp(1.35rem,2.2vw,1.8rem)", fontWeight: 300, letterSpacing: "-0.025em", lineHeight: 1.18 }}>
-                      {run.error ? "Live refusal — see error" : metricFor(meta.key, dataForTab)}
+                      {run.error ? "Live refusal — see error" : metricFor(meta.key, dataForTab, meta.key === "sec" ? PRESETS.sec.period : undefined)}
                     </h3>
                   </div>
                 </div>
@@ -496,7 +509,7 @@ export function IntentIde() {
                 ) : (
                   <div id="ide-visual" style={{ flex: 1, display: "flex", flexDirection: "column" }}>
                     {meta.key === "tx" && dataForTab && <TxVisual data={dataForTab as TxResponse} />}
-                    {meta.key === "sec" && dataForTab && <SecVisual data={dataForTab as FilingsResponse} />}
+                    {meta.key === "sec" && dataForTab && <SecVisual data={dataForTab as FilingsResponse} period={PRESETS.sec.period} />}
                     {meta.key === "tvl" && dataForTab && <TvlVisual data={dataForTab as TvlResponse} scattered={scattered} />}
                     {meta.key === "route" && dataForTab && <RouteVisual data={dataForTab as RouteResponse} />}
                     {meta.key === "grid" && dataForTab && <GridVisual data={dataForTab as GridPriceResponse} />}
@@ -507,7 +520,9 @@ export function IntentIde() {
               {dataForTab && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   <ReceiptCard receipt={dataForTab.receipt} />
-                  <VerifyBadge url={verifyUrl} />
+                  {badgeEndpoint && (
+                    <VerifyBadge receipt={dataForTab.receipt} endpoint={badgeEndpoint} data={dataForTab} />
+                  )}
                 </div>
               )}
 

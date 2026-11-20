@@ -1,10 +1,11 @@
 // M2 regression tests: probe chips must not start concurrent runs, and a
 // stale response must never overwrite the newest run's receipt (the
-// VerifyBadge URL is built from the newest run's params, so a mismatch
-// would show a receipt for a different request than the one displayed).
+// VerifyBadge verifies the displayed run's receipt, so a mismatch would
+// verify a receipt for a different request than the one displayed).
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Probe } from "./Probe";
+import { PRESETS } from "./data";
 
 const RECEIPT = {
   receipt_id: "rcpt-test-1",
@@ -14,11 +15,11 @@ const RECEIPT = {
 };
 
 const TX_BODY = {
-  tx_hash: "0x8c3f442fc6d640a6ff3ea0b12be64f1d4609ea94edd2966f42c01cd9bdcf04b5",
+  tx_hash: "0xafdbc83c485355d90f79fd660bcd12713402aa78922d966657d1005f59e92902",
   status: "confirmed",
   from: "0x1111111111111111111111111111111111111111",
   to: "0x2222222222222222222222222222222222222222",
-  block_number: 15725067,
+  block_number: 26454869,
   value_eth: "0.01",
   source: "archive-rpc-quorum",
   receipt: { ...RECEIPT, quorum_votes: "2-of-3" },
@@ -35,7 +36,7 @@ const TVL_BODY = {
 };
 
 const CHIP_LABELS = [
-  "TX: Block 15725067",
+  "TX: Block 26454869",
   "SEC: AAPL 10-K",
   "TVL: aave-v3",
   "Route: 1 ETH → USDC",
@@ -88,6 +89,19 @@ describe("Probe — chip race guard (M2)", () => {
     vi.restoreAllMocks();
   });
 
+  it("the TX chip preset is the current live-verified tx (C4)", () => {
+    // The landing example must show a current block, not a months-old
+    // one: the preset hash is the tx confirmed live 2026-11-20 at block
+    // 26454869 (receipt rcpt_4FT93E5NXZ8IXSFG3O0YD6TU4E).
+    expect(PRESETS.tx.tx_hash).toBe(
+      "0xafdbc83c485355d90f79fd660bcd12713402aa78922d966657d1005f59e92902",
+    );
+    render(<Probe />);
+    expect(
+      screen.getByRole("button", { name: "TX: Block 26454869" }),
+    ).toBeInTheDocument();
+  });
+
   it("disables all preset chips while a run is loading, re-enables after", async () => {
     const { fetchMock, pending } = mockFetch();
     const { container } = render(<Probe />);
@@ -107,18 +121,18 @@ describe("Probe — chip race guard (M2)", () => {
     // — React does not deliver clicks to a disabled button even when the
     // click is dispatched directly. What the UI must guarantee is that
     // the displayed receipt always belongs to the latest completed run,
-    // never to an earlier one (the VerifyBadge URL is built from the
-    // latest run's params). The guard itself is proven by the IDE test
+    // never to an earlier one (the VerifyBadge verifies the displayed
+    // run's receipt). The guard itself is proven by the IDE test
     // ("ignores a stale response…"), where tab switches CAN overlap runs.
     const { fetchMock, pending } = mockFetch();
     const { container } = render(<Probe />);
 
-    fireEvent.click(screen.getByRole("button", { name: "TX: Block 15725067" }));
+    fireEvent.click(screen.getByRole("button", { name: "TX: Block 26454869" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     pending[0].resolve(TX_BODY);
     await waitFor(() =>
       expect(container.querySelector("#pr-out")?.textContent).toContain(
-        "0x8c3f442fc6d640a6ff3ea0b12be64f1d4609ea94edd2966f42c01cd9bdcf04b5",
+        "0xafdbc83c485355d90f79fd660bcd12713402aa78922d966657d1005f59e92902",
       ),
     );
 
@@ -130,7 +144,7 @@ describe("Probe — chip race guard (M2)", () => {
     );
     const out = container.querySelector("#pr-out")?.textContent ?? "";
     expect(out).toContain("rcpt-test-tvl");
-    expect(out).not.toContain("0x8c3f442fc6d640a6ff3ea0b12be64f1d4609ea94edd2966f42c01cd9bdcf04b5");
+    expect(out).not.toContain("0xafdbc83c485355d90f79fd660bcd12713402aa78922d966657d1005f59e92902");
     expect(out).not.toContain("rcpt-test-1");
   });
 
@@ -202,7 +216,7 @@ describe("Probe — programmatic retarget mid-run is a no-op (J2 R2 M2)", () => 
     select.dispatchEvent(new Event("change", { bubbles: true }));
     await waitFor(() =>
       expect(screen.getByLabelText("Payload JSON")).toHaveValue(
-        JSON.stringify({ entity: "AAPL", period: "last 6 months" }),
+        JSON.stringify({ entity: "AAPL", period: "last 12 months" }),
       ),
     );
   });
@@ -218,8 +232,8 @@ describe("Probe — programmatic retarget mid-run is a no-op (J2 R2 M2)", () => 
 
     // J2's exact repro: native setter + dispatchEvent on the disabled
     // select. The old code moved intent tx -> sec mid-run, so after the
-    // TVL run resolved the VerifyBadge URL was built from the sec intent
-    // with the TVL run's params (/v1/filings?protocol=aave-v3).
+    // TVL run resolved the VerifyBadge would have verified the TVL run's
+    // receipt against the filings endpoint.
     const select = screen.getByRole("combobox") as HTMLSelectElement;
     const setter = Object.getOwnPropertyDescriptor(
       window.HTMLSelectElement.prototype,
@@ -246,10 +260,11 @@ describe("Probe — programmatic retarget mid-run is a no-op (J2 R2 M2)", () => 
       expect(container.querySelector("#pr-out")?.textContent).toContain("aave-v3"),
     );
 
-    // The VerifyBadge URL is the TVL run's, not the filings URL.
-    fireEvent.click(screen.getByRole("button", { name: "Compute envelope digest" }));
+    // The VerifyBadge verifies the TVL run's receipt (its raw endpoint),
+    // not a filings check.
+    fireEvent.click(screen.getByRole("button", { name: "Verify receipt" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(String(fetchMock.mock.calls[1][0])).toBe("/api/v1/tvl?protocol=aave-v3");
+    expect(String(fetchMock.mock.calls[1][0])).toBe("/api/receipts/rcpt-test-tvl/raw");
   });
 
   it("a dispatched mode change mid-run does not retarget the run", async () => {

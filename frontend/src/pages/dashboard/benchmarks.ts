@@ -405,11 +405,11 @@ export const BENCH_CASES: BenchCase[] = [
     cat: "reg",
     name: "Root Canonical Schema Parity Check",
     expect: "entity, filing_count, filings[], urls[] all present at root · receipt",
-    probe: () => JSON.stringify({ entity: "AAPL", period: "last 6 months" }),
+    probe: () => JSON.stringify({ entity: "AAPL", period: "last 12 months" }),
     runnable: true,
     run: async (ctx) => {
-      const outcome = await probe((signal) => getFilings({ entity: "AAPL", period: "last 6 months" }, signal), ctx.signal);
-      ctx.record(toLiveReceipt("REGULATORY_FILING_MONITOR_GENERAL", "AAPL · last 6 months", directUrl("/v1/filings", { entity: "AAPL", period: "last 6 months" }), outcome));
+      const outcome = await probe((signal) => getFilings({ entity: "AAPL", period: "last 12 months" }, signal), ctx.signal);
+      ctx.record(toLiveReceipt("REGULATORY_FILING_MONITOR_GENERAL", "AAPL · last 12 months", directUrl("/v1/filings", { entity: "AAPL", period: "last 12 months" }), outcome));
       if (!outcome.ok) return failFrom(outcome, "filings lookup");
       const body = outcome.body as FilingsResponse;
       const failures: string[] = [];

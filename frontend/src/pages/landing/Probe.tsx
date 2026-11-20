@@ -3,21 +3,22 @@
 // The design's probe was simulated: the trap was a string check on the
 // payload, and "verification" hashed a canned string. This port sends the
 // user's payload to the LIVE endpoint, renders the actual response (or
-// the actual 422 error body), and computes the envelope's SHA-256 digest
-// for comparison with the recorded digest (see VerifyBadge — a match is
-// not expected with the current miner, so no browser verification is
-// promised). Copy curl builds a real GET curl.
+// the actual 422 error body), and verifies the receipt with THE ONE
+// verifier (see VerifyBadge / src/lib/verifyReceipt.ts — stored raw
+// bytes first, live re-check while the miner does not serve them).
+// Copy curl builds a real GET curl.
 import { useRef, useState } from "react";
 import { ApiError, assertValidParam } from "../../lib/api";
 import { ReceiptCard } from "../../components/ReceiptCard";
 import { INTENTS, PRESETS, TRAP_PRESETS, type IntentKey } from "./data";
 import { callLive, type AnyResponse } from "./calls";
-import { apiUrlFor, curlFor, errorMessage, hlJSON } from "./utils";
+import { curlFor, errorMessage, hlJSON } from "./utils";
+import { endpointForIntent } from "../../lib/verifyReceipt";
 import { copyText } from "./toast";
 import { VerifyBadge } from "./VerifyBadge";
 
 const CHIP_PRESETS: { id: string; label: string; key: IntentKey; trap: boolean }[] = [
-  { id: "tx", label: "TX: Block 15725067", key: "tx", trap: false },
+  { id: "tx", label: "TX: Block 26454869", key: "tx", trap: false },
   { id: "sec", label: "SEC: AAPL 10-K", key: "sec", trap: false },
   { id: "tvl", label: "TVL: aave-v3", key: "tvl", trap: false },
   { id: "route", label: "Route: 1 ETH → USDC", key: "route", trap: false },
@@ -34,10 +35,15 @@ export function Probe() {
   const [error, setError] = useState<ApiError | null>(null);
   const [ms, setMs] = useState<number | null>(null);
   const [paramsUsed, setParamsUsed] = useState<Record<string, string> | null>(null);
+  // The intent the DISPLAYED run used — the badge must verify the run
+  // shown, not the currently selected intent (changing the select after
+  // a run must not retarget the badge to a different endpoint).
+  const [intentUsed, setIntentUsed] = useState<IntentKey | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   // Request-id guard: two rapid runs must not race — a stale response
   // (e.g. the first chip's) must never overwrite the newest run's
-  // receipt, or the VerifyBadge URL could mismatch the displayed receipt.
+  // receipt, or the VerifyBadge could verify the wrong run's receipt
+  // against the displayed one.
   const reqRef = useRef(0);
 
   async function run(key: IntentKey, rawPayload: string) {
@@ -71,6 +77,7 @@ export function Probe() {
     setError(null);
     setMs(null);
     setParamsUsed(params);
+    setIntentUsed(key);
     const t0 = performance.now();
     try {
       const res = await callLive(key, params);
@@ -97,7 +104,7 @@ export function Probe() {
   // Mid-run guard (J2 R2 M2): the select/mode buttons are disabled while
   // loading, but a programmatic change dispatch (native setter +
   // dispatchEvent) bypasses `disabled` and used to retarget the run
-  // mid-flight — the VerifyBadge URL was then built from the NEW intent
+  // mid-flight — the VerifyBadge was then built from the NEW intent
   // with the OLD run's params. A no-op while loading closes it; real
   // users cannot reach this path without devtools.
   function onIntentChange(key: IntentKey) {
@@ -117,6 +124,10 @@ export function Probe() {
   const jsonBody: unknown = error
     ? { error: error.message, code: error.code ?? null, status: error.status }
     : data;
+
+  // The badge verifies the DISPLAYED run: the endpoint of the intent
+  // that run used (intentUsed), never the currently selected intent.
+  const badgeEndpoint = intentUsed ? endpointForIntent(intentUsed) : undefined;
 
   return (
     <section id="probe" className="sec-pad" style={{ paddingTop: 32 }}>
@@ -276,7 +287,9 @@ export function Probe() {
               {data && (
                 <div style={{ padding: "0 14px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
                   <ReceiptCard receipt={data.receipt} />
-                  {paramsUsed && <VerifyBadge url={apiUrlFor(intent, paramsUsed)} />}
+                  {paramsUsed && badgeEndpoint && (
+                    <VerifyBadge receipt={data.receipt} endpoint={badgeEndpoint} data={data} />
+                  )}
                 </div>
               )}
               {error && (

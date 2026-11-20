@@ -104,11 +104,15 @@ export const PRESETS: Record<
   Record<string, string>
 > = {
   tx: {
+    // Real confirmed Ethereum tx, block 26454869 (checked live
+    // 2026-11-20 — receipt rcpt_4FT93E5NXZ8IXSFG3O0YD6TU4E). The old
+    // preset (0x8c3f44…, block 15725067) was also real but months old;
+    // the landing example now shows a current block.
     tx_hash:
-      "0x8c3f442fc6d640a6ff3ea0b12be64f1d4609ea94edd2966f42c01cd9bdcf04b5",
+      "0xafdbc83c485355d90f79fd660bcd12713402aa78922d966657d1005f59e92902",
     chain: "ethereum",
   },
-  sec: { entity: "AAPL", period: "last 6 months" },
+  sec: { entity: "AAPL", period: "last 12 months" },
   tvl: { protocol: "aave-v3" },
   route: { pair: "ETH/USDC" },
   grid: {

@@ -39,8 +39,14 @@ function summaryFor(item: DeckItem, data: unknown): string {
   switch (item.key) {
     case "tx":
       return `Block ${String(d.block_number)} ${String(d.status)} · from ${shortHash(String(d.from ?? ""))} to ${shortHash(String(d.to ?? ""))} · ${String(d.value_eth ?? 0)} ETH.`;
-    case "sec":
-      return `${String(d.filing_count)} filings for ${String(d.entity)} pulled verbatim from data.sec.gov with direct EDGAR archive URLs.`;
+    case "sec": {
+      // The count carries its window: "95 filings" is the last-12-months
+      // answer, "52" the last-6-months one — the 2026-11-20
+      // landing/dashboard mismatch was exactly this (filings J2 minor 1).
+      const period = typeof item.params.period === "string" ? item.params.period : "";
+      const window = period ? ` in ${period}` : "";
+      return `${String(d.filing_count)} filings for ${String(d.entity)}${window} pulled verbatim from data.sec.gov with direct EDGAR archive URLs.`;
+    }
     case "tvl":
       return `${String(d.protocol_or_chain)} normalized cleanly to ${formatUsd(d.tvl_usd as number)} total TVL with timestamped proof.`;
     case "route":
