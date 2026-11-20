@@ -16,8 +16,10 @@
 //                            (Directory listing itself is 403; direct dated file works.)
 //   TH_NP15_GEN-APND, TH_SP15_GEN-APND, TH_ZP26_GEN-APND -> CAISO -> CAISO OASIS
 //                            https://oasis.caiso.com/oasisapi/SingleZip?queryname=PRC_LMP
-//                            &market_run_id=DAM (https + follow redirects; resultformat
-//                            ignored, always a zip with one CSV). Hourly DAM intervals,
+//                            &market_run_id=DAM (https + bounded manual
+//                            redirects, every hop allowlist-checked —
+//                            see fetchAllowed(); resultformat ignored,
+//                            always a zip with one CSV). Hourly DAM intervals,
 //                            LMP_PRC in USD/MWh. Observed 2026-11-20: TH_NP15_GEN-APND
 //                            67.57882 USD/MWh @ 2026-11-20T03:00Z.
 //   EUR->USD conversion for Elering: https://open.er-api.com/v6/latest/EUR
@@ -129,6 +131,16 @@ export function resolveGridAlias(nodeOrZone: string): string | undefined {
  * HTTP 429): NYISO falls back to the dated-file URL for the interval's NY
  * date, CAISO to the full SingleZip URL with its query params, Elering to
  * its dashboard API URL.
+ *
+ * CAISO (round-2 J2 M2): the fallback MUST carry the interval's 1-hour
+ * start/end window. The dateless SingleZip query (queryname + node only)
+ * returns HTTP 200 with an INVALID_REQUEST.xml inside the zip (verified
+ * live 2026-11-20), so it is not a usable recomputation URL. With the
+ * window, the same query returns exactly that interval's LMP_PRC row
+ * (verified live 2026-11-20: 03:00-04:00Z returned 60.16249 USD/MWh @
+ * 2026-11-19T03:00:00-00:00). The unparseable-interval branch below is
+ * unreachable from the handler (it validates interval_start before any
+ * row lookup) and keeps the old dateless form only as a last resort.
  */
 export function gridFallbackUrl(nodeOrZone: string, intervalStartIso: string): string {
   const zone = SUPPORTED_ZONES[nodeOrZone];
@@ -139,9 +151,21 @@ export function gridFallbackUrl(nodeOrZone: string, intervalStartIso: string): s
     return NYISO_BASE_URL + yyyymmdd + "realtime_zone.csv";
   }
   if (zone.market === "CAISO") {
+    const ms = Date.parse(intervalStartIso);
+    if (Number.isNaN(ms)) {
+      return (
+        CAISO_OASIS_URL +
+        "?queryname=PRC_LMP&market_run_id=DAM&node=" +
+        encodeURIComponent(nodeOrZone) +
+        "&resultformat=6"
+      );
+    }
     return (
       CAISO_OASIS_URL +
-      "?queryname=PRC_LMP&market_run_id=DAM&node=" +
+      "?queryname=PRC_LMP" +
+      "&startdatetime=" + caisoDt(new Date(ms)) +
+      "&enddatetime=" + caisoDt(new Date(ms + 3600_000)) +
+      "&version=1&market_run_id=DAM&node=" +
       encodeURIComponent(nodeOrZone) +
       "&resultformat=6"
     );
@@ -200,6 +224,42 @@ export interface GridPriceRow {
  */
 export function saveGridPriceBatch(rows: GridPriceRow[]): void {
   if (rows.length === 0) return;
+  // Round-7 guard-criterion fix (F1, defense-in-depth): validate EVERY
+  // row BEFORE opening the transaction — a batch carrying an empty node
+  // or market throws and stores NOTHING (not even its clean rows), so a
+  // future writer bug can never half-commit a corrupt row. Same rule as
+  // saveGridPrice in src/core/db.ts (throw, whitespace counts as empty);
+  // the error names the offending row index so the ingester log points
+  // at the bad row. All production writers pass literal non-empty
+  // node/market values, so no live path can trip this.
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r.node || !r.node.trim() || !r.market || !r.market.trim()) {
+      throw new Error(
+        "saveGridPriceBatch refuses row " +
+          i +
+          " with empty node or market (node=" +
+          JSON.stringify(r.node) +
+          ", market=" +
+          JSON.stringify(r.market) +
+          ")",
+      );
+    }
+    // A4-FIX F3: a non-finite LMP (Infinity/-Infinity/NaN) must fail
+    // loudly like an empty market — SQLite stores Infinity, so without
+    // this a corrupt price would land in the cache and be served.
+    if (typeof r.lmp !== "number" || !Number.isFinite(r.lmp)) {
+      throw new Error(
+        "saveGridPriceBatch refuses row " +
+          i +
+          " with non-finite lmp (node=" +
+          JSON.stringify(r.node) +
+          ", lmp=" +
+          String(r.lmp) +
+          ")",
+      );
+    }
+  }
   const db = getDb();
   const stmt = db.prepare(
     `INSERT OR REPLACE INTO grid_cache
@@ -218,27 +278,218 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-async function fetchText(url: string): Promise<string> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+/**
+ * Upstream allowlist (round-2 J2 M5, SSRF guard). The grid ingester may
+ * fetch ONLY these four origins, over HTTPS. Every fetch goes through
+ * fetchText()/fetchBuffer(), which refuse any other URL BEFORE any
+ * network call — a non-allowlisted URL is never fetched, never retried,
+ * and never resolved. The check is origin-based (hostname + https:):
+ * a lookalike host (mis.nyiso.com.evil.com), a downgraded scheme
+ * (http://mis.nyiso.com), and an unparseable string are all refused.
+ * All production fetch URLs are constants in this module, so the guard
+ * is defense-in-depth today; it exists so a future URL construction
+ * bug (or a bad zone/node value reaching a URL) cannot turn the
+ * ingester into an open fetcher.
+ *
+ * Round-3 redirect hardening (J2 M5 bypass): the initial-URL check
+ * above is NOT sufficient on its own. undici's default redirect mode
+ * is `follow`, and the old fetchText()/fetchBuffer() passed no
+ * `redirect` option and never inspected `res.url` — so an allowlisted
+ * URL that 302'd to an OFF-LIST URL (J2 proved: allowlisted 302 ->
+ * https://127.0.0.1:8443/secret) had its body fetched and parsed as
+ * if it were the allowlisted upstream. The fix is a BOUNDED MANUAL
+ * redirect loop (see fetchAllowed below): redirects are followed only
+ * with `redirect: "manual"`, every hop URL — initial, intermediate,
+ * and final — is allowlist-checked BEFORE its fetch is issued, and a
+ * redirect response's body is never read. An off-list final or
+ * intermediate URL is therefore refused before its body is ever
+ * fetched or parsed. CAISO legitimately redirects (its SingleZip
+ * endpoint 302s within oasis.caiso.com), so redirects are followed,
+ * not banned — but only within the allowlist, and at most
+ * MAX_REDIRECT_HOPS hops.
+ */
+export const GRID_UPSTREAM_ORIGINS: ReadonlySet<string> = new Set([
+  "dashboard.elering.ee",
+  "mis.nyiso.com",
+  "oasis.caiso.com",
+  "open.er-api.com",
+]);
+
+/** Maximum redirects followed per fetch (CAISO needs 1; 5 is headroom, not a licence). */
+export const MAX_REDIRECT_HOPS = 5;
+
+/** Redirect statuses the manual loop follows (Location header required). */
+const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
+
+export function isAllowedGridUpstreamUrl(url: string): boolean {
+  let parsed: URL;
   try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { "User-Agent": USER_AGENT } });
-    if (!res.ok) throw new Error("HTTP " + res.status + " from " + url);
-    return await res.text();
-  } finally {
-    clearTimeout(timer);
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "https:" && GRID_UPSTREAM_ORIGINS.has(parsed.hostname);
+}
+
+/** Throw (named, fail-closed) unless `url` is an allowlisted grid upstream. */
+export function assertAllowedGridUpstreamUrl(url: string): void {
+  if (!isAllowedGridUpstreamUrl(url)) {
+    throw new Error("refusing to fetch non-allowlisted grid upstream URL: " + url);
   }
 }
 
-async function fetchBuffer(url: string): Promise<Buffer> {
+/**
+ * fetchText/fetchBuffer are exported as test seams (like
+ * eleringMissingZones / nyWallToUtcMs below): the M5 pin calls them
+ * directly with an off-list URL and asserts no fetch is performed.
+ *
+ * The optional timeoutMs (default FETCH_TIMEOUT_MS, 20 s) exists for
+ * the A4 on-demand CAISO fetch: OASIS SingleZip is SLOW — observed
+ * 2026-11-20 from this VM at 12 s / 28 s / 47 s for three identical
+ * 1-hour PRC_LMP queries — so a 20 s abort would kill a healthy
+ * on-demand fetch. The background ingester keeps the 20 s default;
+ * only the on-demand path passes a longer timeout (see
+ * fetchCaisoDamLmp).
+ *
+ * Redirect handling (round-3 M5): both go through fetchAllowed(),
+ * which issues every hop with `redirect: "manual"` and allowlist-
+ * checks the next hop URL BEFORE following it. A redirect response's
+ * body is never read — only its Location header — so an off-list
+ * target's bytes can never reach a parser.
+ *
+ * Timeout bounding (A4-FIX F5, J2): fetchAllowed() creates ONE
+ * AbortController and ONE timer for the WHOLE call — the timer is
+ * created once, shared by every redirect hop, and kept alive until
+ * the body has been read (fetchText/fetchBuffer release it only
+ * after the body is consumed). The same deadline is also raced
+ * against every hop fetch and the body read, so even a fetch
+ * implementation that ignores the abort signal cannot run past it:
+ * a slow hop or a stalled body rejects at the deadline, never per
+ * hop and never after headers. The old shape (a fresh controller +
+ * timer per hop, cleared as soon as headers arrived) let 6 hops x
+ * 120 s run 720 s and a stalled body hang indefinitely.
+ */
+async function fetchAllowed(
+  url: string,
+  timeoutMs: number = FETCH_TIMEOUT_MS,
+): Promise<{ res: Response; release: () => void; deadlineMs: number }> {
+  const deadlineMs = Date.now() + timeoutMs;
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      ctrl.abort();
+      reject(new Error("fetch timed out after " + timeoutMs + "ms fetching " + url));
+    }, timeoutMs);
+  });
+  // The deadline promise is raced below; this no-op catch keeps a
+  // timer firing after a settled race from surfacing as an unhandled
+  // rejection (the timer is cleared on every return path via release()).
+  void deadline.catch(() => {});
+  const release = (): void => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+  };
   try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { "User-Agent": USER_AGENT } });
-    if (!res.ok) throw new Error("HTTP " + res.status + " from " + url);
-    return Buffer.from(await res.arrayBuffer());
+    let current = url;
+    for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
+      // Allowlist-check EVERY hop before its network call, including the
+      // initial URL (hop 0) and every redirect target.
+      assertAllowedGridUpstreamUrl(current);
+      // Raced against the ONE shared deadline (not a per-hop timer):
+      // a hop that is still pending when the deadline fires rejects
+      // here, however many hops already ran.
+      const res: Response = await Promise.race([
+        fetch(current, {
+          signal: ctrl.signal,
+          headers: { "User-Agent": USER_AGENT },
+          redirect: "manual",
+        }),
+        deadline,
+      ]);
+      if (!REDIRECT_STATUSES.has(res.status)) return { res, release, deadlineMs };
+      // Redirect: resolve Location against the current URL (it may be
+      // relative), then loop — the next iteration's allowlist check
+      // refuses an off-list target BEFORE any fetch to it. The redirect
+      // response body is never read.
+      const location = res.headers.get("location");
+      if (!location) {
+        throw new Error("HTTP " + res.status + " redirect from " + current + " with no Location header");
+      }
+      if (hop === MAX_REDIRECT_HOPS) {
+        throw new Error(
+          "redirect hop limit (" + MAX_REDIRECT_HOPS + ") exceeded fetching " + url,
+        );
+      }
+      let next: string;
+      try {
+        next = new URL(location, current).toString();
+      } catch {
+        throw new Error("unparseable redirect Location from " + current + ": " + location);
+      }
+      current = next;
+    }
+    // Unreachable: the loop returns on a non-redirect or throws at the hop limit.
+    throw new Error("redirect hop limit (" + MAX_REDIRECT_HOPS + ") exceeded fetching " + url);
+  } catch (err) {
+    release();
+    throw err;
+  }
+}
+
+/**
+ * Read a response body bounded by the SAME overall deadline that
+ * bounded the headers (A4-FIX F5): the abort signal alone is not
+ * enough — a body that stalls after headers arrived used to hang
+ * indefinitely because the old timer was cleared on headers. The
+ * race below rejects at the deadline even if the body stream ignores
+ * the abort signal.
+ */
+async function readBodyWithDeadline<T>(
+  read: () => Promise<T>,
+  deadlineMs: number,
+  url: string,
+): Promise<T> {
+  const remainingMs = deadlineMs - Date.now();
+  if (remainingMs <= 0) {
+    throw new Error("fetch timed out reading body from " + url);
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("fetch timed out reading body from " + url)),
+      remainingMs,
+    );
+  });
+  void timeout.catch(() => {});
+  try {
+    return await Promise.race([read(), timeout]);
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+export async function fetchText(url: string, timeoutMs?: number): Promise<string> {
+  const { res, release, deadlineMs } = await fetchAllowed(url, timeoutMs);
+  try {
+    if (!res.ok) throw new Error("HTTP " + res.status + " from " + url);
+    return await readBodyWithDeadline(() => res.text(), deadlineMs, url);
+  } finally {
+    release();
+  }
+}
+
+export async function fetchBuffer(url: string, timeoutMs?: number): Promise<Buffer> {
+  const { res, release, deadlineMs } = await fetchAllowed(url, timeoutMs);
+  try {
+    if (!res.ok) throw new Error("HTTP " + res.status + " from " + url);
+    return Buffer.from(
+      await readBodyWithDeadline(() => res.arrayBuffer(), deadlineMs, url),
+    );
+  } finally {
+    release();
   }
 }
 
@@ -268,10 +519,28 @@ export function eleringMissingZones(perZoneCounts: Record<string, number>): stri
 
 /** Elering Nord Pool day-ahead / intraday prices, EUR/MWh, 15-min intervals. */
 async function ingestElering(eurUsd: number): Promise<{ count: number; failed: string[] }> {
-  const json = JSON.parse(await fetchText(ELERING_URL)) as unknown;
+  // Round-2 J2 M3: a fetch/parse failure must name the missing zones
+  // (all four — nothing was ingested), not just the transport error.
+  // The throw is caught by runIngesterOnce() (a named "Elering: ..."
+  // entry in failed[]); nothing is written to the cache, so the
+  // handler keeps 502ing for these zones instead of serving anything.
+  let json: unknown;
+  try {
+    json = JSON.parse(await fetchText(ELERING_URL));
+  } catch (err) {
+    throw new Error(
+      "fetch failed: " +
+        errMsg(err) +
+        "; missing zones: " +
+        ELERING_ZONE_KEYS.map((k) => k.toUpperCase()).join(", "),
+    );
+  }
   const data = (json as { success?: unknown; data?: unknown } | null)?.data;
   if ((json as { success?: unknown } | null)?.success !== true || typeof data !== "object" || data === null) {
-    throw new Error("unexpected Elering response shape");
+    throw new Error(
+      "unexpected Elering response shape; missing zones: " +
+        ELERING_ZONE_KEYS.map((k) => k.toUpperCase()).join(", "),
+    );
   }
   const zoneKeyToNode: Record<string, string> = { ee: "EE", fi: "FI", lv: "LV", lt: "LT" };
   const ingestedAt = new Date().toISOString();
@@ -287,7 +556,23 @@ async function ingestElering(eurUsd: number): Promise<{ count: number; failed: s
       // A price of exactly 0 is real (Nord Pool can clear at 0); only
       // null/undefined/NaN/non-finite prices are refused.
       if (!Number.isFinite(priceEur)) continue;
-      const intervalStart = new Date(ts * 1000).toISOString();
+      // A4-FIX3 F-R3-2: a poisoned timestamp (JSON 1e999 parses to
+      // Infinity) used to throw inside toISOString() and abort the
+      // WHOLE Elering cycle — zero EE/FI/LV/LT rows cached that cycle.
+      // Finite-check ts, and validate the constructed Date too (a
+      // finite-but-huge ts, e.g. 1e20, overflows ts*1000 past the Date
+      // range into an Invalid Date whose toISOString() throws the same
+      // way). Skip the bad row, log it, keep the good rows.
+      if (!Number.isFinite(ts)) {
+        console.error("[grid-ingester] Elering: skipping row with non-finite timestamp " + String(ts) + " for " + node);
+        continue;
+      }
+      const intervalDate = new Date(ts * 1000);
+      if (Number.isNaN(intervalDate.getTime())) {
+        console.error("[grid-ingester] Elering: skipping row with out-of-range timestamp " + String(ts) + " for " + node);
+        continue;
+      }
+      const intervalStart = intervalDate.toISOString();
       const lmp = priceEur * eurUsd;
       if (!Number.isFinite(lmp)) continue;
       rows.push({
@@ -306,7 +591,15 @@ async function ingestElering(eurUsd: number): Promise<{ count: number; failed: s
   const count = rows.length;
   const failed = eleringMissingZones(perZoneCounts);
   for (const msg of failed) console.error("[grid-ingester] " + msg);
-  if (count === 0) throw new Error("Elering returned no usable price rows");
+  // Round-2 J2 M3: the zero-row throw used to discard the per-zone
+  // list (failed[] got only "no usable price rows"). Carry the zone
+  // names in the thrown message so the failure names what is missing.
+  if (count === 0) {
+    throw new Error(
+      "Elering returned no usable price rows" +
+        (failed.length > 0 ? " (" + failed.join("; ") + ")" : ""),
+    );
+  }
   return { count, failed };
 }
 
@@ -360,25 +653,86 @@ export function nyWallString(utcMs: number): string {
  * approximation is off by 1 hour for 48 intervals on the fall-back day).
  * Ambiguous wall times (the repeated hour on fall-back day, e.g. 01:30 on
  * 2026-11-01, which occurs once in EDT and once in EST) resolve to the
- * SECOND occurrence (EST): the NYISO CSV carries no DST flag, so both
- * occurrences arrive with the identical wall string and the later row must
- * win the INSERT OR REPLACE rather than the earlier one. Nonexistent wall
- * times (the skipped hour on spring-forward day) resolve to the
- * post-transition instant, which still round-trips to the same wall string.
+ * SECOND occurrence (EST): this function alone cannot tell the two
+ * occurrences apart — the NYISO CSV carries no DST flag, so both
+ * arrive with the identical wall string. The POSITIONAL resolution
+ * lives in ingestNyiso (round-3, GATED round-4): when a file carries
+ * both occurrences of an ambiguous wall time for a node AND the
+ * round-4 chronological gate is open for that node + repeated hour
+ * (complete 12-slot hour, two contiguous ascending runs, no other
+ * decrease in the node's file order), the first in file order is
+ * shifted back one hour to the first (EDT) occurrence and the second
+ * keeps this function's EST result, so both prices survive instead of
+ * the later row overwriting the earlier one. Gate closed (e.g. a
+ * reversed or partial pair) leaves both rows at the EST result —
+ * pre-R3 behaviour, 05:xxZ unserved. A lone ambiguous row
+ * keeps the EST result (this function's behaviour, unchanged).
+ * Nonexistent wall times (the skipped hour on spring-forward day, e.g.
+ * 02:30 on 2026-03-08) resolve to the post-transition instant — 07:30Z,
+ * i.e. 03:30 EDT — so they do NOT round-trip (nyWallString returns
+ * "03:30:00", not the input "02:30:00") and they collide 1:1 with the
+ * real 03:xx rows. Measured 2026-11-20: gap 02:00 -> 07:00Z, 02:30 ->
+ * 07:30Z, 02:55 -> 07:55Z, each equal to the real 03:xx instant. That
+ * collision is benign in the ingester ONLY when the CSV is
+ * chronological: a later real 03:xx row overwrites an earlier gap row
+ * for the same instant (INSERT OR REPLACE), so the final cache holds
+ * the real price — but a gap row arriving AFTER the real row used to
+ * overwrite the real price (round-3 J2 M4). ingestNyiso now guards
+ * that too: a gap row that would overwrite an already-seen real row
+ * for the same instant is skipped. (The old docstring claimed gap
+ * times "still round-trip to the same wall string" — false, corrected
+ * round-2 J2 M4.) Pinned by the spring-forward tests in
+ * tests/grid.test.ts.
  */
-export function nyWallToUtcMs(wall: string): number | null {
+/**
+ * Days in a month, leap-year aware (Feb 29 exists only in leap years).
+ * Shared by the NYISO wall validator below and parseCaisoIntervalStart.
+ */
+function daysInMonth(year: number, month: number): number {
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  return [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+}
+
+/**
+ * Range validity of a NYISO wall-time's components (A4-FIX2 F-N1).
+ * Month 1-12, day 1..days-in-month (leap-year aware), hour 0-23,
+ * minute/second 0-59. This is the ONLY discriminator between an
+ * impossible wall and a genuine DST spring-forward gap wall: an
+ * impossible wall (Feb 30, Apr 31, hour 24, month 00/13) fails here
+ * and is skipped, never cached; a gap wall (02:30 on 2026-03-08)
+ * passes here, fails round-trip by design, and is kept as a gap row
+ * by ingestNyiso. Date.UTC must never see unvalidated components:
+ * it silently rolls over (Feb 30 -> Mar 2, hour 24 -> next day
+ * 00:00), and the rolled instant used to be cached and served as
+ * verified with a receipt (J2 round-2 F-N1).
+ */
+function isValidNyWallComponents(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+): boolean {
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > daysInMonth(year, month)) return false;
+  if (hour > 23 || minute > 59 || second > 59) return false;
+  return true;
+}
+
+/** Normalised "MM/DD/YYYY HH:MM:SS" wall string, or null if unparseable. Shared by nyWallToUtcMs and ingestNyiso. */
+function normalizeNyWall(wall: string): string | null {
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4}) (\d{1,2}):(\d{2}):(\d{2})$/.exec(wall.trim());
   if (!m) return null;
-  const wallAsUtc = Date.UTC(Number(m[3]), Number(m[1]) - 1, Number(m[2]), Number(m[4]), Number(m[5]), Number(m[6]));
-  let utcMs = wallAsUtc - tzOffsetMs(wallAsUtc);
-  for (let i = 0; i < 4; i++) {
-    const next = wallAsUtc - tzOffsetMs(utcMs);
-    if (next === utcMs) break;
-    utcMs = next;
+  // A4-FIX2 F-N1: a range-invalid wall normalises to null, never to a
+  // rolled-over string — so the gap logic in ingestNyiso can never
+  // treat an impossible wall as a spring-forward gap row.
+  if (
+    !isValidNyWallComponents(Number(m[3]), Number(m[1]), Number(m[2]), Number(m[4]), Number(m[5]), Number(m[6]))
+  ) {
+    return null;
   }
-  // Ambiguity check: if the wall clock reads the same one hour later, this
-  // wall time occurs twice — take the second (later, standard-time) occurrence.
-  const wallNorm =
+  return (
     m[1].padStart(2, "0") +
     "/" +
     m[2].padStart(2, "0") +
@@ -389,7 +743,62 @@ export function nyWallToUtcMs(wall: string): number | null {
     ":" +
     m[5] +
     ":" +
-    m[6];
+    m[6]
+  );
+}
+
+export function nyWallToUtcMs(wall: string): number | null {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4}) (\d{1,2}):(\d{2}):(\d{2})$/.exec(wall.trim());
+  if (!m) return null;
+  // A4-FIX2 F-N1: range-check BEFORE Date.UTC — Date.UTC rolls over
+  // out-of-range components instead of rejecting them ("02/30/2026
+  // 00:05:00" -> 2026-03-02T05:05:00Z, "11/19/2026 24:00:00" ->
+  // 2026-11-20T05:00:00Z), and the rolled instant used to be cached
+  // and served as verified with a receipt. An impossible wall returns
+  // null here, so ingestNyiso skips the row entirely: nothing cached
+  // under any rolled instant, and a corrupt 24:00 row can never
+  // overwrite the real 00:00 row (INSERT OR REPLACE, later row wins).
+  // Genuine DST gap walls pass this check (02:30 on 2026-03-08 is
+  // range-valid) and keep resolving to the post-transition instant.
+  if (
+    !isValidNyWallComponents(Number(m[3]), Number(m[1]), Number(m[2]), Number(m[4]), Number(m[5]), Number(m[6]))
+  ) {
+    return null;
+  }
+  const wallAsUtc = Date.UTC(Number(m[3]), Number(m[1]) - 1, Number(m[2]), Number(m[4]), Number(m[5]), Number(m[6]));
+  // A4-FIX3 F-R3-1: Date.UTC maps years 0-99 to 1900-1999 (JS spec),
+  // so a range-valid wall like "02/29/0024 00:05:00" silently became
+  // 1924-02-29T05:05:00Z and was cached + served as verified with a
+  // receipt; year 0 is worse (Date.UTC(0, 1, 29) -> 1900-03-01, a
+  // rollover surviving the validator — the F-N1 failure mode). Verify
+  // the built instant's UTC components reproduce the input components
+  // EXACTLY, and return null on any mismatch — the same round-trip
+  // defence parseCaisoIntervalStart already has. Checked on wallAsUtc
+  // (PRE-offset) on purpose: genuine DST gap walls legitimately do
+  // NOT round-trip through the tz shift, and the fall-back ambiguity
+  // adjustment below shifts by an hour, so the final utcMs must NOT
+  // be checked here. Cost: one Date allocation + six integer
+  // comparisons on the hot path (no perf-pin change).
+  const wallAsUtcDate = new Date(wallAsUtc);
+  if (
+    wallAsUtcDate.getUTCFullYear() !== Number(m[3]) ||
+    wallAsUtcDate.getUTCMonth() + 1 !== Number(m[1]) ||
+    wallAsUtcDate.getUTCDate() !== Number(m[2]) ||
+    wallAsUtcDate.getUTCHours() !== Number(m[4]) ||
+    wallAsUtcDate.getUTCMinutes() !== Number(m[5]) ||
+    wallAsUtcDate.getUTCSeconds() !== Number(m[6])
+  ) {
+    return null;
+  }
+  let utcMs = wallAsUtc - tzOffsetMs(wallAsUtc);
+  for (let i = 0; i < 4; i++) {
+    const next = wallAsUtc - tzOffsetMs(utcMs);
+    if (next === utcMs) break;
+    utcMs = next;
+  }
+  // Ambiguity check: if the wall clock reads the same one hour later, this
+  // wall time occurs twice — take the second (later, standard-time) occurrence.
+  const wallNorm = normalizeNyWall(wall) as string;
   if (
     tzOffsetMs(utcMs) !== tzOffsetMs(utcMs + 3600_000) &&
     nyWallString(utcMs + 3600_000) === wallNorm
@@ -451,6 +860,24 @@ const NYISO_ZONE_NAMES: Record<string, string[]> = {
   LONGIL: ["ZONE_K", "LONGIL"],
 };
 
+/**
+ * Strict decimal parse of an upstream price field (A4-FIX2 F-N3).
+ * Accepts ONLY an optional leading "-" plus digits with an optional
+ * single decimal point ("36.80", "0", "-12.5"). Returns null for
+ * anything else — including the forms Number() silently accepts as a
+ * different literal: hex ("0x10" -> 16), binary ("0b101" -> 5),
+ * exponents ("1e3" -> 1000). A non-decimal price field is a missing
+ * price, never a served number. Overflow to Infinity (an absurdly
+ * long digit run) also returns null. Callers check emptiness first;
+ * an empty field never reaches this function as a price.
+ */
+function parseStrictDecimal(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return null;
+  const value = Number(trimmed);
+  return Number.isFinite(value) ? value : null;
+}
+
 /** NYISO realtime zone LBMP CSV, USD/MWh, 5-min intervals, timestamps in EST/EDT. */
 async function ingestNyiso(): Promise<number> {
   const now = Date.now();
@@ -491,6 +918,12 @@ async function ingestNyiso(): Promise<number> {
     // the old parse+save chunks did NOT reproduce and is withdrawn.
     const rows = lines.slice(1);
     const pending: GridPriceRow[] = [];
+    // Parallel to `pending`: the normalised wall string each row came
+    // from, for the round-3 fall-back positional resolution below.
+    const pendingWall: string[] = [];
+    // (node|intervalStart) instants already covered by a REAL (round-
+    // tripping) row in this file, for the round-3 spring-forward guard.
+    const realSeen = new Set<string>();
     for (let i = 0; i < rows.length; i++) {
       const line = rows[i];
       const cols = splitCsvLine(line);
@@ -498,12 +931,42 @@ async function ingestNyiso(): Promise<number> {
       const keys = NYISO_ZONE_NAMES[name];
       if (keys) {
         const utcMs = nyWallToUtcMs(cols[tsIdx] ?? "");
-        const lbmp = Number((cols[lbmpIdx] ?? "").trim());
+        // A4-FIX NYISO residual (same class as F2): an empty/whitespace
+        // LBMP field is a MISSING price, not $0.00 — Number("") === 0,
+        // so converting before checking would fabricate a $0.00 LMP and
+        // cache it. A price of exactly 0 is real (the string "0"), and
+        // still passes: only the empty field is refused here. The empty
+        // field maps to NaN (not a `continue`) so the unconditional
+        // yield check below still runs for this row (round-2 M3 pin).
+        // A4-FIX2 F-N3: the field is parsed as a STRICT decimal —
+        // Number() would also accept hex ("0x10" -> 16), binary
+        // ("0b101" -> 5) and exponents ("1e3" -> 1000) as prices.
+        // A non-decimal field maps to NaN like an empty one: skipped,
+        // never cached.
+        const lbmpRaw = (cols[lbmpIdx] ?? "").trim();
+        const lbmp = lbmpRaw ? (parseStrictDecimal(lbmpRaw) ?? NaN) : NaN;
         // A price of exactly 0 is real; only NaN/non-finite prices are refused.
         if (utcMs !== null && Number.isFinite(lbmp)) {
           const intervalStart = new Date(utcMs).toISOString();
+          const wallNorm = normalizeNyWall(cols[tsIdx] ?? "");
+          // A gap row is a spring-forward nonexistent wall time: it
+          // does NOT round-trip (nyWallString returns the 03:xx hour,
+          // not the 02:xx input). A real row round-trips exactly.
+          const isGap = wallNorm === null || nyWallString(utcMs) !== wallNorm;
           for (const key of keys) {
+            const cacheKey = key + "|" + intervalStart;
+            // Round-3 spring-forward guard: a gap row arriving AFTER
+            // the real row for the same instant used to overwrite the
+            // real price (INSERT OR REPLACE, later row wins). Skip it:
+            // the real price already stands. A gap row arriving BEFORE
+            // the real row is still written, and the later real row
+            // overwrites it as before — the chronological case is
+            // unchanged. A gap row with no real row anywhere in the
+            // file is kept (status quo: the interval stays servable).
+            if (isGap && realSeen.has(cacheKey)) continue;
+            if (!isGap) realSeen.add(cacheKey);
             pending.push({ node: key, intervalStart, lmp: lbmp, market: "NYISO", ingestedAt, upstreamUrl: url });
+            pendingWall.push(wallNorm ?? "");
           }
         }
       }
@@ -513,6 +976,140 @@ async function ingestNyiso(): Promise<number> {
       // the check, so an all-bad file never yielded.)
       if ((i + 1) % NYISO_YIELD_EVERY_LINES === 0) {
         await new Promise((resolve) => setImmediate(resolve));
+      }
+    }
+    // Round-3 fall-back positional resolution, GATED round-4 (see the
+    // gate below): on the fall-back day the repeated hour (e.g. 01:30
+    // on 2026-11-01) arrives twice with the identical wall string, and
+    // nyWallToUtcMs maps BOTH to the second (EST) occurrence — so the
+    // later row overwrote the earlier one and the EDT price was
+    // discarded (12 genuine 5-min intervals, 05:00-05:55Z, became
+    // unservable 502s). When a file carries EXACTLY TWO valid rows for
+    // the same node + wall string AND the round-4 chronological gate
+    // (below) is open for that node + repeated hour, the first in file
+    // order is the EDT occurrence and the second is the EST one: shift
+    // the first back one hour (to 05:30Z for 01:30) and keep the second
+    // at 06:30Z, so both prices survive. A lone ambiguous row (only
+    // one occurrence in the file — it could be either) is left at the
+    // EST instant: shifting it would risk mislabelling an EST-only row
+    // as EDT. Three or more rows for one node + wall string cannot
+    // occur in a genuine NYISO file and are likewise left untouched.
+    // The check is per file (the map resets per file), per node, and
+    // keyed by the WALL string — not by interval — so a spring-forward
+    // gap collision (different wall strings, same instant) is never
+    // mistaken for a repeated hour.
+    //
+    // ROUND-4 GATE (J2 round-3 FAIL — reversed file order swaps both
+    // prices as verified 1.0): the round-3 shift trusted file order
+    // alone, so a 2-row file with the EST price FIRST and the EDT
+    // price SECOND ("11/01/2026 01:30:00","WEST",222.22 then ...111.11)
+    // served 05:30Z = 222.22 and 06:30Z = 111.11 — BOTH swapped. The
+    // shift now applies ONLY when the repeated hour is PROVABLY
+    // CHRONOLOGICAL for that node in this file — all three must hold:
+    //   G1 COMPLETE: all 12 five-minute slots of the repeated hour
+    //      (H:00..H:55) occur EXACTLY TWICE each for that node.
+    //   G2 TWO CONTIGUOUS ASCENDING RUNS: in the node's file-order
+    //      wall sequence, the 24 repeated-hour rows form two
+    //      consecutive runs of exactly 12, each run exactly the 12
+    //      slots in ascending order (first run = first occurrence,
+    //      second run = second occurrence).
+    //   G3 NO OTHER DECREASE: the node's file-order wall sequence is
+    //      non-decreasing except for exactly ONE decrease in the
+    //      whole file — the H:55 -> H:00 reset at the run boundary.
+    // Gate OFF (any of G1–G3 fails) = pre-R3 EST-only behaviour for
+    // that hour: NO row is shifted, 05:xxZ stays unserved (502), and
+    // 06:xxZ carries the LAST row in file order for that node + wall
+    // (INSERT OR REPLACE) — for J2's reversed pair that is 111.11, the
+    // EDT price, at the EST instant. That 06:30Z value is NOT a
+    // verified EDT/EST split; it is the pre-R3 last-wins residue, and
+    // no reader may treat it as one. The gate guarantees only that a
+    // detectably non-chronological file can never put a swapped
+    // verified price at 05:xxZ.
+    // RESIDUAL LIMIT (disclosed, not fixable from the file): a
+    // complete, globally-ordered file whose two blocks are swapped
+    // whole (EST block first, EDT block second) passes G1–G3 and
+    // still swaps — no signal in the file distinguishes it from a
+    // genuine file, because the CSV carries no DST flag and the two
+    // blocks have identical wall strings. The gate proves the file
+    // is chronological and complete; the EDT-first labelling still
+    // rests on the upstream emitting the first occurrence first
+    // within a complete ordered file. Live NYISO files are strictly
+    // monotonic by wall timestamp (J2, 20261118/19/20, 1,785–4,395
+    // rows, zero decreases), so genuine files pass the gate.
+    {
+      const groups = new Map<string, number[]>();
+      for (let p = 0; p < pending.length; p++) {
+        const ms = Date.parse(pending[p].intervalStart);
+        // Ambiguous iff the wall clock reads the same one hour earlier
+        // too (the first occurrence exists).
+        if (pendingWall[p] && nyWallString(ms - 3600_000) === pendingWall[p]) {
+          const gk = pending[p].node + "|" + pendingWall[p];
+          const arr = groups.get(gk);
+          if (arr) arr.push(p);
+          else groups.set(gk, [p]);
+        }
+      }
+      // Round-4 chronological gate, memoised per node + repeated hour
+      // (all 12 slot-groups of one hour share one verdict).
+      const gateCache = new Map<string, boolean>();
+      const fallBackGateOpen = (node: string, wall: string): boolean => {
+        const date = wall.slice(0, 10); // "MM/DD/YYYY"
+        const hour = wall.slice(11, 13); // "HH"
+        const cacheKey = node + "|" + date + " " + hour;
+        const cached = gateCache.get(cacheKey);
+        if (cached !== undefined) return cached;
+        const slots: string[] = [];
+        for (let k = 0; k < 12; k++) {
+          slots.push(date + " " + hour + ":" + String(k * 5).padStart(2, "0") + ":00");
+        }
+        // The node's wall strings in file order (pending order). The
+        // normalised "MM/DD/YYYY HH:MM:SS" form is zero-padded, so
+        // plain string comparison IS chronological wall order.
+        const seq: string[] = [];
+        for (let p = 0; p < pending.length; p++) {
+          if (pending[p].node === node && pendingWall[p]) seq.push(pendingWall[p]);
+        }
+        let open = true;
+        // G1 COMPLETE: every slot exactly twice for this node.
+        const counts = new Map<string, number>();
+        for (const w of seq) counts.set(w, (counts.get(w) ?? 0) + 1);
+        for (const s of slots) {
+          if (counts.get(s) !== 2) {
+            open = false;
+            break;
+          }
+        }
+        // G2 TWO CONTIGUOUS ASCENDING RUNS of exactly 12 each. (G1
+        // already guarantees no hour row exists outside the two runs
+        // once both slices match: the 24 occurrences are all inside.)
+        if (open) {
+          const i0 = seq.indexOf(slots[0]);
+          if (i0 < 0) open = false;
+          else {
+            for (let k = 0; k < 12 && open; k++) {
+              if (seq[i0 + k] !== slots[k] || seq[i0 + 12 + k] !== slots[k]) open = false;
+            }
+          }
+          // G3 NO OTHER DECREASE: exactly one decrease in the whole
+          // per-node sequence — the H:55 -> H:00 reset at the run
+          // boundary, which G2 already guarantees exists.
+          if (open) {
+            let decreases = 0;
+            for (let i = 1; i < seq.length; i++) {
+              if (seq[i] < seq[i - 1]) decreases++;
+            }
+            if (decreases !== 1) open = false;
+          }
+        }
+        gateCache.set(cacheKey, open);
+        return open;
+      };
+      for (const [gk, idxs] of groups) {
+        if (idxs.length !== 2) continue;
+        const sep = gk.indexOf("|");
+        if (!fallBackGateOpen(gk.slice(0, sep), gk.slice(sep + 1))) continue;
+        const first = pending[idxs[0]];
+        first.intervalStart = new Date(Date.parse(first.intervalStart) - 3600_000).toISOString();
       }
     }
     // One transaction for this file's batch (see saveGridPriceBatch):
@@ -584,7 +1181,82 @@ function caisoDt(d: Date): string {
   );
 }
 
+/**
+ * Strict parse of a CAISO INTERVALSTARTTIME_GMT value (round-2 J2 M2,
+ * hardened round-3 J2 M2-rollover).
+ * The live shape is full ISO-8601 with an explicit zone, e.g.
+ * "2026-11-19T21:00:00-00:00" (verified live 2026-11-20). A bare
+ * Date.parse() is NOT enough: it silently ACCEPTS "2026-11-19"
+ * (date-only -> midnight UTC), "11/19/2026 21:00:00" (US format ->
+ * local time, so host-TZ-dependent), and "2026-11-19T21:00:00" (naive
+ * -> local time) — any of those would cache a row under a WRONG
+ * interval instead of skipping it. The rule is: full date + time +
+ * seconds + explicit zone (Z or ±HH:MM, fractional seconds allowed),
+ * or null (the row is skipped, never guessed). Pure: unit-tested.
+ *
+ * Round-3 rollover hardening: the shape regex alone is NOT enough
+ * either — Date.parse() ROLLS OVER out-of-range components instead of
+ * rejecting them ("2026-02-30T21:00:00Z" -> 2026-03-02, "2026-11-19
+ * T24:00:00Z" -> 2026-11-20T00:00, "2026-02-29" in a non-leap year ->
+ * Mar 1), so a row for an interval the upstream never named was
+ * cached as verified 1.0 under the rolled-over interval (J2 end-to-
+ * end: Feb-30 row 77.77 cached @ 2026-03-02T21:00Z, hour-24 row 88.88
+ * @ 2026-11-20T00:00Z). The components are therefore validated as
+ * integers first — month 1-12, day 1..days-in-month (leap-year aware),
+ * hour 0-23, minute/second 0-59, offset hour 0-23, offset minute
+ * 0-59 — the instant is constructed arithmetically, and the result
+ * is verified by round-trip: the constructed instant, shifted back
+ * into the stated offset, must reproduce every parsed component,
+ * else null. A rollover can therefore never survive: it fails either
+ * the range check or the round-trip.
+ */
+export function parseCaisoIntervalStart(value: string): number | null {
+  const trimmed = value.trim();
+  const m =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.exec(
+      trimmed,
+    );
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = Number(m[6]);
+  const fracMs = m[7] ? Math.floor(Number("0" + m[7]) * 1000) : 0;
+  if (month < 1 || month > 12) return null;
+  // Days in month, leap-year aware (Feb 29 exists only in leap years).
+  if (day < 1 || day > daysInMonth(year, month)) return null;
+  if (hour > 23 || minute > 59 || second > 59) return null;
+  let offsetMs = 0;
+  if (m[8] !== "Z") {
+    const offHour = Number(m[8].slice(1, 3));
+    const offMin = Number(m[8].slice(4, 6));
+    if (offHour > 23 || offMin > 59) return null;
+    offsetMs = (offHour * 60 + offMin) * 60_000 * (m[8][0] === "-" ? -1 : 1);
+  }
+  const ms = Date.UTC(year, month - 1, day, hour, minute, second, fracMs) - offsetMs;
+  // Round-trip verification: shift back into the stated offset and
+  // require every component to reproduce exactly. Any rollover the
+  // range checks above somehow missed fails here instead of caching.
+  const back = new Date(ms + offsetMs);
+  if (
+    back.getUTCFullYear() !== year ||
+    back.getUTCMonth() + 1 !== month ||
+    back.getUTCDate() !== day ||
+    back.getUTCHours() !== hour ||
+    back.getUTCMinutes() !== minute ||
+    back.getUTCSeconds() !== second
+  ) {
+    return null;
+  }
+  return ms;
+}
+
 const CAISO_NODES = ["TH_NP15_GEN-APND", "TH_SP15_GEN-APND", "TH_ZP26_GEN-APND"];
+
+/** The three CAISO hubs whose median answers a "CAISO" system request (A4). */
+export const CAISO_HUB_NODES: readonly string[] = CAISO_NODES;
 
 /** CAISO OASIS PRC_LMP day-ahead market, USD/MWh, hourly intervals. */
 async function ingestCaiso(): Promise<number> {
@@ -618,7 +1290,8 @@ async function ingestCaiso(): Promise<number> {
     const nodeIdx = header.indexOf("NODE");
     const itemIdx = header.indexOf("XML_DATA_ITEM");
     const mwIdx = header.indexOf("MW");
-    if (startIdx < 0 || nodeIdx < 0 || itemIdx < 0 || mwIdx < 0) {
+    const runIdx = header.indexOf("MARKET_RUN_ID");
+    if (startIdx < 0 || nodeIdx < 0 || itemIdx < 0 || mwIdx < 0 || runIdx < 0) {
       errors.push(node + ": unexpected CSV header");
       continue;
     }
@@ -628,10 +1301,29 @@ async function ingestCaiso(): Promise<number> {
       const cols = line.split(",");
       if ((cols[itemIdx] ?? "").trim() !== "LMP_PRC") continue;
       if ((cols[nodeIdx] ?? "").trim() !== node) continue;
-      const startMs = Date.parse((cols[startIdx] ?? "").trim());
-      const lmp = Number((cols[mwIdx] ?? "").trim());
+      // A4-FIX F4: only DAM rows are day-ahead prices — an RTM row for
+      // the same node+hour is a different market and must never be
+      // cached as DAM (the OASIS query constrains market_run_id=DAM,
+      // so this is defence-in-depth, not the live path).
+      if ((cols[runIdx] ?? "").trim() !== "DAM") continue;
+      // Round-2 J2 M2: strict parse — a missing/malformed
+      // INTERVALSTARTTIME_GMT skips the row (never a guessed interval).
+      // A bare Date.parse() would silently accept date-only / US /
+      // naive shapes and cache the row under a wrong interval.
+      const startMs = parseCaisoIntervalStart(cols[startIdx] ?? "");
+      // A4-FIX F2: an empty/whitespace MW field is a MISSING price, not
+      // $0.00 — Number("") === 0, so converting before checking would
+      // fabricate a $0.00 LMP and cache it. A price of exactly 0 is
+      // real (the string "0"), and still passes: only the empty field
+      // is refused here.
+      // A4-FIX2 F-N3: the field is parsed as a STRICT decimal —
+      // Number() would also accept hex ("0x10" -> 16), binary
+      // ("0b101" -> 5) and exponents ("1e3" -> 1000) as prices.
+      const mwRaw = (cols[mwIdx] ?? "").trim();
+      if (!mwRaw) continue;
+      const lmp = parseStrictDecimal(mwRaw);
       // A price of exactly 0 is real; only NaN/non-finite prices are refused.
-      if (Number.isNaN(startMs) || !Number.isFinite(lmp)) continue;
+      if (startMs === null || lmp === null) continue;
       const intervalStart = new Date(startMs).toISOString();
       pending.push({ node, intervalStart, lmp, market: "CAISO", ingestedAt, upstreamUrl: url });
     }
@@ -643,6 +1335,99 @@ async function ingestCaiso(): Promise<number> {
   // places produced "CAISO: CAISO: ..." in failed[]).
   if (count === 0) throw new Error("no usable rows (" + errors.join("; ") + ")");
   return count;
+}
+
+/**
+ * A4 on-demand fetch: CAISO OASIS PRC_LMP day-ahead LMP for ONE node
+ * and ONE settlement hour — the fetch the handler uses when a CAISO
+ * hour is not in the cache (or its cached row is stale), so any
+ * historical hour is answerable instead of cache-only.
+ *
+ * Endpoint (verified live 2026-11-20 from this VM):
+ *   https://oasis.caiso.com/oasisapi/SingleZip
+ *     ?queryname=PRC_LMP
+ *     &startdatetime=YYYYMMDDTHH:MM-0000   (the hour's start, GMT)
+ *     &enddatetime=YYYYMMDDTHH:MM-0000     (start + 1 hour, GMT)
+ *     &version=1&market_run_id=DAM
+ *     &node=<TH_*_GEN-APND>&resultformat=6
+ * The URL is built by gridFallbackUrl() (same 1-hour-window form the
+ * legacy-row fallback uses) so the receipt's upstream_url is exactly
+ * the query that produced the price. Response is a zip with one CSV;
+ * the LMP_PRC row for this node + INTERVALSTARTTIME_GMT (strict-parsed,
+ * same rollover-hardened parseCaisoIntervalStart as the ingester) is
+ * the price; the MCC/MCE/MCL/MGHG component rows are ignored.
+ *
+ * Timeout: OASIS SingleZip is SLOW — three identical 1-hour queries
+ * took 12 s / 28 s / 47 s from this VM on 2026-11-20 — so the default
+ * here is 120 s, NOT the ingester's 20 s FETCH_TIMEOUT_MS (which
+ * would abort a healthy on-demand fetch). Callers fetch the three
+ * system hubs in parallel, so a system answer costs ~one slow call,
+ * not three.
+ *
+ * Returns null when OASIS answers but carries no LMP_PRC row for
+ * this node + hour (no price exists to serve — the caller reports a
+ * cache miss). Throws on transport / zip / header failure (the caller
+ * reports a miss/stale, never a fabricated price).
+ */
+export interface CaisoDamLmp {
+  lmp: number;
+  upstreamUrl: string;
+}
+
+export async function fetchCaisoDamLmp(
+  node: string,
+  intervalStartIso: string,
+  timeoutMs: number = 120_000,
+): Promise<CaisoDamLmp | null> {
+  // A4-FIX2 F-N2: strict-parse the interval with the rollover-hardened
+  // parser (same as the CAISO CSV rows and the handler) — Date.parse()
+  // rolls over ("2026-02-30T14:00:00Z" -> Mar 2) and would fetch and
+  // return the WRONG hour's price. Unreachable from the handler (it
+  // validates first), but this function must not roll over on its own.
+  const startMs = parseCaisoIntervalStart(intervalStartIso);
+  if (startMs === null) {
+    throw new Error("fetchCaisoDamLmp: unparseable interval " + intervalStartIso);
+  }
+  const url = gridFallbackUrl(node, intervalStartIso);
+  if (!url) {
+    throw new Error("fetchCaisoDamLmp: no OASIS URL for node " + node);
+  }
+  const csv = unzipSingleFile(await fetchBuffer(url, timeoutMs));
+  const lines = csv.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) {
+    throw new Error("CAISO OASIS: empty CSV from " + url);
+  }
+  const header = lines[0].split(",");
+  const startIdx = header.indexOf("INTERVALSTARTTIME_GMT");
+  const nodeIdx = header.indexOf("NODE");
+  const itemIdx = header.indexOf("XML_DATA_ITEM");
+  const mwIdx = header.indexOf("MW");
+  const runIdx = header.indexOf("MARKET_RUN_ID");
+  if (startIdx < 0 || nodeIdx < 0 || itemIdx < 0 || mwIdx < 0 || runIdx < 0) {
+    throw new Error("CAISO OASIS: unexpected CSV header from " + url);
+  }
+  for (const line of lines.slice(1)) {
+    const cols = line.split(",");
+    if ((cols[itemIdx] ?? "").trim() !== "LMP_PRC") continue;
+    if ((cols[nodeIdx] ?? "").trim() !== node) continue;
+    // A4-FIX F4: only DAM rows are day-ahead prices — an RTM row for
+    // the same node+hour is a different market and must never be
+    // returned (and cached, by the caller) as a DAM price.
+    if ((cols[runIdx] ?? "").trim() !== "DAM") continue;
+    if (parseCaisoIntervalStart(cols[startIdx] ?? "") !== startMs) continue;
+    // A4-FIX F2: an empty/whitespace MW field is a MISSING price, not
+    // $0.00 — Number("") === 0, so converting before checking would
+    // fabricate a $0.00 LMP. The string "0" is still a real price.
+    // A4-FIX2 F-N3: the field is parsed as a STRICT decimal — Number()
+    // would also accept hex ("0x10" -> 16), binary ("0b101" -> 5) and
+    // exponents ("1e3" -> 1000) as prices.
+    const mwRaw = (cols[mwIdx] ?? "").trim();
+    if (!mwRaw) continue;
+    const lmp = parseStrictDecimal(mwRaw);
+    if (lmp === null) continue;
+    return { lmp, upstreamUrl: url };
+  }
+  return null;
 }
 
 export async function runIngesterOnce(): Promise<{ fetched: number; failed: string[] }> {
@@ -659,7 +1444,17 @@ export async function runIngesterOnce(): Promise<{ fetched: number; failed: stri
   }
 
   try {
-    if (eurUsd === null) throw new Error("no EUR->USD rate available, skipping Elering");
+    // Round-3 J2 M3 (FX stage): when the FX fetch fails, Elering is
+    // skipped — and the failed[] entry must name the zones that lose
+    // service, in the same "missing zones: EE, FI, LV, LT" format as
+    // the other Elering failure paths. The old entry ("no EUR->USD
+    // rate available, skipping Elering") named no zones.
+    if (eurUsd === null) {
+      throw new Error(
+        "no EUR->USD rate available, skipping Elering; missing zones: " +
+          ELERING_ZONE_KEYS.map((k) => k.toUpperCase()).join(", "),
+      );
+    }
     const { count: n, failed: eleringFailed } = await ingestElering(eurUsd);
     fetched += n;
     failed.push(...eleringFailed);

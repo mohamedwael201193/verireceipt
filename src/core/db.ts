@@ -1153,6 +1153,39 @@ export function saveGridPrice(
   ingestedAt?: string,
   upstreamUrl?: string,
 ): void {
+  // Round-7 guard-criterion fix (F1, defense-in-depth): a write carrying
+  // an empty node or market must FAIL LOUDLY, never silently store — the
+  // schema's TEXT NOT NULL blocks NULL only, so "" would otherwise land
+  // in grid_cache and (before the handler's emission guard) be served as
+  // verified 1.0. Throw: this is a synchronous void function with no
+  // return channel, and a throw matches better-sqlite3's own failure
+  // mode for a bad insert (the batch writer's transaction rolls back on
+  // a throw, and runIngesterOnce logs the source failure and continues).
+  // Whitespace-only counts as empty: no production market or node is
+  // whitespace, and a " " market would pass a naive !== "" check.
+  if (!nodeOrZone || !nodeOrZone.trim() || !market || !market.trim()) {
+    throw new Error(
+      "saveGridPrice refuses empty node_or_zone or market (node=" +
+        JSON.stringify(nodeOrZone) +
+        ", market=" +
+        JSON.stringify(market) +
+        ")",
+    );
+  }
+  // A4-FIX F3: a non-finite LMP (Infinity/-Infinity/NaN) must FAIL
+  // LOUDLY, like an empty market — SQLite stores Infinity as Inf, so
+  // without this a corrupt price would land in grid_cache and be
+  // served as verified 1.0 (NaN only throws incidentally via the
+  // NOT NULL constraint, since SQLite maps NaN to NULL).
+  if (typeof lmp !== "number" || !Number.isFinite(lmp)) {
+    throw new Error(
+      "saveGridPrice refuses non-finite lmp (node=" +
+        JSON.stringify(nodeOrZone) +
+        ", lmp=" +
+        String(lmp) +
+        ")",
+    );
+  }
   const database = getDb();
   database
     .prepare(
