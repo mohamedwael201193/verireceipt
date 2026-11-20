@@ -149,9 +149,10 @@ interface RowProbe {
   status: number;
   /** True only when the ping answered as designed (see ping()): a
    * receipt for a receipted /v1/* row (isVerified), 200 +
-   * body.status === "ok" for /health (isHealthOk), a parsed 200 for
-   * the /api/mcp GET probe. A bare 200 with no receipt on a receipted
-   * endpoint is a refusal and must never render "UP". */
+   * body.status === "ok" for /health (isHealthOk), a parsed 200 with
+   * no `error` field for the /api/mcp GET probe. A bare 200 with no
+   * receipt on a receipted endpoint is a refusal and must never
+   * render "UP". */
   verified: boolean;
 }
 
@@ -201,14 +202,23 @@ function HealthRow({
       // receipt) — a bare 200 there is a refusal. /health is
       // non-receipted by contract, so 200 + body.status === "ok" is
       // UP (isHealthOk). The /api/mcp GET probe returns raw parsed
-      // JSON with no receipt by design (its fetcher already throws on
-      // non-2xx and on unparseable JSON), so a parsed 200 is UP there
-      // too — the same latent over-application as /health (J1 R3 M-b).
+      // JSON with no receipt by design — but its fetcher only checks
+      // res.ok + JSON.parse success, so a 200 carrying a parseable
+      // error payload (e.g. {"error":"mcp disabled"}) is NOT up (J2
+      // R5 B4): UP requires a 200 whose parsed body is a non-null
+      // object WITHOUT an `error` field. No GET response shape is
+      // documented for this POST-only endpoint, so no stricter shape
+      // is asserted here.
+      const mcpAnswered = (r: LiveReceipt): boolean => {
+        if (r.status !== 200) return false;
+        const b = r.body as Record<string, unknown> | null;
+        return b !== null && typeof b === "object" && !Array.isArray(b) && !("error" in b);
+      };
       const answered =
         def.key === "health"
           ? isHealthOk(receipt)
           : def.key === "mcp"
-            ? receipt.status === 200
+            ? mcpAnswered(receipt)
             : isVerified(receipt);
       setLast({ latencyMs: outcome.latencyMs, status: receipt.status, verified: answered });
       setLatencies((prev) => [...prev, outcome.latencyMs].slice(-20));

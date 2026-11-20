@@ -332,7 +332,7 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 8 }}>
                 {evaluation.why.map((w) => (
                   <div key={w.k} className="panel" style={{ padding: "10px 12px", display: "flex", alignItems: "flex-start", gap: 9 }}>
-                    <span className={`badge ${w.ok ? "b-ok" : "b-err"}`} style={{ marginTop: 1 }}>{w.ok ? "PASS" : "GATE"}</span>
+                    <span className={`badge ${w.ok === "na" ? "b-dim" : w.ok ? "b-ok" : "b-err"}`} style={{ marginTop: 1 }}>{w.ok === "na" ? "N/A" : w.ok ? "PASS" : "GATE"}</span>
                     <div>
                       <div className="mono" style={{ fontSize: 11, fontWeight: 500 }}>{w.k}</div>
                       <div style={{ fontSize: 12, color: "var(--muted)" }}>{w.v}</div>
@@ -348,7 +348,7 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
           <div className="card" style={{ overflow: "hidden" }}>
             <div style={{ padding: "13px 16px", borderBottom: "1px solid var(--border)", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
               <span className="mono" style={{ fontSize: 11.5, color: "var(--text)", fontWeight: 500 }}>// settled proofs for this run (click row to inspect &amp; verify SHA-256)</span>
-              <span className="mono" style={{ fontSize: 10.5, color: "var(--muted)" }}>live receipts only</span>
+              <span className="mono" style={{ fontSize: 10.5, color: "var(--muted)" }}>live calls · receipts + refusals</span>
             </div>
             <div className="tbl-wrap">
               <table className="hl-tbl">

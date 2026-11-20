@@ -417,7 +417,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     const statusTab = screen.getAllByRole("button", { name: "04 Status & Docs" })[0];
     fireEvent.click(statusTab);
     pingHealthRow();
-    expect(await screen.findByText(/\/health: HTTP 200 — refused \(no receipt\)/, {}, { timeout: 5000 })).toBeTruthy();
+    expect(await screen.findByText(/\/health: HTTP 200 — refused \(body not ok\)/, {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.queryByText(/\/health: ok/)).toBeNull();
     // (J1 R3 B-1b) the /health row never renders UP for a refused ping.
     const healthRow = screen.getByText("/health").closest("tr");
@@ -438,6 +438,53 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     const f01Http = [...(f01Row?.querySelectorAll(".badge") ?? [])].find((b) => b.textContent === "200");
     expect(f01Http).toBeTruthy();
     expect(f01Http?.classList.contains("b-ok")).toBe(false);
+  }, 120000);
+
+  it("B2 repro: m13-sec + m12 refusal paths never render 'undefined' why-card text", async () => {
+    vi.stubGlobal("fetch", (url: string) => oversize200Fetch(url));
+    render(<Dashboard />);
+    // --- m13-sec: SEC 10-K Compliance Audit (filings + route refused).
+    fireEvent.click(screen.getByRole("button", { name: /SEC 10-K Compliance Audit/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
+    expect(await screen.findByText(/COMPLETE · APPENDED TO LEDGER/, {}, { timeout: 15000 })).toBeTruthy();
+    expect(screen.getByText(/Score 0 \/ 100/)).toBeTruthy();
+    // (J2 R5 B2) The filings refusal body {error, message} is truthy,
+    // so the old `filingsBody ? ...` rendered "undefined filings for
+    // undefined" — the card must fall back to the honest text.
+    const edgarCard = screen.getByText("Official EDGAR").closest(".panel");
+    expect(edgarCard?.textContent).toContain("no live filings returned");
+    expect(edgarCard?.textContent).not.toContain("undefined");
+    expect(screen.getByText("URL Provenance").closest(".panel")?.textContent).toContain("no archive URLs returned");
+    expect(screen.getByText("Route Execution").closest(".panel")?.textContent).toContain("no live route returned");
+    // No "undefined" anywhere in the why-cards; all three GATE, none PASS.
+    const whySection = screen.getByText("// why · deterministic policy evaluation").closest(".card");
+    expect(whySection?.textContent).not.toContain("undefined");
+    expect(screen.getAllByText("GATE")).toHaveLength(3);
+    expect(screen.queryByText("PASS")).toBeNull();
+    // The run table honestly records two refused rows.
+    expect(screen.getAllByText(/no receipt · 200 refusal/)).toHaveLength(2);
+    // --- m12: Grid LMP Dispatch Check (grid + route refused).
+    fireEvent.click(screen.getByRole("button", { name: /Mission 12 · Mining/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
+    expect(await screen.findByText(/COMPLETE · APPENDED TO LEDGER/, {}, { timeout: 15000 })).toBeTruthy();
+    expect(screen.getByText(/Score 0 \/ 100/)).toBeTruthy();
+    // (J2 R5 B2) The grid refusal body rendered "— / MWh ·  ·
+    // undefined" — the card must fall back to the honest text.
+    const lmpCard = screen.getByText("LMP (live)").closest(".panel");
+    expect(lmpCard?.textContent).toContain("no live LMP returned");
+    expect(lmpCard?.textContent).not.toContain("undefined");
+    // (J2 R5) Curtailment Threshold is disclosure, not a check: N/A,
+    // never PASS or GATE.
+    const curtailCard = screen.getByText("Curtailment Threshold").closest(".panel");
+    expect(curtailCard?.textContent).toContain("N/A");
+    expect(curtailCard?.textContent).toContain("No threshold configured");
+    expect(curtailCard?.textContent).not.toContain("undefined");
+    expect(screen.getByText("ETH Hedge Check").closest(".panel")?.textContent).toContain("no live route returned");
+    const whySection2 = screen.getByText("// why · deterministic policy evaluation").closest(".card");
+    expect(whySection2?.textContent).not.toContain("undefined");
+    expect(screen.getAllByText("GATE")).toHaveLength(2);
+    expect(screen.queryByText("PASS")).toBeNull();
+    expect(screen.getAllByText(/no receipt · 200 refusal/)).toHaveLength(2);
   }, 120000);
 
   it("B1a/B1b: m13-reverted with 200-refusals never renders success why-card text", async () => {
@@ -578,7 +625,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     expect(kpiCell?.querySelector(".kpi-val")?.textContent).toBe("0");
   });
 
-  it("ledger Refusals KPI counts 200-refusals (M4)", () => {
+  it("ledger Refusals KPI counts every non-verified row (M4)", () => {
     const verified = makeReceipt({ intent: "ONCHAIN_TX_LOOKUP_GENERAL", status: 200, query: "tx-ok" });
     const refused422 = makeReceipt({ intent: "GRID_POWER_PRICE_GENERAL", status: 422, query: "grid-422" });
     const refused200 = toLiveReceipt("ONCHAIN_TX_LOOKUP_GENERAL", "tx-200", "https://example.com", {
@@ -589,10 +636,16 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
       errorCode: "INVALID_RESPONSE",
       errorMessage: "Response body exceeds the 1048576 byte limit",
     });
-    render(<ReceiptsLedger receipts={[verified, refused422, refused200]} onInspect={() => undefined} showToast={() => undefined} />);
-    // 422 + 200-refusal = 2; the verified 200 is never a refusal.
-    const kpiCell = screen.getByText("Refusals (incl. 200)").closest(".kpi-cell");
-    expect(kpiCell?.querySelector(".kpi-val")?.textContent).toBe("2");
+    // (J2 R5 M4) The label used to promise only 400/422/200-no-receipt
+    // while 5xx, other 4xx and timeouts had no KPI: every non-verified
+    // row is now a refusal, and the label says exactly that.
+    const refused500 = makeReceipt({ intent: "ONCHAIN_TX_LOOKUP_GENERAL", status: 500, query: "tx-500" });
+    const refused404 = makeReceipt({ intent: "ONCHAIN_TX_LOOKUP_GENERAL", status: 404, query: "tx-404" });
+    const timedOut = makeReceipt({ intent: "ONCHAIN_TX_LOOKUP_GENERAL", status: 0, query: "tx-timeout" });
+    render(<ReceiptsLedger receipts={[verified, refused422, refused200, refused500, refused404, timedOut]} onInspect={() => undefined} showToast={() => undefined} />);
+    // 422 + 200-refusal + 500 + 404 + timeout = 5; the verified 200 is never a refusal.
+    const kpiCell = screen.getByText("Refusals").closest(".kpi-cell");
+    expect(kpiCell?.querySelector(".kpi-val")?.textContent).toBe("5");
     const okCell = screen.getByText("200 OK Verified").closest(".kpi-cell");
     expect(okCell?.querySelector(".kpi-val")?.textContent).toBe("1");
   });

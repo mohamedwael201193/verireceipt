@@ -43,13 +43,13 @@ export default function ReceiptsLedger({ receipts, onInspect, showToast }: Recei
     // and must never count here — the sub-label promises a sha256, and
     // no sha exists for a refused call.
     const ok = receipts.filter((r) => isVerified(r)).length;
-    // Refusals = clean 4xx refusals PLUS 200-refusals (J2 R4 M4): a
-    // 200 with no receipt was refused by the lib, so it belongs in
-    // this bucket — previously it landed in no KPI except Total.
-    // A verified 200 (receipt minted) is never a refusal.
-    const refusals = receipts.filter(
-      (r) => r.status === 400 || r.status === 422 || (r.status === 200 && r.receipt === null),
-    ).length;
+    // Refusals = every row that is NOT a verified 200 (J2 R5 M4): clean
+    // 4xx refusals (400/422) PLUS 200-refusals (a 200 with no receipt
+    // was refused by the lib) PLUS every other non-verified outcome —
+    // other 4xx (401/403/404/429), 5xx, and timeouts/aborts (status 0).
+    // A verified 200 (receipt minted) is never a refusal. HTTP 503
+    // keeps its own KPI below as a separate cut of the same rows.
+    const refusals = receipts.filter((r) => !isVerified(r)).length;
     const errors503 = receipts.filter((r) => r.status === 503).length;
     const med = median(receipts.map((r) => r.latencyMs));
     return { total, ok, refusals, errors503, med };
@@ -125,7 +125,7 @@ export default function ReceiptsLedger({ receipts, onInspect, showToast }: Recei
           <div className="kpi-sub">root schema + sha256</div>
         </div>
         <div className="kpi-cell">
-          <div className="kpi-lbl">Refusals (incl. 200)</div>
+          <div className="kpi-lbl">Refusals</div>
           <div className="kpi-val mono" style={{ color: "var(--warn)" }}>{kpis.refusals}</div>
           <div className="kpi-sub">unbilled ($0.00)</div>
         </div>

@@ -249,14 +249,16 @@ export default function Dashboard() {
   // is "ok" via isHealthOk, never a refusal. Requiring a receipt here
   // (round 3) called every healthy miner "refused". A 200 whose body
   // is NOT {status:"ok"} — e.g. the lib refused it as INVALID_RESPONSE,
-  // status 200, error body — keeps the refused text below.
+  // status 200, error body — keeps the refused text below. (J2 R5:
+  // the parenthetical is "(body not ok)" — /health never has a
+  // receipt, so "(no receipt)" misattributed the cause.)
   const healthLabel = lastHealthReceipt
     ? isHealthOk(lastHealthReceipt)
       ? `/health: ok · uptime ${(() => {
           const b = lastHealthReceipt.body as { uptime_s?: unknown } | null;
           return typeof b?.uptime_s === "number" ? `${b.uptime_s}s` : "—";
         })()}`
-      : `/health: HTTP ${lastHealthReceipt.status} — refused (no receipt)`
+      : `/health: HTTP ${lastHealthReceipt.status} — ${lastHealthReceipt.status === 200 ? "refused (body not ok)" : "not ok"}`
     : "/health: not probed yet";
 
   const authPillLabel = authMode === "sponsored" ? "Sponsored" : "MCP / CLI";

@@ -64,7 +64,13 @@ export interface DeskCheckResult {
 export interface WhyCard {
   k: string;
   v: string;
-  ok: boolean;
+  /**
+   * Whether the check passed. `true` renders PASS, `false` renders
+   * GATE, `"na"` renders N/A (not a check — no pass/fail applies).
+   * A non-check must never wear PASS (J2 R5: the m12 Curtailment
+   * Threshold card is disclosure, not a check).
+   */
+  ok: boolean | "na";
 }
 
 export interface DeskEvaluation {
@@ -186,7 +192,16 @@ export const DESK_PRESETS: DeskPreset[] = [
         },
         {
           k: "SEC Compliance",
-          v: filingsBody ? `${filingsBody.filing_count} filings for ${filingsBody.entity}` : "no live filings returned",
+          // (J2 R5 B2) Never interpolate a refusal body: probe()
+          // synthesizes {error, message} on refusal, so a bare
+          // `filingsBody ?` is truthy on ANY refusal and rendered
+          // "undefined filings for undefined". Render the count only
+          // on a verified receipt with a typed filing_count (a
+          // verified 0 is a real answer) and a typed entity.
+          v:
+            filings && isVerified(filings.receipt) && typeof filingsBody?.filing_count === "number" && typeof filingsBody?.entity === "string"
+              ? `${filingsBody.filing_count} filings for ${filingsBody.entity}`
+              : "no live filings returned",
           ok: filingsOk,
         },
         {
@@ -324,7 +339,12 @@ export const DESK_PRESETS: DeskPreset[] = [
       const why: WhyCard[] = [
         {
           k: "Official EDGAR",
-          v: filingsBody ? `${filingsBody.filing_count} filings for ${filingsBody.entity} in period` : "no live filings returned",
+          // (J2 R5 B2) Same refusal-body trap as m13-defi "SEC
+          // Compliance": gate on a verified receipt + typed fields.
+          v:
+            filings && isVerified(filings.receipt) && typeof filingsBody?.filing_count === "number" && typeof filingsBody?.entity === "string"
+              ? `${filingsBody.filing_count} filings for ${filingsBody.entity} in period`
+              : "no live filings returned",
           ok: filingsOk,
         },
         {
@@ -395,15 +415,24 @@ export const DESK_PRESETS: DeskPreset[] = [
       const why: WhyCard[] = [
         {
           k: "LMP (live)",
-          v: gridBody
-            ? `${formatUsdPrecise(gridBody.lmp_usd_per_mwh)} / MWh · ${gridBody.market ?? ""} · ${gridBody.node_or_zone}`
-            : "no live LMP returned",
+          // (J2 R5 B2) Same refusal-body trap as the filings cards: a
+          // truthy {error, message} body rendered "— / MWh ·  ·
+          // undefined". Render only on a verified receipt with a
+          // finite numeric LMP and a typed zone.
+          v:
+            grid && isVerified(grid.receipt) && typeof gridBody?.lmp_usd_per_mwh === "number" && Number.isFinite(gridBody.lmp_usd_per_mwh) && typeof gridBody?.node_or_zone === "string"
+              ? `${formatUsdPrecise(gridBody.lmp_usd_per_mwh)} / MWh · ${gridBody.market ?? ""} · ${gridBody.node_or_zone}`
+              : "no live LMP returned",
           ok: gridOk,
         },
         {
           k: "Curtailment Threshold",
           v: "No threshold configured in this build — the design's $85/MWh ceiling has no source (DESIGN-SPEC §8 A4). LMP is reported live, no curtail decision is derived.",
-          ok: true,
+          // (J2 R5) Not a check: there is no threshold to pass or
+          // fail, so neither PASS nor GATE is honest. "na" renders an
+          // N/A badge (MissionDesk) and is excluded from the pass
+          // count (passes counts gridOk + routeOk only).
+          ok: "na",
         },
         {
           k: "ETH Hedge Check",
@@ -457,22 +486,37 @@ export const DESK_PRESETS: DeskPreset[] = [
       const why: WhyCard[] = [
         {
           k: "Schema Gate",
+          // (J2 R5 B3) The else-branch is reached by ANY non-4xx
+          // non-verified outcome — 200-no-receipt, 5xx, timeout
+          // (status 0) — so it must not hardcode "HTTP 200". The
+          // status is parameterized; status 0 means no HTTP response
+          // arrived at all (timeout/network), never a status code.
           v: tx
             ? refused
               ? `refused HTTP ${tx.receipt.status} · ${tx.receipt.errorCode ?? "invalid input"}`
               : answered200
                 ? `answered HTTP ${tx.receipt.status} — guard did not refuse`
-                : `refused: HTTP 200 with an unparseable body — no receipt issued`
+                : tx.receipt.status === 200
+                  ? `refused: HTTP 200 with an unparseable body — no receipt issued`
+                  : tx.receipt.status === 0
+                    ? `no HTTP response (timeout/network) — no receipt issued`
+                    : `HTTP ${tx.receipt.status} — no receipt issued`
             : "not run",
           ok: refused,
         },
         {
           k: "Billing Guard",
-          v: refused
-            ? "HTTP 4xx returned pre-receipt ($0.00 — direct probes are unbilled)"
-            : answered200
-              ? "unexpected 200 for a malformed hash"
-              : "HTTP 200 with an unparseable body — no receipt, $0.00 billed",
+          v: !tx
+            ? "not run"
+            : refused
+              ? "HTTP 4xx returned pre-receipt ($0.00 — direct probes are unbilled)"
+              : answered200
+                ? "unexpected 200 for a malformed hash"
+                : tx.receipt.status === 200
+                  ? "HTTP 200 with an unparseable body — no receipt, $0.00 billed"
+                  : tx.receipt.status === 0
+                    ? "no HTTP response (timeout/network) — no receipt, $0.00 billed"
+                    : `HTTP ${tx.receipt.status} — no receipt, $0.00 billed`,
           ok: refused,
         },
       ];
