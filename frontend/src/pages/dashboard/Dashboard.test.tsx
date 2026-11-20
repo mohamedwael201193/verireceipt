@@ -14,15 +14,15 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "../Dashboard";
 import ReceiptDrawer from "./ReceiptDrawer";
 import ReceiptsLedger from "./ReceiptsLedger";
 import { BENCH_CASES } from "./benchmarks";
 import { DOC_SNIPPETS } from "./docs";
-import type { LiveReceipt } from "./types";
-import { appendToLedger, LEDGER_CAP, toLiveReceipt } from "./utils";
+import type { LiveReceipt, Receipt } from "./types";
+import { appendToLedger, highlightJson, isVerified, LEDGER_CAP, toLiveReceipt } from "./utils";
 
 const RECEIPT = {
   receipt_id: "rcpt_TEST00000000000000000001",
@@ -325,5 +325,192 @@ describe("Dashboard page", () => {
       const m = /"chain":"([^"]+)"/.exec(probeText);
       if (m) expect(supported.has(m[1])).toBe(true);
     }
+  });
+});
+
+describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", (url: string) => mockFetch(url));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  /** HTTP 200 with a >1 MiB body for every endpoint: the lib refuses
+   * every call as INVALID_RESPONSE (status 200, no receipt) — J2's
+   * exact B6 reproduction. */
+  function oversize200Fetch(_url: string) {
+    const big = JSON.stringify({ receipt: RECEIPT, answer: "mock", padding: "x".repeat(1_100_000) });
+    return Promise.resolve(
+      new Response(big, { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+  }
+
+  /** A fetch that hangs on the drawer upstream URL only (M-2). */
+  function hangingUpstreamFetch(url: string, init?: { signal?: AbortSignal }) {
+    if (String(url).includes("example.com/upstream")) return hangingFetch(url, init);
+    return mockFetch(url);
+  }
+
+  /** Green badges whose text is exactly "200" — the dishonest shape. */
+  function green200Badges(container: HTMLElement): Element[] {
+    return [...container.querySelectorAll(".badge.b-ok")].filter((b) => b.textContent === "200");
+  }
+
+  it("B-J2-1 repro: 200 + >1 MiB body, m13-defi preset — all 8 display sites stay honest", async () => {
+    vi.stubGlobal("fetch", (url: string) => oversize200Fetch(url));
+    const { container } = render(<Dashboard />);
+    fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
+    expect(await screen.findByText(/COMPLETE · APPENDED TO LEDGER/, {}, { timeout: 15000 })).toBeTruthy();
+    // Verdict logic (presets.ts, untouched) reads the probe error body:
+    // all four refusals score 0.
+    expect(screen.getByText(/Score 0 \/ 100/)).toBeTruthy();
+    // (2) Mission Desk run table: no green 200 badges on refused rows,
+    // while the Proofs cell honestly says "no receipt · 200 refusal".
+    expect(green200Badges(container)).toHaveLength(0);
+    expect(screen.getAllByText(/no receipt · 200 refusal/)).toHaveLength(4);
+    // (7) Drawer: a refused row opens with a warn "200 · refused"
+    // header badge, never green "200 OK".
+    fireEvent.click(screen.getByText("ONCHAIN_TX_LOOKUP"));
+    const dialog = screen.getByRole("dialog", { name: "Receipt Inspector" });
+    const headBadge = dialog.querySelector(".drawer-head .badge");
+    expect(headBadge?.textContent).toBe("200 · refused");
+    expect(headBadge?.classList.contains("b-warn")).toBe(true);
+    expect(headBadge?.classList.contains("b-ok")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Close Inspector" }));
+    // (1) + (3) Receipts Ledger: KPI reads 0, no green 200 row badges.
+    const receiptsTab = screen.getAllByRole("button", { name: "02 Receipts" })[0];
+    fireEvent.click(receiptsTab);
+    const kpiCell = screen.getByText("200 OK Verified").closest(".kpi-cell");
+    expect(kpiCell?.querySelector(".kpi-val")?.textContent).toBe("0");
+    expect(green200Badges(container)).toHaveLength(0);
+    // (M-5) the refusal reason is visible on the row itself.
+    expect(screen.getAllByText(/INVALID_RESPONSE/).length).toBeGreaterThanOrEqual(4);
+    // (4) telemetry: the desk run probes no /health, so it must read
+    // "not probed yet" — never "/health: ok".
+    expect(screen.queryByText(/\/health: ok/)).toBeNull();
+    // Status view: ping /health (refused 200) → (4) telemetry still not
+    // ok, (5) Endpoints Answered 0/5, (6) no "Last grid receipt".
+    const statusTab = screen.getAllByRole("button", { name: "04 Status & Docs" })[0];
+    fireEvent.click(statusTab);
+    const pingButtons = screen.getAllByRole("button", { name: "Ping" });
+    fireEvent.click(pingButtons[5]); // /health row
+    expect(await screen.findByText(/\/health: HTTP 200 — refused \(no receipt\)/, {}, { timeout: 5000 })).toBeTruthy();
+    expect(screen.queryByText(/\/health: ok/)).toBeNull();
+    const answeredCard = screen.getByText("Endpoints Answered (this session)").closest(".card");
+    expect(answeredCard?.textContent).toContain("0 / 5");
+    expect(screen.getByText("No grid probe yet")).toBeTruthy();
+    expect(screen.queryByText(/Last grid receipt/)).toBeNull();
+    // (8) Benchmarks: the suite scores 0/12 and F01 FAILs with http 200
+    // wearing no green badge.
+    const benchTab = screen.getAllByRole("button", { name: "03 Benchmarks" })[0];
+    fireEvent.click(benchTab);
+    fireEvent.click(screen.getByRole("button", { name: /Run 24-Case Adversarial Suite/ }));
+    expect(await screen.findByText("0 / 12", {}, { timeout: 60000 })).toBeTruthy();
+    const f01Row = screen.getByText("F01").closest("tr");
+    const f01Http = [...(f01Row?.querySelectorAll(".badge") ?? [])].find((b) => b.textContent === "200");
+    expect(f01Http).toBeTruthy();
+    expect(f01Http?.classList.contains("b-ok")).toBe(false);
+  }, 120000);
+
+  it("positive control: a genuine 200 WITH a receipt still shows verified/OK everywhere", async () => {
+    const { container } = render(<Dashboard />);
+    fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
+    expect(await screen.findByText(/COMPLETE · APPENDED TO LEDGER/, {}, { timeout: 15000 })).toBeTruthy();
+    expect(screen.getByText(/Score 100 \/ 100/)).toBeTruthy();
+    // Desk run table: 4 green 200 badges.
+    expect(green200Badges(container)).toHaveLength(4);
+    // Drawer header: green "200 OK".
+    fireEvent.click(screen.getByText("ONCHAIN_TX_LOOKUP"));
+    const dialog = screen.getByRole("dialog", { name: "Receipt Inspector" });
+    const headBadge = dialog.querySelector(".drawer-head .badge");
+    expect(headBadge?.textContent).toBe("200 OK");
+    expect(headBadge?.classList.contains("b-ok")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Close Inspector" }));
+    // Ledger KPI reads 4.
+    fireEvent.click(screen.getAllByRole("button", { name: "02 Receipts" })[0]);
+    const kpiCell = screen.getByText("200 OK Verified").closest(".kpi-cell");
+    expect(kpiCell?.querySelector(".kpi-val")?.textContent).toBe("4");
+    // Status: ping /health → telemetry reads "/health: ok"; 4/5 answered
+    // (desk ran tx/tvl/filings/route; grid never probed).
+    fireEvent.click(screen.getAllByRole("button", { name: "04 Status & Docs" })[0]);
+    const pingButtons = screen.getAllByRole("button", { name: "Ping" });
+    fireEvent.click(pingButtons[5]); // /health row
+    expect(await screen.findByText(/\/health: ok/, {}, { timeout: 5000 })).toBeTruthy();
+    const answeredCard = screen.getByText("Endpoints Answered (this session)").closest(".card");
+    expect(answeredCard?.textContent).toContain("4 / 5");
+    // Benchmarks: a PASS with http 200 keeps its green badge (T11).
+    fireEvent.click(screen.getAllByRole("button", { name: "03 Benchmarks" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: /Run 24-Case Adversarial Suite/ }));
+    expect(await screen.findByText("12 / 12", {}, { timeout: 20000 })).toBeTruthy();
+    const t11Row = screen.getByText("T11").closest("tr");
+    const t11Http = [...(t11Row?.querySelectorAll(".badge") ?? [])].find((b) => b.textContent === "200");
+    expect(t11Http?.classList.contains("b-ok")).toBe(true);
+  }, 60000);
+
+  it("isVerified requires 200 AND a receipt", () => {
+    expect(isVerified({ status: 200, receipt: RECEIPT as unknown as Receipt })).toBe(true);
+    expect(isVerified({ status: 200, receipt: null })).toBe(false);
+    expect(isVerified({ status: 422, receipt: null })).toBe(false);
+    expect(isVerified({ status: 0, receipt: null })).toBe(false);
+  });
+
+  it("a hung upstream recompute can be cancelled and the drawer stays usable (M-2)", async () => {
+    vi.stubGlobal("fetch", hangingUpstreamFetch);
+    const receipt = makeReceipt({ intent: "ONCHAIN_TX_LOOKUP_GENERAL", status: 200 });
+    render(<ReceiptDrawer receipt={receipt} onClose={() => undefined} showToast={() => undefined} />);
+    fireEvent.click(screen.getByRole("button", { name: /Recompute SHA-256 in Browser/ }));
+    expect(await screen.findByText("Fetching upstream…", {}, { timeout: 5000 })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Recompute SHA-256 in Browser/ })).toBeEnabled(), { timeout: 5000 });
+    expect(screen.queryByText("Fetching upstream…")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+  }, 30000);
+
+  it("a hung upstream recompute times out after 45s instead of hanging forever (M-2)", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("fetch", hangingUpstreamFetch);
+      const receipt = makeReceipt({ intent: "ONCHAIN_TX_LOOKUP_GENERAL", status: 200 });
+      render(<ReceiptDrawer receipt={receipt} onClose={() => undefined} showToast={() => undefined} />);
+      fireEvent.click(screen.getByRole("button", { name: /Recompute SHA-256 in Browser/ }));
+      expect(screen.getByText("Fetching upstream…")).toBeTruthy();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(45_000);
+      });
+      expect(screen.getByText(/timed out after 45s/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Recompute SHA-256 in Browser/ })).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 30000);
+
+  it("highlightJson never throws on undefined/null/non-string input (M-3)", () => {
+    expect(highlightJson(undefined)).toBe("");
+    expect(highlightJson(null)).toBe("");
+    expect(highlightJson(() => 1)).toBe("");
+    expect(highlightJson(Symbol("x"))).toBe("");
+    expect(highlightJson({ a: 1 })).toContain("a");
+    expect(highlightJson("plain")).toContain("plain");
+  });
+
+  it("ledger rows surface the refusal reason (M-5)", () => {
+    const refused = toLiveReceipt("ONCHAIN_TX_LOOKUP_GENERAL", "tx-one", "https://example.com", {
+      ok: false,
+      body: { error: "INVALID_RESPONSE", message: "Response body exceeds the 1048576 byte limit" },
+      latencyMs: 12,
+      status: 200,
+      errorCode: "INVALID_RESPONSE",
+      errorMessage: "Response body exceeds the 1048576 byte limit",
+    });
+    render(<ReceiptsLedger receipts={[refused]} onInspect={() => undefined} showToast={() => undefined} />);
+    expect(screen.getByText(/INVALID_RESPONSE/)).toBeTruthy();
+    expect(screen.getByText(/Response body exceeds the 1048576 byte limit/)).toBeTruthy();
+    // The refused 200 is not a verified row: no green badge, KPI 0.
+    expect(document.querySelectorAll(".badge.b-ok")).toHaveLength(0);
+    const kpiCell = screen.getByText("200 OK Verified").closest(".kpi-cell");
+    expect(kpiCell?.querySelector(".kpi-val")?.textContent).toBe("0");
   });
 });

@@ -13,8 +13,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { isSafeUpstreamUrl, ReceiptCard } from "../../components/ReceiptCard";
+import { REQUEST_TIMEOUT_MS } from "../../lib/api";
 import type { LiveReceipt } from "./types";
-import { copyText, highlightJson, sha256Hex, useDrawerFocus } from "./utils";
+import { copyText, highlightJson, isVerified, sha256Hex, useDrawerFocus } from "./utils";
 
 interface ReceiptDrawerProps {
   receipt: LiveReceipt | null;
@@ -33,13 +34,24 @@ type VerifyState =
 export default function ReceiptDrawer({ receipt, onClose, showToast }: ReceiptDrawerProps) {
   const [verify, setVerify] = useState<VerifyState>({ kind: "idle" });
   const panelRef = useRef<HTMLElement | null>(null);
+  const recomputeController = useRef<AbortController | null>(null);
   const open = receipt !== null;
   useDrawerFocus(open, panelRef);
 
   // A verification result belongs to the receipt it was computed for.
+  // A new receipt (or unmount) also aborts any in-flight recompute so
+  // it can never settle into state afterwards (J2 R3 M-2).
   useEffect(() => {
     setVerify({ kind: "idle" });
+    recomputeController.current?.abort();
+    recomputeController.current = null;
   }, [receipt?.id]);
+  useEffect(() => {
+    return () => {
+      recomputeController.current?.abort();
+      recomputeController.current = null;
+    };
+  }, []);
 
   const recorded = receipt?.receipt?.raw_response_sha256 ?? null;
   // audit_url / quorum_votes come through the Receipt index signature as
@@ -60,9 +72,24 @@ export default function ReceiptDrawer({ receipt, onClose, showToast }: ReceiptDr
       setVerify({ kind: "no-crypto" });
       return;
     }
+    // Timeout + abort (J2 R3 M-2): the old code fetched upstream_url
+    // with neither, so a hung upstream left "Fetching upstream…" stuck
+    // with no cancel. Same 45s budget as the data-layer lib
+    // (REQUEST_TIMEOUT_MS), plus a Cancel button while fetching.
+    recomputeController.current?.abort();
+    const controller = new AbortController();
+    recomputeController.current = controller;
+    // A plain flag (not signal.reason instanceof DOMException): the
+    // reason can come from another realm, where instanceof fails — the
+    // flag is set only by this timer, so it cannot misclassify a cancel.
+    let timedOut = false;
+    const timer = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
     setVerify({ kind: "fetching" });
     try {
-      const res = await fetch(receipt.receipt.upstream_url);
+      const res = await fetch(receipt.receipt.upstream_url, { signal: controller.signal });
       if (!res.ok) {
         setVerify({
           kind: "unverifiable",
@@ -85,11 +112,31 @@ export default function ReceiptDrawer({ receipt, onClose, showToast }: ReceiptDr
         showToast("SHA-256 bit-exact match verified in browser");
       }
     } catch (err) {
+      if (timedOut) {
+        setVerify({
+          kind: "unverifiable",
+          reason: `Upstream fetch timed out after ${REQUEST_TIMEOUT_MS / 1000}s — the upstream did not answer. Try again, or verify from a terminal with curl.`,
+        });
+        return;
+      }
+      if (controller.signal.aborted) {
+        // User-cancelled (or superseded by a new receipt): back to
+        // idle, drawer stays usable.
+        setVerify({ kind: "idle" });
+        return;
+      }
       setVerify({
         kind: "unverifiable",
         reason: `Browser could not fetch the upstream URL (${err instanceof Error ? err.message : "network/CORS error"}). Upstream RPCs are POST-only and some hosts block browser fetches.`,
       });
+    } finally {
+      window.clearTimeout(timer);
+      if (recomputeController.current === controller) recomputeController.current = null;
     }
+  }
+
+  function cancelRecompute() {
+    recomputeController.current?.abort();
   }
 
   const curlCmd = receipt ? `curl -s "${receipt.requestUrl}"` : "";
@@ -109,8 +156,8 @@ export default function ReceiptDrawer({ receipt, onClose, showToast }: ReceiptDr
             {receipt?.id ?? ""}
           </span>
           {receipt && (
-            <span className={`badge ${receipt.status === 200 ? "b-ok" : receipt.status === 0 ? "b-err" : "b-warn"}`}>
-              {receipt.status === 0 ? "TIMEOUT" : `${receipt.status}${receipt.status === 200 ? " OK" : ""}`}
+            <span className={`badge ${isVerified(receipt) ? "b-ok" : receipt.status === 0 ? "b-err" : "b-warn"}`}>
+              {receipt.status === 0 ? "TIMEOUT" : isVerified(receipt) ? "200 OK" : `${receipt.status} · refused`}
             </span>
           )}
         </div>
@@ -175,6 +222,16 @@ export default function ReceiptDrawer({ receipt, onClose, showToast }: ReceiptDr
                 >
                   {verify.kind === "fetching" ? "Fetching upstream…" : "Recompute SHA-256 in Browser"}
                 </button>
+                {verify.kind === "fetching" && (
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    style={{ padding: "7px 14px", fontSize: 12 }}
+                    onClick={cancelRecompute}
+                  >
+                    Cancel
+                  </button>
+                )}
               </div>
               <div className="mono" style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 6 }}>
                 <div style={{ color: "var(--muted)" }}>

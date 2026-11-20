@@ -266,7 +266,11 @@ export default function Benchmarks({ onRecord, showToast }: BenchmarksProps) {
               {list.map((c) => {
                 const r = results[c.id];
                 const badge = verdictBadge(r, c.id);
-                const httpCls = r?.http === 200 ? "b-ok" : r?.http === 422 || r?.http === 400 ? "b-warn" : r?.http ? "b-err" : "b-dim";
+                // Green HTTP badge only for a PASS with HTTP 200 (J2 R3
+                // B-J2-1): a FAIL case that returned HTTP 200 with no
+                // receipt (e.g. F01 refused as INVALID_RESPONSE, status
+                // 200) must never wear a green 200 badge.
+                const httpCls = r?.http === 200 && r?.verdict === "PASS" ? "b-ok" : r?.http === 422 || r?.http === 400 ? "b-warn" : r?.http ? "b-err" : "b-dim";
                 return (
                   <tr key={c.id} className="clickable" onClick={() => setExpanded(expanded === c.id ? null : c.id)}>
                     <td className="mono" style={{ fontSize: 11.5, color: "var(--accent)", fontWeight: 500 }}>{c.id}</td>

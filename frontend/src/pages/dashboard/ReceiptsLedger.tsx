@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { LiveReceipt } from "./types";
-import { downloadText, formatDate, formatMs, median, shortHash } from "./utils";
+import { downloadText, formatDate, formatMs, isVerified, median, shortHash } from "./utils";
 
 interface ReceiptsLedgerProps {
   receipts: LiveReceipt[];
@@ -38,7 +38,11 @@ export default function ReceiptsLedger({ receipts, onInspect, showToast }: Recei
 
   const kpis = useMemo(() => {
     const total = receipts.length;
-    const ok = receipts.filter((r) => r.status === 200).length;
+    // Verified = 200 AND a receipt was minted (J2 R3 B-J2-1). A bare 200
+    // with no receipt is a refusal (lib: INVALID_RESPONSE, status 200)
+    // and must never count here — the sub-label promises a sha256, and
+    // no sha exists for a refused call.
+    const ok = receipts.filter((r) => isVerified(r)).length;
     const refusals = receipts.filter((r) => r.status === 400 || r.status === 422).length;
     const errors503 = receipts.filter((r) => r.status === 503).length;
     const med = median(receipts.map((r) => r.latencyMs));
@@ -168,19 +172,20 @@ export default function ReceiptsLedger({ receipts, onInspect, showToast }: Recei
                 <th>Latency</th>
                 <th>Cost</th>
                 <th>raw_response_sha256</th>
+                <th>Refusal reason</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
               {receipts.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="mono" style={{ textAlign: "center", padding: 28, color: "var(--muted)" }}>
+                  <td colSpan={11} className="mono" style={{ textAlign: "center", padding: 28, color: "var(--muted)" }}>
                     No receipts yet in this session — run a Desk check, a Ping, or the benchmark suite.
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="mono" style={{ textAlign: "center", padding: 28, color: "var(--muted)" }}>
+                  <td colSpan={11} className="mono" style={{ textAlign: "center", padding: 28, color: "var(--muted)" }}>
                     No receipts match the current filter.
                   </td>
                 </tr>
@@ -193,7 +198,7 @@ export default function ReceiptsLedger({ receipts, onInspect, showToast }: Recei
                     <td className="mono" style={{ fontSize: 11 }}>verireceipt</td>
                     <td className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>direct</td>
                     <td>
-                      <span className={`badge ${r.status === 200 ? "b-ok" : r.status === 0 ? "b-err" : "b-warn"}`}>
+                      <span className={`badge ${isVerified(r) ? "b-ok" : r.status === 0 ? "b-err" : "b-warn"}`}>
                         {r.status === 0 ? "TIMEOUT" : r.status}
                       </span>
                     </td>
@@ -201,6 +206,13 @@ export default function ReceiptsLedger({ receipts, onInspect, showToast }: Recei
                     <td className="mono" style={{ fontSize: 11 }}>unbilled</td>
                     <td className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
                       {r.receipt ? shortHash(r.receipt.raw_response_sha256) : "—"}
+                    </td>
+                    <td className="mono" style={{ fontSize: 11, color: "var(--muted)", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.errorMessage ?? ""}>
+                      {r.receipt
+                        ? "—"
+                        : r.errorCode
+                          ? `${r.errorCode}${r.errorMessage ? ` — ${r.errorMessage.slice(0, 80)}` : ""}`
+                          : "—"}
                     </td>
                     <td className="mono" style={{ fontSize: 11, color: "var(--accent)", whiteSpace: "nowrap" }}>Inspect →</td>
                   </tr>

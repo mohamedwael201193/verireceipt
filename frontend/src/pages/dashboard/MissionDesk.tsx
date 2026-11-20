@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DESK_PRESETS, type DeskEvaluation, type DeskInputs, type DeskPreset } from "./presets";
 import type { LiveReceipt } from "./types";
-import { formatMs, shortHash, toLiveReceipt } from "./utils";
+import { formatMs, isVerified, shortHash, toLiveReceipt } from "./utils";
 
 interface StreamLine {
   time: string;
@@ -137,12 +137,17 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
         setRunReceipts([...settled]);
         appendLine({
           time: new Date().toISOString().slice(11, 19),
-          tag: outcome.ok ? "200 OK" : `HTTP ${receipt.status || "—"}`,
+          // "200 OK" needs a receipt, not just a resolved fetch (J2 R3
+          // B-J2-1 audit): probe() reports ok:true whenever the fetcher
+          // resolves, so a body with no receipt would otherwise stream a
+          // green "200 OK" line. The lib throws on refusals, so this is
+          // defence-in-depth, not a live path.
+          tag: outcome.ok && receipt.receipt ? "200 OK" : `HTTP ${receipt.status || "—"}`,
           mid: `${check.intent} (${formatMs(outcome.latencyMs)})`,
           tail: outcome.ok
             ? `receipt ${receipt.receipt ? shortHash(receipt.receipt.raw_response_sha256) : "—"} · unbilled`
             : `fail-closed · ${receipt.errorMessage ?? "request failed"} · $0.00`,
-          color: outcome.ok ? "#22C55E" : "#F59E0B",
+          color: outcome.ok && receipt.receipt ? "#22C55E" : "#F59E0B",
         });
       }
 
@@ -368,7 +373,7 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
                         <td className="mono" style={{ fontSize: 11, fontWeight: 500 }}>{r.intent.replace("_GENERAL", "")}</td>
                         <td className="mono" style={{ fontSize: 11 }}>verireceipt</td>
                         <td className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>direct</td>
-                        <td><span className={`badge ${r.status === 200 ? "b-ok" : r.status === 0 ? "b-err" : "b-warn"}`}>{r.status === 0 ? "TIMEOUT" : r.status}</span></td>
+                        <td><span className={`badge ${isVerified(r) ? "b-ok" : r.status === 0 ? "b-err" : "b-warn"}`}>{r.status === 0 ? "TIMEOUT" : r.status}</span></td>
                         <td className="mono" style={{ fontSize: 11 }}>{formatMs(r.latencyMs)}</td>
                         <td className="mono" style={{ fontSize: 11 }}>unbilled</td>
                         <td>

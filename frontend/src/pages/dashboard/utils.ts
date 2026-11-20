@@ -160,6 +160,19 @@ export async function probe<T>(
   }
 }
 
+/**
+ * The ONE display predicate for "verified / OK" (J2 R3 B-J2-1): a call
+ * counts as verified only when HTTP 200 arrived AND the lib minted a
+ * receipt for it. A bare 200 with no receipt is a refusal — the lib
+ * fails it as ApiError INVALID_RESPONSE carrying status 200 — and must
+ * never render as verified, OK, answered, or a receipt age. Every
+ * display site that renders "200", "OK", "Verified", "Answered", or a
+ * receipt age MUST key on this, never on status alone.
+ */
+export function isVerified(r: { status: number; receipt: Receipt | null }): boolean {
+  return r.status === 200 && r.receipt !== null;
+}
+
 /** Session ledger cap: keep the latest 200 receipts, drop older ones. */
 export const LEDGER_CAP = 200;
 
@@ -291,7 +304,14 @@ export function downloadText(filename: string, text: string, mime: string): void
 
 /** Escape + syntax-highlight a JSON value for the drawer viewer. */
 export function highlightJson(value: unknown): string {
-  const s = JSON.stringify(value, null, 2)
+  // Latent guard (J2 R3 M-3): JSON.stringify(undefined) returns
+  // undefined (not a string), so the .replace chain threw a TypeError.
+  // Unreachable via probe() (body is always set), but a drawer body of
+  // undefined/null must render empty, never throw.
+  if (value === undefined || value === null) return "";
+  const raw = JSON.stringify(value, null, 2);
+  if (typeof raw !== "string") return "";
+  const s = raw
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");

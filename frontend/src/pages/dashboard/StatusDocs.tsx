@@ -23,6 +23,7 @@ import {
   copyText,
   directUrl,
   formatMs,
+  isVerified,
   median,
   probe,
   recentGridInterval,
@@ -145,6 +146,9 @@ function endpointDefs(): EndpointDef[] {
 interface RowProbe {
   latencyMs: number;
   status: number;
+  /** True only when the ping returned a receipt (J2 R3 B-J2-1): a bare
+   * 200 with no receipt is a refusal and must never render "UP". */
+  verified: boolean;
 }
 
 /**
@@ -188,7 +192,7 @@ function HealthRow({
       if (!mountedRef.current || controller.signal.aborted) return;
       const receipt = toLiveReceipt(def.intent, def.query, def.requestUrl, outcome);
       onRecord(receipt);
-      setLast({ latencyMs: outcome.latencyMs, status: receipt.status });
+      setLast({ latencyMs: outcome.latencyMs, status: receipt.status, verified: receipt.receipt !== null });
       setLatencies((prev) => [...prev, outcome.latencyMs].slice(-20));
       if (!outcome.ok) {
         setError(`HTTP ${receipt.status || "—"}: ${receipt.errorMessage ?? "request failed"}`);
@@ -203,8 +207,8 @@ function HealthRow({
   const stateBadge = (() => {
     if (loading && !last) return { cls: "b-dim", label: "PROBING…" };
     if (error) return { cls: "b-err", label: last?.status ? `HTTP ${last.status}` : "DOWN" };
-    if (last?.status === 200) return { cls: "b-ok", label: "UP" };
-    if (last) return { cls: "b-warn", label: `HTTP ${last.status}` };
+    if (last?.verified) return { cls: "b-ok", label: "UP" };
+    if (last) return { cls: "b-warn", label: `HTTP ${last.status} · refused` };
     return { cls: "b-dim", label: "NOT PROBED" };
   })();
 
@@ -271,21 +275,27 @@ export default function StatusDocs({
     const body = r.body as { status?: unknown; uptime_s?: unknown } | null;
     return {
       httpStatus: r.status,
-      ok: r.status === 200 && (body === null || body === undefined || body.status === "ok"),
+      // "ok" requires a receipt, not a bare 200 (J2 R3 B-J2-1): a
+      // refused /health ping carries status 200 with an error body and
+      // no receipt, and body.status is absent there — but the receipt
+      // check is the deciding predicate, not the body shape.
+      ok: r.status === 200 && r.receipt !== null && (body === null || body === undefined || body.status === "ok"),
       uptime_s: typeof body?.uptime_s === "number" ? body.uptime_s : null,
       ts: r.ts,
     };
   }, [receipts]);
 
   const answeredEndpoints = useMemo(() => {
+    // Answered = 200 AND a receipt was minted (J2 R3 B-J2-1). A bare
+    // 200 refusal answers nothing.
     const intents = new Set(
-      receipts.filter((r) => r.status === 200).map((r) => r.intent),
+      receipts.filter((r) => isVerified(r)).map((r) => r.intent),
     );
     return ["ONCHAIN_TX_LOOKUP_GENERAL", "REGULATORY_FILING_MONITOR_GENERAL", "TVL_LOOKUP_GENERAL", "OPTIMAL_EXECUTION_ROUTE_GENERAL", "GRID_POWER_PRICE_GENERAL"].filter((i) => intents.has(i)).length;
   }, [receipts]);
 
   const lastGrid = useMemo(
-    () => receipts.find((r) => r.intent === "GRID_POWER_PRICE_GENERAL" && r.status === 200) ?? null,
+    () => receipts.find((r) => r.intent === "GRID_POWER_PRICE_GENERAL" && isVerified(r)) ?? null,
     [receipts],
   );
 
