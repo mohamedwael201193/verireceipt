@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import {
   API_BASE,
@@ -25,32 +25,44 @@ const NAV_LINKS = [
 
 type HealthState = "checking" | "ok" | "down";
 
-/** Live health pill: GET /api/health (proxied to the Render miner). */
+/** Live health pill: GET /api/health (proxied to the Render miner).
+ *  Hardened: each check races a 10s AbortSignal.timeout, polls never stack
+ *  (a check already in flight makes the interval tick a no-op), and a
+ *  sequence number drops stale responses — only the latest check updates
+ *  state. */
 function HealthPill() {
   const [health, setHealth] = useState<HealthState>("checking");
+  const inFlightRef = useRef(false);
+  const seqRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
-    const controller = new AbortController();
     const check = async () => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+      const seq = ++seqRef.current;
       try {
-        const res = await fetch(`${API_BASE}/health`, { signal: controller.signal });
-        if (cancelled) return;
+        const res = await fetch(`${API_BASE}/health`, {
+          signal: AbortSignal.timeout(10000),
+        });
+        if (cancelled || seq !== seqRef.current) return;
         if (!res.ok) {
           setHealth("down");
           return;
         }
         const data = (await res.json()) as { status?: string };
+        if (cancelled || seq !== seqRef.current) return;
         setHealth(data.status === "ok" ? "ok" : "down");
       } catch {
-        if (!cancelled) setHealth("down");
+        if (!cancelled && seq === seqRef.current) setHealth("down");
+      } finally {
+        inFlightRef.current = false;
       }
     };
     void check();
     const id = window.setInterval(() => void check(), 30000);
     return () => {
       cancelled = true;
-      controller.abort();
       window.clearInterval(id);
     };
   }, []);

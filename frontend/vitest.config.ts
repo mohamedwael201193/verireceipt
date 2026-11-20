@@ -12,5 +12,10 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
+    // Lazy route chunks can take seconds to load when the suite runs in
+    // parallel on a loaded machine; the 5s default killed tests that
+    // were only waiting on a chunk. (setup.ts raises the matching
+    // async-util timeout to the same value.)
+    testTimeout: 10_000,
   },
 });
