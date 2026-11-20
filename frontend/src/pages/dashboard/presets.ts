@@ -280,9 +280,16 @@ export const DESK_PRESETS: DeskPreset[] = [
         },
         {
           k: "TVL Guard",
+          // (J2 R6 M3) Mirror the m13-defi "TVL (live)" guard: a
+          // verified receipt without a numeric tvl_usd renders the
+          // honest fallback, never "live TVL —" on a GATE card.
+          // (tvlAnswered already requires the numeric field, so `ok`
+          // was correct — only the text lied.)
           v: tvl
             ? isVerified(tvl.receipt)
-              ? `live TVL ${formatUsd(tvlBody?.tvl_usd ?? null)}`
+              ? typeof tvlBody?.tvl_usd === "number"
+                ? `live TVL ${formatUsd(tvlBody.tvl_usd)}`
+                : "no live TVL returned"
               : `clean refusal HTTP ${tvl.receipt.status} — no fabricated TVL`
             : "not run",
           ok: tvlAnswered,
@@ -349,11 +356,15 @@ export const DESK_PRESETS: DeskPreset[] = [
         },
         {
           k: "URL Provenance",
+          // (J2 R6 M4) Same isVerified gate as its siblings (Official
+          // EDGAR, Route Execution): an unverified body must never
+          // render success text or PASS, even though expectReceipt
+          // makes this unreachable-bad today.
           v:
-            filingsBody && Array.isArray(filingsBody.urls) && filingsBody.urls.length > 0
+            filings && isVerified(filings.receipt) && filingsBody !== null && Array.isArray(filingsBody.urls) && filingsBody.urls.length > 0
               ? `${filingsBody.urls.length} archive URL(s) on sec.gov`
               : "no archive URLs returned",
-          ok: filingsBody !== null && Array.isArray(filingsBody.urls) && filingsBody.urls.length > 0,
+          ok: !!filings && isVerified(filings.receipt) && filingsBody !== null && Array.isArray(filingsBody.urls) && filingsBody.urls.length > 0,
         },
         {
           k: "Route Execution",
@@ -419,9 +430,13 @@ export const DESK_PRESETS: DeskPreset[] = [
           // truthy {error, message} body rendered "— / MWh ·  ·
           // undefined". Render only on a verified receipt with a
           // finite numeric LMP and a typed zone.
+          // (J2 R6 M2) `market` is unvalidated at runtime despite the
+          // lib type: `market: {}` rendered "[object Object]". Render
+          // the market segment only for a non-empty string, else omit
+          // it cleanly — the LMP and zone still read.
           v:
             grid && isVerified(grid.receipt) && typeof gridBody?.lmp_usd_per_mwh === "number" && Number.isFinite(gridBody.lmp_usd_per_mwh) && typeof gridBody?.node_or_zone === "string"
-              ? `${formatUsdPrecise(gridBody.lmp_usd_per_mwh)} / MWh · ${gridBody.market ?? ""} · ${gridBody.node_or_zone}`
+              ? `${formatUsdPrecise(gridBody.lmp_usd_per_mwh)} / MWh${typeof gridBody.market === "string" && gridBody.market ? ` · ${gridBody.market}` : ""} · ${gridBody.node_or_zone}`
               : "no live LMP returned",
           ok: gridOk,
         },
@@ -441,12 +456,20 @@ export const DESK_PRESETS: DeskPreset[] = [
         },
       ];
       const passes = [gridOk, routeOk].filter(Boolean).length;
+      // (J2 R6 M1) gridOk gates score/verdict, not the zone label: a
+      // verified receipt with a finite numeric LMP is a genuinely
+      // verified price even if the body omits node_or_zone, so
+      // requiring the zone in gridOk would demote a verified check
+      // to HOLD over a display label. Omit the "at …" clause from
+      // the headline instead — never "verified live at undefined".
+      const zoneSuffix =
+        typeof gridBody?.node_or_zone === "string" && gridBody.node_or_zone ? ` at ${gridBody.node_or_zone}` : "";
       return {
         verdict: passes === 2 ? "APPROVE" : "HOLD",
         score: scoreOf(passes, 2),
         headline:
           passes === 2
-            ? `Wholesale LMP ${formatUsdPrecise(gridBody?.lmp_usd_per_mwh ?? null)} / MWh verified live at ${gridBody?.node_or_zone}.`
+            ? `Wholesale LMP ${formatUsdPrecise(gridBody?.lmp_usd_per_mwh ?? null)} / MWh verified live${zoneSuffix}.`
             : "Grid or route check did not verify — review the rows before acting.",
         why,
       };

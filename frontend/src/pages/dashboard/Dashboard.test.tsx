@@ -21,6 +21,8 @@ import ReceiptDrawer from "./ReceiptDrawer";
 import ReceiptsLedger from "./ReceiptsLedger";
 import { BENCH_CASES } from "./benchmarks";
 import { DOC_SNIPPETS } from "./docs";
+import { DESK_PRESETS } from "./presets";
+import type { DeskCheckResult, DeskEvaluation } from "./presets";
 import type { LiveReceipt, Receipt } from "./types";
 import { appendToLedger, highlightJson, isVerified, LEDGER_CAP, toLiveReceipt } from "./utils";
 
@@ -648,5 +650,155 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     expect(kpiCell?.querySelector(".kpi-val")?.textContent).toBe("5");
     const okCell = screen.getByText("200 OK Verified").closest(".kpi-cell");
     expect(okCell?.querySelector(".kpi-val")?.textContent).toBe("1");
+  });
+});
+
+describe("J2 R6 — latent minors (verified receipt, missing field)", () => {
+  /** Pure evaluate() helpers: build a DeskCheckResult straight from a
+   * toLiveReceipt outcome — no fetch, no render — so a verified receipt
+   * lacking one field exercises exactly the latent branch. */
+  function presetById(id: string) {
+    const preset = DESK_PRESETS.find((p) => p.id === id);
+    if (!preset) throw new Error(`no desk preset ${id}`);
+    return preset;
+  }
+
+  function deskResult(presetId: string, checkIndex: number, receipt: LiveReceipt): DeskCheckResult {
+    const preset = presetById(presetId);
+    return { check: preset.buildChecks(preset.inputs)[checkIndex], receipt };
+  }
+
+  function verifiedLiveReceipt(intent: string, body: unknown): LiveReceipt {
+    return toLiveReceipt(intent, "q", "https://example.com", {
+      ok: true,
+      body,
+      receipt: RECEIPT as unknown as Receipt,
+      latencyMs: 1,
+    });
+  }
+
+  function refusedLiveReceipt(intent: string, status: number, body: unknown): LiveReceipt {
+    return toLiveReceipt(intent, "q", "https://example.com", {
+      ok: false,
+      body,
+      latencyMs: 1,
+      status,
+      errorCode: "UNKNOWN_ENTITY",
+      errorMessage: "refused",
+    });
+  }
+
+  function whyCard(ev: DeskEvaluation, k: string) {
+    const card = ev.why.find((c) => c.k === k);
+    if (!card) throw new Error(`no why-card ${k}`);
+    return card;
+  }
+
+  it("M1: m12 headline never renders 'undefined' when node_or_zone is absent", () => {
+    const preset = presetById("m12-curtail");
+    const grid = deskResult("m12-curtail", 0, verifiedLiveReceipt("GRID_POWER_PRICE_GENERAL", { lmp_usd_per_mwh: 42 }));
+    const route = deskResult("m12-curtail", 1, verifiedLiveReceipt("OPTIMAL_EXECUTION_ROUTE_GENERAL", { amount_out: 1700000000 }));
+    const ev = preset.evaluate([grid, route]);
+    // The price is genuinely verified (receipt + finite LMP), so the
+    // verdict stays APPROVE — only the zone clause is omitted.
+    expect(ev.verdict).toBe("APPROVE");
+    expect(ev.score).toBe(100);
+    expect(ev.headline).toBe("Wholesale LMP $42.00 / MWh verified live.");
+    expect(ev.headline).not.toContain("undefined");
+    // Positive control: a typed zone restores the "at …" clause.
+    const gridZoned = deskResult(
+      "m12-curtail",
+      0,
+      verifiedLiveReceipt("GRID_POWER_PRICE_GENERAL", { lmp_usd_per_mwh: 42, node_or_zone: "TH_NP15_GEN-APND", market: "CAISO" }),
+    );
+    expect(preset.evaluate([gridZoned, route]).headline).toBe("Wholesale LMP $42.00 / MWh verified live at TH_NP15_GEN-APND.");
+  });
+
+  it("M2: m12 LMP card never renders '[object Object]' for a non-string market", () => {
+    const preset = presetById("m12-curtail");
+    const route = deskResult("m12-curtail", 1, verifiedLiveReceipt("OPTIMAL_EXECUTION_ROUTE_GENERAL", { amount_out: 1700000000 }));
+    const gridObj = deskResult(
+      "m12-curtail",
+      0,
+      verifiedLiveReceipt("GRID_POWER_PRICE_GENERAL", { lmp_usd_per_mwh: 42, node_or_zone: "TH_NP15_GEN-APND", market: {} }),
+    );
+    const lmpObj = whyCard(preset.evaluate([gridObj, route]), "LMP (live)");
+    expect(lmpObj.v).toBe("$42.00 / MWh · TH_NP15_GEN-APND");
+    expect(lmpObj.v).not.toContain("[object Object]");
+    // Empty-string market omits the segment the same clean way.
+    const gridEmpty = deskResult(
+      "m12-curtail",
+      0,
+      verifiedLiveReceipt("GRID_POWER_PRICE_GENERAL", { lmp_usd_per_mwh: 42, node_or_zone: "TH_NP15_GEN-APND", market: "" }),
+    );
+    expect(whyCard(preset.evaluate([gridEmpty, route]), "LMP (live)").v).toBe("$42.00 / MWh · TH_NP15_GEN-APND");
+    // Positive control: a string market still renders its segment.
+    const gridStr = deskResult(
+      "m12-curtail",
+      0,
+      verifiedLiveReceipt("GRID_POWER_PRICE_GENERAL", { lmp_usd_per_mwh: 42, node_or_zone: "TH_NP15_GEN-APND", market: "CAISO" }),
+    );
+    expect(whyCard(preset.evaluate([gridStr, route]), "LMP (live)").v).toBe("$42.00 / MWh · CAISO · TH_NP15_GEN-APND");
+  });
+
+  it("M3: m13-reverted TVL Guard shows the honest fallback when tvl_usd is absent", () => {
+    const preset = presetById("m13-reverted");
+    const tx = deskResult("m13-reverted", 0, verifiedLiveReceipt("ONCHAIN_TX_LOOKUP_GENERAL", { status: "reverted", block_number: 1 }));
+    const tvl = deskResult("m13-reverted", 1, verifiedLiveReceipt("TVL_LOOKUP_GENERAL", { protocol_or_chain: "micro-vault-v1" }));
+    const ev = preset.evaluate([tx, tvl]);
+    expect(ev.verdict).toBe("REJECT");
+    const guard = whyCard(ev, "TVL Guard");
+    expect(guard.v).toBe("no live TVL returned");
+    expect(guard.v).not.toMatch(/^live TVL/);
+    expect(guard.ok).toBe(false);
+    // Positive control: a numeric tvl_usd still renders live TVL.
+    const tvlLive = deskResult("m13-reverted", 1, verifiedLiveReceipt("TVL_LOOKUP_GENERAL", { protocol_or_chain: "micro-vault-v1", tvl_usd: 100 }));
+    expect(whyCard(preset.evaluate([tx, tvlLive]), "TVL Guard").v).toBe("live TVL $100");
+  });
+
+  it("M4: m13-sec URL Provenance ok is false without a verified receipt", () => {
+    const preset = presetById("m13-sec");
+    const route = deskResult("m13-sec", 1, verifiedLiveReceipt("OPTIMAL_EXECUTION_ROUTE_GENERAL", { amount_out: 1700000000 }));
+    // Refused filings whose body still carries urls: the old ungated
+    // `ok` read true on exactly this shape.
+    const filingsRefused = deskResult(
+      "m13-sec",
+      0,
+      refusedLiveReceipt("REGULATORY_FILING_MONITOR_GENERAL", 422, {
+        urls: ["https://www.sec.gov/Archives/edgar/data/320193/000032019323000106/aapl-20230930.htm"],
+      }),
+    );
+    const ev = preset.evaluate([filingsRefused, route]);
+    const prov = whyCard(ev, "URL Provenance");
+    expect(prov.ok).toBe(false);
+    expect(prov.v).toBe("no archive URLs returned");
+    // Positive control: a verified receipt with urls still passes.
+    const filingsOk = deskResult(
+      "m13-sec",
+      0,
+      verifiedLiveReceipt("REGULATORY_FILING_MONITOR_GENERAL", {
+        entity: "AAPL",
+        filing_count: 1,
+        urls: ["https://www.sec.gov/Archives/edgar/data/320193/000032019323000106/aapl-20230930.htm"],
+      }),
+    );
+    const evOk = preset.evaluate([filingsOk, route]);
+    expect(whyCard(evOk, "URL Provenance").ok).toBe(true);
+    expect(whyCard(evOk, "URL Provenance").v).toBe("1 archive URL(s) on sec.gov");
+  });
+
+  it("M5: ledger 503 KPI is error-toned and labelled a subset of Refusals", () => {
+    const verified = makeReceipt({ intent: "ONCHAIN_TX_LOOKUP_GENERAL", status: 200, query: "tx-ok" });
+    const err503 = makeReceipt({ intent: "ONCHAIN_TX_LOOKUP_GENERAL", status: 503, query: "tx-503" });
+    const refused422 = makeReceipt({ intent: "GRID_POWER_PRICE_GENERAL", status: 422, query: "grid-422" });
+    render(<ReceiptsLedger receipts={[verified, err503, refused422]} onInspect={() => undefined} showToast={() => undefined} />);
+    // The 503 row counts in BOTH KPIs: it is a refusal and a 503.
+    const cell503 = screen.getByText("HTTP 503 Errors").closest(".kpi-cell");
+    expect(cell503?.querySelector(".kpi-val")?.textContent).toBe("1");
+    expect(cell503?.querySelector(".kpi-val")?.getAttribute("style")).toContain("var(--err)");
+    expect(cell503?.querySelector(".kpi-val")?.getAttribute("style")).not.toContain("var(--ok)");
+    expect(cell503?.textContent).toContain("subset of Refusals");
+    const refusals = screen.getByText("Refusals").closest(".kpi-cell");
+    expect(refusals?.querySelector(".kpi-val")?.textContent).toBe("2");
   });
 });

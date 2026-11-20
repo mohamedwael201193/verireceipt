@@ -131,8 +131,12 @@ export default function ReceiptsLedger({ receipts, onInspect, showToast }: Recei
         </div>
         <div className="kpi-cell">
           <div className="kpi-lbl">HTTP 503 Errors</div>
-          <div className="kpi-val mono" style={{ color: "var(--ok)" }}>{kpis.errors503}</div>
-          <div className="kpi-sub">measured this session</div>
+          {/* (J2 R6 M5) 503s are failures, not successes: error tone,
+              never green. The caption states the overlap the code
+              comment used to carry alone — 503 rows are a subset of
+              the Refusals KPI, not a separate population. */}
+          <div className="kpi-val mono" style={{ color: "var(--err)" }}>{kpis.errors503}</div>
+          <div className="kpi-sub">subset of Refusals · this session</div>
         </div>
         <div className="kpi-cell">
           <div className="kpi-lbl">Escrow Spend</div>
