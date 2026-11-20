@@ -1,6 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 import type { Receipt } from "../lib/types";
 import { formatDate, shortenSha } from "../lib/format";
+import {
+  MAX_RECEIPT_FETCHED_AT_LENGTH,
+  MAX_RECEIPT_ID_LENGTH,
+  MAX_RECEIPT_SHA_LENGTH,
+  MAX_RECEIPT_UPSTREAM_URL_LENGTH,
+} from "../lib/api";
+
+/**
+ * A receipt field is renderable only as a non-empty (after trim) string
+ * within its length cap (J2 R4 M-1). The API layer (assertValidBody)
+ * rejects over-cap fields as INVALID_RESPONSE, but a receipt can reach
+ * this card from any other caller — so the card enforces the SAME caps
+ * in its own rendering path, importing the constants from api.ts so the
+ * two layers can never drift. Over-cap renders "—", never verbatim:
+ * a 1 MB upstream_url / fetched_at / sha / receipt_id must not land in
+ * the DOM (or in the sha's title= attribute) through the card's
+ * non-API path.
+ */
+function isRenderableReceiptString(value: unknown, maxLength: number): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= maxLength;
+}
 
 /**
  * The only URL schemes that may ever render as a clickable link.
@@ -164,9 +185,11 @@ export function ReceiptCard({ receipt }: ReceiptCardProps) {
   async function copySha() {
     // Never copy the literal string "undefined" when the sha is missing.
     const sha = receipt?.raw_response_sha256;
-    // Audit (J2 R4 B-1): a whitespace-only sha renders "—" via shortenSha,
-    // so it must not be copied either — same trim rule as the renderers.
-    if (typeof sha !== "string" || sha.length === 0 || sha.trim().length === 0) return;
+    // Never copy the literal string "undefined" when the sha is missing.
+    // Same renderability rule as the card itself (B-1 trim + M-1 cap):
+    // a whitespace-only or over-cap sha renders "—", so it must not be
+    // copied either.
+    if (!isRenderableReceiptString(sha, MAX_RECEIPT_SHA_LENGTH)) return;
     try {
       await navigator.clipboard.writeText(sha);
       setCopied(true);
@@ -196,17 +219,26 @@ export function ReceiptCard({ receipt }: ReceiptCardProps) {
   }
 
   const upstreamUrl = receipt.upstream_url;
-  const upstreamIsLink = isSafeUpstreamUrl(upstreamUrl);
+  // The link branch is gated on the length cap too (M-1): isSafeUpstreamUrl
+  // alone would accept a 1 MB https URL and render it as a 1 MB link.
+  const upstreamIsLink =
+    isRenderableReceiptString(upstreamUrl, MAX_RECEIPT_UPSTREAM_URL_LENGTH) &&
+    isSafeUpstreamUrl(upstreamUrl);
   // Defense in depth (B-1b): assertValidBody now rejects malformed
   // receipts, but a receipt can still reach this card from any other
-  // caller — so every rendered field is total over non-string values.
+  // caller — so every rendered field is total over non-string values
+  // AND over-cap values (M-1, same caps as the API layer).
   // A number/object receipt_id, sha or fetched_at renders "—", never
   // throws and never hands React an object child.
-  const receiptId =
-    typeof receipt.receipt_id === "string" && receipt.receipt_id.trim() !== ""
-      ? receipt.receipt_id
-      : "—";
-  const sha = typeof receipt.raw_response_sha256 === "string" ? receipt.raw_response_sha256 : undefined;
+  const receiptId = isRenderableReceiptString(receipt.receipt_id, MAX_RECEIPT_ID_LENGTH)
+    ? receipt.receipt_id
+    : "—";
+  const sha = isRenderableReceiptString(receipt.raw_response_sha256, MAX_RECEIPT_SHA_LENGTH)
+    ? receipt.raw_response_sha256
+    : undefined;
+  const fetchedAt = isRenderableReceiptString(receipt.fetched_at, MAX_RECEIPT_FETCHED_AT_LENGTH)
+    ? formatDate(receipt.fetched_at)
+    : "—";
 
   return (
     <section style={styles.card} aria-label="Verification receipt">
@@ -233,16 +265,17 @@ export function ReceiptCard({ receipt }: ReceiptCardProps) {
           // Deliberately NOT a link: unsafe scheme, relative URL, or
           // missing value — rendered as plain text so it cannot execute.
           // Whitespace-only/empty strings pass the typeof check but must
-          // render "—", not a blank span (J2 R4 B-1, re-opened) — same
-          // trim rule as receipt_id / shortenSha / formatDate.
-          <span style={styles.plainUrl}>{typeof upstreamUrl === "string" && upstreamUrl.trim() !== "" ? upstreamUrl : "—"}</span>
+          // render "—", not a blank span (J2 R4 B-1, re-opened); over-cap
+          // strings render "—", never verbatim (J2 R4 M-1) — same
+          // renderability rule as the other three fields.
+          <span style={styles.plainUrl}>{isRenderableReceiptString(upstreamUrl, MAX_RECEIPT_UPSTREAM_URL_LENGTH) ? upstreamUrl : "—"}</span>
         )}
       </div>
       <div style={styles.row}>
         <span style={styles.label}>Response SHA-256</span>
         <span>
           <code style={styles.mono} title={sha}>
-            {shortenSha(receipt.raw_response_sha256)}
+            {shortenSha(sha)}
           </code>
           <button type="button" style={styles.copyBtn} onClick={copySha}>
             {copied ? "Copied" : "Copy"}
@@ -251,7 +284,7 @@ export function ReceiptCard({ receipt }: ReceiptCardProps) {
       </div>
       <div style={styles.row}>
         <span style={styles.label}>Fetched at</span>
-        <span style={styles.value}>{formatDate(receipt.fetched_at)}</span>
+        <span style={styles.value}>{fetchedAt}</span>
       </div>
     </section>
   );

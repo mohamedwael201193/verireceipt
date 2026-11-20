@@ -263,6 +263,38 @@ describe("malformed receipt fields — defense in depth (J2 R2 B-1b)", () => {
   });
 });
 
+describe("over-cap receipt fields render '—', never verbatim (J2 R4 M-1)", () => {
+  // The caps live in the API layer (assertValidBody) AND in the card's
+  // own rendering path: through the card's non-API path a 1 MB field
+  // used to render verbatim (~1,002,000 chars of HTML).
+  const ONE_MB = "x".repeat(1_000_000);
+
+  it.each([
+    ["receipt_id", { ...receipt, receipt_id: ONE_MB }],
+    ["upstream_url", { ...receipt, upstream_url: ONE_MB }],
+    ["raw_response_sha256", { ...receipt, raw_response_sha256: ONE_MB }],
+    ["fetched_at", { ...receipt, fetched_at: ONE_MB }],
+  ])("renders '—' for a 1 MB %s and keeps the card HTML small", (_field, bad) => {
+    const { container } = render(<ReceiptCard receipt={bad} />);
+    // Only the over-cap row falls back: the other three fields are valid.
+    expect(screen.getAllByText("—")).toHaveLength(1);
+    // The 1 MB value must not appear anywhere in the rendered output.
+    expect(container.textContent).not.toContain(ONE_MB);
+    expect(container.innerHTML.length).toBeLessThan(10_000);
+  });
+
+  it("accepts receipt_id at exactly the 512-char cap and dashes at 513", () => {
+    const atCap = { ...receipt, receipt_id: "r".repeat(512) };
+    const { unmount } = render(<ReceiptCard receipt={atCap} />);
+    expect(screen.getByText("r".repeat(512))).toBeTruthy();
+    expect(screen.queryAllByText("—")).toHaveLength(0);
+    unmount();
+    const overCap = { ...receipt, receipt_id: "r".repeat(513) };
+    render(<ReceiptCard receipt={overCap} />);
+    expect(screen.getAllByText("—")).toHaveLength(1);
+  });
+});
+
 describe("upstream URL userinfo / encoding tricks (J2 R2 M-3)", () => {
   it.each([
     "https://user:pass@evil.com/",
