@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import vm from "node:vm";
-import { ApiError, getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx } from "./api";
+import { ApiError, assertValidParam, getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx } from "./api";
 
 const fetchMock = vi.fn();
 
@@ -806,18 +806,91 @@ describe("extended blank-rendering family in receipt fields (J2 R6 B-1)", () => 
     });
   });
 
-  it("accepts a receipt_id carrying a keep-list character (U+2065, lone combining mark)", async () => {
-    // The strip must stay narrow: U+2065 (unassigned, visible tofu)
-    // and lone U+0301 (dotted-circle placeholder) are visible, so a
-    // receipt carrying them is valid — rejecting them would be a
-    // false positive on real data.
-    for (const receipt_id of ["rcpt_\u2065TEST", "rcpt_\u0301TEST"]) {
+  it("accepts a receipt_id carrying a keep-list character (lone combining mark U+0301)", async () => {
+    // The strip must stay narrow: a lone U+0301 draws a small mark
+    // (57 ink px at 64px in Chromium 156), so a receipt carrying it
+    // is valid — rejecting it would be a false positive on real data.
+    // U+2065 is NOT in this test any more: it is Default_Ignorable
+    // (0 ink px in the same Chromium) and is now rejected — see the
+    // Cc battery below.
+    for (const receipt_id of ["rcpt_\u0301TEST"]) {
       fetchMock.mockResolvedValue(
         jsonResponse({ ...baseBody, receipt: { ...sampleReceipt, receipt_id } }),
       );
       const res = await getTx({ tx_hash: "0x00", chain: "sepolia" });
       expect(res.receipt.receipt_id).toBe(receipt_id);
     }
+  });
+});
+
+describe("control characters (Cc) in receipt fields (J2 R7 B-1)", () => {
+  const baseBody = {
+    tx_hash: "0x00",
+    status: "not_found",
+    from: null,
+    to: null,
+    block_number: null,
+    value_eth: null,
+  };
+  // All 65 \p{Cc} code points × all 4 receipt fields = 260 cases.
+  // J2's round-6 repro: a 200 whose receipt carries a Cc-only char
+  // in ANY field was accepted 240/240 (only U+000B/U+000C rejected,
+  // via trim()); assertValidParam accepted 60/62 Cc-only params.
+  const range = (start: number, end: number): number[] => {
+    const out: number[] = [];
+    for (let cp = start; cp <= end; cp++) out.push(cp);
+    return out;
+  };
+  const CODE_POINTS = [...range(0x00, 0x1f), ...range(0x7f, 0x9f)];
+  const CC = CODE_POINTS.map((cp) => String.fromCodePoint(cp));
+  const fields = ["receipt_id", "raw_response_sha256", "fetched_at", "upstream_url"] as const;
+  const cases = fields.flatMap((field) =>
+    CC.map(
+      (value) =>
+        [`${field} is control-only`, { ...sampleReceipt, [field]: value }] as const,
+    ),
+  );
+
+  it("covers exactly the 65 control code points", () => {
+    expect(CODE_POINTS).toHaveLength(65);
+    expect(new Set(CODE_POINTS).size).toBe(65);
+  });
+
+  it.each(cases)("rejects a 200 whose receipt has %s", async (_label, receipt) => {
+    fetchMock.mockResolvedValue(jsonResponse({ ...baseBody, receipt }));
+    await expect(getTx({ tx_hash: "0x00", chain: "sepolia" })).rejects.toMatchObject({
+      status: 200,
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it.each(CC)("assertValidParam rejects a Cc-only param %s", (value) => {
+    expect(() => assertValidParam(value, "tx_hash")).toThrow(ApiError);
+    try {
+      assertValidParam(value, "tx_hash");
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toMatchObject({ status: 400, code: "INVALID_PARAM" });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a receipt_id that is only U+2065 (Default_Ignorable, ex keep-list)", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ ...baseBody, receipt: { ...sampleReceipt, receipt_id: "\u2065" } }),
+    );
+    await expect(getTx({ tx_hash: "0x00", chain: "sepolia" })).rejects.toMatchObject({
+      status: 200,
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it("accepts a receipt_id with a visible character next to a control character", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ ...baseBody, receipt: { ...sampleReceipt, receipt_id: "rcpt_\u0001TEST" } }),
+    );
+    const res = await getTx({ tx_hash: "0x00", chain: "sepolia" });
+    expect(res.receipt.receipt_id).toBe("rcpt_\u0001TEST");
   });
 });
 
@@ -899,6 +972,82 @@ describe("empty-message and throwing-accessor errors (J2 R6 M-1/M-2)", () => {
       expect(caught).toBeInstanceOf(ApiError);
       expect(caught).toMatchObject({ status: 0, code: "UNKNOWN" });
     }
+  });
+
+  it.each(["\u200B", "\u200B\u200C", " \u200B ", "\u00AD", "\uFEFF"])(
+    "classifies fetch() throwing an invisible-only message %s as UNKNOWN, not NETWORK_ERROR (J2 R7 M-1a)",
+    async (message) => {
+      fetchMock.mockRejectedValue({ message });
+      await expect(getHealth()).rejects.toMatchObject({ status: 0, code: "UNKNOWN" });
+      try {
+        await getHealth();
+        expect.unreachable();
+      } catch (err) {
+        expect((err as Error).message).toBe("Unknown request failure");
+      }
+    },
+  );
+
+  it("still reports NETWORK_ERROR with the message preserved when a visible character sits next to an invisible one (J2 R7 M-1a)", async () => {
+    fetchMock.mockRejectedValue({ message: "net down\u200B" });
+    try {
+      await getHealth();
+      expect.unreachable();
+    } catch (caught) {
+      expect(caught).toMatchObject({ status: 0, code: "NETWORK_ERROR" });
+      expect((caught as Error).message).toBe("net down\u200B");
+    }
+  });
+});
+
+describe("error-body message fallback (J2 R7 M-1b)", () => {
+  // A 500 body whose message/error candidates are empty, blank or
+  // invisible-only must fall back to the default status message —
+  // never surface "" / "   " / "\u200B" — and a blank `message` must
+  // never hide a real `error`.
+  it.each([
+    ["empty message", { message: "" }, "Request failed with status 500"],
+    ["whitespace-only message", { message: "   " }, "Request failed with status 500"],
+    ["invisible-only message", { message: "\u200B" }, "Request failed with status 500"],
+    ["blank message hiding a real error", { message: "  ", error: "Real error" }, "Real error"],
+    ["empty error", { error: "" }, "Request failed with status 500"],
+  ])("a 500 with %s surfaces %s", async (_label, body, expected) => {
+    fetchMock.mockResolvedValue(jsonResponse(body, 500));
+    try {
+      await getHealth();
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 500 });
+      expect((err as Error).message).toBe(expected);
+    }
+  });
+
+  it("falls through a blank message to a real error, and keeps a visible message verbatim", async () => {
+    // Fresh Response per call (a Response body can only be consumed once).
+    const fail500 = (body: unknown) => {
+      fetchMock.mockImplementation(() => Promise.resolve(jsonResponse(body, 500)));
+    };
+    const messageOf = async (): Promise<string> => {
+      try {
+        await getHealth();
+        expect.unreachable();
+      } catch (err) {
+        expect(err).toBeInstanceOf(ApiError);
+        expect(err).toMatchObject({ status: 500 });
+        return (err as Error).message;
+      }
+    };
+    fail500({ message: "", error: "Real error" });
+    expect(await messageOf()).toBe("Real error");
+    fail500({ message: "Boom" });
+    expect(await messageOf()).toBe("Boom");
+    // No candidates at all: the default status message.
+    fail500({});
+    expect(await messageOf()).toBe("Request failed with status 500");
+    // A non-string candidate is skipped, not surfaced.
+    fail500({ message: 123, error: "Real error" });
+    expect(await messageOf()).toBe("Real error");
   });
 });
 

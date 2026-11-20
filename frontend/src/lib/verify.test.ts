@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import vm from "node:vm";
 import { sha256Hex, verifyReceipt } from "./verify";
 import type { Receipt } from "./types";
 
@@ -398,5 +399,114 @@ describe("SharedArrayBuffer bodies verify (J2 R6 M-3)", () => {
     await expect(
       verifyReceipt(receiptWith(EMPTY_SHA), spoof as unknown as ArrayBuffer),
     ).resolves.toEqual({ verified: false, computedSha: "" });
+  });
+});
+
+describe("tag-spoofed SharedArrayBuffer verifies (J2 R7 M-3)", () => {
+  // J2's round-6 repro: a SharedArrayBuffer with an own
+  // Symbol.toStringTag of "ArrayBuffer" made toString report
+  // "[object ArrayBuffer]", so the SAB-copy branch was skipped, the
+  // raw SAB view reached subtle.digest (TypeError), and
+  // verifyReceipt returned {verified:false} even with the correct
+  // digest — a false negative. SAB detection is now tag-independent
+  // (identity + `instanceof ArrayBuffer`), and bare buffers are
+  // always copied into a fresh plain ArrayBuffer before hashing.
+  const ABC_SHA =
+    "0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+  const EMPTY_SHA =
+    "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+  function sabOf(text: string): SharedArrayBuffer {
+    const bytes = new TextEncoder().encode(text);
+    const sab = new SharedArrayBuffer(bytes.byteLength);
+    new Uint8Array(sab).set(bytes);
+    return sab;
+  }
+
+  /** A real SAB whose toString tag claims it is an ArrayBuffer. */
+  function spoofedSabOf(text: string, tag = "ArrayBuffer"): SharedArrayBuffer {
+    const sab = sabOf(text);
+    Object.defineProperty(sab, Symbol.toStringTag, { value: tag, configurable: true });
+    expect(Object.prototype.toString.call(sab)).toBe(`[object ${tag}]`);
+    return sab;
+  }
+
+  it("verifies a bare tag-spoofed SAB with the correct digest", async () => {
+    const result = await verifyReceipt(receiptWith(ABC_SHA), spoofedSabOf("abc"));
+    expect(result).toEqual({ verified: true, computedSha: ABC_SHA });
+  });
+
+  it("fails a bare tag-spoofed SAB against the wrong digest, with the correct computedSha", async () => {
+    const result = await verifyReceipt(receiptWith(EMPTY_SHA), spoofedSabOf("abc"));
+    expect(result.verified).toBe(false);
+    expect(result.computedSha).toBe(ABC_SHA);
+  });
+
+  it("verifies a tag-spoofed SAB even when the tag is spoofed to something else entirely", async () => {
+    const result = await verifyReceipt(
+      receiptWith(ABC_SHA),
+      spoofedSabOf("abc", "TotallyNotABuffer"),
+    );
+    expect(result).toEqual({ verified: true, computedSha: ABC_SHA });
+  });
+
+  it("verifies a Uint8Array view over a tag-spoofed SAB (only its own bytes)", async () => {
+    const view = new Uint8Array(spoofedSabOf("xxabcyy"), 2, 3);
+    const result = await verifyReceipt(receiptWith(ABC_SHA), view);
+    expect(result).toEqual({ verified: true, computedSha: ABC_SHA });
+  });
+
+  it("verifies an offset view and a DataView over a tag-spoofed SAB", async () => {
+    const sab = spoofedSabOf("abc");
+    const view = new Uint8Array(sab, 0, 3);
+    await expect(verifyReceipt(receiptWith(ABC_SHA), view)).resolves.toEqual({
+      verified: true,
+      computedSha: ABC_SHA,
+    });
+    const dataView = new DataView(spoofedSabOf("abc"));
+    await expect(
+      verifyReceipt(receiptWith(ABC_SHA), dataView as unknown as ArrayBuffer),
+    ).resolves.toEqual({ verified: true, computedSha: ABC_SHA });
+  });
+
+  it("sha256Hex hashes a bare tag-spoofed SAB identically to its string form", async () => {
+    await expect(sha256Hex(spoofedSabOf("abc"))).resolves.toBe(ABC_SHA);
+    await expect(sha256Hex(new Uint8Array(spoofedSabOf("abc")))).resolves.toBe(ABC_SHA);
+  });
+
+  it("still rejects a Symbol.toStringTag-spoofed plain object (tag 'ArrayBuffer')", async () => {
+    // The tag-independent identity check must not become a spoof
+    // bypass: a plain object claiming the ArrayBuffer tag has no
+    // buffer of its own, so it is rejected exactly as before.
+    const spoof = { [Symbol.toStringTag]: "ArrayBuffer" } as unknown as SharedArrayBuffer;
+    await expect(sha256Hex(spoof)).rejects.toThrow(TypeError);
+    await expect(
+      verifyReceipt(receiptWith(EMPTY_SHA), spoof as unknown as ArrayBuffer),
+    ).resolves.toEqual({ verified: false, computedSha: "" });
+  });
+
+  it("verifies a cross-realm SharedArrayBuffer and a cross-realm ArrayBuffer view", async () => {
+    // instanceof fails across realms, so the tag + instanceof legs
+    // alone would miss these; the identity check + copy cover them.
+    const ctx = vm.createContext({});
+    const xSab = vm.runInContext(
+      "new SharedArrayBuffer(3)",
+      ctx,
+    ) as SharedArrayBuffer;
+    new Uint8Array(xSab).set(new TextEncoder().encode("abc"));
+    expect(xSab instanceof SharedArrayBuffer).toBe(false);
+    await expect(verifyReceipt(receiptWith(ABC_SHA), xSab)).resolves.toEqual({
+      verified: true,
+      computedSha: ABC_SHA,
+    });
+    const xView = vm.runInContext(
+      "new Uint8Array([97, 98, 99])",
+      ctx,
+    ) as Uint8Array;
+    expect(xView.buffer instanceof ArrayBuffer).toBe(false);
+    await expect(verifyReceipt(receiptWith(ABC_SHA), xView)).resolves.toEqual({
+      verified: true,
+      computedSha: ABC_SHA,
+    });
   });
 });

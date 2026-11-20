@@ -356,6 +356,63 @@ describe("extended blank-rendering family renders '—', never blank (J2 R6 B-1 
   });
 });
 
+describe("control characters (Cc) render '—', never blank (J2 R7 B-1)", () => {
+  // All 65 \p{Cc} code points × all 4 receipt fields = 260 cases.
+  // J2's round-6 repro: a card with all four fields "\u0001" rendered
+  // zero "—" with the raw control char in the HTML.
+  const range = (start: number, end: number): number[] => {
+    const out: number[] = [];
+    for (let cp = start; cp <= end; cp++) out.push(cp);
+    return out;
+  };
+  const CODE_POINTS = [...range(0x00, 0x1f), ...range(0x7f, 0x9f)];
+  const CC = CODE_POINTS.map((cp) => String.fromCodePoint(cp));
+  const fields = ["receipt_id", "upstream_url", "raw_response_sha256", "fetched_at"] as const;
+
+  it("covers exactly the 65 control code points", () => {
+    expect(CODE_POINTS).toHaveLength(65);
+    expect(new Set(CODE_POINTS).size).toBe(65);
+  });
+
+  it.each(
+    fields.flatMap((field) =>
+      CC.map((value) => [field, value] as const),
+    ),
+  )("renders '—' for %s set to a control-only string", (field, value) => {
+    const bad = { ...receipt, [field]: value };
+    const { container, unmount } = render(<ReceiptCard receipt={bad} />);
+    try {
+      expect(screen.getAllByText("—")).toHaveLength(1);
+      expect(container.textContent).not.toContain(value);
+      if (field === "upstream_url") {
+        expect(screen.queryByRole("link")).toBeNull();
+      }
+    } finally {
+      unmount();
+    }
+  });
+
+  it.each(["\u0001", "\u007F", "\u0085", "\u009F"])(
+    "renders four '—' with all four fields set to %s and no raw control char in the HTML",
+    (value) => {
+      const bad = {
+        receipt_id: value,
+        upstream_url: value,
+        raw_response_sha256: value,
+        fetched_at: value,
+      };
+      const { container, unmount } = render(<ReceiptCard receipt={bad} />);
+      try {
+        expect(screen.getAllByText("—")).toHaveLength(4);
+        expect(container.textContent).not.toContain(value);
+        expect(screen.queryByRole("link")).toBeNull();
+      } finally {
+        unmount();
+      }
+    },
+  );
+});
+
 describe("over-cap receipt fields render '—', never verbatim (J2 R4 M-1)", () => {
   // The caps live in the API layer (assertValidBody) AND in the card's
   // own rendering path: through the card's non-API path a 1 MB field
