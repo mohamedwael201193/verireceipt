@@ -272,6 +272,9 @@ describe("invisible format characters render '—', never blank (J2 R5 B-1)", ()
     "\u200D",
     "\u2060",
     "\u180E",
+    "\u00AD", // SOFT HYPHEN (J2 R6 M-4: was omitted from this battery)
+    "\uFEFF", // BOM (J2 R6 M-4: was omitted from this battery)
+    "\u202E", // RIGHT-TO-LEFT OVERRIDE (J2 R6 M-4: was omitted)
     "\u200B\u200B",
     " \u200B ",
     "\u200B \u200C \u200D",
@@ -283,6 +286,60 @@ describe("invisible format characters render '—', never blank (J2 R5 B-1)", ()
       INVISIBLE.map((value) => [field, value] as const),
     ),
   )("renders '—' for %s set to an invisible-only string", (field, value) => {
+    const bad = { ...receipt, [field]: value };
+    const { container, unmount } = render(<ReceiptCard receipt={bad} />);
+    try {
+      // Only the blanked row falls back: the other three fields are valid.
+      expect(screen.getAllByText("—")).toHaveLength(1);
+      // The raw invisible character must not appear anywhere in the HTML.
+      expect(container.textContent).not.toContain(value);
+      if (field === "upstream_url") {
+        expect(screen.queryByRole("link")).toBeNull();
+      }
+    } finally {
+      unmount();
+    }
+  });
+});
+
+describe("extended blank-rendering family renders '—', never blank (J2 R6 B-1 / M-4)", () => {
+  // Same 295 code points as the formatter + API batteries: every Cf
+  // isolate/format survivor, every variation selector / CGJ, every
+  // Hangul filler, and U+2800 — each one in each of the 4 receipt
+  // fields, at card level. J2's round-5 repro was 84/84 card failures
+  // on this family; the card must render "—" with zero raw chars in
+  // the HTML for every one of them.
+  const range = (start: number, end: number): number[] => {
+    const out: number[] = [];
+    for (let cp = start; cp <= end; cp++) out.push(cp);
+    return out;
+  };
+  const CODE_POINTS = [
+    ...range(0x2066, 0x2069),
+    0x206a, 0x206f, 0x061c, ...range(0x0600, 0x0605), 0x06dd, 0x070f,
+    ...range(0x0890, 0x0891), 0x08e2, ...range(0x1bca0, 0x1bca3), 0x1d173,
+    0x13430, ...range(0xfff9, 0xfffb), 0xe0001, 0xe007f,
+    ...range(0x180b, 0x180d),
+    0x180f,
+    ...range(0xfe00, 0xfe0f),
+    ...range(0xe0100, 0xe01ef),
+    0x034f,
+    0x115f, 0x1160, 0x3164, 0xffa0,
+    0x2800,
+  ];
+  const EXTENDED = CODE_POINTS.map((cp) => String.fromCodePoint(cp));
+  const fields = ["receipt_id", "upstream_url", "raw_response_sha256", "fetched_at"] as const;
+
+  it("covers exactly the 295 extended-family code points", () => {
+    expect(CODE_POINTS).toHaveLength(295);
+    expect(new Set(CODE_POINTS).size).toBe(295);
+  });
+
+  it.each(
+    fields.flatMap((field) =>
+      EXTENDED.map((value) => [field, value] as const),
+    ),
+  )("renders '—' for %s set to an extended-family-only string", (field, value) => {
     const bad = { ...receipt, [field]: value };
     const { container, unmount } = render(<ReceiptCard receipt={bad} />);
     try {

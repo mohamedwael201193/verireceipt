@@ -53,12 +53,35 @@ function isArrayBuffer(value: unknown): value is ArrayBuffer {
   }
 }
 
-function toBytes(data: string | Uint8Array | ArrayBuffer): Uint8Array {
+/**
+ * SharedArrayBuffer check, same shape as isArrayBuffer: the tag alone
+ * is spoofable (`[Symbol.toStringTag]`), so the identity check closes
+ * it — a real SharedArrayBuffer is its own view's buffer, a spoof's
+ * is a fresh empty buffer. A SharedArrayBuffer can never be detached,
+ * so there is no B-2 interaction here.
+ */
+function isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer {
+  if (value === null || typeof value !== "object") return false;
+  if (Object.prototype.toString.call(value) !== "[object SharedArrayBuffer]") return false;
+  try {
+    return new Uint8Array(value as SharedArrayBuffer).buffer === value;
+  } catch {
+    return false;
+  }
+}
+
+function toBytes(data: string | Uint8Array | ArrayBuffer | SharedArrayBuffer): Uint8Array {
   if (typeof data === "string") return new TextEncoder().encode(data);
   // ArrayBuffer bodies (e.g. `await res.arrayBuffer()`) are a natural
   // way to hand a fetched upstream body to verification (J2 R3) — accept
   // them instead of silently failing the verification.
   if (isArrayBuffer(data)) return new Uint8Array(data);
+  // A bare SharedArrayBuffer (J2 R6 M-3): WebCrypto rejects a view on
+  // one with TypeError, so copy its bytes into a fresh ArrayBuffer.
+  // The tag + identity check above keeps spoofs out, exactly as for
+  // ArrayBuffer; a SharedArrayBuffer can never be detached, so the
+  // B-2 fail-closed guarantee is untouched.
+  if (isSharedArrayBuffer(data)) return new Uint8Array(data).slice();
   // ArrayBuffer.isView (not instanceof) — jsdom TextEncoder returns a
   // Uint8Array from another realm, which fails instanceof.
   if (ArrayBuffer.isView(data)) {
@@ -79,6 +102,20 @@ function toBytes(data: string | Uint8Array | ArrayBuffer): Uint8Array {
     } catch {
       throw new TypeError("sha256Hex: cannot hash a view of a detached ArrayBuffer");
     }
+    // SharedArrayBuffer-backed views (J2 R6 M-3): WebCrypto throws
+    // TypeError for a view on a SharedArrayBuffer, so a SAB-backed
+    // body could never verify even when the bytes matched — a false
+    // negative. Copy the view's own bytes (byteOffset/byteLength, so
+    // offset views and DataViews hash exactly their own bytes) into a
+    // fresh ArrayBuffer. Only SAB-backed views copy: a plain
+    // ArrayBuffer-backed view keeps the zero-copy path. The detached
+    // probe above still runs first — a detached view throws before
+    // any copy — so the B-2 guarantee is unchanged.
+    if (Object.prototype.toString.call(data.buffer) === "[object SharedArrayBuffer]") {
+      return new Uint8Array(
+        new Uint8Array(data.buffer as ArrayBuffer, data.byteOffset, data.byteLength),
+      );
+    }
     return data as Uint8Array;
   }
   throw new TypeError("sha256Hex expects a string, Uint8Array or ArrayBuffer");
@@ -89,7 +126,9 @@ function normalizeHash(hash: string): string {
 }
 
 /** SHA-256 of `data`, returned 0x-prefixed to match receipt digests. */
-export async function sha256Hex(data: string | Uint8Array | ArrayBuffer): Promise<string> {
+export async function sha256Hex(
+  data: string | Uint8Array | ArrayBuffer | SharedArrayBuffer,
+): Promise<string> {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) {
     throw new Error(
@@ -109,8 +148,8 @@ export async function sha256Hex(data: string | Uint8Array | ArrayBuffer): Promis
  * case). Returns `{ verified, computedSha }`.
  *
  * Malformed input (null / non-object receipt, non-string recorded hash,
- * non-string / non-Uint8Array / non-ArrayBuffer body) returns
- * `{ verified: false, computedSha: "" }` instead of throwing — a bad
+ * non-string / non-Uint8Array / non-ArrayBuffer / non-SharedArrayBuffer
+ * body) returns `{ verified: false, computedSha: "" }` instead of throwing — a bad
  * receipt is a failed verification, not a crash. A detached view or
  * detached DataView body (J2 R5 B-2) is malformed the same way: it
  * returns `{ verified: false }` instead of throwing out of
@@ -121,7 +160,7 @@ export async function sha256Hex(data: string | Uint8Array | ArrayBuffer): Promis
  */
 export async function verifyReceipt(
   receipt: Receipt | null | undefined,
-  rawBody: string | Uint8Array | ArrayBuffer | null | undefined,
+  rawBody: string | Uint8Array | ArrayBuffer | SharedArrayBuffer | null | undefined,
 ): Promise<ReceiptVerification> {
   // Check WebCrypto FIRST: unavailable crypto must throw even for
   // malformed input — never a silent verdict without a real hash.
@@ -137,7 +176,8 @@ export async function verifyReceipt(
     typeof receipt.raw_response_sha256 !== "string" ||
     (typeof rawBody !== "string" &&
       !ArrayBuffer.isView(rawBody) &&
-      !isArrayBuffer(rawBody))
+      !isArrayBuffer(rawBody) &&
+      !isSharedArrayBuffer(rawBody))
   ) {
     return { verified: false, computedSha: "" };
   }

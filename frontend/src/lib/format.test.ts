@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { formatDate, formatEth, formatUsd, formatUsdPrecise, shortenHash, shortenSha } from "./format";
+import {
+  formatDate,
+  formatEth,
+  formatUsd,
+  formatUsdPrecise,
+  hasVisibleCharacter,
+  shortenHash,
+  shortenSha,
+} from "./format";
 
 describe("formatUsd", () => {
   it("formats whole dollars without cents", () => {
@@ -112,6 +120,9 @@ describe("invisible format characters render '—' (J2 R5 B-1)", () => {
     "\u200D", // ZWJ
     "\u2060", // WORD JOINER
     "\u180E", // Mongolian vowel separator
+    "\u00AD", // SOFT HYPHEN (J2 R6 M-4: card battery omitted it)
+    "\uFEFF", // BOM (J2 R6 M-4: card battery omitted it)
+    "\u202E", // RIGHT-TO-LEFT OVERRIDE (J2 R6 M-4: card battery omitted it)
     "\u200B\u200B", // doubled
     " \u200B ", // mixed with spaces
     "\u200B \u200C \u200D", // mixed multiples
@@ -142,8 +153,7 @@ describe("invisible format characters render '—' (J2 R5 B-1)", () => {
   });
 });
 
-describe("formatDate over-long invalid passthrough (J2 R5 m5)", () => {
-  it("renders '—' for an over-long invalid string instead of passing 100k chars through", () => {
+describe("formatDate over-long invalid passthrough (J2 R5 m5)", () => {  it("renders '—' for an over-long invalid string instead of passing 100k chars through", () => {
     expect(formatDate("x".repeat(100_000))).toBe("—");
     expect(formatDate("x".repeat(129))).toBe("—");
   });
@@ -191,5 +201,77 @@ describe("formatters total over non-string values (J2 R2 B-1b)", () => {
     expect(shortenHash("")).toBe("—");
     expect(shortenHash("   ")).toBe("—");
     expect(shortenHash("\t\n")).toBe("—");
+  });
+});
+
+describe("extended blank-rendering family renders '—' (J2 R6 B-1)", () => {
+  // Every code point J2's round-5 repro listed as surviving the R5
+  // literal strip list, as ranges expanded to single code points
+  // (295 in total). A string of only one such character must be blank
+  // in every formatter — the R5 list covered 8 of these and missed
+  // the rest, so the regression battery covers the FULL family, not
+  // a sample of it.
+  const range = (start: number, end: number): number[] => {
+    const out: number[] = [];
+    for (let cp = start; cp <= end; cp++) out.push(cp);
+    return out;
+  };
+  const CODE_POINTS = [
+    // Cf isolates / format: U+2066–U+2069, U+206A, U+206F, U+061C,
+    // U+0600–U+0605, U+06DD, U+070F, U+0890–U+0891, U+08E2,
+    // U+1BCA0–U+1BCA3, U+1D173, U+13430, U+FFF9–U+FFFB, U+E0001, U+E007F
+    ...range(0x2066, 0x2069),
+    0x206a, 0x206f, 0x061c, ...range(0x0600, 0x0605), 0x06dd, 0x070f,
+    ...range(0x0890, 0x0891), 0x08e2, ...range(0x1bca0, 0x1bca3), 0x1d173,
+    0x13430, ...range(0xfff9, 0xfffb), 0xe0001, 0xe007f,
+    // Mn variation selectors / CGJ: U+180B–U+180D, U+180F,
+    // U+FE00–U+FE0F, U+E0100–U+E01EF, U+034F
+    ...range(0x180b, 0x180d),
+    0x180f,
+    ...range(0xfe00, 0xfe0f),
+    ...range(0xe0100, 0xe01ef),
+    0x034f,
+    // Lo Hangul fillers: U+115F, U+1160, U+3164, U+FFA0
+    0x115f, 0x1160, 0x3164, 0xffa0,
+    // So blank cell: U+2800
+    0x2800,
+  ];
+  const EXTENDED = CODE_POINTS.map((cp) => String.fromCodePoint(cp));
+
+  it("covers exactly the 295 extended-family code points", () => {
+    expect(CODE_POINTS).toHaveLength(295);
+    expect(new Set(CODE_POINTS).size).toBe(295);
+  });
+
+  it.each(EXTENDED)("hasVisibleCharacter is false for U+%s", (value) => {
+    expect(hasVisibleCharacter(value)).toBe(false);
+  });
+
+  it.each(EXTENDED)("formatDate renders '—' for %s", (value) => {
+    expect(formatDate(value)).toBe("—");
+  });
+
+  it.each(EXTENDED)("shortenHash renders '—' for %s", (value) => {
+    expect(shortenHash(value)).toBe("—");
+  });
+
+  it.each(EXTENDED)("shortenSha renders '—' for %s", (value) => {
+    expect(shortenSha(value)).toBe("—");
+  });
+
+  it.each(EXTENDED)("formatEth renders '—' for %s", (value) => {
+    expect(formatEth(value)).toBe("—");
+  });
+
+  it("does NOT strip the keep-list: U+2065 (unassigned Cn, tofu box) and lone combining marks (dotted-circle placeholder)", () => {
+    // These render visibly in Chrome, so they must NOT be treated as
+    // blank — the category strip must stay narrow (no blanket \p{Mn}).
+    for (const value of ["\u2065", "\u0301", "\u0610", "\u17B4", "\u17B5"]) {
+      expect(hasVisibleCharacter(value)).toBe(true);
+    }
+    expect(formatDate("\u0301")).toBe("\u0301");
+    expect(shortenSha("\u2065")).toBe("\u2065");
+    expect(shortenHash("\u2065")).toBe("\u2065");
+    expect(shortenSha("0xabc\u0301")).toBe("0xabc\u0301");
   });
 });

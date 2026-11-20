@@ -5,21 +5,40 @@ const usd = new Intl.NumberFormat("en-US", {
 });
 
 /**
- * Invisible format characters that `String.trim()` does NOT strip
- * (J2 R5 B-1, re-opened): U+200B (ZWSP), U+200C (ZWNJ), U+200D (ZWJ),
- * U+200E/U+200F (LRM/RLM), U+202A–U+202E (bidi controls),
- * U+2060–U+2064 (word joiner / invisible operators), U+180E (Mongolian
- * vowel separator), U+00AD (soft hyphen), U+FEFF (BOM). `trim()` strips
- * whitespace (incl. NBSP and BOM at the edges) but leaves these in
- * place, so a string of only such characters passed every
- * `trim().length > 0` blank-render guard in this branch and rendered
- * as a visually blank cell — or passed API validation as a receipt
- * field. A string "has a visible character" only if, after removing
- * these format characters, something non-whitespace remains. A visible
- * character next to a format character (e.g. "a\u200Bb") still counts:
- * only all-invisible strings are blank.
+ * Blank-rendering characters that `String.trim()` does NOT strip
+ * (J2 R6 B-1 — category-based, replacing the R5 literal list, which
+ * missed whole classes of the same bug). A string "has a visible
+ * character" only if, after removing these, something non-whitespace
+ * remains. A visible character next to one (e.g. "a\u200Bb") still
+ * counts: only all-invisible strings are blank.
+ *
+ * The strip is a Unicode CATEGORY, not a literal list, so no future
+ * code point in the class can slip through:
+ * - `\p{Cf}` (format controls): the whole R5 list (U+00AD, U+180E,
+ *   U+200B–U+200F, U+202A–U+202E, U+2060–U+2064, U+FEFF) plus the
+ *   R6 survivors — isolates U+2066–U+2069, U+206A, U+206F, Arabic
+ *   marks U+061C, U+0600–U+0605, U+06DD, U+070F, U+0890–U+0891,
+ *   U+08E2, shorthand U+1BCA0–U+1BCA3, U+1D173, U+13430,
+ *   interlinear U+FFF9–U+FFFB, tags U+E0001, U+E007F.
+ * - Variation selectors + CGJ (Mn, but ONLY these — a blanket `\p{Mn}`
+ *   would also strip lone combining marks, which render visibly):
+ *   U+180B–U+180D, U+180F, U+FE00–U+FE0F, U+E0100–U+E01EF, U+034F.
+ * - Hangul fillers (Lo, invisible by construction): U+115F, U+1160,
+ *   U+3164, U+FFA0.
+ * - U+2800 BRAILLE PATTERN BLANK (So, not White_Space — trim() does
+ *   not strip it, and it renders as an empty cell).
+ *
+ * Deliberately NOT stripped (verified keep-list, see format.test.ts):
+ * U+2065 (unassigned, Cn — renders as a visible tofu box) and lone
+ * combining marks U+0301, U+0610, U+17B4, U+17B5 (Mn — Chrome renders
+ * them with a dotted-circle placeholder, i.e. visibly).
+ *
+ * Unicode property escapes need ES2018+ (project target ES2022,
+ * Node 24, modern browsers) — verified in Node 24 and in the
+ * jsdom/vitest suite against every code point above.
  */
-const INVISIBLE_FORMAT_CHARS = /[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g;
+const INVISIBLE_FORMAT_CHARS =
+  /[\p{Cf}\u180B-\u180D\u180F\uFE00-\uFE0F\u{E0100}-\u{E01EF}\u034F\u115F\u1160\u3164\uFFA0\u2800]/gu;
 
 /** True when `value` is a string containing at least one visible character. */
 export function hasVisibleCharacter(value: unknown): boolean {

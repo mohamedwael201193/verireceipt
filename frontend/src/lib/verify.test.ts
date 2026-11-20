@@ -325,3 +325,78 @@ describe("detached views fail closed (J2 R5 B-2)", () => {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+describe("SharedArrayBuffer bodies verify (J2 R6 M-3)", () => {
+  // WebCrypto throws TypeError for a view on a SharedArrayBuffer, so
+  // a SAB-backed body used to return {verified:false} even when the
+  // bytes matched — fail-closed, but a false negative. toBytes now
+  // copies SAB-backed bytes into a fresh ArrayBuffer. The copy is
+  // safe by construction: a SharedArrayBuffer can never be detached,
+  // so the B-2 detached-view guarantee (probe-then-throw, exercised
+  // in the describe above) is untouched by this path.
+  const ABC_SHA =
+    "0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+  const EMPTY_SHA =
+    "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+  function sabOf(text: string): SharedArrayBuffer {
+    const bytes = new TextEncoder().encode(text);
+    const sab = new SharedArrayBuffer(bytes.byteLength);
+    new Uint8Array(sab).set(bytes);
+    return sab;
+  }
+
+  it("verifies a Uint8Array view over a SharedArrayBuffer", async () => {
+    const view = new Uint8Array(sabOf("abc"));
+    const result = await verifyReceipt(receiptWith(ABC_SHA), view);
+    expect(result).toEqual({ verified: true, computedSha: ABC_SHA });
+  });
+
+  it("verifies an offset view over a SharedArrayBuffer (only its own bytes)", async () => {
+    const sab = sabOf("xxabcyy");
+    const view = new Uint8Array(sab, 2, 3);
+    const result = await verifyReceipt(receiptWith(ABC_SHA), view);
+    expect(result).toEqual({ verified: true, computedSha: ABC_SHA });
+  });
+
+  it("verifies a DataView over a SharedArrayBuffer", async () => {
+    const view = new DataView(sabOf("abc"));
+    const result = await verifyReceipt(
+      receiptWith(ABC_SHA),
+      view as unknown as ArrayBuffer,
+    );
+    expect(result).toEqual({ verified: true, computedSha: ABC_SHA });
+  });
+
+  it("verifies a bare SharedArrayBuffer", async () => {
+    const result = await verifyReceipt(receiptWith(ABC_SHA), sabOf("abc"));
+    expect(result).toEqual({ verified: true, computedSha: ABC_SHA });
+  });
+
+  it("still fails a SharedArrayBuffer view against the wrong digest", async () => {
+    const view = new Uint8Array(sabOf("abc"));
+    const result = await verifyReceipt(receiptWith(EMPTY_SHA), view);
+    expect(result.verified).toBe(false);
+    expect(result.computedSha).toBe(ABC_SHA);
+  });
+
+  it("sha256Hex hashes a SharedArrayBuffer view identically to its string form", async () => {
+    const view = new Uint8Array(sabOf("abc"));
+    await expect(sha256Hex(view)).resolves.toBe(ABC_SHA);
+    await expect(sha256Hex(sabOf("abc"))).resolves.toBe(ABC_SHA);
+  });
+
+  it("still verifies a genuinely empty SharedArrayBuffer view against the empty digest", async () => {
+    const view = new Uint8Array(new SharedArrayBuffer(0));
+    const result = await verifyReceipt(receiptWith(EMPTY_SHA), view);
+    expect(result).toEqual({ verified: true, computedSha: EMPTY_SHA });
+  });
+
+  it("rejects a Symbol.toStringTag-spoofed 'SharedArrayBuffer' instead of hashing empty bytes", async () => {
+    const spoof = { [Symbol.toStringTag]: "SharedArrayBuffer" } as unknown as ArrayBuffer;
+    await expect(sha256Hex(spoof)).rejects.toThrow(TypeError);
+    await expect(
+      verifyReceipt(receiptWith(EMPTY_SHA), spoof as unknown as ArrayBuffer),
+    ).resolves.toEqual({ verified: false, computedSha: "" });
+  });
+});
