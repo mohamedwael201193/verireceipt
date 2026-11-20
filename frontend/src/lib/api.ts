@@ -413,10 +413,17 @@ async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promis
         // isValidRetryAfterSec); anything else is ignored. When the body
         // value is absent/invalid, the standard Retry-After response
         // header is the fallback (J2 R3) — a 429 that signals its delay
-        // only via the header must not lose it.
+        // only via the header must not lose it. Guarded with optional
+        // chaining (J1 dashboard re-review): a real fetch Response
+        // always has headers, but hand-rolled stubs in other branches'
+        // tests return {ok, status, json, text} with NO headers — an
+        // unguarded read threw TypeError, wrapped as NETWORK_ERROR
+        // (status 0), masking the real error status/code. A missing
+        // headers object (or a headers without .get) simply means no
+        // header fallback, never a network error.
         const retryAfterSec = isValidRetryAfterSec(err?.retry_after_sec)
           ? err?.retry_after_sec
-          : parseRetryAfterHeader(res.headers.get("Retry-After"));
+          : parseRetryAfterHeader(res.headers?.get?.("Retry-After") ?? null);
         throw new ApiError(message, res.status, err?.code, retryAfterSec);
       }
       assertValidBody(body, res.status, expectReceipt);

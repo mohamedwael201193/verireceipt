@@ -877,6 +877,27 @@ describe("Retry-After response header (J2 R3)", () => {
       expect(secs).toBeLessThanOrEqual(60);
     }
   });
+
+  it("surfaces the real error code/status when the Response has no headers object (J1 dashboard re-review)", async () => {
+    // Hand-rolled stubs in other branches' tests return {ok, status,
+    // text} with NO headers. The Retry-After fallback must not throw
+    // TypeError and mask the real 422 as NETWORK_ERROR (status 0) —
+    // a missing headers object simply means no header fallback.
+    const body = { error: "unprocessable", code: "UNSUPPORTED_PAIR", message: "pair not supported" };
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 422,
+      text: () => Promise.resolve(JSON.stringify(body)),
+    } as unknown as Response);
+    try {
+      await getHealth();
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 422, code: "UNSUPPORTED_PAIR" });
+      expect((err as Error).message).toBe("pair not supported");
+    }
+  });
 });
 
 describe("response-body size cap (J2 R3)", () => {
