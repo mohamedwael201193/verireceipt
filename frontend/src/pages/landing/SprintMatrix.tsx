@@ -60,7 +60,7 @@ export function SprintMatrix() {
               <div
                 id="sprint-tip"
                 className="mono"
-                style={{ position: "absolute", top: -34, left: tip.left, background: "var(--paper)", color: "var(--paper-ink)", padding: "4px 10px", borderRadius: 4, fontSize: 11, zIndex: 20, pointerEvents: "none", whiteSpace: "nowrap", boxShadow: "0 10px 24px rgba(0,0,0,0.45)" }}
+                style={{ position: "absolute", top: -34, left: tip.left, maxWidth: `calc(100% - ${tip.left}px)`, background: "var(--paper)", color: "var(--paper-ink)", padding: "4px 10px", borderRadius: 4, fontSize: 11, zIndex: 20, pointerEvents: "none", whiteSpace: "normal", overflowWrap: "break-word", textAlign: "left", boxSizing: "border-box", boxShadow: "0 10px 24px rgba(0,0,0,0.45)" }}
               >
                 {tip.text}
               </div>
@@ -81,9 +81,13 @@ export function SprintMatrix() {
                     aria-label={`${SPRINT_COLUMN_LABELS[c]} · gate ${r + 1}/6`}
                     onMouseOver={(e) => {
                       const el = e.currentTarget;
+                      const parentWidth = el.parentElement?.offsetWidth ?? 400;
+                      // Clamp so at least 120px of the (now wrapping)
+                      // tooltip fits; maxWidth above keeps it inside the
+                      // container — and the container inside the viewport.
                       setTip({
                         text: `${SPRINT_COLUMN_LABELS[c]} · gate ${r + 1}/6`,
-                        left: Math.max(0, Math.min((el.parentElement?.offsetWidth ?? 400) - 220, el.offsetLeft)),
+                        left: Math.max(0, Math.min(parentWidth - 120, el.offsetLeft)),
                       });
                     }}
                     onClick={() => setCur([0, 1, 2, 3, 4, 4, 5, 5][c] ?? 0)}

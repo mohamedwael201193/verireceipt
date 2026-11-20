@@ -5,7 +5,12 @@
 // the SAME response. MATCH VERIFIED is shown ONLY on a byte-exact match.
 // A mismatch is reported honestly: the miner's receipt covers the
 // upstream raw bytes (not the envelope the browser receives), so the two
-// digests are not expected to be equal with the current miner.
+// digests are not expected to be equal with the current miner. The
+// steady state for that expected mismatch is therefore NEUTRAL, not a
+// warning: it is not a failed verification, it is a digest of the
+// envelope, which is not comparable to the upstream receipt. The
+// computed and recorded digests are both shown, with the explanation,
+// so the user can see exactly what was compared.
 import { useState } from "react";
 import { verifyEndpoint, type VerifyState } from "./verify";
 
@@ -30,7 +35,7 @@ export function VerifyBadge({ url, label = "Verify in browser" }: { url: string;
           <span className="badge b-ok">MATCH VERIFIED ✓</span>
         ) : (
           <span>
-            <span className="badge b-warn">DIGESTS DIFFER — SEE NOTE</span>
+            <span className="badge b-neutral">ENVELOPE DIGEST — NOT COMPARABLE TO UPSTREAM RECEIPT</span>
             <span style={{ display: "block", marginTop: 8, color: "var(--muted)" }}>
               Computed (SHA-256 of the response body this browser received):
               <br />
