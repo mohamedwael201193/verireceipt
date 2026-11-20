@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Receipt } from "../lib/types";
-import { formatDate, shortenSha } from "../lib/format";
+import { formatDate, hasVisibleCharacter, shortenSha } from "../lib/format";
 import {
   MAX_RECEIPT_FETCHED_AT_LENGTH,
   MAX_RECEIPT_ID_LENGTH,
@@ -9,8 +9,11 @@ import {
 } from "../lib/api";
 
 /**
- * A receipt field is renderable only as a non-empty (after trim) string
- * within its length cap (J2 R4 M-1). The API layer (assertValidBody)
+ * A receipt field is renderable only as a non-empty string with at
+ * least one visible character, within its length cap (J2 R4 M-1).
+ * hasVisibleCharacter (not trim()) decides blankness: trim() does not
+ * strip U+200B etc., so an invisible-format-only string used to render
+ * as a blank cell (J2 R5 B-1). The API layer (assertValidBody)
  * rejects over-cap fields as INVALID_RESPONSE, but a receipt can reach
  * this card from any other caller — so the card enforces the SAME caps
  * in its own rendering path, importing the constants from api.ts so the
@@ -20,7 +23,7 @@ import {
  * non-API path.
  */
 function isRenderableReceiptString(value: unknown, maxLength: number): value is string {
-  return typeof value === "string" && value.trim().length > 0 && value.length <= maxLength;
+  return typeof value === "string" && hasVisibleCharacter(value) && value.length <= maxLength;
 }
 
 /**
@@ -57,7 +60,15 @@ export function isSafeUpstreamUrl(value: unknown): value is string {
     // AFTER parsing. Check the RAW authority instead — a real upstream
     // host never contains "%" (userinfo was already rejected above, so
     // any "%" left in the authority is in the host:port part).
-    const authority = value.trim().match(/^[^:]+:\/\/([^/?#]*)/)?.[1] ?? "";
+    // The WHATWG parser strips tabs/newlines/carriage returns anywhere
+    // in the URL (J2 R5 m3), so the raw authority is compared after
+    // stripping those same characters: "https://example.com\n/" parses
+    // to host example.com, and the raw text must be read the same way
+    // or a legit-shape URL fails closed as plain text. The "%" check
+    // above runs on this same stripped authority, so stripping cannot
+    // hide a percent-encoded host.
+    const comparable = value.replace(/[\t\n\r]/g, "");
+    const authority = comparable.trim().match(/^[^:]+:\/\/([^/?#]*)/)?.[1] ?? "";
     if (authority.includes("%")) return false;
     if (parsed.hostname.includes("%")) return false;
     // Triple-slash bypass (J2 R3 M-3): Node's WHATWG parser treats
@@ -71,10 +82,28 @@ export function isSafeUpstreamUrl(value: unknown): value is string {
     // or extra slashes swallowing the authority) — plain text, never a
     // link. The port, if any, is the part after the first ":" (or after
     // the "]" for IPv6) and is not compared: "example.com:8443" is legit.
-    if (authority.length === 0) return false;
-    const rawHost = authority.startsWith("[")
-      ? (authority.match(/^\[[^\]]*\]/)?.[0] ?? "")
-      : (authority.split(":")[0] ?? "");
+    // Empty userinfo (J2 R5 m3): the parser ignores a bare "@" —
+    // "https://@example.com/" has empty username/password and host
+    // example.com — but the raw authority is "@example.com", which
+    // failed the host comparison below. The parsed userinfo check
+    // above already rejected any NON-empty userinfo, so anything
+    // before the last "@" here can only be empty (or a lone ":",
+    // user "" + pass ""); strip it before the host compare, and fail
+    // closed if it is anything else.
+    const atIndex = authority.lastIndexOf("@");
+    const hostPort =
+      atIndex === -1
+        ? authority
+        : (() => {
+            const userinfo = authority.slice(0, atIndex);
+            if (userinfo !== "" && userinfo !== ":") return null;
+            return authority.slice(atIndex + 1);
+          })();
+    if (hostPort === null) return false;
+    if (hostPort.length === 0) return false;
+    const rawHost = hostPort.startsWith("[")
+      ? (hostPort.match(/^\[[^\]]*\]/)?.[0] ?? "")
+      : (hostPort.split(":")[0] ?? "");
     const stripBrackets = (h: string) => h.replace(/^\[|\]$/g, "");
     if (rawHost.length === 0) return false;
     if (stripBrackets(rawHost).toLowerCase() !== stripBrackets(parsed.hostname).toLowerCase()) {

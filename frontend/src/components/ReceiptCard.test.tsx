@@ -263,6 +263,42 @@ describe("malformed receipt fields — defense in depth (J2 R2 B-1b)", () => {
   });
 });
 
+describe("invisible format characters render '—', never blank (J2 R5 B-1)", () => {
+  // trim() strips NBSP/FEFF but NOT these: every one used to render
+  // as a visually blank cell (0 dashes, raw char in the HTML).
+  const INVISIBLE = [
+    "\u200B",
+    "\u200C",
+    "\u200D",
+    "\u2060",
+    "\u180E",
+    "\u200B\u200B",
+    " \u200B ",
+    "\u200B \u200C \u200D",
+  ];
+  const fields = ["receipt_id", "upstream_url", "raw_response_sha256", "fetched_at"] as const;
+
+  it.each(
+    fields.flatMap((field) =>
+      INVISIBLE.map((value) => [field, value] as const),
+    ),
+  )("renders '—' for %s set to an invisible-only string", (field, value) => {
+    const bad = { ...receipt, [field]: value };
+    const { container, unmount } = render(<ReceiptCard receipt={bad} />);
+    try {
+      // Only the blanked row falls back: the other three fields are valid.
+      expect(screen.getAllByText("—")).toHaveLength(1);
+      // The raw invisible character must not appear anywhere in the HTML.
+      expect(container.textContent).not.toContain(value);
+      if (field === "upstream_url") {
+        expect(screen.queryByRole("link")).toBeNull();
+      }
+    } finally {
+      unmount();
+    }
+  });
+});
+
 describe("over-cap receipt fields render '—', never verbatim (J2 R4 M-1)", () => {
   // The caps live in the API layer (assertValidBody) AND in the card's
   // own rendering path: through the card's non-API path a 1 MB field
@@ -367,5 +403,37 @@ describe("legit IPv6 upstream URL (J1 R3 m2)", () => {
     expect(isSafeUpstreamUrl("https://[::1]:8443/")).toBe(true);
     expect(isSafeUpstreamUrl("https://[2001:db8::1]/path")).toBe(true);
     expect(isSafeUpstreamUrl("https://[::1]/")).toBe(true);
+  });
+});
+
+describe("parser-stripped characters / empty userinfo render as links (J2 R5 m3)", () => {
+  // The WHATWG parser strips tabs/newlines from the URL and ignores a
+  // bare "@" (empty userinfo), so the raw-authority comparison must
+  // read the URL the same way the parser does — these legit-shape URLs
+  // used to fail closed as plain text.
+  it.each([
+    "https://example.com\n/",
+    "https://example.com\t/",
+    "https://example.com\r/",
+    "https://@example.com/",
+    "https://:@example.com/",
+    "https://exa\nmple.com/",
+  ])("renders %s as a link", (url) => {
+    const { container } = render(<ReceiptCard receipt={receiptWithUrl(url)} />);
+    const link = screen.getByRole("link");
+    expect(link.getAttribute("href")).toBe(url);
+    expect(container.textContent).toContain(url);
+  });
+
+  it("isSafeUpstreamUrl accepts parser-stripped / empty-userinfo https URLs", () => {
+    expect(isSafeUpstreamUrl("https://example.com\n/")).toBe(true);
+    expect(isSafeUpstreamUrl("https://example.com\t/")).toBe(true);
+    expect(isSafeUpstreamUrl("https://@example.com/")).toBe(true);
+    expect(isSafeUpstreamUrl("https://:@example.com/")).toBe(true);
+    // Non-empty userinfo is still rejected — the "@" fix must not
+    // become a userinfo bypass.
+    expect(isSafeUpstreamUrl("https://user@example.com/")).toBe(false);
+    expect(isSafeUpstreamUrl("https://user:pass@example.com/")).toBe(false);
+    expect(isSafeUpstreamUrl("https://evil.com\n@example.com/")).toBe(false);
   });
 });
