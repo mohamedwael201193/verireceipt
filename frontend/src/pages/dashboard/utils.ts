@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type RefObject } from "react";
 import { ApiError } from "../../lib/api";
+import { MINER_BOND_USD_TEXT } from "../../lib/minerBond";
 import {
   appendSessionReceipt,
   readLedgerGeneration,
@@ -12,8 +13,8 @@ import type { LiveReceipt, ProbeOutcome, Receipt } from "./types";
 
 /** Live miner origin (the /api proxy rewrites to this in dev and production). */
 export const MINER_ORIGIN = "https://verireceipt.onrender.com";
-/** Verified on-chain registration bond (DESIGN-SPEC §8 A3). */
-export const MINER_BOND_USDC = "$1.40 Test USDC";
+/** On-chain registration bond: minerBond(6152) = quoteMinerBond(6) (lib/minerBond.ts). */
+export const MINER_BOND_USDC = `${MINER_BOND_USD_TEXT} Test USDC`;
 export const DIAMOND_ADDRESS = "0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b";
 export const DIAMOND_SHORT = "0x72a70e…a08b";
 
@@ -184,8 +185,7 @@ export async function probe<T>(
  * /health is non-receipted by contract (getHealth passes no
  * expectReceipt; HealthResponse has no receipt field), so a healthy
  * /health answers 200 {status:"ok"} with no receipt — that MUST render
- * ok via isHealthOk below, never "refused". The /api/mcp GET probe
- * likewise returns raw parsed JSON with no receipt.
+ * ok via isHealthOk below, never "refused".
  */
 export function isVerified(r: { status: number; receipt: Receipt | null }): boolean {
   return r.status === 200 && r.receipt !== null;
@@ -214,7 +214,7 @@ export function appendToLedger(prev: LiveReceipt[], next: LiveReceipt): LiveRece
 }
 
 /**
- * Dashboard intent → /receipts ledger endpoint. Only the five receipted
+ * Dashboard intent → /receipts ledger endpoint. Only the six receipted
  * intents map; /health, MCP probes and anything else have no receipt
  * block and are never written to the shared ledger (they stay in the
  * dashboard's own in-memory ledger only).
@@ -374,7 +374,9 @@ export function persistLiveReceiptToSessionLedger(
     summary: summaryFor(endpoint, receipt.body, params),
     verifyData,
   };
-  return appendSessionReceipt(entry) ? "persisted" : "failed";
+  // Pass the generation captured at probe start so append can refuse
+  // or roll back if a Clear landed in the write window (P-LEDGER-XTAB).
+  return appendSessionReceipt(entry, receipt.ledgerGenAtStart) ? "persisted" : "failed";
 }
 
 let refusalSeq = 0;

@@ -1,7 +1,7 @@
 // /benchmarks — live latency benchmarks.
 //
 // REAL MEASUREMENTS ONLY. "Run benchmark" measures the actual round-trip
-// latency of all five endpoints + /health against the live API (3 runs each,
+// latency of all six endpoints + /health against the live API (3 runs each,
 // sequential), then shows min / median / max per endpoint with timestamps.
 // Nothing is pre-filled: before the first run the table is an honest empty
 // state. No Math.random() latencies, no fixed cadence, no simulated suite.

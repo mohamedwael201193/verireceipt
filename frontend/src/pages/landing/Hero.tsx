@@ -814,8 +814,8 @@ export function Hero() {
               <span className="l2">oracle.</span>
             </h1>
             <p className="hero-sub">
-              Deterministic intelligence for Telegraph Season II. Five keyless intents with raw SHA-256 receipts,
-              served Always-Warm on Render with strict fail-closed refusals.
+              Deterministic intelligence for Telegraph Season II. Six keyless intents with raw SHA-256 receipts,
+              served from a Render web service, with strict fail-closed refusals. Live status below.
             </p>
             <div className="hero-cta-row">
               <a href="/#probe" className="btn-solid-accent" aria-label="Start a probe — explore the live oracle">
@@ -829,7 +829,7 @@ export function Hero() {
                   // availability
                 </div>
                 <div style={{ fontSize: 13.5, color: "var(--text)" }}>
-                  Always-Warm on Render · {BOND_DISPLAY.replace(" Test USDC Bond", " Bond")}
+                  Render web service · {BOND_DISPLAY.replace(" Test USDC Bond", " Bond")}
                 </div>
                 <div className="mono" style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>
                   {health.loading && "GET /health — checking live status…"}

@@ -52,7 +52,30 @@ export function VerifyBadge({
         </button>
       )}
       {state.status === "running" && <span style={{ color: "var(--muted)" }}>Verifying receipt…</span>}
-      {result?.kind === "verified" && (
+      {result?.kind === "verified" && result.mode === "live_recheck" && endpoint === "grid" && (
+        <span>
+          <span className="badge b-warn">HASH MATCHES STORED GRID FIELDS (LIVE RE-CHECK)</span>
+          <span style={{ display: "block", marginTop: 8, color: "var(--muted)" }}>
+            This re-hashes the canonical evidence JSON already in this receipt
+            (node_or_zone, interval_start, lmp_usd_per_mwh, market). It is not a
+            re-fetch of CAISO bytes, and it is not a stored-raw-bytes check.
+            <br />
+            Method: {result.method}
+            {result.evidenceKind ? ` · evidence: ${result.evidenceKind}` : ""}.
+            <br />
+            Computed (SHA-256 of the bytes checked):
+            <br />
+            <span style={{ color: "var(--text)", overflowWrap: "anywhere" }}>{result.computed}</span>
+            <br />
+            Recorded in receipt {receipt.receipt_id}:
+            <br />
+            <span style={{ color: "var(--text)", overflowWrap: "anywhere" }}>
+              {receipt.raw_response_sha256}
+            </span>
+          </span>
+        </span>
+      )}
+      {result?.kind === "verified" && !(result.mode === "live_recheck" && endpoint === "grid") && (
         <span>
           <span className="badge b-ok">SHA-256 MATCH VERIFIED ✓</span>
           <span style={{ display: "block", marginTop: 8, color: "var(--muted)" }}>

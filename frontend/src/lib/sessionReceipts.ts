@@ -46,10 +46,18 @@ export const SESSION_RECEIPTS_CORRUPT_BACKUP_KEY =
  * does NOT bump it — its promise is narrow (only the corrupt stored
  * value goes). clearSessionReceipts() itself does NOT bump it (Discard
  * calls it); only the Clear action bumps, via bumpLedgerGeneration().
+ *
+ * XTAB r7: the counter alone was not enough (J2 Medium 1: a stale tab's
+ * full-ledger write after a Clear resurrected pre-Clear rows and could
+ * wipe the other tab's later append). Every ledger write now stamps the
+ * epoch INTO the stored value (LedgerEnvelope), merges per key against a
+ * fresh read, and is dropped when the stored epoch moved; readers ignore
+ * a stored ledger whose stamp is older than the current epoch.
  */
 export const SESSION_RECEIPTS_GEN_KEY = "verireceipt.session-receipts.gen.v1";
 
-export function readLedgerGeneration(): number {
+/** Stored clear counter alone (GEN key). 0 when absent or invalid. */
+function readStoredGenCounter(): number {
   try {
     const raw = localStorage.getItem(SESSION_RECEIPTS_GEN_KEY);
     if (raw === null) return 0;
@@ -61,15 +69,60 @@ export function readLedgerGeneration(): number {
 }
 
 /**
+ * Current clear epoch (XTAB r7): the larger of the stored GEN counter and
+ * the epoch stamped inside the ledger value itself. The epoch travels
+ * WITH the ledger (see LedgerEnvelope), so a ledger written under an
+ * older epoch is recognisably stale even if it lands after a Clear.
+ */
+export function readLedgerGeneration(): number {
+  const counter = readStoredGenCounter();
+  const raw = readRawLedger();
+  if (raw.kind === "envelope") return Math.max(counter, raw.epoch);
+  return counter;
+}
+
+/**
  * Bump the stored clear generation. The in-memory ref in Receipts.tsx
  * still covers this tab when the write throws.
  */
 export function bumpLedgerGeneration(): void {
+  // Single read, then one write (P-LEDGER-XTAB). The new epoch is one
+  // past the CURRENT epoch (counter or ledger stamp, whichever is
+  // larger), so it is always strictly newer than any stored ledger.
   try {
-    localStorage.setItem(SESSION_RECEIPTS_GEN_KEY, String(readLedgerGeneration() + 1));
+    const current = readLedgerGeneration();
+    localStorage.setItem(SESSION_RECEIPTS_GEN_KEY, String(current + 1));
   } catch {
     // ignore — the in-memory ref still covers this tab
   }
+}
+
+/**
+ * Remove one entry after a write that raced with a Clear (P-LEDGER-XTAB).
+ *
+ * The caller supplies the decision to roll back — this function does
+ * NOT re-read the generation key (or any second storage place) to
+ * decide whether to proceed. That second read was the TOCTOU in the
+ * earlier rollbackEntry(): two getItem calls could disagree mid-function.
+ * Only `key` is removed (the stored epoch stamp is kept as is); a single
+ * read-modify-write, no retry loop.
+ * Returns true when the entry is absent afterwards (already gone, or
+ * removed). Returns false when storage is corrupt/unavailable or the
+ * write throws.
+ */
+export function rollbackEntry(key: string): boolean {
+  if (typeof key !== "string" || key.length === 0) return false;
+  // Operates on the ledger value as stored, keeping its own epoch stamp:
+  // it removes `key` and nothing else, and never decides anything from
+  // the GEN key. A stale-epoch ledger stays stale (readers ignore it).
+  const raw = readRawLedger();
+  if (raw.kind === "unavailable" || raw.kind === "corrupt") return false;
+  if (raw.kind === "empty") return true;
+  if (!raw.entries.some((e) => isRecord(e) && e.key === key)) return true;
+  const kept = raw.entries.filter((e) => !(isRecord(e) && e.key === key));
+  return raw.kind === "envelope"
+    ? writeEnvelope(raw.epoch, kept as SessionReceipt[])
+    : writeRawValue(JSON.stringify(kept));
 }
 /** Cap the session ledger: the newest 200 receipts, same as the dashboard. */
 export const SESSION_RECEIPTS_CAP = 200;
@@ -202,23 +255,81 @@ export interface ReadSessionReceiptsResult {
   dropped: number;
 }
 
-export function readSessionReceipts(): ReadSessionReceiptsResult {
+/**
+ * Stored ledger format (XTAB r7). New writes store an envelope
+ *   {"v":2,"epoch":<clear epoch>,"entries":[...]}
+ * under the SAME key, so the clear epoch is stored WITH the entries and
+ * cannot be separated from them by a cross-tab race. A bare array is the
+ * pre-r7 format (no epoch stamp); it is read as belonging to the
+ * current epoch, which is what it meant to the build that wrote it.
+ */
+export const LEDGER_ENVELOPE_VERSION = 2;
+
+type RawLedger =
+  | { kind: "unavailable" }
+  | { kind: "empty" }
+  | { kind: "corrupt" }
+  | { kind: "legacy"; entries: unknown[] }
+  | { kind: "envelope"; epoch: number; entries: unknown[] };
+
+function readRawLedger(): RawLedger {
   let raw: string | null;
   try {
     raw = localStorage.getItem(SESSION_RECEIPTS_KEY);
   } catch {
-    // Storage threw on read: unavailable, not corrupt.
-    return { entries: [], corrupt: false, unavailable: true, dropped: 0 };
+    return { kind: "unavailable" };
   }
-  if (!raw) return { entries: [], corrupt: false, unavailable: false, dropped: 0 };
+  if (!raw) return { kind: "empty" };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    // Unparseable JSON: corrupt, not empty — the caller must not overwrite it.
-    return { entries: [], corrupt: true, unavailable: false, dropped: 0 };
+    return { kind: "corrupt" };
   }
-  if (!Array.isArray(parsed)) return { entries: [], corrupt: true, unavailable: false, dropped: 0 };
+  if (Array.isArray(parsed)) return { kind: "legacy", entries: parsed };
+  if (
+    isRecord(parsed) &&
+    parsed.v === LEDGER_ENVELOPE_VERSION &&
+    typeof parsed.epoch === "number" &&
+    Number.isSafeInteger(parsed.epoch) &&
+    parsed.epoch >= 0 &&
+    Array.isArray(parsed.entries)
+  ) {
+    return { kind: "envelope", epoch: parsed.epoch, entries: parsed.entries };
+  }
+  return { kind: "corrupt" };
+}
+
+interface LedgerState extends ReadSessionReceiptsResult {
+  /** Clear epoch these entries belong to (the current epoch). */
+  epoch: number;
+}
+
+/**
+ * One consistent read of the ledger for the CURRENT epoch. A stored
+ * envelope stamped with an OLDER epoch than the current one is a
+ * pre-Clear ledger that a stale tab wrote after the Clear: it is treated
+ * as empty (its rows were cleared), never shown, and the next write
+ * replaces it.
+ */
+function readLedgerState(): LedgerState {
+  const counter = readStoredGenCounter();
+  const raw = readRawLedger();
+  if (raw.kind === "unavailable") {
+    return { entries: [], corrupt: false, unavailable: true, dropped: 0, epoch: counter };
+  }
+  if (raw.kind === "corrupt") {
+    return { entries: [], corrupt: true, unavailable: false, dropped: 0, epoch: counter };
+  }
+  if (raw.kind === "empty") {
+    return { entries: [], corrupt: false, unavailable: false, dropped: 0, epoch: counter };
+  }
+  const epoch = raw.kind === "envelope" ? Math.max(counter, raw.epoch) : counter;
+  if (raw.kind === "envelope" && raw.epoch < epoch) {
+    // Stale (pre-Clear) ledger: cleared rows stay cleared.
+    return { entries: [], corrupt: false, unavailable: false, dropped: 0, epoch };
+  }
+  const parsed = raw.entries;
   // Invalid entries are dropped, never rendered; the ledger is capped.
   const valid = parsed.filter(isValidSessionReceipt);
   const entries = valid.slice(0, SESSION_RECEIPTS_CAP);
@@ -229,18 +340,27 @@ export function readSessionReceipts(): ReadSessionReceiptsResult {
   // — never a silent rewrite to []. A stored [] is a legitimate empty
   // ledger and stays non-corrupt.
   if (parsed.length > 0 && entries.length === 0)
-    return { entries: [], corrupt: true, unavailable: false, dropped };
-  return { entries, corrupt: false, unavailable: false, dropped };
+    return { entries: [], corrupt: true, unavailable: false, dropped, epoch };
+  return { entries, corrupt: false, unavailable: false, dropped, epoch };
 }
 
-function writeSessionReceipts(entries: SessionReceipt[]): boolean {
+export function readSessionReceipts(): ReadSessionReceiptsResult {
+  const { entries, corrupt, unavailable, dropped } = readLedgerState();
+  return { entries, corrupt, unavailable, dropped };
+}
+
+function writeRawValue(value: string): boolean {
   try {
-    localStorage.setItem(SESSION_RECEIPTS_KEY, JSON.stringify(entries));
+    localStorage.setItem(SESSION_RECEIPTS_KEY, value);
     return true;
   } catch {
     // storage full/unavailable — receipts stay in memory for the session
     return false;
   }
+}
+
+function writeEnvelope(epoch: number, entries: SessionReceipt[]): boolean {
+  return writeRawValue(JSON.stringify({ v: LEDGER_ENVELOPE_VERSION, epoch, entries }));
 }
 
 /**
@@ -269,16 +389,44 @@ function backupRawIfAbsent(): void {
  * validation, the raw value is backed up first (J2 R2 B3) so no
  * legitimate receipt is silently destroyed with no evidence.
  */
-export function appendSessionReceipt(entry: SessionReceipt): boolean {
+export function appendSessionReceipt(
+  entry: SessionReceipt,
+  expectedGeneration?: number,
+): boolean {
   if (!isValidSessionReceipt(entry)) return false;
-  const { entries, corrupt, unavailable, dropped } = readSessionReceipts();
-  if (corrupt || unavailable) return false;
-  if (dropped > 0) backupRawIfAbsent();
-  const next = [entry, ...entries.filter((r) => r.key !== entry.key)].slice(
+  // One epoch snapshot at the start; a stale caller is refused before
+  // anything is written.
+  const genAtStart = readLedgerGeneration();
+  if (expectedGeneration !== undefined && genAtStart !== expectedGeneration) {
+    return false;
+  }
+  // XTAB r7 (J2 Medium 1): the write is merged PER KEY against a FRESH
+  // read of the stored ledger taken immediately before the write — never
+  // against an earlier snapshot — and it is stamped with the epoch. If
+  // the stored ledger has moved to another epoch since the snapshot (a
+  // Clear in another tab), this write is dropped: it cannot resurrect
+  // pre-Clear rows, and it cannot replace a post-Clear ledger (and the
+  // other tab's later append in it) with a stale copy.
+  const current = readLedgerState();
+  if (current.corrupt || current.unavailable) return false;
+  if (current.epoch !== genAtStart) return false;
+  if (current.dropped > 0) backupRawIfAbsent();
+  const next = [entry, ...current.entries.filter((r) => r.key !== entry.key)].slice(
     0,
     SESSION_RECEIPTS_CAP,
   );
-  return writeSessionReceipts(next);
+  if (!writeEnvelope(genAtStart, next)) return false;
+  // A Clear that lands between the fresh read and the write (same
+  // synchronous call; only reachable through cross-process storage
+  // reordering) leaves a ledger stamped with the OLD epoch: every reader
+  // treats it as cleared (readLedgerState), so pre-Clear rows still do
+  // not come back. The incoming key is rolled back as well.
+  const genAfterWrite = readLedgerGeneration();
+  if (genAfterWrite !== genAtStart) {
+    rollbackEntry(entry.key);
+    return false;
+  }
+  return true;
 }
 
 /** Remove the shared ledger entirely (Clear button), including any

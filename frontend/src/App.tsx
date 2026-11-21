@@ -37,12 +37,12 @@ import Status from "./pages/Status";
  * renders the same Receipts page as a deep link into the session
  * ledger: an id matching a receipt in this browser session opens
  * that entry; any other id shows an honest not-found notice. No
- * backend fetch is attempted — the API does not serve /receipts/:id
- * in this build (live check 2026-11-20: HTTP 404 for a fresh
- * receipt, direct and via /api), so a receipt from another session
- * cannot be loaded here. When the miner mounts
- * /receipts/:id/raw, the verifier re-point belongs in Receipts.tsx
- * (see its header) — not in this route.
+ * backend fetch is attempted by this route. The API now serves
+ * /receipts/:id and /receipts/:id/raw (live check 2026-11-21: HTTP 200,
+ * direct and via /api; the 2026-11-20 check was a 404), but loading a
+ * receipt from another session here is out of scope for this build.
+ * Raw-byte verification lives in lib/verifyReceipt.ts (see the
+ * Receipts.tsx header) — not in this route.
  */
 export default function App() {
   return (

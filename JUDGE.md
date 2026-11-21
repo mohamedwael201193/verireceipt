@@ -69,24 +69,26 @@ services outside the judge's control. The contract is:
 ## 4. 30-second receipt recomputation
 
 Every answer is receipted: `receipt.raw_response_sha256` is the SHA-256 of
-the raw upstream response the answer was derived from.
+the evidence bytes the answer was derived from, and the miner serves those
+exact stored bytes at `/receipts/:id/raw`.
 
 ```bash
-# Fetch the same upstream URL the receipt names, hash it, compare:
-curl -s "<receipt.upstream_url>" | sha256sum
-# Compare the output with receipt.raw_response_sha256 from the answer.
-# A match proves the answer was derived from that exact upstream response.
+# Take receipt.receipt_id from any response, fetch the stored evidence bytes, hash them:
+curl -s "$BASE/receipts/$RECEIPT_ID/raw" | sha256sum
+# Compare the output with receipt.raw_response_sha256 in the same response.
+# (Re-fetching the live upstream_url is not a proof: live upstreams such as
+# DeFiLlama change between calls.)
 ```
 
 Notes:
 
 - The upstream URL is named in the receipt (`receipt.upstream_url`) and the
-  fetch time in `receipt.fetched_at`.
-- Some upstreams (e.g. RPC quorums) return a fresh response on each fetch,
-  so a recomputation minutes later may legitimately differ. The receipt
-  proves the response *at fetch time*; the strongest check is to recompute
-  immediately after receiving the answer.
-- For the `/v1/tx` quorum, the receipt covers the quorum's aggregated raw
+  fetch time in `receipt.fetched_at`; that is provenance, not the hash input
+  to re-fetch.
+- `/receipts/:id/raw` serves the stored bytes, so the check gives the same
+  result whenever it is run; the response header `x-raw-sha256` carries the
+  same digest. `GET /receipts/:id` returns the stored receipt itself.
+- For the `/v1/tx` quorum, the stored bytes are the quorum's aggregated raw
   response; the same procedure applies.
 
 ## 5. What is NOT claimed

@@ -25,6 +25,7 @@ import {
   isHealthOk,
   isVerified,
   median,
+  MINER_BOND_USDC,
   probe,
   recentGridInterval,
   relativeAge,
@@ -62,7 +63,7 @@ function endpointDefs(): EndpointDef[] {
       key: "tx",
       path: "/v1/tx",
       role: "ONCHAIN_TX_LOOKUP_GENERAL",
-      src: "2-of-3 Archive RPC Quorum",
+      src: "2-of-N Archive RPC Quorum (2-of-3 on ethereum)",
       intent: "ONCHAIN_TX_LOOKUP_GENERAL",
       query: `${CONFIRMED_TX.slice(0, 8)}…${CONFIRMED_TX.slice(-4)} (ethereum)`,
       requestUrl: directUrl("/v1/tx", { tx_hash: CONFIRMED_TX, chain: "ethereum" }),
@@ -112,7 +113,7 @@ function endpointDefs(): EndpointDef[] {
       key: "validator",
       path: "/v1/validator",
       role: "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
-      src: "2-of-4 beacon-node quorum (Lodestar, PublicNode, Stakely, blockreq)",
+      src: "2-of-4 beacon-node quorum at the finalized state (Lodestar, PublicNode, Stakely, blockreq)",
       intent: "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
       query: "validator_index=1",
       requestUrl: directUrl("/v1/validator", { validator_index: "1" }),
@@ -128,28 +129,6 @@ function endpointDefs(): EndpointDef[] {
       requestUrl: directUrl("/health", {}),
       fetcher: (signal) => getHealth(signal),
     },
-    {
-      key: "mcp",
-      path: "/api/mcp",
-      role: "Streamable HTTP MCP Server",
-      src: "VeriReceipt Desk Tools (POST-only)",
-      intent: "MCP",
-      query: "GET /api/mcp (POST-only endpoint)",
-      requestUrl: "https://verireceipt.onrender.com/api/mcp",
-      // The miner serves no GET /api/mcp route yet (server.ts has no MCP
-      // route); this probe reports the live status honestly instead of
-      // assuming the endpoint exists.
-      // 15s timeout + abort: the raw fetch previously had neither, so a
-      // hung MCP probe could block the row forever.
-      fetcher: async (signal) => {
-        const timeout = AbortSignal.timeout(15_000);
-        const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-        const res = await fetch("/api/api/mcp", { headers: { Accept: "application/json" }, signal: combined });
-        const text = await res.text();
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 120)}`);
-        return JSON.parse(text) as unknown;
-      },
-    },
   ];
 }
 
@@ -158,8 +137,7 @@ interface RowProbe {
   status: number;
   /** True only when the ping answered as designed (see ping()): a
    * receipt for a receipted /v1/* row (isVerified), 200 +
-   * body.status === "ok" for /health (isHealthOk), a parsed 200 with
-   * no `error` field for the /api/mcp GET probe. A bare 200 with no
+   * body.status === "ok" for /health (isHealthOk). A bare 200 with no
    * receipt on a receipted endpoint is a refusal and must never
    * render "UP". */
   verified: boolean;
@@ -210,25 +188,9 @@ function HealthRow({
       // B-J2-1): receipted /v1/* rows require isVerified (200 AND a
       // receipt) — a bare 200 there is a refusal. /health is
       // non-receipted by contract, so 200 + body.status === "ok" is
-      // UP (isHealthOk). The /api/mcp GET probe returns raw parsed
-      // JSON with no receipt by design — but its fetcher only checks
-      // res.ok + JSON.parse success, so a 200 carrying a parseable
-      // error payload (e.g. {"error":"mcp disabled"}) is NOT up (J2
-      // R5 B4): UP requires a 200 whose parsed body is a non-null
-      // object WITHOUT an `error` field. No GET response shape is
-      // documented for this POST-only endpoint, so no stricter shape
-      // is asserted here.
-      const mcpAnswered = (r: LiveReceipt): boolean => {
-        if (r.status !== 200) return false;
-        const b = r.body as Record<string, unknown> | null;
-        return b !== null && typeof b === "object" && !Array.isArray(b) && !("error" in b);
-      };
-      const answered =
-        def.key === "health"
-          ? isHealthOk(receipt)
-          : def.key === "mcp"
-            ? mcpAnswered(receipt)
-            : isVerified(receipt);
+      // UP (isHealthOk). (r8: the MCP probe row is gone — the miner
+      // serves no MCP endpoint; live 404 on GET and POST, 2026-11-21.)
+      const answered = def.key === "health" ? isHealthOk(receipt) : isVerified(receipt);
       setLast({ latencyMs: outcome.latencyMs, status: receipt.status, verified: answered });
       setLatencies((prev) => [...prev, outcome.latencyMs].slice(-20));
       if (!outcome.ok) {
@@ -255,7 +217,7 @@ function HealthRow({
       <td className="mono" style={{ fontSize: 11 }}>{def.role}</td>
       <td style={{ fontSize: 12, color: "var(--muted)" }}>{def.src}</td>
       <td className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
-        {def.key === "health" || def.key === "mcp" ? "—" : "10s · miner.yaml"}
+        {def.key === "health" ? "—" : "10s · miner.yaml"}
       </td>
       <td className="mono" style={{ fontSize: 11.5 }}>
         {p50 !== null && latencies.length >= 3
@@ -408,7 +370,7 @@ export default function StatusDocs({
             Status &amp; <span className="serif-i">30-Second Docs.</span>
           </h1>
         </div>
-        <span className="badge b-ok">auth: none · Bond $1.40 Test USDC</span>
+        <span className="badge b-ok">auth: none · Bond {MINER_BOND_USDC}</span>
       </div>
 
       <div className="kpi-grid-4">
@@ -426,7 +388,7 @@ export default function StatusDocs({
           <div style={{ fontSize: 16, fontWeight: 500, color: answeredEndpoints === 6 ? "var(--ok)" : "var(--text)", marginBottom: 3 }}>
             {answeredEndpoints} / 6
           </div>
-          <div className="kpi-sub">4.5s abort cap · 2-of-4 quorum · after-budget replies not counted</div>
+          <div className="kpi-sub">client timeout 45 s (route 60 s) · a probe aborted at that budget is not counted</div>
         </div>
         <div className="card" style={{ padding: "15px 17px" }}>
           <div className="kpi-lbl">Persistent Disk SQLite</div>
@@ -434,14 +396,14 @@ export default function StatusDocs({
           <div className="kpi-sub">WAL mode · survives every deploy</div>
         </div>
         <div className="card" style={{ padding: "15px 17px" }}>
-          <div className="kpi-lbl">Grid Cron Cache</div>
+          <div className="kpi-lbl">Grid Store (5-min ingester)</div>
           <div style={{ fontSize: 16, fontWeight: 500, color: "var(--accent)", marginBottom: 3 }}>
             {lastGrid ? `Last grid receipt ${relativeAge(lastGrid.ts)}` : "No grid probe yet"}
           </div>
           <div className="kpi-sub">
             {lastGrid?.receipt
               ? `quorum: ${String((lastGrid.receipt as unknown as Record<string, unknown>).quorum_votes ?? "—")}`
-              : "CAISO OASIS cron cache"}
+              : "CAISO · NYISO · Elering in SQLite, refreshed every 5 min"}
           </div>
         </div>
       </div>
@@ -487,8 +449,8 @@ export default function StatusDocs({
           </table>
         </div>
         <div className="note-line" style={{ padding: "10px 16px", borderTop: "1px solid var(--border)" }}>
-          Cache TTL 10s is the miner-wide cache_ttl_sec from miner.yaml. The /api/mcp row probes GET; the MCP server is
-          Streamable HTTP (POST) and the miner serves no GET route for it yet — the live status is shown as-is.
+          Cache TTL 10s is the miner-wide cache_ttl_sec from miner.yaml (applied by the Telegraph node). Every row is a
+          route the miner actually serves; the miner has no MCP endpoint of its own.
         </div>
       </div>
 

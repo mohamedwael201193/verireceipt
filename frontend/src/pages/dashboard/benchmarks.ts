@@ -22,7 +22,7 @@
 //   and R02 (empty protocol) are refused CLIENT-SIDE by the data-layer lib
 //   (getRoute 422 / assertValidParam 400) — the expectation text says so
 //   honestly instead of claiming a live API refusal.
-// - F04 (simulated upstream outage) and B03 (circuit-breaker trip) are NOT
+// - F04 (simulated upstream outage) and B03 (upstream failover) are NOT
 //   executable via the public API — there is no injection parameter. They
 //   render as SKIP with the reason, excluded from the pass rate. The old
 //   file's "502/4512ms" and "breaker_primary: OPEN" were invented.
@@ -487,7 +487,7 @@ export const BENCH_CASES: BenchCase[] = [
     "The public API has no upstream-outage injection parameter, so this case cannot be executed from the browser. A 502 can only be observed during a real upstream outage.",
   ),
 
-  // 4 Burst Concurrency & Always-Warm Spot Checks
+  // 4 Burst Concurrency & Liveness Spot Checks
   {
     id: "B01",
     cat: "burst",
@@ -547,7 +547,7 @@ export const BENCH_CASES: BenchCase[] = [
   {
     id: "B02",
     cat: "burst",
-    name: "Always-Warm Spot-Check Probe",
+    name: "Liveness Spot-Check Probe",
     expect: "GET /health returns 200 · status ok · latency reported live",
     probe: () => "GET /health",
     runnable: true,
@@ -568,15 +568,15 @@ export const BENCH_CASES: BenchCase[] = [
   skipCase(
     "B03",
     "burst",
-    "Circuit Breaker Trip & 30s Recovery",
-    "Auto-failover to secondary RPC in <200ms",
-    () => "Primary RPC injected 500 -> fallback LlamaRPC",
-    "A breaker trip cannot be injected via the public API — there is no fault-injection parameter. Failover can only be observed during a real upstream failure.",
+    "Upstream Failover (no miner-side breaker)",
+    "Quorum continues on the remaining RPC legs; the miner runs no circuit breaker (the miner.yaml breaker settings are applied by the Telegraph node)",
+    () => "Primary RPC injected 500 -> remaining quorum legs",
+    "An upstream failure cannot be injected via the public API — there is no fault-injection parameter. Failover can only be observed during a real upstream failure.",
   ),
   {
     id: "B04",
     cat: "burst",
-    name: "SQLite WAL Grid Cron Cache Hit",
+    name: "SQLite Grid Store Re-Read",
     expect: "Two consecutive grid calls both 200 with receipts · 2nd latency reported live",
     probe: () => "GET /v1/grid-price (TH_NP15_GEN-APND) × 2",
     runnable: true,

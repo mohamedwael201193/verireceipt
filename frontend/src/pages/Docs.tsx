@@ -5,8 +5,9 @@
 // (src/core/errors.ts, src/handlers/*). Every example is a REAL callable
 // request against the live base URL, and each one links to its live try-it
 // form on /receipts. No invented endpoints: only the routes the server
-// actually serves (GET /health + six GET /v1/*) are listed — there is no
-// /api/mcp route in this build, so none is documented.
+// actually serves (GET /health + six GET /v1/* + the /receipts/:id routes)
+// are listed — the miner has no MCP route in this build, so none is
+// documented (r8: live 404 on GET and POST, 2026-11-21).
 //
 // Registration snippet uses the real repo and the real commit SHA:
 // github.com/mohamedwael201193/verireceipt @
@@ -16,6 +17,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { REGISTRATION_CAST_SNIPPET } from './dashboard/docs';
+import { MINER_BOND_SOURCE, MINER_BOND_USD_TEXT } from '../lib/minerBond';
 
 const API_BASE_URL = 'https://verireceipt.onrender.com';
 const REPO_URL = 'https://github.com/mohamedwael201193/verireceipt';
@@ -285,7 +287,7 @@ export default function Docs() {
           </p>
         </div>
         <div className="vr-head-side">
-          <span className="vr-badge vr-b-dim">auth: none · Bond $1.40 Test USDC</span>
+          <span className="vr-badge vr-b-dim">auth: none · Bond {MINER_BOND_USD_TEXT} Test USDC</span>
           <span className="vr-badge vr-b-dim">miner 774921 · verireceipt</span>
         </div>
       </header>
@@ -306,12 +308,24 @@ export default function Docs() {
           </dd>
           <dt>auth</dt>
           <dd>none — all endpoints are keyless GETs</dd>
-          <dt>rate limit</dt>
+          <dt>rate limit (node-side)</dt>
           <dd className="vr-mono">20 req/s · cache TTL 10 s</dd>
-          <dt>circuit breaker</dt>
-          <dd className="vr-mono">threshold 5 · cooldown 30 s</dd>
-          <dt>bond</dt>
-          <dd>$1.40 Test USDC (verified)</dd>
+          <dt>circuit breaker (node-side)</dt>
+          <dd>
+            <span className="vr-mono">threshold 5 · cooldown 30 s</span> — declared in miner.yaml and
+            applied by the Telegraph node to calls into this miner; the miner process runs no breaker
+          </dd>
+          <dt>bond (on-chain)</dt>
+          <dd>{MINER_BOND_USD_TEXT} Test USDC — {MINER_BOND_SOURCE}. Re-read live on the Status page.</dd>
+          <dt>Sepolia registration</dt>
+          <dd>
+            registrationId 6152 (updateMiner of 6150) · tx{" "}
+            <a href="https://sepolia.etherscan.io/tx/0x775fcc05adca9be05188554e0487b46e09f207bc5ea1de89a2fd86e2b79f07cb" target="_blank" rel="noopener noreferrer">
+              0x775fcc05adca9be05188554e0487b46e09f207bc5ea1de89a2fd86e2b79f07cb
+            </a>
+            {" "}· yamlHash 0x1653f3c00f8ee983bc2d2b36579c665c94ce2215ab1bb0d526564a9aec183e9f
+            (pin 4f471e48). Node activation is read live on the Status page and is not claimed here.
+          </dd>
         </dl>
       </section>
 
@@ -341,7 +355,7 @@ export default function Docs() {
               <tr><td className="vr-mono">raw_response_sha256</td><td className="vr-mono">string</td><td>SHA-256 (<span className="vr-mono">0x</span> + 64 hex) of the raw upstream response bytes.</td></tr>
               <tr><td className="vr-mono">quorum_votes</td><td className="vr-mono">string</td><td>e.g. <span className="vr-mono">3/3 sources agreed</span> (tx), <span className="vr-mono">1/1 primary source</span> (TVL).</td></tr>
               <tr><td className="vr-mono">fetched_at</td><td className="vr-mono">string</td><td>ISO-8601 UTC time the upstream was fetched.</td></tr>
-              <tr><td className="vr-mono">audit_url</td><td className="vr-mono">string</td><td>Recorded audit URL. Note: the API does not serve <span className="vr-mono">/receipts/:id</span> in this build (live check 2026-11-20: HTTP 404).</td></tr>
+              <tr><td className="vr-mono">audit_url</td><td className="vr-mono">string</td><td>Audit URL. <span className="vr-mono">GET /receipts/:id</span> returns the stored receipt and <span className="vr-mono">/receipts/:id/raw</span> the exact evidence bytes hashed into raw_response_sha256 (live check 2026-11-21: HTTP 200).</td></tr>
             </tbody>
           </table>
         </div>
@@ -349,9 +363,9 @@ export default function Docs() {
           To verify, recompute the hash the miner actually hashed. The browser verifier
           (one verifier for the whole site, /receipts page + dashboard inspector + landing
           badge) fetches the stored raw bytes first —{' '}
-          <span className="vr-mono">GET /api/receipts/:id/raw</span> — and hashes them
-          against the recorded digest. While the miner does not serve that endpoint yet
-          (live check 2026-11-20: HTTP 404), it falls back to a live re-check whose method
+          <span className="vr-mono">GET /api/receipts/:id/raw</span> (served; live check
+          2026-11-21: HTTP 200 for all six intents) — and hashes them against the recorded
+          digest. Only if that fetch fails does it fall back to a live re-check whose method
           differs per endpoint: tx replays the exact JSON-RPC{' '}
           <span className="vr-mono">eth_getTransactionReceipt</span> call against the
           receipt’s upstream RPC URL; filings and TVL re-fetch the upstream URL and hash the
@@ -359,10 +373,10 @@ export default function Docs() {
           mismatch because the upstream serves different bytes per edge); grid re-hashes the
           canonical evidence JSON{' '}
           <span className="vr-mono">{'{"node_or_zone","interval_start","lmp_usd_per_mwh","market"}'}</span>{' '}
-          built from the answer fields; route cannot be re-hashed in-browser because the
-          evidence includes quoter request/response data the API does not carry — until the
-          miner serves /raw, when route becomes verifiable too. Only a match counts as
-          verified, and the method used is always named.
+          built from the answer fields; route has no live re-check because its evidence
+          includes quoter request/response data the answer does not carry, so route is
+          verified through /raw only. Only a match counts as verified, and the UI names the
+          method it used.
         </p>
       </section>
 
@@ -568,8 +582,8 @@ curl "$BASE/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2026-11-2
       </section>
 
       <p className="vr-muted vr-small">
-        Only the six routes on this page are served by this build. The design drafts also named
-        /api/mcp and POST /v1/* paths — none of those exist in the server, so they are not
+        Only the routes on this page are served by this build. The design drafts also named an
+        MCP route and POST /v1/* paths — none of those exist in the server, so they are not
         documented here.
       </p>
     </div>

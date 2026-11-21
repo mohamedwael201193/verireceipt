@@ -12,12 +12,15 @@
 //   ERCOT has no keyless feed). Supported grid markets: CAISO, NYISO,
 //   Elering (EE, FI, LV, LT).
 // - Miner identity: id 774921, slug verireceipt (see ../config).
-// - Bond is $1.40 Test USDC (verified). No sponsored-balance figure.
+// - Bond is $1.50 Test USDC (on-chain minerBond(6152) = quoteMinerBond(6),
+//   lib/minerBond.ts). No sponsored-balance figure.
 // - M12 curtailment numbers (ERCOT $118.40 vs $65) were fabricated and
 //   are NOT reproduced: the desk grid items show live LMP with no
 //   threshold verdict.
 // - AAPL filing count is never hardcoded here — the live call decides.
 // - No fabricated signal hashes, latencies, costs, or receipt ids.
+
+import { MINER_BOND_USD_TEXT } from "../../lib/minerBond";
 
 export type IntentKey = "tx" | "sec" | "tvl" | "route" | "grid" | "validator";
 
@@ -41,10 +44,10 @@ export const INTENTS: IntentMeta[] = [
     file: "tx-lookup",
     ext: ".ts",
     name: "ONCHAIN_TX_LOOKUP_GENERAL",
-    sub: "# ONCHAIN_TX_LOOKUP_GENERAL · 2-of-3 Archive Quorum",
-    desc: "Queries archive RPCs in parallel with block-pinned confirmation depth and OP-Stack L1 data-fee accounting.",
+    sub: "# ONCHAIN_TX_LOOKUP_GENERAL · 2-of-N Archive Quorum",
+    desc: "Queries archive RPCs (2-of-3 on Ethereum, Base, Arbitrum, Optimism and Sepolia; 2-of-2 on Polygon and Base Sepolia) with block-pinned confirmation depth and OP-Stack L1 data-fee accounting; a split vote fails closed.",
     kind: "deterministic",
-    upstreams: "Archive RPC quorum · 2-of-3",
+    upstreams: "Archive RPC quorum · 2-of-3 (2-of-2 on Polygon, Base Sepolia)",
     schema: "tx_hash, status, block_number, value_eth",
     url: "GET /v1/tx · ethereum mainnet",
   },
@@ -90,7 +93,7 @@ export const INTENTS: IntentMeta[] = [
     ext: ".ts",
     name: "GRID_POWER_PRICE_GENERAL",
     sub: "# GRID_POWER_PRICE_GENERAL · Wholesale LMP Cache",
-    desc: "Background Render cron ingests CAISO OASIS, NYISO, and Elering settlement data into SQLite for instant responses.",
+    desc: "An in-process background ingester (every 5 minutes) loads CAISO OASIS, NYISO, and Elering prices into SQLite; answers are served from that stored settlement data.",
     kind: "deterministic",
     upstreams: "CAISO OASIS · NYISO · Elering",
     schema: "lmp_usd_per_mwh, node_or_zone, market, currency",
@@ -102,9 +105,9 @@ export const INTENTS: IntentMeta[] = [
     ext: ".ts",
     name: "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
     sub: "# VALIDATOR_PERFORMANCE_VERIFY_GENERAL · Beacon Effective Balance",
-    desc: "Reads a validator's effective balance from a 2-of-N Ethereum beacon-node quorum (Lodestar, PublicNode, Stakely). The index is a canonical non-negative integer written as a decimal string.",
+    desc: "Reads a validator's effective balance at the finalized state from a 2-of-4 Ethereum beacon-node quorum (Lodestar, PublicNode, Stakely, blockreq). The index is a canonical non-negative integer written as a decimal string.",
     kind: "deterministic",
-    upstreams: "Lodestar ChainSafe · PublicNode Beacon · Stakely Beacon",
+    upstreams: "Lodestar ChainSafe · PublicNode Beacon · Stakely Beacon · blockreq Beacon",
     schema: "validator_index, effective_balance (gwei), status",
     url: "GET /v1/validator · beacon quorum",
   },
@@ -161,7 +164,7 @@ export const UPSTREAMS: { n: string; ic: string }[] = [
   { n: "SEC EDGAR", ic: "M3 13h10M4 11V6M8 11V6M12 11V6M2 6l6-3.5L14 6Z" },
   { n: "DeFiLlama", ic: "M3 12l3.5-4 3 2.5L13 5" },
   { n: "PublicNode RPC", ic: "M8 2.5l5 2.8v5.4L8 13.5 3 10.7V5.3Z" },
-  { n: "LlamaRPC", ic: "M4 8a4 4 0 1 0 8 0 4 4 0 1 0-8 0M8 2v2M8 12v2" },
+  { n: "dRPC", ic: "M4 8a4 4 0 1 0 8 0 4 4 0 1 0-8 0M8 2v2M8 12v2" },
   { n: "Uniswap V3", ic: "M3 11c2.5 0 3.5-6 5-6s2.5 6 5 6" },
   { n: "CAISO OASIS", ic: "M9 2L4 9h4l-1 5 5-7H8l1-5Z" },
   { n: "Beacon quorum", ic: "M8 2.5l5 2.8v5.4L8 13.5 3 10.7V5.3Z" },
@@ -181,15 +184,15 @@ export interface Plate {
 
 /** Guarantee plates — fixed marketing copy (DESIGN-SPEC §7, verbatim). */
 export const PLATES: Plate[] = [
-  { id: "quorum", fig: "fig. 01 · quorum", num: "01", cat: "accuracy", tag: "// 2-of-3 consensus", title: "2-of-3 RPC Quorum →", desc: "Parallel archive RPC voting eliminates single-node not_found hallucinations." },
-  { id: "receipt", fig: "fig. 02 · receipt", num: "02", cat: "accuracy", tag: "// sha-256 envelope", title: "SHA-256 Receipts →", desc: "Four sealed layers bind raw upstream bytes to every 200 OK JSON root." },
-  { id: "vault", fig: "fig. 03 · vault", num: "03", cat: "accuracy", tag: "// unbilled refusal", title: "Strict 400/422/502 →", desc: "Malformed or future intervals refuse cleanly with zero billing and zero guesswork." },
-  { id: "cabinet", fig: "fig. 04 · cabinet", num: "04", cat: "reliability", tag: "// always-warm render", title: "Always-Warm Render →", desc: "Zero cold starts on Render Paid protect hourly spot-check routing." },
-  { id: "terrain", fig: "fig. 05 · terrain", num: "05", cat: "reliability", tag: "// sqlite wal cache", title: "Bounded SWR Cache →", desc: "Persistent disk SQLite WAL serves CAISO & EDGAR payloads under 25ms." },
-  { id: "format", fig: "fig. 06 · format", num: "06", cat: "verification", tag: "// verbatim root keys", title: "Byte-Exact Schemas →", desc: "Crooked upstream JSON snaps cleanly into canonical root fields." },
-  { id: "riffle", fig: "fig. 07 · riffle", num: "07", cat: "verification", tag: "// 30s judge audit", title: "Recomputable Audits →", desc: "Curl the upstream URL, run sha256sum, and verify exact byte identity." },
-  { id: "sieve", fig: "fig. 08 · sieve", num: "08", cat: "reliability", tag: "// 4.5s abort cap", title: "Circuit Breakers →", desc: "Three-tier timeout isolation stops upstream stalls from cascading." },
-  { id: "settle", fig: "fig. 09 · settle", num: "09", cat: "consumption", tag: "// eip-191 escrow", title: "Mission 13 & 12 Desk →", desc: "Scattered specialist checks converge into a single deterministic verdict." },
+  { id: "quorum", fig: "fig. 01 · quorum", num: "01", cat: "accuracy", tag: "// 2-of-n consensus", title: "2-of-N RPC Quorum →", desc: "Two independent archive RPCs must agree (2-of-3 on Ethereum, Base, Arbitrum, Optimism and Sepolia; 2-of-2 on Polygon and Base Sepolia); a split vote returns 502 QUORUM_DISAGREEMENT instead of a guess." },
+  { id: "receipt", fig: "fig. 02 · receipt", num: "02", cat: "accuracy", tag: "// sha-256 envelope", title: "SHA-256 Receipts →", desc: "Every 200 answer carries receipt.raw_response_sha256 over the exact evidence bytes served at /receipts/{id}/raw." },
+  { id: "vault", fig: "fig. 03 · vault", num: "03", cat: "accuracy", tag: "// fail-closed refusal", title: "Strict 400/422/502 →", desc: "Malformed input and future intervals are refused with 400/422 and no receipt; upstream failures return 502. No guessed values." },
+  { id: "cabinet", fig: "fig. 04 · cabinet", num: "04", cat: "reliability", tag: "// live /health", title: "Live Status →", desc: "/health and every endpoint are probed live on /status. Uptime is only what /health reports; nothing more is claimed." },
+  { id: "terrain", fig: "fig. 05 · terrain", num: "05", cat: "reliability", tag: "// sqlite wal store", title: "Persistent Grid Store →", desc: "Grid prices live in SQLite (WAL) on a persistent disk. Latency is measured live on /benchmarks, not claimed here." },
+  { id: "format", fig: "fig. 06 · format", num: "06", cat: "verification", tag: "// verbatim root keys", title: "Declared Schemas →", desc: "Responses use the field names declared in miner.yaml; a conformance suite checks them against the live service." },
+  { id: "riffle", fig: "fig. 07 · riffle", num: "07", cat: "verification", tag: "// sha256sum check", title: "Recomputable Audits →", desc: "Fetch /receipts/{id}/raw, run sha256sum, and compare it with raw_response_sha256." },
+  { id: "sieve", fig: "fig. 08 · sieve", num: "08", cat: "reliability", tag: "// per-intent abort timers", title: "Bounded Upstream Calls →", desc: "Every upstream call has its own abort timer, set per intent: route 4 s per RPC call (8 s total), TVL 4.5 s per fetch (9 s total), validator 4.5 s for the whole request, filings 10 s per SEC request (30 s total), tx 12 s per RPC call. Grid answers come from the stored ingest (20 s per ingester fetch); a missing CAISO hour, or a NYISO post-close re-check, is fetched live, capped at 120 s. The miner itself runs no circuit breaker; the breaker settings in miner.yaml are applied by the Telegraph node." },
+  { id: "settle", fig: "fig. 09 · settle", num: "09", cat: "consumption", tag: "// desk · direct probes", title: "Mission 13 & 12 Desk →", desc: "Several specialist checks combine into one deterministic verdict. Today the Desk calls the miner directly (unbilled); escrow-paid runs are UNVERIFIED (not shipped yet)." },
 ];
 
 export interface SprintStep {
@@ -205,8 +208,8 @@ export interface SprintStep {
  * Default step is day 01 (Nov 20, the current day).
  */
 export const SPRINT_STEPS: SprintStep[] = [
-  { label: "01 Star & Setup", cols: [0], g1: "// day 01 · Nov 20 — star bounties + Render US-East deploy", g2: "// gate: /health 200 OK · SQLite WAL active · 5 handlers live" },
-  { label: "02 Freeze Cutoff", cols: [1], g1: "// day 02 · Nov 21 EOD — registerMiner on Diamond 0x72a7…", g2: "// gate: $1.40 Test USDC bond · activation_status: active" },
+  { label: "01 Star & Setup", cols: [0], g1: "// day 01 · Nov 20 — star bounties + Render deploy", g2: "// gate: /health 200 OK · SQLite WAL active · intent handlers live (six served today)" },
+  { label: "02 Freeze Cutoff", cols: [1], g1: "// day 02 · Nov 21 EOD — registerMiner on Diamond 0x72a7…", g2: `// gate: ${MINER_BOND_USD_TEXT} Test USDC bond · activation_status: active` },
   { label: "03 Harden & Traps", cols: [2], g1: "// days 03–04 · Nov 22–23 — 24-case adversarial trap suite", g2: "// gate: 24/24 pass · 0% 503 · public Update #1 posted" },
   { label: "04 Mission Desk", cols: [3], g1: "// days 05–06 · Nov 24–25 — 100+ ranked EIP-191 escrow calls", g2: "// gate: 100+ signal_hash rows committed to receipts/ledger.jsonl" },
   { label: "05 Growth & Grace Exit", cols: [4, 5], g1: "// days 07–09 · Nov 26–28 — grace exits Nov 28 · external dev reruns", g2: "// gate: ranked epoch standings + tutorial + Updates #2 & #3" },

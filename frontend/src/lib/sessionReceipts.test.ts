@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SESSION_RECEIPTS_CAP,
   SESSION_RECEIPTS_CORRUPT_BACKUP_KEY,
@@ -10,6 +10,7 @@ import {
   clearSessionReceipts,
   readLedgerGeneration,
   readSessionReceipts,
+  rollbackEntry,
   uniqueSessionReceiptKey,
   type SessionReceipt,
 } from "./sessionReceipts";
@@ -271,4 +272,225 @@ describe("ledger generation (J2 R6 cross-tab Clear gate)", () => {
     expect(readLedgerGeneration()).toBe(1);
   });
 
+});
+
+describe("P-LEDGER-XTAB — rollbackEntry, TOCTOU, throwing storage", () => {
+  it("rollbackEntry removes only the named key and does not read the generation key", () => {
+    const first = entry({ key: "keep-me" });
+    const second = entry({ key: "drop-me" });
+    // Distinct receipt ids so validation/identity is obvious in diffs.
+    first.receipt = { ...first.receipt, receipt_id: "rcpt_keep" };
+    second.receipt = { ...second.receipt, receipt_id: "rcpt_drop" };
+    expect(appendSessionReceipt(first)).toBe(true);
+    expect(appendSessionReceipt(second)).toBe(true);
+    const keysRead: string[] = [];
+    const origGet = localStorage.getItem.bind(localStorage);
+    const getSpy = vi.spyOn(Storage.prototype, "getItem").mockImplementation((k) => {
+      keysRead.push(String(k));
+      return origGet(k);
+    });
+    expect(rollbackEntry("drop-me")).toBe(true);
+    getSpy.mockRestore();
+    expect(keysRead).not.toContain(SESSION_RECEIPTS_GEN_KEY);
+    const left = readSessionReceipts().entries.map((e) => e.key);
+    expect(left).toEqual(["keep-me"]);
+  });
+
+  it("appendSessionReceipt rolls back the new key when generation changes during the write (TOCTOU)", () => {
+    const kept = entry({ key: "kept" });
+    expect(appendSessionReceipt(kept)).toBe(true);
+    const origSet = Storage.prototype.setItem;
+    let injected = false;
+    const setSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      k: string,
+      v: string,
+    ) {
+      if (String(k) === SESSION_RECEIPTS_KEY && !injected) {
+        injected = true;
+        // Simulate another tab's Clear between our read and our write:
+        // bump gen first, then allow the write through (the resurrecting write).
+        origSet.call(this, SESSION_RECEIPTS_GEN_KEY, "1");
+        origSet.call(this, SESSION_RECEIPTS_KEY, "[]");
+      }
+      return origSet.call(this, k, v);
+    });
+    const incoming = entry({ key: "incoming" });
+    expect(appendSessionReceipt(incoming, 0)).toBe(false);
+    setSpy.mockRestore();
+    const left = readSessionReceipts().entries.map((e) => e.key);
+    expect(left).not.toContain("incoming");
+  });
+
+  it("appendSessionReceipt refuses before writing when expectedGeneration is already stale", () => {
+    bumpLedgerGeneration();
+    const row = entry({ key: "stale-start" });
+    expect(appendSessionReceipt(row, 0)).toBe(false);
+    expect(readSessionReceipts().entries).toHaveLength(0);
+  });
+
+  it("append, rollback, and bump do not throw when storage throws (throwing-storage)", () => {
+    const row = entry({ key: "throw-me" });
+    const boom = () => {
+      throw new Error("storage blocked");
+    };
+    const getSpy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(boom);
+    const setSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(boom);
+    const rmSpy = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(boom);
+    expect(() => bumpLedgerGeneration()).not.toThrow();
+    expect(() => appendSessionReceipt(row)).not.toThrow();
+    expect(appendSessionReceipt(row)).toBe(false);
+    expect(() => rollbackEntry("throw-me")).not.toThrow();
+    expect(rollbackEntry("throw-me")).toBe(false);
+    getSpy.mockRestore();
+    setSpy.mockRestore();
+    rmSpy.mockRestore();
+  });
+});
+
+/**
+ * XTAB r7 — J2 Medium 1 (pc2-xtab-r6 verdict, 2026-11-21): a stale tab's
+ * full-ledger write after another tab's Clear resurrected pre-Clear rows
+ * and wiped the other tab's post-Clear append. These tests replay J2's
+ * exact two-tab sequence in one jsdom by interleaving "tab B" inside
+ * tab A's storage calls. Against the r6 module they FAIL (kept comes
+ * back, legit-after-clear is gone); against r7 they pass.
+ */
+describe("XTAB r7 — stale-tab write vs Clear (J2 Medium 1)", () => {
+  function named(key: string): SessionReceipt {
+    const e = entry({ key, label: key });
+    e.receipt = { ...e.receipt, receipt_id: `rcpt_${key}` };
+    return e;
+  }
+
+  /** Tab B's Clear, exactly as Receipts.tsx does it: bump, then clear. */
+  function tabBClear(): void {
+    bumpLedgerGeneration();
+    clearSessionReceipts();
+  }
+
+  /**
+   * Run `tabB` right after tab A's FIRST read of the ledger key returns
+   * (tab A "has already read [kept]"), then let tab A continue.
+   */
+  function afterFirstLedgerRead(tabB: () => void) {
+    const origGet = Storage.prototype.getItem;
+    let fired = false;
+    return vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (
+      this: Storage,
+      k: string,
+    ) {
+      const value = origGet.call(this, k);
+      if (!fired && String(k) === SESSION_RECEIPTS_KEY) {
+        fired = true;
+        tabB();
+      }
+      return value;
+    });
+  }
+
+  it("J2 sequence: Clear in tab B after tab A read [kept] — the Clear is not undone", () => {
+    expect(appendSessionReceipt(named("kept"))).toBe(true);
+    const genA = readLedgerGeneration(); // tab A starts its try-it at generation 0
+    expect(genA).toBe(0);
+    const spy = afterFirstLedgerRead(tabBClear);
+    const ok = appendSessionReceipt(named("incoming"), genA);
+    spy.mockRestore();
+    expect(ok).toBe(false);
+    expect(readSessionReceipts().entries.map((e) => e.key)).toEqual([]);
+  });
+
+  it("J2 stronger sequence: tab B Clears AND appends legit-after-clear — it survives, kept stays gone", () => {
+    expect(appendSessionReceipt(named("kept"))).toBe(true);
+    const genA = readLedgerGeneration();
+    const spy = afterFirstLedgerRead(() => {
+      tabBClear();
+      const genB = readLedgerGeneration();
+      expect(genB).toBe(1);
+      expect(appendSessionReceipt(named("legit-after-clear"), genB)).toBe(true);
+    });
+    const ok = appendSessionReceipt(named("incoming"), genA);
+    spy.mockRestore();
+    expect(ok).toBe(false);
+    expect(readSessionReceipts().entries.map((e) => e.key)).toEqual(["legit-after-clear"]);
+  });
+
+  it("same-epoch concurrent append from another tab is merged per key, not overwritten", () => {
+    expect(appendSessionReceipt(named("kept"))).toBe(true);
+    const spy = afterFirstLedgerRead(() => {
+      expect(appendSessionReceipt(named("other-tab"), 0)).toBe(true);
+    });
+    const ok = appendSessionReceipt(named("incoming"), 0);
+    spy.mockRestore();
+    expect(ok).toBe(true);
+    expect(readSessionReceipts().entries.map((e) => e.key)).toEqual([
+      "incoming",
+      "other-tab",
+      "kept",
+    ]);
+  });
+
+  it("Clear landing inside tab A's final write still never resurrects pre-Clear rows", () => {
+    expect(appendSessionReceipt(named("kept"))).toBe(true);
+    const origSet = Storage.prototype.setItem;
+    let fired = false;
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      k: string,
+      v: string,
+    ) {
+      if (!fired && String(k) === SESSION_RECEIPTS_KEY) {
+        fired = true;
+        spy.mockRestore();
+        tabBClear();
+        // Tab A's stale write then lands on top of the cleared ledger.
+      }
+      return origSet.call(this, k, v);
+    });
+    const ok = appendSessionReceipt(named("incoming"), 0);
+    spy.mockRestore();
+    expect(ok).toBe(false);
+    // The stored value is stamped with the old epoch, so every reader
+    // treats it as cleared: neither kept nor incoming is shown.
+    expect(readLedgerGeneration()).toBe(1);
+    expect(readSessionReceipts().entries.map((e) => e.key)).toEqual([]);
+    // The next append at the current epoch replaces the stale value.
+    expect(appendSessionReceipt(named("after"), 1)).toBe(true);
+    expect(readSessionReceipts().entries.map((e) => e.key)).toEqual(["after"]);
+  });
+
+  it("a stored ledger stamped with an older epoch is never shown; a legacy array is", () => {
+    window.localStorage.setItem(SESSION_RECEIPTS_GEN_KEY, "2");
+    window.localStorage.setItem(
+      SESSION_RECEIPTS_KEY,
+      JSON.stringify({ v: 2, epoch: 1, entries: [named("pre-clear")] }),
+    );
+    expect(readSessionReceipts()).toEqual({ entries: [], corrupt: false, unavailable: false, dropped: 0 });
+    window.localStorage.setItem(SESSION_RECEIPTS_KEY, JSON.stringify([named("legacy")]));
+    expect(readSessionReceipts().entries.map((e) => e.key)).toEqual(["legacy"]);
+  });
+
+  it("writes stamp the epoch into the stored value, and Clear moves past the stamp", () => {
+    expect(appendSessionReceipt(named("a"))).toBe(true);
+    const stored = JSON.parse(window.localStorage.getItem(SESSION_RECEIPTS_KEY)!);
+    expect(stored).toMatchObject({ v: 2, epoch: 0 });
+    expect(stored.entries.map((e: SessionReceipt) => e.key)).toEqual(["a"]);
+    // GEN counter lost (e.g. a failed write): the stamp still counts.
+    window.localStorage.setItem(
+      SESSION_RECEIPTS_KEY,
+      JSON.stringify({ v: 2, epoch: 4, entries: [named("b")] }),
+    );
+    expect(readLedgerGeneration()).toBe(4);
+    bumpLedgerGeneration();
+    expect(readLedgerGeneration()).toBe(5);
+    expect(readSessionReceipts().entries).toEqual([]);
+  });
+
+  it("an envelope with a bad shape is corrupt and is not overwritten (M6)", () => {
+    const bad = JSON.stringify({ v: 2, epoch: -1, entries: [] });
+    window.localStorage.setItem(SESSION_RECEIPTS_KEY, bad);
+    expect(readSessionReceipts().corrupt).toBe(true);
+    expect(appendSessionReceipt(named("x"))).toBe(false);
+    expect(window.localStorage.getItem(SESSION_RECEIPTS_KEY)).toBe(bad);
+  });
 });

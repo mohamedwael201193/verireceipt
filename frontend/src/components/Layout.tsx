@@ -12,8 +12,11 @@ import {
   MINER_ID,
   MINER_SLUG,
 } from "../config";
+import { frontendCommit, REPO_URL } from "../lib/buildCommit";
 import { useTheme } from "../hooks/useTheme";
 import ThemeToggle from "./ThemeToggle";
+
+const BUILD = frontendCommit();
 
 const NAV_LINKS = [
   { to: "/", label: "Home", end: true },
@@ -271,12 +274,18 @@ export default function Layout() {
             </div>
             <div>
               <div className="kicker">// deployment</div>
-              <div style={{ color: "var(--text)", marginBottom: 6 }}>Always-Warm Render US-East</div>
+              <div style={{ color: "var(--text)", marginBottom: 6 }}>Render web service</div>
               <div className="mono" style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 4 }}>
                 Node.js 20 · Fastify · SQLite WAL
               </div>
               <div className="mono" style={{ fontSize: 11.5, color: "var(--muted)" }}>
                 auth: none · {BOND_DISPLAY}
+              </div>
+              <div className="mono" style={{ fontSize: 11, color: "var(--muted)", marginTop: 6, overflowWrap: "anywhere" }}>
+                <a href={`${REPO_URL}/commit/${BUILD.sha}`} target="_blank" rel="noreferrer" style={{ color: "var(--muted)" }}>
+                  {BUILD.sha}
+                </a>
+                <div style={{ marginTop: 4 }}>{BUILD.label}</div>
               </div>
             </div>
           </div>

@@ -1,12 +1,10 @@
 // THE ONE receipt verifier (PLAN.md C2).
 //
-// Four verifiers used to exist — pages/Receipts.tsx (per-endpoint live
-// re-check), pages/dashboard/ReceiptDrawer.tsx (plain GET + hash, wrong
-// for tx/grid/route), pages/landing/verify.ts (hashed the whole miner
-// envelope, which can never match the recorded digest), and lib/verify.ts
-// (dead code, deleted round 5). This module is the only one: every call
+// This module is THE ONE receipt verifier (PLAN.md C2): every call
 // site (Receipts VerifyPanel, ReceiptDrawer recompute, landing
-// VerifyBadge) calls verifyReceipt() here.
+// VerifyBadge) calls verifyReceipt() here. lib/verify.ts is the hash-
+// primitive attack suite, not a UI verifier. pages/landing/verify.ts
+// (envelope-digest, which can never match) has been deleted.
 //
 // How it verifies, in order:
 //   1. RAW BYTES FIRST: GET /api/receipts/:id/raw (same-origin; the
@@ -18,10 +16,9 @@
 //      request/response the miner hashed) and grid (the stored bytes are
 //      whatever the miner hashed — the canonical evidence JSON, NOT the
 //      CAISO zip; see the grid note below).
-//   2. LIVE RE-CHECK FALLBACK: while the miner does not serve /raw yet
-//      (live check 2026-11-20: HTTP 404 for fresh receipts, direct and
-//      via the proxy — miner C1 not landed), the per-endpoint live
-//      re-check runs instead, labelled mode "live_recheck": tx replays
+//   2. LIVE RE-CHECK FALLBACK: if /raw is unavailable (non-OK), the
+//      per-endpoint live re-check runs instead, labelled mode
+//      "live_recheck": tx replays
 //      the exact JSON-RPC call, grid re-hashes the canonical evidence
 //      JSON, filings/tvl re-fetch the upstream URL. Route has no live
 //      re-check (the API response does not carry the quoter bytes) and
@@ -148,24 +145,24 @@ export function verifyMethodNote(endpoint: SessionReceiptEndpoint): string {
   if (endpoint === "tx") {
     return (
       raw +
-      "While the miner does not serve them yet, replays the miner's exact JSON-RPC call instead — POST eth_getTransactionReceipt to the receipt's upstream RPC URL — and hashes the exact response text."
+      "If stored raw bytes are not served, replays the miner's exact JSON-RPC call instead — POST eth_getTransactionReceipt to the receipt's upstream RPC URL — and hashes the exact response text."
     );
   }
   if (endpoint === "grid") {
     return (
       raw +
-      "While the miner does not serve them yet, re-hashes the canonical evidence JSON the miner hashed: JSON.stringify({node_or_zone, interval_start, lmp_usd_per_mwh, market}). (The CAISO zip bytes are NOT what was hashed, so re-fetching the zip can never match.)"
+      "If stored raw bytes are not served, re-hashes the canonical evidence JSON the miner hashed: JSON.stringify({node_or_zone, interval_start, lmp_usd_per_mwh, market}). (The CAISO zip bytes are NOT what was hashed, so re-fetching the zip can never match.)"
     );
   }
   if (endpoint === "route") {
     return (
       raw +
-      "The stored bytes ARE the quoter request/response the miner hashed, so this becomes verifiable once the miner serves them. While it does not, this receipt cannot be re-hashed in the browser — the API response does not carry the raw quoter bytes."
+      "The stored bytes ARE the quoter request/response the miner hashed, so this becomes verifiable once the miner serves them. If they are not served, this receipt cannot be re-hashed in the browser — the API response does not carry the raw quoter bytes."
     );
   }
   return (
     raw +
-    "While the miner does not serve them yet, re-fetches the receipt's upstream URL and hashes the exact bytes. Verified only on a match."
+    "If stored raw bytes are not served, re-fetches the receipt's upstream URL and hashes the exact bytes. Verified only on a match."
   );
 }
 
@@ -450,7 +447,7 @@ async function liveRecheck(
 /**
  * THE ONE receipt verifier. Tries the stored raw bytes first
  * (/api/receipts/:id/raw), falls back to the per-endpoint live re-check
- * while the miner does not serve them (HTTP 404 today). Never throws
+ * when /raw is unavailable. Never throws
  * for a verification outcome — every outcome is a returned result
  * (verified / mismatch / unverifiable / not-reproducible / cancelled /
  * no-crypto). The caller renders result.mode + result.method so the

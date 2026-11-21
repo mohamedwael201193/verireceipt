@@ -11,9 +11,9 @@
 // Receipt verification is real, not a badge — and there is exactly ONE
 // verifier (src/lib/verifyReceipt.ts, PLAN.md C2). It tries the stored
 // raw bytes first (GET /api/receipts/:id/raw, SHA-256 vs the recorded
-// digest) and falls back to the per-endpoint live re-check while the
-// miner does not serve /raw yet (live check 2026-11-20: HTTP 404 for
-// fresh receipts — miner C1 not landed). The live re-check methods,
+// digest) and falls back to the per-endpoint live re-check only when
+// /raw is unavailable (live check 2026-11-21: /raw HTTP 200; it was a
+// 404 on 2026-11-20 before miner C1 landed). The live re-check methods,
 // proven live 2026-11-20:
 // - /v1/tx: replay the exact JSON-RPC call the miner made —
 //   POST {"jsonrpc":"2.0","id":1,"method":"eth_getTransactionReceipt",
@@ -45,9 +45,8 @@
 // miner team (C1): the miner hashed canonical evidence JSON, not the
 // CAISO zip, so a raw_bytes grid check against zip bytes would mismatch
 // a receipt the live re-check matches.
-// The receipt's audit_url is recorded text only: the API does not serve
-// /receipts/:id in this build (live check 2026-11-20 returned HTTP 404).
-// The receipts/:id route deep-links into the session ledger instead: an
+// The API serves the receipt's audit_url (/receipts/:id, live check
+// 2026-11-21: HTTP 200; 404 on 2026-11-20). The receipts/:id route deep-links into the session ledger instead: an
 // id matching a receipt collected in this browser session opens that
 // entry; any other id shows an honest not-found notice (see below).
 //
@@ -346,11 +345,10 @@ function VerifyPanel({
         <span className="vr-mono">
           {typeof receipt.audit_url === 'string' ? receipt.audit_url : '—'}
         </span>{' '}
-        — the API does
-        not serve <span className="vr-mono">/receipts/:id</span> in this build (live check
-        2026-11-20: HTTP 404), so it is shown as recorded text, not a working link.
-        Verification above tries <span className="vr-mono">/api/receipts/:id/raw</span> first
-        and falls back to a live re-check while the miner does not serve it.
+        — the miner serves <span className="vr-mono">/receipts/:id</span> (live check
+        2026-11-21: HTTP 200); it is shown here as recorded text. Verification above tries{' '}
+        <span className="vr-mono">/api/receipts/:id/raw</span> first and falls back to a live
+        re-check only if that fetch fails.
       </p>
     </div>
   );
@@ -621,9 +619,9 @@ export default function Receipts() {
   // receipts/:id route renders this page with the id in the URL. An id
   // matching a receipt in this browser session opens that entry and
   // scrolls it into view; any other id shows an honest not-found
-  // notice below. No backend fetch is attempted — the API does not
-  // serve /receipts/:id in this build (live check 2026-11-20:
-  // HTTP 404), so a receipt from another session cannot be loaded.
+  // notice below. No backend fetch is attempted by this deep link
+  // (the API does serve /receipts/:id since 2026-11-21, HTTP 200;
+  // loading another session's receipt here is out of scope).
   const { id: deepLinkId } = useParams();
   const deepLinkEntry = useMemo(
     () =>
@@ -824,10 +822,11 @@ export default function Receipts() {
         clearGenAtStart !== clearGenRef.current ||
         ledgerGenAtStart !== readLedgerGeneration()
       ) {
-        const nextMemory = memoryOnlyRef.current.filter((m) => !appendSessionReceipt(m));
-        memoryOnlyRef.current = nextMemory;
-        setMemoryOnly(nextMemory);
-        setStored(mergeLedgerDisplay(readSessionReceipts().entries, nextMemory));
+        // Stale completion: do NOT retry the memory-only backlog into
+        // storage here (P-LEDGER-XTAB loop defect). A post-Clear
+        // completion of a later call still retries the backlog on its
+        // success path, generation-gated by appendSessionReceipt.
+        setStored(mergeLedgerDisplay(readSessionReceipts().entries, memoryOnlyRef.current));
         return false;
       }
       // Read the backlog from the ref, never from the closure snapshot
@@ -838,10 +837,13 @@ export default function Receipts() {
       // any re-render.
       const current = memoryOnlyRef.current;
       let nextMemory: StoredReceipt[];
-      if (appendSessionReceipt(entry)) {
+      if (appendSessionReceipt(entry, ledgerGenAtStart)) {
         // Entry persisted: retry the backlog (a transient cause may
         // have healed). Permanently invalid entries stay memory-only.
-        nextMemory = current.filter((m) => !appendSessionReceipt(m));
+        // Backlog writes are gated on the CURRENT generation so a
+        // pre-Clear memory-only row cannot resurrect (P-LEDGER-XTAB).
+        const genNow = readLedgerGeneration();
+        nextMemory = current.filter((m) => !appendSessionReceipt(m, genNow));
       } else {
         nextMemory = [entry, ...current.filter((r) => r.key !== entry.key)].slice(
           0,
@@ -1152,10 +1154,10 @@ export default function Receipts() {
               <p>
                 No receipt <span className="vr-mono">{deepLinkId}</span> in this browser
                 session's ledger. Receipts are kept per browser session — run a live call
-                on the dashboard or below to collect one. The API does not serve{' '}
-                <span className="vr-mono">/receipts/:id</span> in this build (live check
-                2026-11-20: HTTP 404), so a receipt from another session cannot be loaded
-                here.
+                on the dashboard or below to collect one. The miner does serve{' '}
+                <span className="vr-mono">/receipts/:id</span> (live check 2026-11-21: HTTP 200),
+                but this page does not load receipts from it, so a receipt from another
+                session is not shown here.
               </p>
             )}
             <Link to="/receipts" className="vr-btn-ghost">
@@ -1300,7 +1302,7 @@ export default function Receipts() {
 
       {/* ---- Try-it forms ---- */}
       <div className="vr-kicker" style={{ marginTop: 28 }}>
-        // try-it · five live endpoints · each call returns its real receipt
+        // try-it · six live endpoints · each call returns its real receipt
       </div>
       <div className="vr-tryit-grid">
         {(Object.keys(ENDPOINT_META) as EndpointKey[]).map((key) => (
@@ -1321,7 +1323,7 @@ export default function Receipts() {
         ))}
       </div>
       <p className="vr-muted vr-small" style={{ marginTop: 18 }}>
-        Miner <span className="vr-mono">774921 · verireceipt</span> · auth: none · all five
+        Miner <span className="vr-mono">774921 · verireceipt</span> · auth: none · all six
         endpoints are GET — the forms above call the live API through the same-origin{' '}
         <span className="vr-mono">/api</span> proxy. Failed calls (e.g. a future grid interval, an
         unknown protocol) return the real error — nothing is fabricated.

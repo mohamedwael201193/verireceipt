@@ -1,3 +1,10 @@
+// Hash-primitive attack suite (NOT a UI receipt verifier).
+//
+// PLAN.md C2: production call sites use src/lib/verifyReceipt.ts only.
+// This module remains so verify.test.ts can keep pinning the
+// ArrayBuffer / SharedArrayBuffer / toStringTag spoof cases against a
+// standalone sha256Hex. Do not import this file from UI components.
+//
 // Receipt verification: recompute SHA-256 over a fetched upstream response
 // body and compare it with the receipt's recorded digest.
 //

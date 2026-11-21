@@ -8,14 +8,19 @@
 // shows the real error (status + code + message).
 //
 // Render service facts shown are only the documented base URL plus the
-// miner.yaml registration facts (miner id 774921, slug verireceipt, bond
-// $1.40 Test USDC — verified). The Render plan, disk, and region are NOT
+// miner.yaml registration facts (miner id 774921, slug verireceipt) and the
+// bond, which is re-read live on-chain (minerBond(6152), quoteMinerBond(6)). Live Sepolia registration status is
+// read from the Telegraph node and is never shown as "active" unless
+// that live read says so. The Render plan, disk, and region are NOT
 // shown: the API does not report them. No "Always-Warm" claim, no sponsored
 // balance (no such figure exists), no canned p50 latencies.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, ApiError } from '../lib/api';
 import { useHealth } from '../lib/hooks';
+import { describeNodeListing, useMinerRegistration } from '../lib/minerRegistration';
+import { useLiveQuery } from '../lib/hooks';
+import { bondBadge, fetchLiveMinerBond, MINER_BOND_SOURCE, MINER_BOND_USD_TEXT } from '../lib/minerBond';
 
 const API_BASE_URL = 'https://verireceipt.onrender.com';
 const PROBE_INTERVAL_MS = 60_000;
@@ -138,6 +143,8 @@ function probeDetail(key: string, data: unknown, methodPath?: string): string | 
 
 export default function Status() {
   const health = useHealth();
+  const registration = useMinerRegistration();
+  const bond = useLiveQuery('miner-bond-live', (signal) => fetchLiveMinerBond(signal));
   const healthData = health.data as unknown as
     | { status: string; service: string; uptime_s: number; upstreams: Record<string, unknown> }
     | null;
@@ -252,7 +259,7 @@ export default function Status() {
           <span className={`vr-badge ${allUp ? 'vr-b-ok' : downCount > 0 ? 'vr-b-err' : 'vr-b-dim'}`}>
             {allUp ? 'ALL SYSTEMS UP' : downCount > 0 ? `${downCount} ENDPOINT${downCount === 1 ? '' : 'S'} DOWN` : 'CHECKING…'}
           </span>
-          <span className="vr-badge vr-b-dim">auth: none · Bond $1.40 Test USDC</span>
+          <span className="vr-badge vr-b-dim">auth: none · Bond {MINER_BOND_USD_TEXT} Test USDC</span>
         </div>
       </header>
 
@@ -376,18 +383,76 @@ export default function Status() {
           <dd className="vr-mono">774921 · verireceipt</dd>
           <dt>auth</dt>
           <dd>none</dd>
-          <dt>bond</dt>
-          <dd>$1.40 Test USDC (verified)</dd>
-          <dt>rate limit</dt>
+          <dt>bond (on-chain)</dt>
+          <dd>
+            {MINER_BOND_USD_TEXT} Test USDC — {MINER_BOND_SOURCE}.{' '}
+            {(() => {
+              // J2 Minor 3 (r7): a later failed or in-flight re-read never
+              // keeps an earlier green "matches" badge (see bondBadge).
+              const badge = bondBadge(bond);
+              return <span className={`vr-badge vr-b-${badge.tone}`}>{badge.text}</span>;
+            })()}
+          </dd>
+          <dt>rate limit (node-side)</dt>
           <dd className="vr-mono">20 req/s · cache TTL 10 s</dd>
-          <dt>circuit breaker</dt>
-          <dd className="vr-mono">threshold 5 · cooldown 30 s</dd>
+          <dt>circuit breaker (node-side)</dt>
+          <dd>
+            <span className="vr-mono">threshold 5 · cooldown 30 s</span> — declared in miner.yaml and
+            applied by the Telegraph node to calls into this miner; the miner process runs no breaker
+          </dd>
         </dl>
         <p className="vr-muted vr-small">
           Not shown on purpose: Render plan, disk, and region. The API does not report them, so
           this page does not claim them. Uptime above comes from the live /health response, not
           from a hosting dashboard.
         </p>
+      </section>
+
+      <section className="vr-card" aria-label="Sepolia registration">
+        <div className="vr-kicker">// sepolia · live node check</div>
+        <h2 className="vr-h2">Sepolia registration</h2>
+        <p className="vr-muted vr-small">
+          The miner is registered on Ethereum Sepolia. The identifiers below are the
+          confirmed updateMiner transaction facts (it replaced the earlier registration
+          6150). Activation on the Telegraph node is read live and is shown as active only
+          when that read says so.
+        </p>
+        {registration.data ? (
+          <dl className="vr-kv">
+            <dt>registration id</dt>
+            <dd className="vr-mono">{registration.data.registrationId}</dd>
+            <dt>updateMiner tx</dt>
+            <dd className="vr-mono">
+              <a href={registration.data.explorerTx} target="_blank" rel="noopener noreferrer">
+                {registration.data.registerTx}
+              </a>
+              {' '}· block {registration.data.registerBlock}
+            </dd>
+            <dt>replaces</dt>
+            <dd className="vr-mono">registrationId {registration.data.previousRegistrationId}</dd>
+            <dt>yaml hash</dt>
+            <dd className="vr-mono">{registration.data.yamlHash}</dd>
+            <dt>yaml pin</dt>
+            <dd className="vr-mono">{registration.data.yamlPin}</dd>
+            <dt>node /api/miners/{registration.data.registrationId}</dt>
+            <dd>
+              {describeNodeListing(registration.data.nodeByRegistrationId)}
+              {registration.data.nodeReportsActive ? (
+                <span className="vr-badge vr-b-ok" style={{ marginLeft: 8 }}>active (live node)</span>
+              ) : (
+                <span className="vr-badge vr-b-dim" style={{ marginLeft: 8 }}>not reported active</span>
+              )}
+            </dd>
+          </dl>
+        ) : (
+          <p className="vr-muted vr-small">
+            {registration.loading
+              ? "Checking the live Telegraph node…"
+              : registration.error
+                ? `Node check failed (${registration.error.message}) — UNVERIFIED`
+                : "UNVERIFIED"}
+          </p>
+        )}
       </section>
     </div>
   );

@@ -88,12 +88,15 @@ Field names vary per endpoint; `confidence`, `verdict`, `source`, and
 - **Registered YAML:** [`miner.yaml` @ `4f471e4`](https://raw.githubusercontent.com/mohamedwael201193/verireceipt/4f471e48296d7225a482ef70025352e954b9cf5d/miner.yaml),
   SHA-256 `0x1653f3c00f8ee983bc2d2b36579c665c94ce2215ab1bb0d526564a9aec183e9f`
 - **Diamond (Telegraph):** `0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b`
-- **Typical ask price:** $0.01 per call (per Telegraph docs, "usually $0.01 in USDC")
+- **Floor price (on-chain):** `minPriceUsdc = 10000` = $0.01, the protocol minimum (getMiner(6152)).
+  Telegraph docs (using/api-keys.md): a request costs "usually about $0.01" per miner call.
+- **Bond (on-chain):** $1.50 Test USDC = `minerBond(6152)` = `quoteMinerBond(6)` = 1,500,000 base units
+  ($1.00 first intent + 5 × $0.10, per `minerBondParams()`), read 2026-11-21.
 - **Miner id / slug:** `774921` / `verireceipt`
 
 ## How it works
 
-1. A request hits one of the five deterministic endpoints.
+1. A request hits one of the six deterministic endpoints.
 2. The server queries the official upstream source(s) directly — archive
    RPCs, SEC EDGAR, DeFiLlama, on-chain DEX pools,
    official ISO price feeds. No language model is involved anywhere.

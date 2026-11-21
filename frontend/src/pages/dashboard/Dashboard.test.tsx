@@ -145,8 +145,9 @@ describe("Dashboard page", () => {
     expect(screen.queryByText(/Score 98 \/ 100/)).toBeNull();
     expect(screen.queryByText(/Archived Receipts: 124/)).toBeNull();
     // Verified bond is shown instead (Auth drawer value; the StatusDocs
-    // "Bond $1.40" badge only exists while that view is mounted).
-    expect(screen.getByText("$1.40 Test USDC")).toBeTruthy();
+    // "Bond $1.50" badge only exists while that view is mounted).
+    expect(screen.getByText("$1.50 Test USDC")).toBeTruthy();
+    expect(screen.queryByText(/\$1\.40/)).toBeNull();
     // The session ledger chrome renders (starts empty — 0 receipts).
     expect(await screen.findByText(/Session receipts:/)).toBeTruthy();
   });
@@ -580,11 +581,11 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     const receipt = makeReceipt({ intent: "ONCHAIN_TX_LOOKUP_GENERAL", status: 200 });
     render(<ReceiptDrawer receipt={receipt} onClose={() => undefined} showToast={() => undefined} />);
     fireEvent.click(screen.getByRole("button", { name: /Recompute SHA-256 in Browser/ }));
-    expect(await screen.findByText("Fetching upstream…", {}, { timeout: 5000 })).toBeTruthy();
+    expect(await screen.findByText("Verifying…", {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.getByRole("button", { name: /Recompute SHA-256 in Browser/ })).toBeEnabled(), { timeout: 5000 });
-    expect(screen.queryByText("Fetching upstream…")).toBeNull();
+    expect(screen.queryByText("Verifying…")).toBeNull();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   }, 30000);
 
@@ -595,7 +596,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
       const receipt = makeReceipt({ intent: "ONCHAIN_TX_LOOKUP_GENERAL", status: 200 });
       render(<ReceiptDrawer receipt={receipt} onClose={() => undefined} showToast={() => undefined} />);
       fireEvent.click(screen.getByRole("button", { name: /Recompute SHA-256 in Browser/ }));
-      expect(screen.getByText("Fetching upstream…")).toBeTruthy();
+      expect(screen.getByText("Verifying…")).toBeTruthy();
       await act(async () => {
         await vi.advanceTimersByTimeAsync(45_000);
       });

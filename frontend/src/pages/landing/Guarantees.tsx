@@ -370,7 +370,7 @@ export function Guarantees() {
           </h2>
         </div>
         <p style={{ fontSize: 14.5, color: "var(--muted)", maxWidth: 390 }}>
-          Zero-LLM determinism from ingestion to settlement. Hover any hairline schematic to inspect coordinates,
+          Zero-LLM determinism from upstream fetch to receipt. Hover any hairline schematic to inspect coordinates,
           quorum springs, and fail-closed gates.
         </p>
       </div>

@@ -53,7 +53,7 @@ function summaryFor(item: DeckItem, data: unknown): string {
       return `Block-pinned execution resolved 1 ETH to ${formatUsdcBaseUnits(d.amount_out as number)} in exact 6-decimal base units${d.winning_venue ? ` via ${String(d.winning_venue)}` : ""}.`;
     case "grid":
       if (item.trap) return "";
-      return `${String(d.node_or_zone)} wholesale settlement interval served from the SQLite cron cache at ${formatLmp(d.lmp_usd_per_mwh as number)} (${String(d.market)}).`;
+      return `${String(d.node_or_zone)} wholesale settlement interval priced at ${formatLmp(d.lmp_usd_per_mwh as number)} (${String(d.market)}), served from the SQLite store the 5-minute ingester fills (a missing CAISO hour is fetched live from OASIS first).`;
     default:
       return "";
   }
@@ -174,9 +174,9 @@ export function ReceiptDeck() {
               <>
                 Future settlement interval refused cleanly with{" "}
                 <em className="serif-i" style={{ fontWeight: 500 }}>
-                  HTTP {r.error instanceof ApiError ? r.error.status : "422"} and zero charge
+                  HTTP {r.error instanceof ApiError ? r.error.status : "422"} and no receipt
                 </em>{" "}
-                — proving the oracle never fabricates missing data.
+                — the oracle refuses instead of fabricating missing data.
               </>
             ) : (
               <>Live call failed: {errorMessage(r.error)}</>
@@ -197,7 +197,7 @@ export function ReceiptDeck() {
           <div className="mono" style={{ fontSize: 11.5, color: "var(--paper-muted)", lineHeight: 1.7 }}>
             {errorMessage(r.error)}
             <br />
-            No receipt is issued for an unbilled refusal.
+            No receipt is issued for a refusal.
           </div>
         )}
         <div
@@ -246,7 +246,7 @@ export function ReceiptDeck() {
             <span className="it">the live chain.</span>
           </h2>
           <p style={{ fontSize: 14.5, color: "var(--muted)", maxWidth: 340, marginBottom: 34 }}>
-            Every answer carries its upstream URL and SHA-256 digest anyone can recompute in 30 seconds.
+            Every 200 answer carries its upstream URL and SHA-256 digest; fetch /receipts/{"{id}"}/raw and run sha256sum to recompute it.
           </p>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <button type="button" className="circle-arrow" aria-label="Previous receipt" onClick={() => advance(-1)}>

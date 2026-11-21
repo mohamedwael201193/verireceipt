@@ -3,16 +3,15 @@
 // Endpoint list corrected to the live GET contract (the design's POST
 // /v1/*-lookup paths do not exist). Miner identity is the verified
 // 774921 / verireceipt; the repo link points at the real repo and the
-// real base commit — no <user>/<COMMIT_SHA> placeholders. The clock is
+// build commit (VERCEL_GIT_COMMIT_SHA when present; otherwise an honest origin/main pin). The clock is
 // real client time; the deployment column shows the live /health status
 // next to the brand copy.
 import { useEffect, useState } from "react";
+import { frontendCommit, REPO_URL } from "../../lib/buildCommit";
 import { useHealth } from "../../lib/hooks";
 import { BOND_DISPLAY, CHAIN_ID, CHAIN_NAME, DIAMOND_SHORT, MINER_ID, MINER_SLUG } from "../../config";
 
-const REPO_URL = "https://github.com/mohamedwael201193/verireceipt";
-const BASE_COMMIT = "e35fb0ac303ee2c2477030c22329bf2b0195d299";
-const BASE_COMMIT_SHORT = "e35fb0a";
+const BUILD = frontendCommit();
 
 function useUtcClock(): string {
   const [now, setNow] = useState(() => new Date().toISOString().slice(11, 19) + " UTC+0");
@@ -65,6 +64,7 @@ export function SiteFooter() {
             <span>GET /v1/tvl</span>
             <span>GET /v1/route</span>
             <span>GET /v1/grid-price</span>
+            <span>GET /v1/validator</span>
             <span>GET /health</span>
           </div>
         </div>
@@ -85,14 +85,14 @@ export function SiteFooter() {
           <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
             Miner {MINER_ID} · {MINER_SLUG} ·{" "}
             <a href={REPO_URL} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>
-              repo @{BASE_COMMIT_SHORT}
+              repo @{BUILD.short}
             </a>
           </div>
         </div>
         <div>
           <div className="kicker">// deployment</div>
           <div style={{ color: "var(--text)", marginBottom: 6 }}>
-            Always-Warm Render US-East{" "}
+            Render web service{" "}
             <span className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
               {health.loading && "(checking…)"}
               {health.data && `(live · ${health.data.status})`}
@@ -106,9 +106,10 @@ export function SiteFooter() {
             auth: none · {BOND_DISPLAY}
           </div>
           <div className="mono" style={{ fontSize: 11, color: "var(--muted)", marginTop: 6, overflowWrap: "anywhere" }}>
-            <a href={`${REPO_URL}/commit/${BASE_COMMIT}`} target="_blank" rel="noreferrer" style={{ color: "var(--muted)" }}>
-              {BASE_COMMIT}
+            <a href={`${REPO_URL}/commit/${BUILD.sha}`} target="_blank" rel="noreferrer" style={{ color: "var(--muted)" }}>
+              {BUILD.sha}
             </a>
+            <div style={{ marginTop: 4 }}>{BUILD.label}</div>
           </div>
         </div>
       </div>

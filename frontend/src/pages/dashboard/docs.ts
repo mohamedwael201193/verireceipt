@@ -12,9 +12,13 @@
 //   Test USDC address was verified as a live Sepolia contract (eth_getCode)
 //   on 2026-11-20. Amounts are template values — verify against the live
 //   Diamond before broadcasting.
-// - escrow / mcp tabs are display-only reference text (not executed code);
-//   the Diamond address matches render.yaml; the $2.00 daily cap matches
-//   DESK_DAILY_SPEND_CAP_USD in render.yaml.
+// - escrow / mcp tabs are display-only reference text (not executed code).
+//   escrow mirrors the official escrow-inference.md example (telegraph-docs
+//   c652c68) with an intent + `params` body (engine-ask.md; `input` is
+//   refused live with HTTP 400); payTo comes from the 402 challenge. The
+//   r7 build ran it live with an unfunded throwaway key (see PC2-BUILD.md).
+//   The mcp tab uses only env vars from mcp-server.md; the $2.00 daily cap
+//   matches DESK_DAILY_SPEND_CAP_USD in render.yaml.
 
 export type DocTabId = "curl" | "escrow" | "mcp" | "yaml" | "cast";
 
@@ -49,49 +53,71 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     'curl -s "https://verireceipt.onrender.com/v1/route?pair=ETH%2FUSDC"\n' +
     'curl -s "https://verireceipt.onrender.com/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2026-11-20T05:00:00.000Z"\n' +
     'curl -s "https://verireceipt.onrender.com/v1/validator?validator_index=1"\n\n' +
-    "# 3. Ranked Telegraph Engine Ask (Returns 402 Escrow Challenge -> Sign X-PAYMENT)\n" +
+    "# 3. Ranked Telegraph Engine Ask: with no payment header the node answers\n#    402 Payment Required, listing the accepted schemes (exact / escrow)\n" +
     "curl -i -X POST https://devnode.telegraphprotocol.com/engine/v1/ask \\\n" +
     '  -H "Content-Type: application/json" \\\n' +
-    `  -d '{"intent":"TVL_LOOKUP_GENERAL","input":{"protocol":"aave-v3"},"max_budget_usdc":10000}'\n\n` +
-    "# 4. Recompute a Receipt SHA-256 Independently in 30 Seconds\n" +
-    "#    Take receipt.upstream_url from any response, fetch it, hash it:\n" +
-    'curl -s "https://api.llama.fi/protocol/aave-v3" | sha256sum\n' +
-    "#    Compare with receipt.raw_response_sha256 in the same response.",
+    `  -d '{"intent":"TVL_LOOKUP_GENERAL","params":{"protocol":"aave-v3"},"max_budget_usdc":10000}'\n\n` +
+    "# 4. Recompute a receipt SHA-256 independently\n" +
+    "#    Take receipt.receipt_id from any response, fetch the stored evidence bytes, hash them:\n" +
+    'curl -s "https://verireceipt.onrender.com/receipts/$RECEIPT_ID/raw" | sha256sum\n' +
+    "#    Compare with receipt.raw_response_sha256 in the same response. (Re-fetching the live\n" +
+    "#    upstream_url is not a proof: live upstreams such as DeFiLlama change between calls.)",
 
   escrow:
-    "// EIP-191 Escrow Primary Rail (X-PAYMENT) + pLimit(1) x402 Fallback\n" +
-    "// Display-only reference — this snippet is not executed by the dashboard.\n" +
-    'import { privateKeyToAccount } from "viem/accounts";\n\n' +
-    'const DIAMOND = "0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b";\n' +
-    'const NODE = "https://devnode.telegraphprotocol.com";\n\n' +
-    "export async function askRankedEscrow(intent: string, input: Record<string, unknown>) {\n" +
-    "  const account = privateKeyToAccount(process.env.DESK_KEY as `0x${string}`);\n" +
-    '  const body = JSON.stringify({ intent, input, max_budget_usdc: 40000 });\n\n' +
-    "  // Step 1: Fetch 402 escrow challenge template\n" +
-    "  const challenge = await fetch(`${NODE}/engine/v1/ask`, {\n" +
-    '    method: "POST", headers: { "Content-Type": "application/json" }, body\n' +
-    "  }).then(r => r.json());\n\n" +
-    '  const esc = challenge.accepts.find((a: any) => a.scheme === "escrow");\n' +
-    "  const from = account.address.toLowerCase(); // MUST be lowercase\n" +
-    "  const signature = await account.signMessage({ message: esc.extra.message });\n\n" +
-    "  // Step 2: Retry with X-PAYMENT (never PAYMENT-SIGNATURE for escrow)\n" +
-    "  const headerVal = Buffer.from(JSON.stringify({\n" +
-    '    scheme: "escrow", from, to: DIAMOND, amount: esc.maxAmountRequired, signature\n' +
-    '  })).toString("base64");\n\n' +
-    "  return fetch(`${NODE}/engine/v1/ask`, {\n" +
-    '    method: "POST",\n' +
-    '    headers: { "Content-Type": "application/json", "X-PAYMENT": headerVal },\n' +
-    "    body\n" +
+    "// EIP-191 escrow payment over X-PAYMENT, following the official Telegraph\n" +
+    "// escrow-inference.md example (telegraph-docs c652c68). Display-only reference:\n" +
+    "// the dashboard does not execute it. Fund escrow first (LedgerFacet.depositUSDC).\n" +
+    'import { createWalletClient, http } from "viem";\n' +
+    'import { privateKeyToAccount } from "viem/accounts";\n' +
+    'import { sepolia } from "viem/chains";\n\n' +
+    'const NODE = "https://devnode.telegraphprotocol.com";\n' +
+    "const account = privateKeyToAccount(process.env.PRIVATE_KEY as `0x${string}`);\n" +
+    "const wallet = createWalletClient({ account, chain: sepolia, transport: http() });\n\n" +
+    "export async function askEscrow(intent: string, params: Record<string, unknown>) {\n" +
+    "  // Request field is `params` (engine-ask.md); `input` is refused with HTTP 400.\n" +
+    "  const body = JSON.stringify({ intent, params, max_budget_usdc: 40000 });\n" +
+    '  const json = { "Content-Type": "application/json" };\n\n' +
+    "  // 1: no payment header -> 402; pick the escrow entry from accepts[]\n" +
+    "  const challenge = await fetch(`${NODE}/engine/v1/ask`, { method: \"POST\", headers: json, body })\n" +
+    "    .then((r) => r.json());\n" +
+    '  const escrow = challenge.accepts.find((a: any) => a.scheme === "escrow");\n' +
+    '  if (!escrow) throw new Error("this node does not accept escrow");\n\n' +
+    "  const template: string = escrow.extra.message;\n" +
+    "  const now = Math.floor(Date.now() / 1000);\n" +
+    "  const authorization = {\n" +
+    "    from: account.address.toLowerCase(), // lowercase, or the signature will not match\n" +
+    "    to: escrow.payTo,\n" +
+    "    value: template.match(/Amount:\\s*(\\d+)\\s*uUSDC/)![1],\n" +
+    "    validAfter: String(now - 5),\n" +
+    "    validBefore: String(now + 100), // window must stay under 2 minutes\n" +
+    "    nonce: crypto.randomUUID(), // fresh every attempt\n" +
+    "  };\n\n" +
+    "  // 2: fill the template in place and sign it verbatim (EIP-191 personal_sign)\n" +
+    "  const message = template\n" +
+    '    .replace("{from}", authorization.from)\n' +
+    '    .replace("{nonce}", authorization.nonce)\n' +
+    '    .replace("{validAfter}", authorization.validAfter)\n' +
+    '    .replace("{validBefore}", authorization.validBefore);\n' +
+    "  const signature = await wallet.signMessage({ message });\n\n" +
+    "  // 3: same body, now with X-PAYMENT (never PAYMENT-SIGNATURE for escrow)\n" +
+    "  const payment = btoa(JSON.stringify({\n" +
+    '    x402Version: 2, scheme: "escrow", network: escrow.network,\n' +
+    "    payload: { signature, authorization },\n" +
+    "  }));\n" +
+    "  const res = await fetch(`${NODE}/engine/v1/ask`, {\n" +
+    '    method: "POST", headers: { ...json, "X-PAYMENT": payment }, body,\n' +
     "  });\n" +
+    "  if (res.status === 402) throw new Error((await res.json()).reason);\n" +
+    '  const header = res.headers.get("X-PAYMENT-RESPONSE");\n' +
+    "  return { answer: await res.json(), receipt: header ? JSON.parse(atob(header)) : null };\n" +
     "}",
 
   mcp:
-    "// Claude Desktop / Cursor MCP Configuration (Zero-Wallet Streamable HTTP)\n" +
+    "// Claude Desktop / Cursor config for the official Telegraph MCP server (stdio via npx).\n" +
+    "// Pays from escrow: create and fund the wallet first with\n" +
+    "//   npx -y @telegraphprotocol/telegraph-protocol-mcp setup\n" +
     "{\n" +
     '  "mcpServers": {\n' +
-    '    "verireceipt-desk": {\n' +
-    '      "url": "https://verireceipt.onrender.com/api/mcp"\n' +
-    "    },\n" +
     '    "telegraph-network": {\n' +
     '      "command": "npx",\n' +
     '      "args": ["-y", "@telegraphprotocol/telegraph-protocol-mcp"],\n' +

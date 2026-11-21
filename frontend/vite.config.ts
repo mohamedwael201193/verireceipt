@@ -9,6 +9,14 @@ import { MINER_BASE_URL } from "./src/config";
 // test in src/deploy-contract.test.ts).
 export default defineConfig({
   plugins: [react()],
+  // Vercel injects VERCEL_GIT_COMMIT_SHA at build time. An empty string
+  // means an unlabeled local build; the footer then pins origin/main
+  // with honest wording instead of inventing a sha.
+  define: {
+    __BUILD_COMMIT__: JSON.stringify(
+      process.env.VERCEL_GIT_COMMIT_SHA || process.env.GITHUB_SHA || "",
+    ),
+  },
   server: {
     proxy: {
       "/api": {
