@@ -71,7 +71,7 @@ export function spentOnUtcDay(records: PurchaseRecord[], now: Date): bigint {
     .reduce((s, r) => s + BigInt(r.telegraph_receipt.amount_uusdc), 0n);
 }
 
-/** Rewrite the ledger in place. After a purchase is recorded, `--write` may update `delivery_proof` and backfill `recovered_fields`. `engine.result` for the three existing rows was backfilled from the captured paid replies (those replies are not fully public); ok numeric fields are re-checked against the live signal payload. */
+/** Rewrite the ledger in place. After a purchase is recorded, `--write` may update `delivery_proof` and backfill `recovered_fields`. `engine.result` for the three existing rows was backfilled from the captured paid replies (those replies are not fully public); ok numeric fields are re-checked against the live signal payload. Committed `checks` include the backfilled `signal intent` check (payload.intent_id and the parsed request line must match the purchased intent). */
 export function writeLedger(file: string, records: PurchaseRecord[]): void {
   writeFileSync(file, records.map((r) => JSON.stringify(r) + "\n").join(""));
 }

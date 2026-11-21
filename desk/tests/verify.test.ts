@@ -80,7 +80,7 @@ describe("deliveryIsOk (J2 Minor 2)", () => {
   const included: DeliveryProof = {
     status: "included",
     detail: "ok",
-    delivery: { payer, receipt_hash: receipt.receipt_hash, usdc: 10000 },
+    delivery: { payer, receipt_hash: receipt.receipt_hash, usdc: 10000, miner_id: "6152" },
   };
   it("pending is OK (epoch block not recorded yet)", () => {
     expect(deliveryIsOk({ status: "pending", detail: "no block recorded for this epoch" }, receipt, payer)).toBe(true);
@@ -105,7 +105,7 @@ describe("checkDelivery status mapping", () => {
     const err = await checkDelivery(31, "0x" + "ab".repeat(32), (async () => new Response("bad gateway", { status: 502 })) as unknown as typeof fetch);
     expect(err.status).toBe("error");
     expect(deliveryIsOk(err, { receipt_hash: "0x" + "ab".repeat(32), amount_uusdc: "10000" }, PAYER)).toBe(false);
-    const rec = { payer: PAYER, receipt_hash: "0x" + "ab".repeat(32), usdc: 10000 };
+    const rec = { payer: PAYER, receipt_hash: "0x" + "ab".repeat(32), usdc: 10000, miner_id: "6152" };
     const inc = await checkDelivery(30, rec.receipt_hash, (async () => new Response(JSON.stringify({ delivery: rec, deliveries_root: "0x" + "11".repeat(32) }), { status: 200 })) as unknown as typeof fetch);
     expect(inc.status).toBe("included");
     expect(deliveryIsOk(inc, { receipt_hash: rec.receipt_hash, amount_uusdc: "10000" }, PAYER)).toBe(true);
@@ -148,9 +148,9 @@ describe("deliveryIsOk / deliveryProofToStore (J1 Minor 1, J2 Minor 4)", () => {
     expect(deliveryProofToStore(d, false, "2026-11-21T00:00:00Z")).toEqual({ status: "error", checked_at: "2026-11-21T00:00:00Z" });
   });
   it("--write stores included only when the delivery row matches payer, amount and receipt_hash", () => {
-    const ok: DeliveryProof = { status: "included", detail: "ok", deliveriesRoot: "0x" + "11".repeat(32), delivery: { payer: PAYER, receipt_hash: receipt.receipt_hash, usdc: 10000 } };
+    const ok: DeliveryProof = { status: "included", detail: "ok", deliveriesRoot: "0x" + "11".repeat(32), delivery: { payer: PAYER, receipt_hash: receipt.receipt_hash, usdc: 10000, miner_id: "6152" } };
     expect(deliveryIsOk(ok, receipt, PAYER)).toBe(true);
-    expect(deliveryProofToStore(ok, true, "2026-11-21T00:00:00Z")).toEqual({ status: "included", checked_at: "2026-11-21T00:00:00Z", deliveries_root: "0x" + "11".repeat(32), receipt_hash: receipt.receipt_hash, payer: PAYER, usdc: 10000 });
+    expect(deliveryProofToStore(ok, true, "2026-11-21T00:00:00Z")).toEqual({ status: "included", checked_at: "2026-11-21T00:00:00Z", deliveries_root: "0x" + "11".repeat(32), receipt_hash: receipt.receipt_hash, payer: PAYER, usdc: 10000, miner_id: "6152" });
     const mismatch: DeliveryProof = { ...ok, delivery: { ...ok.delivery, usdc: 1 } };
     expect(deliveryIsOk(mismatch, receipt, PAYER)).toBe(false);
     expect(deliveryProofToStore(mismatch, false, "2026-11-21T00:00:00Z")?.status).toBe("error");

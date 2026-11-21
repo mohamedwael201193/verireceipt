@@ -7,6 +7,7 @@
 import data from "./deskPurchases.json";
 import { sha256Hex } from "./receipt";
 import { BOUGHT_AT_SLACK_MS, catalogAgrees, valueFieldPinned } from "./taskCatalog";
+import { SEPOLIA_REGISTRATION_ID } from "./minerRegistration";
 
 export interface DeskPurchase {
   version: 1;
@@ -155,8 +156,14 @@ export function assertPurchases(rows: unknown): DeskPurchase[] {
     }
     const bought = Date.parse(r.bought_at);
     const receiptMs = typeof r.telegraph_receipt?.timestamp === "number" ? r.telegraph_receipt.timestamp * 1000 : NaN;
-    if (!Number.isFinite(bought) || !Number.isFinite(receiptMs) || Math.abs(bought - receiptMs) > BOUGHT_AT_SLACK_MS) {
+    if (typeof r.bought_at !== "string" || !Number.isFinite(bought) || !Number.isFinite(receiptMs) || Math.abs(bought - receiptMs) > BOUGHT_AT_SLACK_MS) {
       throw new Error("deskPurchases.json has a bought_at that is inconsistent with the receipt timestamp");
+    }
+    if (typeof r.telegraph_receipt?.miner !== "string" || r.telegraph_receipt.miner !== String(SEPOLIA_REGISTRATION_ID)) {
+      throw new Error("deskPurchases.json has a row whose telegraph_receipt.miner is not the on-chain registration id");
+    }
+    if (typeof r.title !== "string" || typeof r.mission !== "string" || typeof r.task_id !== "string") {
+      throw new Error("deskPurchases.json has a row that does not match the pinned task catalog");
     }
     if (r.recovered_fields) {
       for (const [, f] of Object.entries(r.recovered_fields)) {
@@ -172,17 +179,19 @@ export function assertPurchases(rows: unknown): DeskPurchase[] {
       }
     }
   }
-  const keys: Array<[string, (r: DeskPurchase) => string | undefined]> = [
+  const keys: Array<[string, (r: DeskPurchase) => string | undefined, boolean?]> = [
+    ["task_id", (r) => r.task_id],
     ["receipt_hash", (r) => r.telegraph_receipt?.receipt_hash],
     ["signal_hash", (r) => r.signal_hash],
-    ["nonce", (r) => r.nonce],
+    ["nonce", (r) => r.nonce, true],
     ["miner_receipt.receipt_id", (r) => r.miner_receipt?.receipt_id],
   ];
-  for (const [label, get] of keys) {
+  for (const [label, get, fold] of keys) {
     const seen = new Set<string>();
     for (const r of rows as DeskPurchase[]) {
-      const v = get(r);
-      if (!v) continue;
+      const raw = get(r);
+      if (!raw) continue;
+      const v = fold ? raw.toLowerCase() : raw;
       if (seen.has(v)) throw new Error(`deskPurchases.json has a duplicate ${label}`);
       seen.add(v);
     }

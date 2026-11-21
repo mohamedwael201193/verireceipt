@@ -237,10 +237,41 @@ describe("recovered fields on the committed ledger (J2 fields H1 / M1)", () => {
   it("assertPurchases rejects a recovered value that would crash String()", () => {
     const bad = row({
       recovered_fields: {
-        market: { value: { toString: null }, node_status: "unavailable", source: "raw" },
+        ...(DESK_PURCHASES[0].recovered_fields ?? {}),
+        currency: { value: { toString: null }, node_status: "unavailable", source: "raw" },
       },
     });
     expect(() => assertPurchases([bad])).toThrow(/not a string, number, or null/);
     expect(formatRecoveredValue({ toString: null })).toBe('{"toString":null}');
+  });
+});
+
+describe("desk-d-followup tampers (J2 M1, J1/J2 minors)", () => {
+  it("T40: swapping task_id/title between the two GRID rows fails the catalog pin on node_or_zone and market", () => {
+    const caiso = DESK_PURCHASES.find((p) => p.task_id === "m12-caiso-np15")!;
+    const nyiso = DESK_PURCHASES.find((p) => p.task_id === "m12-nyiso-zone-j")!;
+    expect(() => assertPurchases([{ ...caiso, task_id: nyiso.task_id, title: nyiso.title }])).toThrow(/task catalog/);
+  });
+  it("T40b: two rows with the same task_id fail uniqueness", () => {
+    const a = DESK_PURCHASES[0];
+    const b = DESK_PURCHASES[1];
+    expect(() => assertPurchases([a, { ...b, task_id: a.task_id, title: a.title, mission: a.mission, intent: a.intent, value_field: a.value_field, params: a.params, recovered_fields: a.recovered_fields }])).toThrow(/duplicate task_id/);
+  });
+  it("refuses a missing or non-string title, bought_at, or miner", () => {
+    const a = DESK_PURCHASES[0];
+    const { title: _t, ...noTitle } = a;
+    expect(() => assertPurchases([noTitle as DeskPurchase])).toThrow(/task catalog/);
+    expect(() => assertPurchases([{ ...a, title: ["NYISO Zone J dispatch gate"] as unknown as string }])).toThrow(/task catalog/);
+    const { bought_at: _b, ...noBought } = a;
+    expect(() => assertPurchases([noBought as DeskPurchase])).toThrow(/bought_at/);
+    expect(() => assertPurchases([{ ...a, bought_at: 1795267605 as unknown as string }])).toThrow(/bought_at/);
+    const { miner: _m, ...receipt } = a.telegraph_receipt;
+    expect(() => assertPurchases([{ ...a, telegraph_receipt: receipt as typeof a.telegraph_receipt }])).toThrow(/miner/);
+    expect(() => assertPurchases([{ ...a, telegraph_receipt: { ...a.telegraph_receipt, miner: "9999" } }])).toThrow(/miner/);
+  });
+  it("nonce uniqueness is case-insensitive", () => {
+    const a = DESK_PURCHASES[0];
+    const b = DESK_PURCHASES[1];
+    expect(() => assertPurchases([a, { ...b, nonce: a.nonce.toUpperCase() }])).toThrow(/duplicate nonce/);
   });
 });

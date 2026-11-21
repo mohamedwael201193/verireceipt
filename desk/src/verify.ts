@@ -17,7 +17,7 @@
 // invent a walker.
 import { createHash } from "node:crypto";
 import { keccak256, toBytes } from "viem";
-import { ENGINE_URL, MINER_BASE_URL, NODE_URL } from "./constants.js";
+import { ENGINE_URL, MINER_BASE_URL, NODE_URL, VERIRECEIPT_ONCHAIN_MINER_ID } from "./constants.js";
 import { catalogAgrees, valueFieldPinned } from "./missions.js";
 import type { Fetch } from "./client.js";
 import { FIELD_FORMAT, formatFor, isNumericField, reconcileShaped, type FieldStatus, type ReconciledField } from "../../src/core/shapedFields.js";
@@ -190,6 +190,9 @@ export function receiptPendingShape(r: LedgerIdentity): { ok: boolean; failures:
   if (r.telegraph_receipt.rail !== "escrow") failures.push("rail != escrow");
   if (!RECEIPT_HASH_RE.test(r.telegraph_receipt.receipt_hash)) failures.push("receipt_hash shape");
   if (!Number.isSafeInteger(r.telegraph_receipt.epoch_id) || r.telegraph_receipt.epoch_id < 0) failures.push("epoch_id shape");
+  if (typeof r.telegraph_receipt.miner !== "string" || r.telegraph_receipt.miner !== VERIRECEIPT_ONCHAIN_MINER_ID) {
+    failures.push("miner");
+  }
   return { ok: failures.length === 0, failures };
 }
 
@@ -300,16 +303,16 @@ export function storedLedgerAgrees(r: LedgerIdentity, v: VerifyOutput): { ok: bo
   if ((r.verdict === "VERIFIED") !== v.verified) failures.push("verdict-vs-live");
   if (!checksAgree(r.checks, v.checks)) failures.push("checks");
   failures.push(...receiptPendingShape(r).failures);
-  if (typeof r.task_id === "string" && typeof r.mission === "string" && typeof r.title === "string" && typeof r.value_field === "string") {
-    if (!catalogAgrees({ task_id: r.task_id, mission: r.mission, title: r.title, intent: r.intent, value_field: r.value_field })) {
-      failures.push("catalog");
-    }
+  if (
+    typeof r.task_id !== "string" || typeof r.mission !== "string" || typeof r.title !== "string" || typeof r.value_field !== "string" ||
+    !catalogAgrees({ task_id: r.task_id, mission: r.mission, title: r.title, intent: r.intent, value_field: r.value_field, params: r.params, recovered_fields: r.recovered_fields })
+  ) {
+    failures.push("catalog");
   }
-  if (typeof r.value_field === "string" && !valueFieldPinned(r.intent, r.value_field)) failures.push("value_field");
+  if (typeof r.value_field !== "string" || !valueFieldPinned(r.intent, r.value_field)) failures.push("value_field");
   if ("value" in r && !valuesAgree(r.value, v.payloadValue)) failures.push("value");
-  if (typeof r.bought_at === "string") {
-    failures.push(...boughtAtAgrees(r.bought_at, r.telegraph_receipt.timestamp, v.signalTimestamp).failures);
-  }
+  if (typeof r.bought_at !== "string") failures.push("bought_at");
+  else failures.push(...boughtAtAgrees(r.bought_at, r.telegraph_receipt.timestamp, v.signalTimestamp).failures);
   failures.push(...recoveredFieldsAgree(r.recovered_fields, v.fields).failures);
   if (r.engine?.field_status && !fieldStatusShapeOk(r.intent, r.engine.field_status)) failures.push("field_status");
   if (r.engine?.result && r.value_field && !valuesAgree(r.engine.result[r.value_field], r.value)) {
@@ -321,6 +324,7 @@ export function storedLedgerAgrees(r: LedgerIdentity, v: VerifyOutput): { ok: bo
 
 export function uniquePurchaseIds(
   rows: Array<{
+    task_id?: string;
     telegraph_receipt?: { receipt_hash?: string };
     signal_hash?: string;
     nonce?: string;
@@ -328,17 +332,19 @@ export function uniquePurchaseIds(
   }>,
 ): { ok: boolean; failures: string[] } {
   const failures: string[] = [];
-  const track = (label: string, values: Array<string | undefined | null>) => {
+  const track = (label: string, values: Array<string | undefined | null>, fold = false) => {
     const seen = new Map<string, number>();
     values.forEach((v, i) => {
       if (!v) return;
-      if (seen.has(v)) failures.push(`duplicate ${label} at ${seen.get(v)} and ${i}`);
-      else seen.set(v, i);
+      const key = fold ? v.toLowerCase() : v;
+      if (seen.has(key)) failures.push(`duplicate ${label} at ${seen.get(key)} and ${i}`);
+      else seen.set(key, i);
     });
   };
+  track("task_id", rows.map((r) => r.task_id));
   track("receipt_hash", rows.map((r) => r.telegraph_receipt?.receipt_hash));
   track("signal_hash", rows.map((r) => r.signal_hash));
-  track("nonce", rows.map((r) => r.nonce));
+  track("nonce", rows.map((r) => r.nonce), true);
   track("miner_receipt.receipt_id", rows.map((r) => r.miner_receipt?.receipt_id));
   return { ok: failures.length === 0, failures };
 }
@@ -482,7 +488,8 @@ export function deliveryIsOk(
   if (String(d.delivery.payer ?? "").toLowerCase() !== payer.toLowerCase()) return false;
   if (Number(d.delivery.usdc) !== Number(receipt.amount_uusdc)) return false;
   if (intent != null && String(d.delivery.intent ?? "") !== intent) return false;
-  if (receipt.miner != null && String(d.delivery.miner_id ?? "") !== receipt.miner) return false;
+  if (String(d.delivery.miner_id ?? "") !== VERIRECEIPT_ONCHAIN_MINER_ID) return false;
+  if (receipt.miner !== undefined && receipt.miner !== VERIRECEIPT_ONCHAIN_MINER_ID) return false;
   return true;
 }
 

@@ -151,7 +151,7 @@ npm run export                                       # copy the ledger into the 
 Escrow has no per-call transaction: each call is billed once in its epoch's
 ledger root. `npm run verify -- --write` records the epoch delivery proof
 (`GET /v1/blocks/{epoch}/deliveries/{receipt_hash}`) once the node has
-recorded that epoch's block. The official response also includes a Merkle `proof` and `deliveries_root`; we store and shape-check them. The leaf/node hash algorithm is not documented in the official docs, so we do not invent a proof walker. The committed `engine.result` on the three existing rows was backfilled from the captured paid replies (not fully public); ok numeric fields are re-checked against the live signal payload.
+recorded that epoch's block. The official response also includes a Merkle `proof` and `deliveries_root`; we store the root and the proof length (`proof_nodes`) and shape-check the live proof (an array of 32-byte hex hashes plus the root). The leaf/node hash algorithm is not documented in the official docs, so we do not invent a proof walker. The receipt_hash ↔ signal binding comes from the paid X-PAYMENT-RESPONSE and is not re-derivable from public endpoints; a swap of receipt_hash and delivery_proof between two of our own same-intent rows, or substitution of another of our same-epoch, same-intent, same-amount deliveries (including a manual probe, `0x2a9181c9…95a1`), is not detectable. The committed `engine.result` on the three existing rows was backfilled from the captured paid replies (not fully public); ok numeric fields are re-checked against the live signal payload.
 
 ## Running locally
 
