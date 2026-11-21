@@ -4,6 +4,7 @@
 // procedural art with no data dependency. The status line is live:
 // the clock is real client time and the availability line is wired to
 // GET /health (real uptime / real error state, never a canned "warm").
+import { Link } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { useHealth } from "../../lib/hooks";
 import { BOND_DISPLAY, DIAMOND_SHORT } from "../../config";
@@ -818,9 +819,9 @@ export function Hero() {
               served from a Render web service, with strict fail-closed refusals. Live status below.
             </p>
             <div className="hero-cta-row">
-              <a href="/#probe" className="btn-solid-accent" aria-label="Start a probe — explore the live oracle">
+              <Link to="/#probe" className="btn-solid-accent" aria-label="Start a probe — explore the live oracle">
                 Start a probe
-              </a>
+              </Link>
             </div>
             <div className="hero-avail">
               <span className="radar-dot" aria-hidden="true" />

@@ -3,6 +3,7 @@
 // A dated plan (Nov 20 → Dec 1), kept as static plan copy (DESIGN-SPEC
 // §8 A17: no live progress source exists for these gates). Default step
 // is day 01 (Nov 20, the current day).
+import { Link } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { SPRINT_COLUMN_LABELS, SPRINT_STEPS } from "./data";
 
@@ -67,9 +68,9 @@ export function SprintMatrix() {
             grace Nov 28, and ship 6 verified submissions by Dec 1.
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14 }}>
-            <a href="#probe" className="btn-solid-accent" style={{ padding: "11px 22px", fontSize: 13 }}>
+            <Link to="/#probe" className="btn-solid-accent" style={{ padding: "11px 22px", fontSize: 13 }}>
               Open Live Probe
-            </a>
+            </Link>
             <span className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>// Nov 20 → Dec 1</span>
           </div>
         </div>

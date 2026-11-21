@@ -1,3 +1,4 @@
+import { MemoryRouter } from "react-router-dom";
 // J2 R2 B1 regression tests: the sprint tooltip must fit inside the
 // container on ALL 8 columns at 360px. The old clamp assumed a ~140px
 // tooltip (parentWidth - 140), but the single-line nowrap tooltip is
@@ -50,7 +51,7 @@ describe("clampSprintTipLeft — real-width clamp (J2 R2 B1)", () => {
 
 describe("SprintMatrix — tooltip renders on hover", () => {
   it("shows the column label tooltip for the last column", () => {
-    render(<SprintMatrix />);
+    render(<MemoryRouter><SprintMatrix /></MemoryRouter>);
     fireEvent.mouseOver(
       screen.getByRole("button", { name: "d11 · Dec 1 · 6 final submissions · gate 1/6" }),
     );

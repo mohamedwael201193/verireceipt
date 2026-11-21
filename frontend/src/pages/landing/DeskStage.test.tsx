@@ -1,3 +1,4 @@
+import { MemoryRouter } from "react-router-dom";
 // J2 B1 regression tests: desk items 03/04 must NEVER render a VERIFIED
 // verdict. No SHA-256 recompute happens anywhere in the desk — the grid
 // call merely returning data is a live response with a receipt, not a
@@ -43,7 +44,7 @@ function mockGridFetch(body: unknown) {
 }
 
 function selectAndPlay(title: RegExp) {
-  render(<DeskStage />);
+  render(<MemoryRouter><DeskStage /></MemoryRouter>);
   fireEvent.click(screen.getByRole("button", { name: title }));
   fireEvent.click(screen.getByRole("button", { name: /Run .* live checks/ }));
 }

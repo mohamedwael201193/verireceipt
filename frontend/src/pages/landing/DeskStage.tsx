@@ -9,6 +9,7 @@
 // invented), no threshold verdicts are shown (the $65/$85 thresholds
 // and ERCOT $118.40 figure were fabricated), and no EIP-191 signing is
 // claimed — these are read-only GET checks, no wallet, no signing.
+import { Link } from "react-router-dom";
 import { useRef, useState } from "react";
 import { ApiError } from "../../lib/api";
 import type { Receipt } from "../../lib/types";
@@ -238,9 +239,9 @@ export function DeskStage() {
             Real calls, <span className="it">receipted in the open.</span>
           </h2>
         </div>
-        <a href="#probe" className="mono" style={{ fontSize: 12, color: "var(--text)" }}>
+        <Link to="/#probe" className="mono" style={{ fontSize: 12, color: "var(--text)" }}>
           Run live probe ↗
-        </a>
+        </Link>
       </div>
 
       <div className="stage-shell">
