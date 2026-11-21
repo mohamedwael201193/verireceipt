@@ -1,24 +1,40 @@
 // GET /v1/grid-price — wholesale electricity LMP.
-// Elering and NYISO are served from the SQLite cache only (a cache miss
-// is a 502 GRID_CACHE_MISS, a stale row a 502 GRID_CACHE_STALE — never
-// served as verified). CAISO is cache-first with an ON-DEMAND fallback:
-// a CAISO node or the CAISO system whose hour is missing or stale is
-// fetched live from CAISO OASIS PRC_LMP day-ahead for exactly that hour
-// (see fetchCaisoDamLmp in src/jobs/gridIngester.ts) and the fetched row
-// is cached before it is served, so a retry is a cache hit. A "CAISO" /
-// "CAISO system" / empty-ish node_or_zone names the CAISO system and is
-// answered as the median of the three CAISO hubs NP15/SP15/ZP26, with
-// the method stated in the market field and the answer prose.
+// Elering is served from the SQLite cache only (a cache miss is a 502
+// GRID_CACHE_MISS, a stale provisional row a 502 GRID_CACHE_STALE —
+// never served as verified). The Elering dashboard API is a short
+// rolling window, so a historical re-fetch is not feasible; a post-
+// close Elering row that has never been successfully written at or
+// after the provisional close is served with an honest unverified
+// envelope (not verified / 1.0). NYISO is cache-first: a stale
+// provisional row is still 502 GRID_CACHE_STALE, but after the
+// §20.3 close a cached hour is revalidated from the official dated
+// MIS CSV (fetchNyisoRtLbmp). CAISO is cache-first with an ON-DEMAND
+// fallback: a CAISO node or the CAISO system whose hour is missing
+// or stale is fetched live from CAISO OASIS PRC_LMP day-ahead for
+// exactly that hour (see fetchCaisoDamLmp in src/jobs/gridIngester.ts)
+// and the fetched row is cached before it is served, so a retry is a
+// cache hit. A "CAISO" / "CAISO system" / empty-ish node_or_zone
+// names the CAISO system and is answered as the median of the three
+// CAISO hubs NP15/SP15/ZP26, with the method stated in the market
+// field and the answer prose.
 // Prices are written to the cache by src/jobs/gridIngester.ts from verified
 // keyless ISO feeds (Elering, NYISO, CAISO). Settlement windows come from
 // SUPPORTED_ZONES (NYISO 5 min, Elering 15 min, CAISO 60 min); the default
 // 1h window applies only if a zone ever lacks one.
 //
-// Freshness: GRID_CACHE_TTL_MS is 1 hour. It covers all three zone windows
-// (5/15/60 min) with margin — a 1h-old NYISO row is already 12 windows
-// stale. The receipt's fetched_at is the row's ingested_at (when the
-// ingester wrote it), NOT the response time, so a receipt never claims a
-// stale row was fetched fresh.
+// Freshness: GRID_CACHE_TTL_MS is 1 hour for intervals that are still
+// *provisional* (CAISO Tariff §35.2: until the end of the 3rd Business
+// Day after the Trading Day for DAM; NYISO MST Att. E §20.3: 4
+// business days after the operating day for realtime; Elering: 3
+// Estonian business days). After that window closes, a valid cache
+// row is kept (no TTL eviction) and is not "immutable": CAISO and
+// NYISO rows are revalidated at least once after the close, and
+// CAISO also periodically inside the conservative §35.3.2 window
+// (see gridFinality.ts). A failed revalidation still serves the
+// valid cache (fetched_at stays the last successful ingest) but is
+// not labelled verified / 1.0. The receipt's fetched_at is the
+// row's ingested_at (when the upstream price was last successfully
+// written), NOT the response time.
 // Upstream URL: read from the row's persisted upstream_url (written at
 // ingest time, so it survives restarts). The fallback for legacy rows with
 // no stored URL is the dated-file / full-query URL pattern — never the bare
@@ -26,21 +42,51 @@
 
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
-import { getGridPrice, saveGridPrice, saveReceipt } from "../core/db";
+import {
+  getGridPrice,
+  getGridRevalidate,
+  markGridRevalidateAttempt,
+  saveGridPrice,
+  saveReceipt,
+} from "../core/db";
 import {
   CAISO_HUB_NODES,
   SUPPORTED_ZONES,
   fetchCaisoDamLmp,
+  fetchNyisoRtLbmp,
   gridFallbackUrl,
+  isSettledGridInterval,
   parseCaisoIntervalStart,
   resolveGridAlias,
 } from "../jobs/gridIngester";
+import {
+  gridMarketKind,
+  needsGridRevalidation,
+  provisionalCloseMs,
+} from "../jobs/gridFinality";
 
 /** ISO-8601 UTC only: trailing Z or +00:00/-00:00 required, no bare local time. */
 const ISO_UTC_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]00:00)$/;
 
-/** Max age of a cache row served as verified: 1 hour. */
+/** Max age of a *provisional* cache row served as verified: 1 hour.
+ *  Settled (post-provisional) rows bypass this TTL; see isFreshGridRow. */
 export const GRID_CACHE_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * Envelope for a valid official cache row whose live post-close
+ * revalidation did not confirm the value (failed fetch, or no
+ * historical path). Uses the existing verdict / confidence / source
+ * fields only — no new envelope keys. "unverified" is the honest
+ * counterpart of the "verified" label this miner otherwise emits;
+ * 0.5 reflects an official prior fetch that could not be re-checked.
+ */
+export const GRID_UNCONFIRMED_VERDICT = "unverified";
+export const GRID_UNCONFIRMED_CONFIDENCE = 0.5;
+
+const ELERING_NO_HISTORICAL_REFETCH =
+  "no historical re-fetch; Elering dashboard API is a short rolling window";
+const FAILED_REVALIDATION =
+  "post-close revalidation did not confirm the cached price";
 
 /**
  * Spellings that name the CAISO system rather than one hub (A4).
@@ -71,6 +117,8 @@ interface ResolvedHubPrice {
   ingestedAt: string;
   upstreamUrl: string;
   fromCache: boolean;
+  /** True when this hub was served after a failed post-close revalidation. */
+  unconfirmed?: boolean;
 }
 
 /**
@@ -79,11 +127,88 @@ interface ResolvedHubPrice {
  * staleness check applies (see below), factored out so the CAISO
  * on-demand path and the cache-only path cannot drift apart.
  */
-function isFreshGridRow(row: GridCacheRow, nowMs: number): boolean {
+function isFreshGridRow(
+  row: GridCacheRow,
+  nowMs: number,
+  intervalStart: string,
+  windowMin: number,
+  market?: string,
+): boolean {
   if (!row.ingested_at) return false;
   const ingestedMs = Date.parse(row.ingested_at);
   if (Number.isNaN(ingestedMs) || ingestedMs > nowMs) return false;
-  return nowMs - ingestedMs <= GRID_CACHE_TTL_MS;
+  if (nowMs - ingestedMs <= GRID_CACHE_TTL_MS) return true;
+  // Past the official provisional window: ingested_at ageing is not a
+  // reason to evict the row (A9: a 2-month-old CAISO DAM hour was
+  // being re-queried every TTL and 502'd when OASIS blipped). This
+  // is not "the price can never change" — callers still revalidate
+  // CAISO rows (needsGridRevalidation). Corrupt rows never reach
+  // this helper.
+  return isSettledGridInterval(intervalStart, windowMin, nowMs, market);
+}
+
+function gridRowNeedsRevalidation(
+  node: string,
+  intervalStart: string,
+  market: string | null | undefined,
+  row: GridCacheRow,
+  nowMs: number,
+): boolean {
+  const kind = gridMarketKind(market);
+  if (!kind) return false;
+  const startMs = Date.parse(intervalStart);
+  if (Number.isNaN(startMs)) return false;
+  const st = getGridRevalidate(node, intervalStart);
+  return needsGridRevalidation({
+    kind,
+    intervalStartMs: startMs,
+    nowMs,
+    ingestedAt: row.ingested_at,
+    lastSuccessAt: st?.last_success_at,
+    lastAttemptAt: st?.last_attempt_at,
+  });
+}
+
+
+function lastGridSuccessMs(node: string, intervalStart: string, row: GridCacheRow): number | null {
+  const st = getGridRevalidate(node, intervalStart);
+  const raw = st?.last_success_at || row.ingested_at;
+  if (!raw) return null;
+  const ms = Date.parse(raw);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * A settled row whose last successful write is still before the
+ * provisional close has not been confirmed after the close — even if
+ * we are currently in the failed-attempt cooldown and will not fetch
+ * again on this request.
+ */
+function isPostCloseUnconfirmed(
+  node: string,
+  intervalStart: string,
+  market: string | null | undefined,
+  row: GridCacheRow,
+  nowMs: number,
+): boolean {
+  const kind = gridMarketKind(market);
+  if (!kind) return false;
+  const startMs = Date.parse(intervalStart);
+  if (Number.isNaN(startMs)) return false;
+  const close = provisionalCloseMs(kind, startMs);
+  if (close === null || nowMs < close) return false;
+  const lastSuccess = lastGridSuccessMs(node, intervalStart, row);
+  if (lastSuccess === null) return true;
+  return lastSuccess < close;
+}
+
+function isCorruptGridRow(row: GridCacheRow): boolean {
+  return (
+    typeof row.market !== "string" ||
+    !row.market.trim() ||
+    typeof row.lmp_usd_per_mwh !== "number" ||
+    !Number.isFinite(row.lmp_usd_per_mwh)
+  );
 }
 
 /**
@@ -111,19 +236,18 @@ async function resolveCaisoHubPrice(
   // A4-FIX F3/F6: corrupt = empty/whitespace market or a non-finite
   // price (Infinity/NaN smuggled in via direct SQL — the writers now
   // refuse both, but legacy/hand-seeded rows can still carry them).
-  const corrupt =
-    row !== null &&
-    (typeof row.market !== "string" ||
-      !row.market.trim() ||
-      typeof row.lmp_usd_per_mwh !== "number" ||
-      !Number.isFinite(row.lmp_usd_per_mwh));
-  if (row && isFreshGridRow(row, nowMs) && !corrupt) {
+  const corrupt = row !== null && isCorruptGridRow(row);
+  const fresh = row !== null && isFreshGridRow(row, nowMs, intervalStart, 60, "CAISO") && !corrupt;
+  const needsRefresh =
+    row !== null && !corrupt && gridRowNeedsRevalidation(node, intervalStart, "CAISO", row, nowMs);
+  if (row && fresh && !needsRefresh) {
     return {
       node,
       lmp: row.lmp_usd_per_mwh,
       ingestedAt: row.ingested_at,
       upstreamUrl: row.upstream_url,
       fromCache: true,
+      unconfirmed: isPostCloseUnconfirmed(node, intervalStart, "CAISO", row, nowMs),
     };
   }
   const hadRow = row !== null;
@@ -137,6 +261,20 @@ async function resolveCaisoHubPrice(
     const ingestedAt = new Date().toISOString();
     saveGridPrice(node, intervalStart, fetched.lmp, "CAISO", ingestedAt, fetched.upstreamUrl);
     return { node, lmp: fetched.lmp, ingestedAt, upstreamUrl: fetched.upstreamUrl, fromCache: false };
+  }
+  // Failed revalidation of a still-valid post-provisional (or
+  // TTL-fresh) row: keep the cache, do not 502, record the attempt
+  // so we do not storm OASIS (J2 m1).
+  if (row && !corrupt && fresh) {
+    markGridRevalidateAttempt(node, intervalStart, new Date().toISOString());
+    return {
+      node,
+      lmp: row.lmp_usd_per_mwh,
+      ingestedAt: row.ingested_at,
+      upstreamUrl: row.upstream_url,
+      fromCache: true,
+      unconfirmed: true,
+    };
   }
   if (corrupt) return "invalid";
   return hadRow ? "stale" : null;
@@ -232,11 +370,14 @@ async function serveCaisoSystemMedian(
     market: CAISO_SYSTEM_MARKET,
   });
   const upstreamUrl = median.upstreamUrl || gridFallbackUrl(median.node, intervalStart);
+  const anyUnconfirmed = prices.some((p) => p.unconfirmed);
   const receipt = makeReceipt(
     "GRID_POWER_PRICE_GENERAL",
     upstreamUrl,
     rawBody,
-    "median of 3 CAISO OASIS PRC_LMP DAM hub rows (NP15/SP15/ZP26)",
+    anyUnconfirmed
+      ? "median of 3 CAISO OASIS PRC_LMP DAM hub rows (NP15/SP15/ZP26); " + FAILED_REVALIDATION
+      : "median of 3 CAISO OASIS PRC_LMP DAM hub rows (NP15/SP15/ZP26)",
   );
   receipt.fetched_at = median.ingestedAt;
   try {
@@ -262,7 +403,14 @@ async function serveCaisoSystemMedian(
       currency: "USD",
     },
     receipt,
-    { answer, verdict: "verified", confidence: 1.0, source },
+    anyUnconfirmed
+      ? {
+          answer,
+          verdict: GRID_UNCONFIRMED_VERDICT,
+          confidence: GRID_UNCONFIRMED_CONFIDENCE,
+          source: source + " (" + FAILED_REVALIDATION + ")",
+        }
+      : { answer, verdict: "verified", confidence: 1.0, source },
   );
 }
 
@@ -402,8 +550,10 @@ export async function handleGridPrice(
   }
   // A4 on-demand CAISO fetch (single hub): a missing hour is fetched
   // live from OASIS PRC_LMP DAM for exactly this hour and cached
-  // BEFORE it is served, so a retry is a cache hit. Non-CAISO zones
-  // stay cache-only (their miss behaviour is pinned by tests). A
+  // BEFORE it is served, so a retry is a cache hit. A NYISO or
+  // Elering miss is still 502 GRID_CACHE_MISS (pinned by tests); NYISO
+  // live fetch is used to revalidate an existing post-close row, not
+  // to fill a miss. A
   // failed live fetch (or an OASIS answer with no price for the hour)
   // falls through to the 502 GRID_CACHE_MISS below — never a guess.
   let fetchedLive = false;
@@ -449,16 +599,19 @@ export async function handleGridPrice(
   // family as a stale row: a freshness failure, not a wrong answer).
   const ingestedMs = Date.parse(row.ingested_at);
   const futureIngested = !Number.isNaN(ingestedMs) && ingestedMs > nowMs;
-  let stale =
-    !row.ingested_at ||
-    Number.isNaN(ingestedMs) ||
-    futureIngested ||
-    nowMs - ingestedMs > GRID_CACHE_TTL_MS;
-  if (stale && zone.market === "CAISO") {
-    // A4: a stale CAISO row is re-fetched live instead of refused —
-    // the fresh fetch replaces it (cached first, as above). Only if
-    // the live fetch fails is the stale row refused as before, with
-    // the same GRID_CACHE_STALE code and message.
+  const corruptRow = isCorruptGridRow(row);
+  // Same freshness rule as the median path (TTL, or post-provisional).
+  let stale = !isFreshGridRow(row, nowMs, intervalStart, windowMin, zone.market);
+  const needsRefresh =
+    !corruptRow &&
+    gridRowNeedsRevalidation(normalizedZone, intervalStart, zone.market, row, nowMs);
+  let unconfirmed = false;
+  // CAISO live path: refresh a stale row, repair a corrupt row even
+  // when the interval is already past the provisional window (J2 m4:
+  // the median path already fell through to OASIS; the single-node
+  // path previously returned 502 GRID_CACHE_INVALID without a fetch),
+  // and revalidate at least once after the provisional close (J2 m1).
+  if (zone.market === "CAISO" && (stale || corruptRow || needsRefresh)) {
     let fetched: { lmp: number; upstreamUrl: string } | null = null;
     try {
       fetched = await fetchCaisoDamLmp(normalizedZone, intervalStart);
@@ -476,7 +629,47 @@ export async function handleGridPrice(
       };
       fetchedLive = true;
       stale = false;
+    } else if (!corruptRow && !stale && needsRefresh) {
+      // Valid post-provisional row, revalidation failed: keep it,
+      // but do not label it verified / 1.0 (r3 / J2 minor 2).
+      markGridRevalidateAttempt(normalizedZone, intervalStart, new Date().toISOString());
+      unconfirmed = true;
     }
+  }
+  // NYISO live path after the §20.3 close (dated MIS CSVs). Provisional
+  // stale rows stay 502 GRID_CACHE_STALE (cache-only during the window).
+  if (zone.market === "NYISO" && !stale && (corruptRow || needsRefresh)) {
+    let fetched: { lmp: number; upstreamUrl: string } | null = null;
+    try {
+      fetched = await fetchNyisoRtLbmp(normalizedZone, intervalStart);
+    } catch {
+      fetched = null;
+    }
+    if (fetched) {
+      const ingestedAt = new Date().toISOString();
+      saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "NYISO", ingestedAt, fetched.upstreamUrl);
+      row = {
+        lmp_usd_per_mwh: fetched.lmp,
+        market: "NYISO",
+        ingested_at: ingestedAt,
+        upstream_url: fetched.upstreamUrl,
+      };
+      fetchedLive = true;
+    } else if (!corruptRow && needsRefresh) {
+      markGridRevalidateAttempt(normalizedZone, intervalStart, new Date().toISOString());
+      unconfirmed = true;
+    }
+  }
+  // Elering has no historical re-fetch. A post-close row that was
+  // never successfully written at or after the close is labelled
+  // honestly rather than verified / 1.0 (J1 residual 2 / r3).
+  if (
+    !stale &&
+    !corruptRow &&
+    !fetchedLive &&
+    isPostCloseUnconfirmed(normalizedZone, intervalStart, zone.market, row, nowMs)
+  ) {
+    unconfirmed = true;
   }
   if (stale) {
     // A4-FIX F6 (same masking J2 found on the median path): a stale row
@@ -555,10 +748,10 @@ export async function handleGridPrice(
   // the raw upstream feed bytes, and NOT the stored row's spelling
   // alone: an alias query (N.Y.C.) serving a ZONE_J row hashes
   // node_or_zone "N.Y.C.", so two spellings of one row yield different
-  // hashes, each recomputable from its own response. Elering / NYISO
-  // rows are served from the SQLite cache only and never fetched live;
-  // a CAISO row may instead have been fetched live on demand for this
-  // hour (fetchCaisoDamLmp) and cached before serving — the hash still
+  // hashes, each recomputable from its own response. An Elering row
+  // is served from the SQLite cache only; a CAISO or post-close NYISO
+  // row may have been fetched live on demand and cached before
+  // serving — the hash still
   // covers the four constructed fields AS SERVED, not the raw upstream
   // feed bytes. The ingester persists only the parsed fields — the raw
   // feed bytes are never stored (grid_cache has no raw-response
@@ -575,13 +768,23 @@ export async function handleGridPrice(
     lmp_usd_per_mwh: row.lmp_usd_per_mwh,
     market: row.market,
   });
+  let quorumVotes: string;
+  if (fetchedLive && zone.market === "CAISO") {
+    quorumVotes = "1/1 live CAISO OASIS PRC_LMP DAM fetch (on-demand, cached before serving)";
+  } else if (fetchedLive && zone.market === "NYISO") {
+    quorumVotes = "1/1 live NYISO MIS realtime LBMP fetch (on-demand, cached before serving)";
+  } else if (unconfirmed && gridMarketKind(zone.market) === "ELERING") {
+    quorumVotes = "1/1 cache row from official Elering/Nord Pool feed; " + ELERING_NO_HISTORICAL_REFETCH;
+  } else if (unconfirmed) {
+    quorumVotes = "1/1 cache row from official ISO feed; " + FAILED_REVALIDATION;
+  } else {
+    quorumVotes = "1/1 cache row from verified ISO feed";
+  }
   const receipt = makeReceipt(
     "GRID_POWER_PRICE_GENERAL",
     upstreamUrl,
     rawBody,
-    fetchedLive
-      ? "1/1 live CAISO OASIS PRC_LMP DAM fetch (on-demand, cached before serving)"
-      : "1/1 cache row from verified ISO feed",
+    quorumVotes,
   );
   // The receipt's fetched_at is the cache-ingest time, not the response
   // time: it states when the upstream row was actually fetched.
@@ -617,6 +820,19 @@ export async function handleGridPrice(
       currency,
     },
     receipt,
-    { answer, verdict: "verified", confidence: 1.0, source: zone.source },
+    unconfirmed
+      ? {
+          answer,
+          verdict: GRID_UNCONFIRMED_VERDICT,
+          confidence: GRID_UNCONFIRMED_CONFIDENCE,
+          source:
+            zone.source +
+            " (" +
+            (gridMarketKind(zone.market) === "ELERING"
+              ? ELERING_NO_HISTORICAL_REFETCH
+              : FAILED_REVALIDATION) +
+            ")",
+        }
+      : { answer, verdict: "verified", confidence: 1.0, source: zone.source },
   );
 }

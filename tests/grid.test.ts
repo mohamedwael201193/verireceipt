@@ -4,7 +4,7 @@
 // it runs runIngesterOnce() against the real Elering / NYISO / CAISO feeds
 // (no mocks) and serves one fetched row through the handler.
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -22,25 +22,57 @@ afterAll(() => {
 
 import { ApiError } from "../src/core/errors";
 import { sha256Hex } from "../src/core/receipt";
-import { getDb, saveGridPrice } from "../src/core/db";
-import { handleGridPrice, CAISO_SYSTEM_MARKET } from "../src/handlers/gridPrice";
+import { getDb, getGridRevalidate, saveGridPrice } from "../src/core/db";
+import {
+  handleGridPrice,
+  CAISO_SYSTEM_MARKET,
+  GRID_UNCONFIRMED_CONFIDENCE,
+  GRID_UNCONFIRMED_VERDICT,
+} from "../src/handlers/gridPrice";
 import {
   eleringMissingZones,
+  CAISO_EMPTY_ARCHIVE_ATTEMPTS,
+  CAISO_LIVE_ATTEMPTS,
+  CAISO_RETRY_DELAY_MS,
+  CaisoEmptyArchiveError,
   fetchBuffer,
   fetchCaisoDamLmp,
   fetchText,
   gridFallbackUrl,
   isAllowedGridUpstreamUrl,
+  isSettledGridInterval,
+  oasisErrorCodeFromPayload,
   nyWallString,
   nyWallToUtcMs,
   parseCaisoIntervalStart,
+  resetCaisoLiveInflightForTests,
+  resetNyisoLiveInflightForTests,
   runIngesterOnce,
   SUPPORTED_ZONES,
 } from "../src/jobs/gridIngester";
 // Round-2 pinning-test-only imports (additive; no existing test touched).
 import { vi } from "vitest";
-import { getGridPrice } from "../src/core/db";
+import { getGridPrice, purgeGridCacheOverflow } from "../src/core/db";
 import { saveGridPriceBatch } from "../src/jobs/gridIngester";
+import {
+  CAISO_CORRECTION_BUSINESS_DAYS,
+  CAISO_DAM_PROVISIONAL_BUSINESS_DAYS,
+  GRID_CACHE_MAX_ROWS,
+  GRID_REFERENCE_CAISO_NODES,
+  GRID_REFERENCE_INTERVAL,
+  correctionCloseMs,
+  easterSunday,
+  gridFinalityPhase,
+  GRID_REVALIDATE_COOLDOWN_MS,
+  isCaisoBusinessDay,
+  isEstonianPublicHoliday,
+  isEvictionProtectedRow,
+  isStoreableGridIntervalKey,
+  isUsFederalOrDayAfterThanksgiving,
+  needsGridRevalidation,
+  provisionalCloseMs,
+  ymdKey,
+} from "../src/jobs/gridFinality";
 
 /** Past instant floored to a 15-min boundary (also a 5-min and 60-min boundary). */
 function pastIso(hoursAgo: number): string {
@@ -56,6 +88,16 @@ function futureIso(hoursAhead: number): string {
 /** ISO instant N minutes ago (exact, for ingested_at values). */
 function minutesAgoIso(minutes: number): string {
   return new Date(Date.now() - minutes * 60_000).toISOString();
+}
+
+/** Start of the last completed CAISO hour (ended 0–60 min ago; not yet settled). */
+function lastCompletedCaisoHourIso(nowMs: number = Date.now()): string {
+  const windowMs = 3600_000;
+  return new Date(Math.floor(nowMs / windowMs) * windowMs - windowMs).toISOString();
+}
+
+function isoToCaisoGmt(iso: string): string {
+  return iso.replace(".000Z", "-00:00").replace(/Z$/, "-00:00");
 }
 
 async function expectApiError(
@@ -293,8 +335,8 @@ describe("handleGridPrice staleness bound (1 hour)", () => {
     expect(res.currency).toBe("USD");
   });
 
-  it("61-minute-old row -> 502 GRID_CACHE_STALE", async () => {
-    const interval = pastIso(3);
+  it("61-minute-old row on a recent (unsettled) interval -> 502 GRID_CACHE_STALE", async () => {
+    const interval = pastIso(2);
     saveGridPrice("EE", interval, 99.99, "Elering EE", minutesAgoIso(61));
     await expectApiError(
       handleGridPrice({ node_or_zone: "EE", interval_start: interval }),
@@ -303,14 +345,20 @@ describe("handleGridPrice staleness bound (1 hour)", () => {
     );
   });
 
-  it("48-hour-old and 1-year-old rows -> 502 GRID_CACHE_STALE (never verified 1.0)", async () => {
-    const interval48 = pastIso(50);
+  it("48-hour-old ingest on a recent (unsettled) interval -> 502 GRID_CACHE_STALE", async () => {
+    // The interval itself is only ~2 h old, so the official provisional
+    // window (days, not hours) has not closed; an aged ingested_at is
+    // still a freshness failure.
+    const interval48 = pastIso(2);
     saveGridPrice("EE", interval48, 99.99, "Elering EE", minutesAgoIso(48 * 60));
     await expectApiError(
       handleGridPrice({ node_or_zone: "EE", interval_start: interval48 }),
       502,
       "GRID_CACHE_STALE",
     );
+  });
+
+  it("settled historical Elering row older than the TTL is served (A9)", async () => {
     const intervalYear = "2025-11-19T05:00:00.000Z";
     saveGridPrice(
       "EE",
@@ -319,11 +367,13 @@ describe("handleGridPrice staleness bound (1 hour)", () => {
       "Elering EE",
       new Date(Date.now() - 365 * 24 * 3600_000).toISOString(),
     );
-    await expectApiError(
-      handleGridPrice({ node_or_zone: "EE", interval_start: intervalYear }),
-      502,
-      "GRID_CACHE_STALE",
-    );
+    const res = await handleGridPrice({ node_or_zone: "EE", interval_start: intervalYear });
+    expect(res.lmp_usd_per_mwh).toBe(99.99);
+    // Ingested a year ago, before the 3-BD close of 2025-11-19, and
+    // Elering has no historical re-fetch: served, but not as verified 1.0 (r3).
+    expect(res.verdict).toBe(GRID_UNCONFIRMED_VERDICT);
+    expect(res.confidence).toBe(GRID_UNCONFIRMED_CONFIDENCE);
+    expect(String(res.source)).toContain("no historical re-fetch");
   });
 
   it("receipt fetched_at is the row's ingested_at, not the response time", async () => {
@@ -1977,9 +2027,31 @@ describe("GRID A4: CAISO system hub median (cached hubs, no network)", () => {
     }
   });
 
-  it("a stale hub + failed re-fetch -> 502 GRID_CACHE_STALE naming the hub", async () => {
+  it("a settled historical hub older than the TTL is used without a live re-fetch (A9)", async () => {
     const now = new Date().toISOString();
     const t = "2026-09-13T18:00:00.000Z";
+    saveGridPrice("TH_NP15_GEN-APND", t, 38.09, "CAISO", now);
+    saveGridPrice("TH_SP15_GEN-APND", t, 36.74, "CAISO", now);
+    saveGridPrice("TH_ZP26_GEN-APND", t, 36.8, "CAISO", minutesAgoIso(61));
+    let fetchCalls = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((url: unknown) => {
+      fetchCalls++;
+      return Promise.reject(new Error("stubbed OASIS failure"));
+    }) as typeof fetch;
+    try {
+      const res = await handleGridPrice({ node_or_zone: "CAISO", interval_start: t });
+      expect(res.lmp_usd_per_mwh).toBe(36.8); // median of 36.74, 36.8, 38.09
+      expect(res.verdict).toBe("verified");
+      expect(fetchCalls).toBe(0);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("a stale hub on a recent unsettled hour + failed re-fetch -> 502 GRID_CACHE_STALE naming the hub", async () => {
+    const now = new Date().toISOString();
+    const t = lastCompletedCaisoHourIso();
     saveGridPrice("TH_NP15_GEN-APND", t, 38.09, "CAISO", now);
     saveGridPrice("TH_SP15_GEN-APND", t, 36.74, "CAISO", now);
     saveGridPrice("TH_ZP26_GEN-APND", t, 36.8, "CAISO", minutesAgoIso(61));
@@ -2079,7 +2151,8 @@ describe("GRID A4: on-demand single-hub OASIS fetch (stubbed)", () => {
   });
 
   it("a stale CAISO row + failed re-fetch -> 502 GRID_CACHE_STALE; a good re-fetch replaces it", async () => {
-    const hour = "2026-11-18T05:00:00.000Z";
+    const hour = lastCompletedCaisoHourIso();
+    const hourEnd = new Date(Date.parse(hour) + 3600_000).toISOString();
     saveGridPrice("TH_SP15_GEN-APND", hour, 11.11, "CAISO", minutesAgoIso(61));
     const realFetch = globalThis.fetch;
     globalThis.fetch = (() => Promise.reject(new Error("stubbed OASIS failure"))) as typeof fetch;
@@ -2097,7 +2170,7 @@ describe("GRID A4: on-demand single-hub OASIS fetch (stubbed)", () => {
       "PRC_LMP.csv",
       [
         CAISO_HEADER,
-        caisoLmpRow("TH_SP15_GEN-APND", "2026-11-18T05:00:00-00:00", "2026-11-18T06:00:00-00:00", 22.22),
+        caisoLmpRow("TH_SP15_GEN-APND", isoToCaisoGmt(hour), isoToCaisoGmt(hourEnd), 22.22),
       ].join("\n"),
     );
     globalThis.fetch = (async (url: unknown) => {
@@ -3110,4 +3183,810 @@ describe("GRID A4-FIX3 F-R3-1/F-R3-2: sub-100-year walls never cached; poisoned 
     const res = await handleGridPrice({ node_or_zone: "EE", interval_start: "2026-01-04T04:00:00.000Z" });
     expect(res.lmp_usd_per_mwh).toBe(42.5 * 1.09);
   });
+});
+
+
+describe("A9 isSettledGridInterval (pure)", () => {
+  it("follows CAISO Tariff §35.2 (end of 3rd Business Day), not interval_end + 2 h", () => {
+    const start = "2026-09-13T14:00:00.000Z"; // Sunday, 07:00 PDT Trading Day 2026-09-13
+    const startMs = Date.parse(start);
+    // 3rd Business Day following Sun 13 Sep is Wed 16 Sep. End of that
+    // day in America/Los_Angeles is Thu 17 Sep 00:00 PDT = 07:00Z.
+    const close = Date.parse("2026-09-17T07:00:00.000Z");
+    expect(provisionalCloseMs("CAISO", startMs)).toBe(close);
+    expect(isSettledGridInterval(start, 60, close - 1)).toBe(false);
+    expect(isSettledGridInterval(start, 60, close)).toBe(true);
+    // The withdrawn A9 r1 rule (end + 2 h = 17:00Z the same day) is
+    // still well inside the provisional window.
+    expect(isSettledGridInterval(start, 60, Date.parse("2026-09-13T17:00:00.000Z"))).toBe(false);
+    // Unparseable / bad window: fail closed (not settled).
+    expect(isSettledGridInterval("2026-02-30T14:00:00.000Z", 60, close + 10 * 86400_000)).toBe(false);
+    expect(isSettledGridInterval(start, 0, close + 10 * 86400_000)).toBe(false);
+  });
+
+  it("a PDT hour and a post-DST PST hour are both settled by mid-November, a 90-minute-old hour is not", () => {
+    // 2026-09-13 is US PDT (UTC-7); 2026-11-01 is the US DST end date (PST, UTC-8).
+    // Trading-day math uses America/Los_Angeles, not a raw UTC offset.
+    const pdt = "2026-09-13T14:00:00.000Z";
+    const pst = "2026-11-01T15:00:00.000Z"; // 07:00 PST Trading Day 2026-11-01 (Sunday)
+    const now = Date.parse("2026-11-21T10:00:00.000Z");
+    expect(isSettledGridInterval(pdt, 60, now)).toBe(true);
+    expect(isSettledGridInterval(pst, 60, now)).toBe(true);
+    // A window that ended 90 minutes ago is still well inside the 3-BD window.
+    const recent = "2026-11-21T08:00:00.000Z";
+    expect(isSettledGridInterval(recent, 60, now)).toBe(false);
+  });
+});
+
+describe("A9 CAISO live fetch retry + single-flight (stubbed)", () => {
+  afterEach(() => {
+    resetCaisoLiveInflightForTests();
+  });
+
+  it("retry policy is bounded", () => {
+    expect(CAISO_LIVE_ATTEMPTS).toBe(3);
+    expect(CAISO_RETRY_DELAY_MS).toBe(500);
+    expect(CAISO_RETRY_DELAY_MS * (CAISO_LIVE_ATTEMPTS - 1)).toBeLessThan(120_000);
+  });
+
+  const HOUR = "2026-09-13T20:00:00.000Z";
+  const START_GMT = "2026-09-13T20:00:00-00:00";
+  const END_GMT = "2026-09-13T21:00:00-00:00";
+
+  function zipFor(node: string, lmp: number): Buffer {
+    return makeCaisoZip(
+      "PRC_LMP.csv",
+      [CAISO_HEADER, caisoLmpRow(node, START_GMT, END_GMT, lmp)].join("\n"),
+    );
+  }
+
+  it("retries a transient OASIS 503 then serves and caches the price", async () => {
+    const zip = zipFor("TH_SP15_GEN-APND", 36.74434);
+    const realFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes("oasis.caiso.com")) throw new Error("stubbed upstream failure");
+      fetchCalls++;
+      if (fetchCalls < 3) {
+        return new Response("unavailable", { status: 503 });
+      }
+      return new Response(new Uint8Array(zip), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const res = await handleGridPrice({ node_or_zone: "TH_SP15_GEN-APND", interval_start: HOUR });
+      expect(res.lmp_usd_per_mwh).toBe(36.74434);
+      expect(res.verdict).toBe("verified");
+      expect(fetchCalls).toBe(CAISO_LIVE_ATTEMPTS);
+      expect(getGridPrice("TH_SP15_GEN-APND", HOUR)?.lmp_usd_per_mwh).toBe(36.74434);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }, 8000);
+
+  it("exhausted retries leave the cache empty and return 502 GRID_CACHE_MISS", async () => {
+    const realFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes("oasis.caiso.com")) throw new Error("stubbed upstream failure");
+      fetchCalls++;
+      return new Response("unavailable", { status: 503 });
+    }) as typeof fetch;
+    try {
+      await expectApiError(
+        handleGridPrice({ node_or_zone: "TH_NP15_GEN-APND", interval_start: HOUR }),
+        502,
+        "GRID_CACHE_MISS",
+      );
+      expect(fetchCalls).toBe(CAISO_LIVE_ATTEMPTS);
+      expect(getGridPrice("TH_NP15_GEN-APND", HOUR)).toBeNull();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }, 8000);
+
+  it("a well-formed OASIS CSV with no LMP row is not retried (genuine miss)", async () => {
+    // Header + a non-LMP component row: well-formed, no LMP_PRC match.
+    const mcc = caisoLmpRow("TH_ZP26_GEN-APND", START_GMT, END_GMT, 1.23).replace(",LMP,LMP_PRC,", ",MCC,LMP_MCC,");
+    const zip = makeCaisoZip("PRC_LMP.csv", [CAISO_HEADER, mcc].join("\n"));
+    const realFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes("oasis.caiso.com")) throw new Error("stubbed upstream failure");
+      fetchCalls++;
+      return new Response(new Uint8Array(zip), { status: 200 });
+    }) as typeof fetch;
+    try {
+      expect(await fetchCaisoDamLmp("TH_ZP26_GEN-APND", HOUR)).toBeNull();
+      expect(fetchCalls).toBe(1);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("concurrent misses share one in-flight OASIS fetch (single-flight)", async () => {
+    const zip = zipFor("TH_ZP26_GEN-APND", 36.79695);
+    const realFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes("oasis.caiso.com")) throw new Error("stubbed upstream failure");
+      fetchCalls++;
+      await gate;
+      return new Response(new Uint8Array(zip), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const p1 = handleGridPrice({ node_or_zone: "TH_ZP26_GEN-APND", interval_start: HOUR });
+      const p2 = handleGridPrice({ node_or_zone: "TH_ZP26_GEN-APND", interval_start: HOUR });
+      // Let both handlers reach the in-flight map before releasing OASIS.
+      await new Promise((r) => setTimeout(r, 30));
+      expect(fetchCalls).toBe(1);
+      release!();
+      const [a, b] = await Promise.all([p1, p2]);
+      expect(a.lmp_usd_per_mwh).toBe(36.79695);
+      expect(b.lmp_usd_per_mwh).toBe(36.79695);
+      expect(fetchCalls).toBe(1);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
+
+describe("A9 settled historical cache (NYISO + CAISO reference hour)", () => {
+  it("a 2-month-old NYISO row is served without being evicted by the 1 h TTL", async () => {
+    const interval = "2026-09-13T14:00:00.000Z";
+    saveGridPrice("ZONE_A", interval, 42.5, "NYISO", minutesAgoIso(48 * 60));
+    const res = await handleGridPrice({ node_or_zone: "ZONE_A", interval_start: interval });
+    expect(res.lmp_usd_per_mwh).toBe(42.5);
+    expect(res.verdict).toBe("verified");
+  });
+});
+
+
+describe("A9 r2 CAISO / NYISO / Elering finality calendar", () => {
+  it("computes Easter 2026 as 5 April (Anonymous Gregorian)", () => {
+    expect(ymdKey(easterSunday(2026))).toBe("2026-04-05");
+    expect(ymdKey(easterSunday(2025))).toBe("2025-04-20");
+  });
+
+  it("treats Juneteenth, observed Independence Day, and the Friday after Thanksgiving as non-Business Days under Appendix A", () => {
+    // 2026-06-19 is a Friday — Juneteenth is a federal holiday, so it is
+    // NOT a CAISO Appendix A Business Day (even though the lowercase
+    // §11.29 settlements calendar treats it as an operating day).
+    expect(isCaisoBusinessDay({ y: 2026, m: 6, d: 19 })).toBe(false);
+    expect(isUsFederalOrDayAfterThanksgiving({ y: 2026, m: 6, d: 19 })).toBe(true);
+    // 4 July 2026 is a Saturday → observed Friday 3 July.
+    expect(isCaisoBusinessDay({ y: 2026, m: 7, d: 3 })).toBe(false);
+    expect(isCaisoBusinessDay({ y: 2026, m: 7, d: 4 })).toBe(false); // Saturday
+    expect(isCaisoBusinessDay({ y: 2026, m: 7, d: 6 })).toBe(true); // Monday
+    // Thanksgiving 2026-11-26 and Friday 11-27.
+    expect(isCaisoBusinessDay({ y: 2026, m: 11, d: 26 })).toBe(false);
+    expect(isCaisoBusinessDay({ y: 2026, m: 11, d: 27 })).toBe(false);
+    expect(isCaisoBusinessDay({ y: 2026, m: 11, d: 30 })).toBe(true); // Monday
+  });
+
+  it("a Thanksgiving-week CAISO DAM hour stays provisional across the holiday weekend", () => {
+    // Trading Day Wednesday 25 Nov 2026. Following BDs: Mon 30, Tue 1 Dec, Wed 2 Dec.
+    // End of 2 Dec Pacific = 2026-12-03T08:00:00.000Z (PST, UTC-8).
+    const startMs = Date.parse("2026-11-25T18:00:00.000Z"); // 10:00 PST
+    const close = provisionalCloseMs("CAISO", startMs);
+    expect(close).toBe(Date.parse("2026-12-03T08:00:00.000Z"));
+    expect(gridFinalityPhase("CAISO", startMs, close! - 1)).toBe("provisional");
+    expect(gridFinalityPhase("CAISO", startMs, close!)).toBe("correction");
+  });
+
+  it("CAISO §35.3.2 conservative correction window is 30 Business Days", () => {
+    expect(CAISO_DAM_PROVISIONAL_BUSINESS_DAYS).toBe(3);
+    expect(CAISO_CORRECTION_BUSINESS_DAYS).toBe(30);
+    const startMs = Date.parse("2026-09-13T14:00:00.000Z");
+    const corr = correctionCloseMs("CAISO", startMs);
+    const prov = provisionalCloseMs("CAISO", startMs);
+    expect(corr).toBeGreaterThan(prov!);
+    // 21 Nov 2026 is past both windows (reference hour is safely final).
+    const now = Date.parse("2026-11-21T10:00:00.000Z");
+    expect(gridFinalityPhase("CAISO", startMs, now)).toBe("final");
+  });
+
+  it("NYISO realtime is provisional until the end of the 4th business day (MST Att. E §20.3)", () => {
+    // 2026-09-13T14:00Z = 10:00 EDT, operating day Sunday 13 Sep.
+    // Following BDs: Mon 14, Tue 15, Wed 16, Thu 17. End of 17 Sep
+    // Eastern = 2026-09-18T04:00:00.000Z (EDT, UTC-4).
+    const startMs = Date.parse("2026-09-13T14:00:00.000Z");
+    expect(provisionalCloseMs("NYISO", startMs)).toBe(Date.parse("2026-09-18T04:00:00.000Z"));
+    expect(correctionCloseMs("NYISO", startMs)).toBe(provisionalCloseMs("NYISO", startMs));
+    expect(isSettledGridInterval("2026-09-13T14:00:00.000Z", 5, Date.parse("2026-09-18T03:59:59.999Z"))).toBe(
+      false,
+    );
+    expect(isSettledGridInterval("2026-09-13T14:00:00.000Z", 5, Date.parse("2026-09-18T04:00:00.000Z"))).toBe(
+      true,
+    );
+  });
+
+  it("Elering Midsummer (24 Jun) is not a business day; 3-BD window skips it", () => {
+    expect(isEstonianPublicHoliday({ y: 2026, m: 6, d: 23 })).toBe(true);
+    expect(isEstonianPublicHoliday({ y: 2026, m: 6, d: 24 })).toBe(true);
+    // Delivery 2026-06-22 (Monday EET). Following BDs skip 23–24 Jun:
+    // Tue 23 holiday, Wed 24 holiday, Thu 25 (1), Fri 26 (2), Mon 29 (3).
+    const startMs = Date.parse("2026-06-22T10:00:00.000Z"); // 13:00 EEST
+    const close = provisionalCloseMs("ELERING", startMs);
+    // End of Mon 29 Jun in Europe/Tallinn (EEST, UTC+3) = 2026-06-29T21:00:00.000Z.
+    expect(close).toBe(Date.parse("2026-06-29T21:00:00.000Z"));
+  });
+
+  it("needsGridRevalidation is true once after provisional close, then false after a post-close success", () => {
+    const startMs = Date.parse("2026-09-13T14:00:00.000Z");
+    const close = provisionalCloseMs("CAISO", startMs)!;
+    expect(
+      needsGridRevalidation({
+        kind: "CAISO",
+        intervalStartMs: startMs,
+        nowMs: close,
+        ingestedAt: "2026-09-14T12:00:00.000Z",
+      }),
+    ).toBe(true);
+    expect(
+      needsGridRevalidation({
+        kind: "CAISO",
+        intervalStartMs: startMs,
+        nowMs: close,
+        ingestedAt: "2026-09-14T12:00:00.000Z",
+        lastSuccessAt: new Date(close).toISOString(),
+      }),
+    ).toBe(false);
+    // Cooldown after a failed attempt.
+    expect(
+      needsGridRevalidation({
+        kind: "CAISO",
+        intervalStartMs: startMs,
+        nowMs: close + 60_000,
+        ingestedAt: "2026-09-14T12:00:00.000Z",
+        lastAttemptAt: new Date(close).toISOString(),
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("A9 r2 OASIS empty zip / header-only / error 1000 (J2 m2)", () => {
+  afterEach(() => {
+    resetCaisoLiveInflightForTests();
+  });
+
+  const HOUR = "2026-09-13T20:00:00.000Z";
+
+  function makeEmptyCaisoZip(): Buffer {
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    return eocd;
+  }
+
+  function oasisErrorXml(code: number, desc: string): string {
+    return (
+      '<?xml version="1.0"?><OASISERROR><ERR_CODE>' +
+      code +
+      "</ERR_CODE><ERR_DESC>" +
+      desc +
+      "</ERR_DESC></OASISERROR>"
+    );
+  }
+
+  it("classifies official error 1000 and the FAQ wording as a genuine miss", () => {
+    expect(oasisErrorCodeFromPayload(oasisErrorXml(1000, "No data returned for the specified selection."))).toBe(
+      1000,
+    );
+    expect(oasisErrorCodeFromPayload(oasisErrorXml(1003, "Timed out waiting for query response."))).toBe(1003);
+    expect(oasisErrorCodeFromPayload("INTERVALSTARTTIME_GMT,NODE,XML_DATA_ITEM,MW,MARKET_RUN_ID\n")).toBeNull();
+  });
+
+  it("a header-only well-formed PRC_LMP CSV is a genuine miss and is not retried", async () => {
+    const zip = makeCaisoZip("PRC_LMP.csv", CAISO_HEADER + "\n");
+    const realFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes("oasis.caiso.com")) throw new Error("stubbed upstream failure");
+      fetchCalls++;
+      return new Response(new Uint8Array(zip), { status: 200 });
+    }) as typeof fetch;
+    try {
+      expect(await fetchCaisoDamLmp("TH_ZP26_GEN-APND", HOUR)).toBeNull();
+      expect(fetchCalls).toBe(1);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("an official OASIS 1000 error document is a genuine miss and is not retried", async () => {
+    const zip = makeCaisoZip("ERROR.xml", oasisErrorXml(1000, "No data returned for the specified selection."));
+    const realFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes("oasis.caiso.com")) throw new Error("stubbed upstream failure");
+      fetchCalls++;
+      return new Response(new Uint8Array(zip), { status: 200 });
+    }) as typeof fetch;
+    try {
+      expect(await fetchCaisoDamLmp("TH_NP15_GEN-APND", HOUR)).toBeNull();
+      expect(fetchCalls).toBe(1);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("an empty zip is retried once only (high-load artefact, not a 3-shot storm)", async () => {
+    const empty = makeEmptyCaisoZip();
+    const realFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes("oasis.caiso.com")) throw new Error("stubbed upstream failure");
+      fetchCalls++;
+      return new Response(new Uint8Array(empty), { status: 200 });
+    }) as typeof fetch;
+    try {
+      await expect(fetchCaisoDamLmp("TH_SP15_GEN-APND", HOUR)).rejects.toBeInstanceOf(CaisoEmptyArchiveError);
+      expect(fetchCalls).toBe(CAISO_EMPTY_ARCHIVE_ATTEMPTS);
+      expect(fetchCalls).toBeLessThan(CAISO_LIVE_ATTEMPTS);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }, 8000);
+});
+
+describe("A9 r2 post-provisional revalidation and single-node live repair", () => {
+  afterEach(() => {
+    resetCaisoLiveInflightForTests();
+  });
+
+  const HOUR = "2026-09-13T14:00:00.000Z";
+  const START_GMT = "2026-09-13T14:00:00-00:00";
+  const END_GMT = "2026-09-13T15:00:00-00:00";
+
+  function zipFor(node: string, lmp: number): Buffer {
+    return makeCaisoZip(
+      "PRC_LMP.csv",
+      [CAISO_HEADER, caisoLmpRow(node, START_GMT, END_GMT, lmp)].join("\n"),
+    );
+  }
+
+  it("revalidates a pre-close ingest at least once after the provisional window and picks up a late revision (J2 m1)", async () => {
+    // Ingested on Mon 14 Sep, before the Wed 16 Sep close. First serve
+    // after the close must hit OASIS, not pin 99.99.
+    saveGridPrice("TH_SP15_GEN-APND", HOUR, 99.99, "CAISO", "2026-09-14T12:00:00.000Z");
+    const zip = zipFor("TH_SP15_GEN-APND", 36.74434);
+    const realFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes("oasis.caiso.com")) throw new Error("stubbed upstream failure");
+      fetchCalls++;
+      return new Response(new Uint8Array(zip), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const res = await handleGridPrice({ node_or_zone: "TH_SP15_GEN-APND", interval_start: HOUR });
+      expect(res.lmp_usd_per_mwh).toBe(36.74434);
+      expect(res.verdict).toBe("verified");
+      expect(fetchCalls).toBe(1);
+      expect(getGridPrice("TH_SP15_GEN-APND", HOUR)?.lmp_usd_per_mwh).toBe(36.74434);
+      // Second call: already revalidated after the close; no more fetch.
+      const res2 = await handleGridPrice({ node_or_zone: "TH_SP15_GEN-APND", interval_start: HOUR });
+      expect(res2.lmp_usd_per_mwh).toBe(36.74434);
+      expect(fetchCalls).toBe(1);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }, 8000);
+
+  it("a failed post-provisional revalidation still serves the valid cached price and does not storm", async () => {
+    saveGridPrice("TH_NP15_GEN-APND", HOUR, 38.09459, "CAISO", "2026-09-14T12:00:00.000Z");
+    const realFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes("oasis.caiso.com")) throw new Error("stubbed upstream failure");
+      fetchCalls++;
+      return new Response("unavailable", { status: 503 });
+    }) as typeof fetch;
+    try {
+      const res = await handleGridPrice({ node_or_zone: "TH_NP15_GEN-APND", interval_start: HOUR });
+      expect(res.lmp_usd_per_mwh).toBe(38.09459);
+      expect(res.verdict).toBe(GRID_UNCONFIRMED_VERDICT);
+      expect(res.confidence).toBe(GRID_UNCONFIRMED_CONFIDENCE);
+      expect(String(res.source)).toContain("post-close revalidation did not confirm");
+      const receipt = res.receipt as Record<string, unknown>;
+      expect(receipt.fetched_at).toBe("2026-09-14T12:00:00.000Z");
+      expect(String(receipt.quorum_votes)).toContain("post-close revalidation did not confirm");
+      expect(fetchCalls).toBe(CAISO_LIVE_ATTEMPTS);
+      const res2 = await handleGridPrice({ node_or_zone: "TH_NP15_GEN-APND", interval_start: HOUR });
+      expect(res2.lmp_usd_per_mwh).toBe(38.09459);
+      expect(res2.verdict).toBe(GRID_UNCONFIRMED_VERDICT);
+      expect(fetchCalls).toBe(CAISO_LIVE_ATTEMPTS); // cooldown, no second storm
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }, 8000);
+
+  it("the single-node path live-repairs a settled corrupt row (J2 m4)", async () => {
+    getDb()
+      .prepare(
+        `INSERT OR REPLACE INTO grid_cache
+         (node_or_zone, interval_start, lmp_usd_per_mwh, market, ingested_at, upstream_url)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run("TH_SP15_GEN-APND", HOUR, 99.99, "   ", "2026-09-14T12:00:00.000Z", "");
+    const zip = zipFor("TH_SP15_GEN-APND", 36.74434);
+    const realFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes("oasis.caiso.com")) throw new Error("stubbed upstream failure");
+      fetchCalls++;
+      return new Response(new Uint8Array(zip), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const res = await handleGridPrice({ node_or_zone: "TH_SP15_GEN-APND", interval_start: HOUR });
+      expect(res.lmp_usd_per_mwh).toBe(36.74434);
+      expect(res.verdict).toBe("verified");
+      expect(fetchCalls).toBe(1);
+      expect(getGridPrice("TH_SP15_GEN-APND", HOUR)?.market).toBe("CAISO");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }, 8000);
+});
+
+describe("A9 r2 grid_cache bound (J2 m3)", () => {
+  it("purges unprotected rows down to the cap and never evicts the official CAISO reference", () => {
+    expect(GRID_CACHE_MAX_ROWS).toBe(25_000);
+    const db = getDb();
+    const snapshot = db
+      .prepare(
+        "SELECT node_or_zone, interval_start, lmp_usd_per_mwh, market, ingested_at, upstream_url FROM grid_cache",
+      )
+      .all();
+    const nowMs = Date.parse("2026-11-21T10:00:00.000Z");
+    try {
+      db.exec("DELETE FROM grid_cache");
+      for (const node of GRID_REFERENCE_CAISO_NODES) {
+        saveGridPrice(node, GRID_REFERENCE_INTERVAL, 36.8, "CAISO", "2026-11-21T09:00:00.000Z");
+      }
+      for (let i = 0; i < 30; i++) {
+        const interval = new Date(Date.parse("2020-01-01T00:00:00.000Z") + i * 3600_000).toISOString();
+        saveGridPrice("ZONE_A", interval, i, "NYISO", "2020-01-02T00:00:00.000Z");
+      }
+      const deleted = purgeGridCacheOverflow(10, nowMs);
+      expect(deleted).toBeGreaterThan(0);
+      const n = (db.prepare("SELECT COUNT(*) AS n FROM grid_cache").get() as { n: number }).n;
+      expect(n).toBeLessThanOrEqual(10);
+      for (const node of GRID_REFERENCE_CAISO_NODES) {
+        expect(getGridPrice(node, GRID_REFERENCE_INTERVAL)?.lmp_usd_per_mwh).toBe(36.8);
+      }
+    } finally {
+      db.exec("DELETE FROM grid_cache");
+      const ins = db.prepare(
+        `INSERT OR REPLACE INTO grid_cache
+         (node_or_zone, interval_start, lmp_usd_per_mwh, market, ingested_at, upstream_url)
+         VALUES (@node_or_zone, @interval_start, @lmp_usd_per_mwh, @market, @ingested_at, @upstream_url)`,
+      );
+      for (const row of snapshot) ins.run(row);
+    }
+  });
+});
+
+describe("A9 r3: first post-close revalidation is not blocked by a pre-close success", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetCaisoLiveInflightForTests();
+  });
+
+  const HOUR = "2026-09-13T14:00:00.000Z";
+  const START_MS = Date.parse(HOUR);
+  const START_GMT = "2026-09-13T14:00:00-00:00";
+  const END_GMT = "2026-09-13T15:00:00-00:00";
+  const NODE = "TH_SP15_GEN-APND";
+  const LIVE_LMP = 36.74434;
+  const WRONG_LMP = 99.99;
+  const close = provisionalCloseMs("CAISO", START_MS)!;
+  // J2's exact instants: close is 2026-09-17T07:00:00.000Z.
+  const REQUEST_AT = Date.parse("2026-09-17T07:00:00.001Z");
+
+  function zipFor(node: string, lmp: number): Buffer {
+    return makeCaisoZip(
+      "PRC_LMP.csv",
+      [CAISO_HEADER, caisoLmpRow(node, START_GMT, END_GMT, lmp)].join("\n"),
+    );
+  }
+
+  function stubOasis(lmp: number): () => number {
+    const zip = zipFor(NODE, lmp);
+    const realFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes("oasis.caiso.com")) throw new Error("stubbed upstream failure");
+      fetchCalls++;
+      return new Response(new Uint8Array(zip), { status: 200 });
+    }) as typeof fetch;
+    return () => {
+      const n = fetchCalls;
+      globalThis.fetch = realFetch;
+      return n;
+    };
+  }
+
+  it("pure: ingest at close−30min / close−1ms / close−5h all require a post-close revalidation at close+1ms", () => {
+    expect(close).toBe(Date.parse("2026-09-17T07:00:00.000Z"));
+    expect(REQUEST_AT).toBe(close + 1);
+    for (const deltaMs of [30 * 60_000, 1, 5 * 3600_000]) {
+      const ingested = new Date(close - deltaMs).toISOString();
+      expect(
+        needsGridRevalidation({
+          kind: "CAISO",
+          intervalStartMs: START_MS,
+          nowMs: REQUEST_AT,
+          ingestedAt: ingested,
+        }),
+      ).toBe(true);
+      // A lastAttempt copied from the pre-close success must not start the cooldown.
+      expect(
+        needsGridRevalidation({
+          kind: "CAISO",
+          intervalStartMs: START_MS,
+          nowMs: REQUEST_AT,
+          ingestedAt: ingested,
+          lastSuccessAt: ingested,
+          lastAttemptAt: ingested,
+        }),
+      ).toBe(true);
+    }
+    // A failed attempt already made after close still honours the cooldown.
+    expect(
+      needsGridRevalidation({
+        kind: "CAISO",
+        intervalStartMs: START_MS,
+        nowMs: REQUEST_AT,
+        ingestedAt: new Date(close - 30 * 60_000).toISOString(),
+        lastAttemptAt: new Date(close).toISOString(),
+      }),
+    ).toBe(false);
+    expect(GRID_REVALIDATE_COOLDOWN_MS).toBe(60 * 60 * 1000);
+  });
+
+  async function serveAfterClose(ingestDeltaMs: number): Promise<{ lmp: unknown; fetches: number; verdict: unknown }> {
+    vi.spyOn(Date, "now").mockReturnValue(REQUEST_AT);
+    const ingested = new Date(close - ingestDeltaMs).toISOString();
+    saveGridPrice(NODE, HOUR, WRONG_LMP, "CAISO", ingested, "seed");
+    const restore = stubOasis(LIVE_LMP);
+    try {
+      const res = await handleGridPrice({ node_or_zone: NODE, interval_start: HOUR });
+      const fetches = restore();
+      return { lmp: res.lmp_usd_per_mwh, fetches, verdict: res.verdict };
+    } catch (err) {
+      restore();
+      throw err;
+    }
+  }
+
+  it("handler: TH_SP15_GEN-APND @ 2026-09-13T14:00Z ingested 99.99 at close−30min, request at 2026-09-17T07:00:00.001Z fetches and serves 36.74434 (J2 MAJOR)", async () => {
+    const out = await serveAfterClose(30 * 60_000);
+    expect(out.fetches).toBe(1);
+    expect(out.lmp).toBe(LIVE_LMP);
+    expect(out.verdict).toBe("verified");
+    expect(getGridPrice(NODE, HOUR)?.lmp_usd_per_mwh).toBe(LIVE_LMP);
+  }, 8000);
+
+  it("handler: the same official hour ingested at close−1ms is revalidated at close+1ms", async () => {
+    const out = await serveAfterClose(1);
+    expect(out.fetches).toBe(1);
+    expect(out.lmp).toBe(LIVE_LMP);
+    expect(out.verdict).toBe("verified");
+  }, 8000);
+
+  it("handler: the same official hour ingested at close−5h is revalidated at close+1ms", async () => {
+    const out = await serveAfterClose(5 * 3600_000);
+    expect(out.fetches).toBe(1);
+    expect(out.lmp).toBe(LIVE_LMP);
+    expect(out.verdict).toBe("verified");
+  }, 8000);
+});
+
+describe("A9 r3: Saturday New Year observance across the year boundary", () => {
+  it("1 Jan 2028 (Saturday) is observed on Friday 31 Dec 2027; Trading Day 2027-12-28 closes 2028-01-04T08:00Z", () => {
+    expect(isUsFederalOrDayAfterThanksgiving({ y: 2027, m: 12, d: 31 })).toBe(true);
+    expect(isCaisoBusinessDay({ y: 2027, m: 12, d: 31 })).toBe(false);
+    expect(isCaisoBusinessDay({ y: 2028, m: 1, d: 1 })).toBe(false); // Saturday
+    expect(isCaisoBusinessDay({ y: 2028, m: 1, d: 3 })).toBe(true); // Monday
+    // Trading Day Tuesday 28 Dec 2027 10:00 PST. Following BDs: Wed 29,
+    // Thu 30, skip Fri 31 (observed New Year's), skip weekend, Mon 3 Jan is 3rd BD.
+    // End of Mon 3 Jan 2028 PST (UTC-8) = 2028-01-04T08:00:00.000Z.
+    const close = provisionalCloseMs("CAISO", Date.parse("2027-12-28T18:00:00.000Z"));
+    expect(close).toBe(Date.parse("2028-01-04T08:00:00.000Z"));
+  });
+});
+
+describe("A9 r3: Easter Monday is not an Estonian public holiday", () => {
+  it("follows the Public Holidays Act §2 (Good Friday / Easter Sunday / Pentecost, not Easter Monday)", () => {
+    expect(ymdKey(easterSunday(2026))).toBe("2026-04-05");
+    expect(isEstonianPublicHoliday({ y: 2026, m: 4, d: 3 })).toBe(true); // Good Friday
+    expect(isEstonianPublicHoliday({ y: 2026, m: 4, d: 5 })).toBe(true); // Easter Sunday
+    expect(isEstonianPublicHoliday({ y: 2026, m: 4, d: 6 })).toBe(false); // Easter Monday — not in the Act
+    // Delivery Thursday 2026-04-02. Following BDs: Mon 6 (Easter Monday
+    // is a weekday), Tue 7, Wed 8. End of 8 Apr EEST (UTC+3) =
+    // 2026-04-08T21:00:00.000Z.
+    const close = provisionalCloseMs("ELERING", Date.parse("2026-04-02T10:00:00.000Z"));
+    expect(close).toBe(Date.parse("2026-04-08T21:00:00.000Z"));
+  });
+});
+
+describe("A9 r3: a zip containing a 0-byte file is retried once only", () => {
+  afterEach(() => {
+    resetCaisoLiveInflightForTests();
+  });
+
+  it("classifies a 0-byte file inside the zip like an empty archive", async () => {
+    const emptyFileZip = makeCaisoZip("empty.csv", "");
+    const realFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes("oasis.caiso.com")) throw new Error("stubbed upstream failure");
+      fetchCalls++;
+      return new Response(new Uint8Array(emptyFileZip), { status: 200 });
+    }) as typeof fetch;
+    try {
+      await expect(fetchCaisoDamLmp("TH_SP15_GEN-APND", "2026-09-13T20:00:00.000Z")).rejects.toBeInstanceOf(
+        CaisoEmptyArchiveError,
+      );
+      expect(fetchCalls).toBe(CAISO_EMPTY_ARCHIVE_ATTEMPTS);
+      expect(fetchCalls).toBeLessThan(CAISO_LIVE_ATTEMPTS);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }, 8000);
+});
+
+describe("A9 r3: saveGridPriceBatch records revalidation success", () => {
+  it("a post-close batch overwrite updates last_success_at so the new value is the recorded write", () => {
+    const hour = "2026-09-13T14:00:00.000Z";
+    const node = "TH_ZP26_GEN-APND";
+    const close = provisionalCloseMs("CAISO", Date.parse(hour))!;
+    saveGridPrice(node, hour, 36.79695, "CAISO", new Date(close).toISOString(), "first");
+    expect(getGridRevalidate(node, hour)?.last_success_at).toBe(new Date(close).toISOString());
+    const later = new Date(close + 60_000).toISOString();
+    saveGridPriceBatch([
+      { node, intervalStart: hour, lmp: 99.99, market: "CAISO", ingestedAt: later, upstreamUrl: "batch" },
+    ]);
+    expect(getGridPrice(node, hour)?.lmp_usd_per_mwh).toBe(99.99);
+    expect(getGridRevalidate(node, hour)?.last_success_at).toBe(later);
+    // The batch write itself is the post-close success, so a subsequent
+    // request does not owe another mandatory check.
+    expect(
+      needsGridRevalidation({
+        kind: "CAISO",
+        intervalStartMs: Date.parse(hour),
+        nowMs: close + 120_000,
+        ingestedAt: later,
+        lastSuccessAt: later,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("A9 r3: grid_cache cap binds and invalid keys are evictable", () => {
+  function withIsolatedCache(fn: (db: ReturnType<typeof getDb>) => void): void {
+    const db = getDb();
+    const snapshot = db
+      .prepare(
+        "SELECT node_or_zone, interval_start, lmp_usd_per_mwh, market, ingested_at, upstream_url FROM grid_cache",
+      )
+      .all();
+    try {
+      db.exec("DELETE FROM grid_cache");
+      db.exec("DELETE FROM grid_cache_revalidate");
+      fn(db);
+    } finally {
+      db.exec("DELETE FROM grid_cache");
+      db.exec("DELETE FROM grid_cache_revalidate");
+      const ins = db.prepare(
+        `INSERT OR REPLACE INTO grid_cache
+         (node_or_zone, interval_start, lmp_usd_per_mwh, market, ingested_at, upstream_url)
+         VALUES (@node_or_zone, @interval_start, @lmp_usd_per_mwh, @market, @ingested_at, @upstream_url)`,
+      );
+      for (const row of snapshot) ins.run(row);
+    }
+  }
+
+  it("saveGridPrice and saveGridPriceBatch refuse unparseable interval keys", () => {
+    expect(isStoreableGridIntervalKey("invalid_0")).toBe(false);
+    expect(Number.isNaN(Date.parse("invalid_0"))).toBe(true);
+    expect(isStoreableGridIntervalKey("foo-0")).toBe(false);
+    expect(isStoreableGridIntervalKey("2026-09-13T14:00:00.000Z")).toBe(true);
+    expect(() => saveGridPrice("ZONE_A", "invalid_0", 1, "NYISO", "2020-01-02T00:00:00.000Z")).toThrow(
+      /unparseable or non-canonical interval_start/,
+    );
+    expect(() =>
+      saveGridPriceBatch([
+        { node: "ZONE_A", intervalStart: "invalid_0", lmp: 1, market: "NYISO", ingestedAt: "2020-01-02T00:00:00.000Z", upstreamUrl: "" },
+      ]),
+    ).toThrow(/unparseable or non-canonical interval_start/);
+  });
+
+  it("legacy unparseable interval keys are always evictable and the cap binds", () => {
+    withIsolatedCache((db) => {
+      const nowMs = Date.parse("2026-11-21T10:00:00.000Z");
+      const ins = db.prepare(
+        `INSERT OR REPLACE INTO grid_cache
+         (node_or_zone, interval_start, lmp_usd_per_mwh, market, ingested_at, upstream_url)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      );
+      for (const node of GRID_REFERENCE_CAISO_NODES) {
+        saveGridPrice(node, GRID_REFERENCE_INTERVAL, 36.8, "CAISO", "2026-11-21T09:00:00.000Z");
+      }
+      for (let i = 0; i < 20; i++) {
+        ins.run("ZONE_A", "invalid_" + i, i, "NYISO", "2020-01-02T00:00:00.000Z", "");
+      }
+      expect(isEvictionProtectedRow("ZONE_A", "invalid_0", "NYISO", nowMs)).toBe(false);
+      const deleted = purgeGridCacheOverflow(10, nowMs);
+      expect(deleted).toBeGreaterThan(0);
+      const n = (db.prepare("SELECT COUNT(*) AS n FROM grid_cache").get() as { n: number }).n;
+      expect(n).toBeLessThanOrEqual(10);
+      const invalidLeft = (
+        db.prepare("SELECT COUNT(*) AS n FROM grid_cache WHERE interval_start LIKE 'invalid_%'").get() as { n: number }
+      ).n;
+      expect(invalidLeft).toBe(0);
+      for (const node of GRID_REFERENCE_CAISO_NODES) {
+        expect(getGridPrice(node, GRID_REFERENCE_INTERVAL)?.lmp_usd_per_mwh).toBe(36.8);
+      }
+    });
+  });
+
+  it("a protected-in-window set that exceeds the cap is evicted down to the cap; official references survive", () => {
+    withIsolatedCache((db) => {
+      // During the NYISO §20.3 window of the 13 Sep operating day.
+      const nowMs = Date.parse("2026-09-14T16:00:00.000Z");
+      for (const node of GRID_REFERENCE_CAISO_NODES) {
+        saveGridPrice(node, GRID_REFERENCE_INTERVAL, 36.8, "CAISO", "2026-09-14T12:00:00.000Z");
+      }
+      for (let i = 0; i < 30; i++) {
+        const interval = new Date(Date.parse("2026-09-13T14:00:00.000Z") + i * 5 * 60_000).toISOString();
+        saveGridPrice("ZONE_A", interval, i, "NYISO", "2026-09-13T18:00:00.000Z");
+      }
+      const deleted = purgeGridCacheOverflow(10, nowMs);
+      expect(deleted).toBeGreaterThan(0);
+      const n = (db.prepare("SELECT COUNT(*) AS n FROM grid_cache").get() as { n: number }).n;
+      expect(n).toBeLessThanOrEqual(10);
+      for (const node of GRID_REFERENCE_CAISO_NODES) {
+        expect(getGridPrice(node, GRID_REFERENCE_INTERVAL)?.lmp_usd_per_mwh).toBe(36.8);
+      }
+    });
+  });
+});
+
+describe("A9 r3: NYISO post-close revalidation from the dated MIS CSV", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetNyisoLiveInflightForTests();
+  });
+
+  it("revalidates a pre-close NYISO cache row after the 4-BD close and serves the official CSV price", async () => {
+    const hour = "2026-09-13T14:00:00.000Z";
+    const close = provisionalCloseMs("NYISO", Date.parse(hour))!;
+    expect(close).toBe(Date.parse("2026-09-18T04:00:00.000Z"));
+    vi.spyOn(Date, "now").mockReturnValue(close + 1);
+    saveGridPrice("ZONE_A", hour, 99.99, "NYISO", new Date(close - 30 * 60_000).toISOString(), "seed");
+    // 2026-09-13T14:00Z = 10:00 EDT. CSV Name for ZONE_A is WEST.
+    const csv =
+      '"Time Stamp","Name","PTID","LBMP ($/MWHr)","Marginal Cost Losses ($/MWHr)","Marginal Cost Congestion ($/MWHr)"\n' +
+      '"09/13/2026 10:00:00","WEST",61752,42.5,0.00,0.00\n';
+    const realFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes("realtime_zone.csv")) throw new Error("stubbed upstream failure");
+      fetchCalls++;
+      return new Response(csv, { status: 200 });
+    }) as typeof fetch;
+    try {
+      const res = await handleGridPrice({ node_or_zone: "ZONE_A", interval_start: hour });
+      expect(res.lmp_usd_per_mwh).toBe(42.5);
+      expect(res.verdict).toBe("verified");
+      expect(fetchCalls).toBe(1);
+      expect(getGridPrice("ZONE_A", hour)?.lmp_usd_per_mwh).toBe(42.5);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }, 8000);
 });

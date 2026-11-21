@@ -13,6 +13,13 @@ import { dirname, resolve, sep } from "path";
 import Database from "better-sqlite3";
 import { gunzipSync, gzipSync } from "zlib";
 import { sha256Hex, type Receipt } from "./receipt";
+import {
+  GRID_CACHE_MAX_ROWS,
+  GRID_EVICT_INVALID,
+  GRID_EVICT_REFERENCE,
+  gridCacheEvictionPriority,
+  isStoreableGridIntervalKey,
+} from "../jobs/gridFinality";
 
 let db: Database.Database | null = null;
 
@@ -781,6 +788,19 @@ export function getDb(): Database.Database {
     if (!gridColNames.has("upstream_url")) {
       instance.exec("ALTER TABLE grid_cache ADD COLUMN upstream_url TEXT NOT NULL DEFAULT ''");
     }
+    // A9 r2 (J2 m1 / m3): revalidation timestamps live in a side table so
+    // INSERT OR REPLACE on grid_cache (unchanged SQL) cannot wipe them,
+    // and so a failed OASIS re-check can be recorded without mutating
+    // the served ingested_at / receipt fetched_at.
+    instance.exec(`
+      CREATE TABLE IF NOT EXISTS grid_cache_revalidate (
+        node_or_zone TEXT NOT NULL,
+        interval_start TEXT NOT NULL,
+        last_success_at TEXT NOT NULL DEFAULT '',
+        last_attempt_at TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (node_or_zone, interval_start)
+      )
+    `);
     // Receipt-fix (2026-11-20): evidence columns for miner_receipts.
     // Migrate pre-existing tables (created before the columns existed):
     // ADD COLUMN is idempotent via the PRAGMA check. Legacy rows keep
@@ -1498,6 +1518,15 @@ export function saveGridPrice(
         ")",
     );
   }
+  if (!isStoreableGridIntervalKey(intervalStart)) {
+    throw new Error(
+      "saveGridPrice refuses unparseable or non-canonical interval_start (node=" +
+        JSON.stringify(nodeOrZone) +
+        ", interval=" +
+        JSON.stringify(intervalStart) +
+        ")",
+    );
+  }
   const database = getDb();
   database
     .prepare(
@@ -1513,4 +1542,103 @@ export function saveGridPrice(
       ingestedAt ?? new Date().toISOString(),
       upstreamUrl ?? "",
     );
+  // A successful write is itself a validation of this key. Bound the
+  // table after every write (no-op when under the cap).
+  markGridRevalidateSuccess(nodeOrZone, intervalStart, ingestedAt ?? new Date().toISOString());
+  purgeGridCacheOverflow();
+}
+
+export interface GridRevalidateState {
+  last_success_at: string;
+  last_attempt_at: string;
+}
+
+export function getGridRevalidate(nodeOrZone: string, intervalStart: string): GridRevalidateState | null {
+  const row = getDb()
+    .prepare(
+      `SELECT last_success_at, last_attempt_at FROM grid_cache_revalidate
+       WHERE node_or_zone = ? AND interval_start = ?`,
+    )
+    .get(nodeOrZone, intervalStart) as GridRevalidateState | undefined;
+  return row ?? null;
+}
+
+export function markGridRevalidateSuccess(nodeOrZone: string, intervalStart: string, atIso: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO grid_cache_revalidate (node_or_zone, interval_start, last_success_at, last_attempt_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(node_or_zone, interval_start) DO UPDATE SET
+         last_success_at = excluded.last_success_at,
+         last_attempt_at = excluded.last_attempt_at`,
+    )
+    .run(nodeOrZone, intervalStart, atIso, atIso);
+}
+
+export function markGridRevalidateAttempt(nodeOrZone: string, intervalStart: string, atIso: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO grid_cache_revalidate (node_or_zone, interval_start, last_success_at, last_attempt_at)
+       VALUES (?, ?, '', ?)
+       ON CONFLICT(node_or_zone, interval_start) DO UPDATE SET
+         last_attempt_at = excluded.last_attempt_at`,
+    )
+    .run(nodeOrZone, intervalStart, atIso);
+}
+
+/**
+ * Evict grid_cache rows until the table is at or under `maxRows`.
+ * Order (r3): unparseable interval keys first, then unprotected
+ * historical (final) rows, then oldest correction-window rows, then
+ * oldest provisional rows. Official GRID reference keys are never
+ * deleted. The cap therefore binds even when the protected set
+ * alone would exceed it (e.g. a Thanksgiving-week NYISO window).
+ * Returns the number of rows deleted.
+ */
+export function purgeGridCacheOverflow(
+  maxRows: number = GRID_CACHE_MAX_ROWS,
+  nowMs: number = Date.now(),
+): number {
+  if (!Number.isFinite(maxRows) || maxRows < 0) return 0;
+  const database = getDb();
+  const total = (database.prepare("SELECT COUNT(*) AS n FROM grid_cache").get() as { n: number }).n;
+  if (total <= maxRows) return 0;
+  const rows = database
+    .prepare(
+      `SELECT node_or_zone, interval_start, market FROM grid_cache`,
+    )
+    .all() as Array<{ node_or_zone: string; interval_start: string; market: string }>;
+  rows.sort((a, b) => {
+    const pa = gridCacheEvictionPriority(a.node_or_zone, a.interval_start, a.market, nowMs);
+    const pb = gridCacheEvictionPriority(b.node_or_zone, b.interval_start, b.market, nowMs);
+    if (pa !== pb) return pa - pb;
+    if (a.interval_start < b.interval_start) return -1;
+    if (a.interval_start > b.interval_start) return 1;
+    if (a.node_or_zone < b.node_or_zone) return -1;
+    if (a.node_or_zone > b.node_or_zone) return 1;
+    return 0;
+  });
+  const del = database.prepare(
+    "DELETE FROM grid_cache WHERE node_or_zone = ? AND interval_start = ?",
+  );
+  const delMeta = database.prepare(
+    "DELETE FROM grid_cache_revalidate WHERE node_or_zone = ? AND interval_start = ?",
+  );
+  let remaining = total;
+  let deleted = 0;
+  const run = database.transaction(() => {
+    for (const r of rows) {
+      const rank = gridCacheEvictionPriority(r.node_or_zone, r.interval_start, r.market, nowMs);
+      if (rank >= GRID_EVICT_REFERENCE) continue;
+      // Invalid interval keys are always evicted, even when the table
+      // is already at or under the cap — they are never legal rows.
+      if (remaining <= maxRows && rank > GRID_EVICT_INVALID) continue;
+      del.run(r.node_or_zone, r.interval_start);
+      delMeta.run(r.node_or_zone, r.interval_start);
+      remaining -= 1;
+      deleted += 1;
+    }
+  });
+  run();
+  return deleted;
 }

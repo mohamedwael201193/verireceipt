@@ -37,8 +37,13 @@
 // logged and the other sources still run. No mocks, no LLM.
 
 import { inflateRawSync } from "zlib";
-import { getDb } from "../core/db";
+import { getDb, markGridRevalidateSuccess, purgeGridCacheOverflow } from "../core/db";
 import { recordJobSkipped, startJob } from "../core/loopLag";
+import {
+  gridMarketKind,
+  isPastProvisionalWindow,
+  isStoreableGridIntervalKey,
+} from "./gridFinality";
 
 export interface GridZoneInfo {
   market: string;
@@ -259,6 +264,17 @@ export function saveGridPriceBatch(rows: GridPriceRow[]): void {
           ")",
       );
     }
+    if (!isStoreableGridIntervalKey(r.intervalStart)) {
+      throw new Error(
+        "saveGridPriceBatch refuses row " +
+          i +
+          " with unparseable or non-canonical interval_start (node=" +
+          JSON.stringify(r.node) +
+          ", interval=" +
+          JSON.stringify(r.intervalStart) +
+          ")",
+      );
+    }
   }
   const db = getDb();
   const stmt = db.prepare(
@@ -269,9 +285,15 @@ export function saveGridPriceBatch(rows: GridPriceRow[]): void {
   const runBatch = db.transaction((rs: GridPriceRow[]) => {
     for (const r of rs) {
       stmt.run(r.node, r.intervalStart, r.lmp, r.market, r.ingestedAt, r.upstreamUrl);
+      // A successful batch write is itself a post-write validation of
+      // this key (r3 / J2 minor 3). Without this, a post-close batch
+      // overwrite left last_success_at at an earlier write and the
+      // handler would treat the new value as already revalidated.
+      markGridRevalidateSuccess(r.node, r.intervalStart, r.ingestedAt);
     }
   });
   runBatch(rows);
+  purgeGridCacheOverflow();
 }
 
 function errMsg(err: unknown): string {
@@ -1125,6 +1147,83 @@ async function ingestNyiso(): Promise<number> {
 }
 
 /**
+ * OASIS SingleZip returned a zip whose central directory lists no
+ * files. The Interface Specification (§3, "Returned XML File") says
+ * every request returns a zip containing an XML/CSV payload; official
+ * "no data" is Error Code 1000 inside that payload, not an empty
+ * archive. CAISO's April 2020 OASIS CPG slides ("Lessons learned in
+ * 2019") recorded "Corrupted and Empty files created in high load
+ * conditions" — so an empty zip, or a zip that contains a 0-byte
+ * file, is treated as a *transient* high-load artefact, retried once
+ * only (not a 3-attempt storm, J2 m2 / r3).
+ */
+export class CaisoEmptyArchiveError extends Error {
+  constructor(message = "CAISO zip: empty archive") {
+    super(message);
+    this.name = "CaisoEmptyArchiveError";
+  }
+}
+
+/** Official OASIS §3.2 "No data returned for the specified selection." */
+export const OASIS_GENUINE_MISS_CODES: ReadonlySet<number> = new Set([
+  1000,
+  // Start date beyond the prescribed limit — the hour is not in the
+  // published set; retrying will not create it.
+  1014,
+]);
+
+export const OASIS_TRANSIENT_ERROR_CODES: ReadonlySet<number> = new Set([
+  1003, // timed out waiting for query response
+  1006, // validation exception during transformation
+  1008, // out of memory
+  1009, // exceptions reading/writing XML
+  1010, // system error
+  1012, // connection refused
+  1013, // required resources unavailable
+  1015, // GroupZip in processing; retry later
+]);
+
+/** Empty-zip retries: first try + one retry, never a 3-shot storm. */
+export const CAISO_EMPTY_ARCHIVE_ATTEMPTS = 2;
+
+/**
+ * Parse an OASIS error code from an unzipped payload. Official errors
+ * are XML with a code + description (Interface Specification §3.2).
+ * Returns null when the payload is not an error document (e.g. a CSV).
+ */
+export function oasisErrorCodeFromPayload(payload: string): number | null {
+  const trimmed = payload.trim();
+  if (!trimmed) return null;
+  const head = trimmed.slice(0, 256);
+  const looksXml =
+    head.startsWith("<") ||
+    head.charCodeAt(0) === 0xfeff && head.trimStart().startsWith("<") ||
+    /^<\?xml/i.test(head);
+  if (/no data returned for the specified selection/i.test(trimmed)) return 1000;
+  if (!looksXml) return null;
+  const tagged = trimmed.match(/<\s*(?:ERR_CODE|ERROR_CODE|errcode|errorcode)\s*>\s*(\d{4})\s*</i);
+  if (tagged) return Number(tagged[1]);
+  const loose = trimmed.match(/\b(?:ERR_CODE|ERROR_CODE)\b[^0-9]{0,24}(\d{4})/i);
+  if (loose) return Number(loose[1]);
+  if (/<\s*OASISERROR/i.test(trimmed)) {
+    const m = trimmed.match(/\b(10\d{2})\b/);
+    if (m) return Number(m[1]);
+  }
+  return null;
+}
+
+function headerHasPrcLmpColumns(headerLine: string): boolean {
+  const header = headerLine.split(",");
+  return (
+    header.indexOf("INTERVALSTARTTIME_GMT") >= 0 &&
+    header.indexOf("NODE") >= 0 &&
+    header.indexOf("XML_DATA_ITEM") >= 0 &&
+    header.indexOf("MW") >= 0 &&
+    header.indexOf("MARKET_RUN_ID") >= 0
+  );
+}
+
+/**
  * Extract the single file from a zip buffer (CAISO SingleZip always returns a
  * one-file deflate zip). No dependency: parse the central directory, then
  * inflate the raw deflate stream with zlib.
@@ -1140,10 +1239,11 @@ function unzipSingleFile(zip: Buffer): string {
   if (eocd < 0) throw new Error("CAISO zip: end-of-central-directory not found");
   const cdCount = zip.readUInt16LE(eocd + 10);
   const cdOffset = zip.readUInt32LE(eocd + 16);
-  if (cdCount < 1) throw new Error("CAISO zip: empty archive");
+  if (cdCount < 1) throw new CaisoEmptyArchiveError();
   if (zip.readUInt32LE(cdOffset) !== 0x02014b50) throw new Error("CAISO zip: bad central directory");
   const method = zip.readUInt16LE(cdOffset + 10);
   const compSize = zip.readUInt32LE(cdOffset + 20);
+  const uncompSize = zip.readUInt32LE(cdOffset + 24);
   const nameLen = zip.readUInt16LE(cdOffset + 28);
   const extraLen = zip.readUInt16LE(cdOffset + 30);
   const commentLen = zip.readUInt16LE(cdOffset + 32);
@@ -1160,6 +1260,13 @@ function unzipSingleFile(zip: Buffer): string {
   void extraLen;
   const comp = zip.subarray(dataStart, dataStart + compSize);
   const out = method === 8 ? inflateRawSync(comp) : comp;
+  // A zip that contains a 0-byte file is the same high-load class as
+  // an empty archive (CAISO April 2020 OASIS CPG: "Empty files
+  // created in high load conditions"). Classify as CaisoEmptyArchiveError
+  // so it is retried once only, not three times.
+  if (uncompSize === 0 || out.length === 0) {
+    throw new CaisoEmptyArchiveError("CAISO zip: empty file");
+  }
   return out.toString("utf8");
 }
 
@@ -1251,6 +1358,36 @@ export function parseCaisoIntervalStart(value: string): number | null {
     return null;
   }
   return ms;
+}
+
+/**
+ * True when the market's official *provisional* window has closed
+ * (CAISO Tariff §35.2: end of the 3rd Business Day after the Trading
+ * Day for DAM; NYISO MST Att. E §20.3: end of the 4th business day
+ * after the operating day for realtime; Elering: end of the 3rd
+ * Estonian business day after the delivery day). A valid cache row
+ * for such an interval is not evicted by the 1-hour TTL, but it is
+ * not "immutable": the handler still revalidates CAISO rows at least
+ * once after this instant and periodically inside the §35.3.2 window
+ * (see needsGridRevalidation). Unparseable intervals / bad windows
+ * fail closed (not settled). The instant uses the market's local
+ * business-day calendar and time zone, not a raw UTC + 2 h offset.
+ *
+ * `market` is optional for call-site compatibility; when omitted the
+ * kind is inferred from windowMin (60 CAISO, 15 Elering, 5 NYISO).
+ */
+export function isSettledGridInterval(
+  intervalStartIso: string,
+  windowMin: number,
+  nowMs: number = Date.now(),
+  market?: string,
+): boolean {
+  const startMs = parseCaisoIntervalStart(intervalStartIso);
+  if (startMs === null) return false;
+  if (!Number.isFinite(windowMin) || windowMin <= 0) return false;
+  const kind = gridMarketKind(market, windowMin);
+  if (!kind) return false;
+  return isPastProvisionalWindow(kind, startMs, nowMs);
 }
 
 const CAISO_NODES = ["TH_NP15_GEN-APND", "TH_SP15_GEN-APND", "TH_ZP26_GEN-APND"];
@@ -1374,26 +1511,60 @@ export interface CaisoDamLmp {
   upstreamUrl: string;
 }
 
-export async function fetchCaisoDamLmp(
+/** Default attempts for a live OASIS fetch (1 + 2 retries). */
+export const CAISO_LIVE_ATTEMPTS = 3;
+/** Backoff between retryable OASIS failures, inside the 120 s budget. */
+export const CAISO_RETRY_DELAY_MS = 500;
+
+const caisoLiveInflight = new Map<string, Promise<CaisoDamLmp | null>>();
+
+/** Test seam: drop in-flight live fetches between cases. */
+export function resetCaisoLiveInflightForTests(): void {
+  caisoLiveInflight.clear();
+}
+
+const nyisoLiveInflight = new Map<string, Promise<NyisoRtLbmp | null>>();
+
+/** Test seam: drop in-flight NYISO live fetches between cases. */
+export function resetNyisoLiveInflightForTests(): void {
+  nyisoLiveInflight.clear();
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * One OASIS SingleZip GET + parse (no retry, no single-flight).
+ * Throws on transport / zip / unexpected-header failure. Returns null
+ * only when the CSV is well-formed but has no LMP_PRC DAM row for this
+ * node + hour (a genuine "no price", not retried by the wrapper).
+ */
+async function fetchCaisoDamLmpOnce(
   node: string,
   intervalStartIso: string,
-  timeoutMs: number = 120_000,
+  startMs: number,
+  timeoutMs: number,
 ): Promise<CaisoDamLmp | null> {
-  // A4-FIX2 F-N2: strict-parse the interval with the rollover-hardened
-  // parser (same as the CAISO CSV rows and the handler) — Date.parse()
-  // rolls over ("2026-02-30T14:00:00Z" -> Mar 2) and would fetch and
-  // return the WRONG hour's price. Unreachable from the handler (it
-  // validates first), but this function must not roll over on its own.
-  const startMs = parseCaisoIntervalStart(intervalStartIso);
-  if (startMs === null) {
-    throw new Error("fetchCaisoDamLmp: unparseable interval " + intervalStartIso);
-  }
   const url = gridFallbackUrl(node, intervalStartIso);
   if (!url) {
     throw new Error("fetchCaisoDamLmp: no OASIS URL for node " + node);
   }
   const csv = unzipSingleFile(await fetchBuffer(url, timeoutMs));
+  const errCode = oasisErrorCodeFromPayload(csv);
+  if (errCode !== null) {
+    if (OASIS_GENUINE_MISS_CODES.has(errCode)) return null;
+    throw new Error("CAISO OASIS: error " + errCode + " from " + url);
+  }
   const lines = csv.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  // Header-only well-formed PRC_LMP CSV: official "no data" in CSV
+  // form — the report ran and produced the schema with zero price
+  // rows. Same class as a well-formed CSV with no LMP_PRC DAM match
+  // (genuine miss, not retried). An empty payload or a file that is
+  // not a PRC_LMP header is not that class (unexpected / transient).
+  if (lines.length === 1 && headerHasPrcLmpColumns(lines[0])) {
+    return null;
+  }
   if (lines.length < 2) {
     throw new Error("CAISO OASIS: empty CSV from " + url);
   }
@@ -1428,6 +1599,190 @@ export async function fetchCaisoDamLmp(
     return { lmp, upstreamUrl: url };
   }
   return null;
+}
+
+export async function fetchCaisoDamLmp(
+  node: string,
+  intervalStartIso: string,
+  timeoutMs: number = 120_000,
+): Promise<CaisoDamLmp | null> {
+  // A4-FIX2 F-N2: strict-parse the interval with the rollover-hardened
+  // parser (same as the CAISO CSV rows and the handler) — Date.parse()
+  // rolls over ("2026-02-30T14:00:00Z" -> Mar 2) and would fetch and
+  // return the WRONG hour's price. Unreachable from the handler (it
+  // validates first), but this function must not roll over on its own.
+  const startMs = parseCaisoIntervalStart(intervalStartIso);
+  if (startMs === null) {
+    throw new Error("fetchCaisoDamLmp: unparseable interval " + intervalStartIso);
+  }
+  // Canonical key so "…14:00:00Z" and "…14:00:00.000Z" share one flight.
+  const key = node + "|" + new Date(startMs).toISOString();
+  const existing = caisoLiveInflight.get(key);
+  if (existing) return existing;
+  const started = Date.now();
+  const work = (async (): Promise<CaisoDamLmp | null> => {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= CAISO_LIVE_ATTEMPTS; attempt++) {
+      const remaining = timeoutMs - (Date.now() - started);
+      if (remaining <= 0) {
+        throw lastErr instanceof Error
+          ? lastErr
+          : new Error("fetchCaisoDamLmp: budget exhausted for " + node);
+      }
+      try {
+        // A well-formed CSV with no LMP_PRC row, a header-only PRC_LMP
+        // CSV, or an official OASIS 1000/1014 error document is a
+        // genuine miss: do NOT retry it (that would only delay a 502).
+        return await fetchCaisoDamLmpOnce(node, intervalStartIso, startMs, remaining);
+      } catch (err) {
+        lastErr = err;
+        const emptyArchive = err instanceof CaisoEmptyArchiveError;
+        const maxAttempts = emptyArchive ? CAISO_EMPTY_ARCHIVE_ATTEMPTS : CAISO_LIVE_ATTEMPTS;
+        if (attempt >= maxAttempts) throw err;
+        const wait = Math.min(CAISO_RETRY_DELAY_MS, timeoutMs - (Date.now() - started) - 1);
+        if (wait <= 0) throw err;
+        await sleep(wait);
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error("fetchCaisoDamLmp: retries exhausted");
+  })().finally(() => {
+    if (caisoLiveInflight.get(key) === work) caisoLiveInflight.delete(key);
+  });
+  caisoLiveInflight.set(key, work);
+  return work;
+}
+
+
+export interface NyisoRtLbmp {
+  lmp: number;
+  upstreamUrl: string;
+}
+
+/** Default attempts for a live NYISO dated-CSV fetch (1 + 2 retries). */
+export const NYISO_LIVE_ATTEMPTS = 3;
+
+function nyisoRowMatchesNode(csvName: string, node: string): boolean {
+  const keys = NYISO_ZONE_NAMES[csvName];
+  if (!keys) return false;
+  if (keys.includes(node)) return true;
+  const alias = resolveGridAlias(node);
+  return alias !== undefined && keys.includes(alias);
+}
+
+/**
+ * Parse one dated NYISO realtime_zone CSV and return the LBMP for
+ * `node` at `startMs`. A well-formed file that has no matching row is
+ * a genuine miss (null, not retried). Transport / unexpected-header
+ * failures throw. Fall-back repeated hours: when the file carries
+ * exactly two valid rows for the same zone + wall string, the first
+ * in file order is the EDT occurrence (UTC = mapped instant − 1 h)
+ * and the second is EST — the same convention as ingestNyiso.
+ */
+function parseNyisoRtLbmpFromCsv(
+  text: string,
+  node: string,
+  startMs: number,
+  url: string,
+): NyisoRtLbmp | null {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) {
+    throw new Error("NYISO MIS: empty CSV from " + url);
+  }
+  const header = splitCsvLine(lines[0]);
+  const tsIdx = header.findIndex((h) => h.trim() === "Time Stamp");
+  const nameIdx = header.findIndex((h) => h.trim() === "Name");
+  const lbmpIdx = header.findIndex((h) => h.trim().startsWith("LBMP"));
+  if (tsIdx < 0 || nameIdx < 0 || lbmpIdx < 0) {
+    throw new Error("NYISO MIS: unexpected CSV header from " + url);
+  }
+  type Row = { wall: string; utcMs: number; lmp: number };
+  const collected: Row[] = [];
+  for (const line of lines.slice(1)) {
+    const cols = splitCsvLine(line);
+    const name = (cols[nameIdx] ?? "").trim();
+    if (!nyisoRowMatchesNode(name, node)) continue;
+    const utcMs = nyWallToUtcMs(cols[tsIdx] ?? "");
+    const lbmpRaw = (cols[lbmpIdx] ?? "").trim();
+    const lmp = lbmpRaw ? parseStrictDecimal(lbmpRaw) : null;
+    const wallNorm = normalizeNyWall(cols[tsIdx] ?? "");
+    if (utcMs === null || lmp === null || wallNorm === null) continue;
+    collected.push({ wall: wallNorm, utcMs, lmp });
+  }
+  const wallCount = new Map<string, number>();
+  for (const r of collected) wallCount.set(r.wall, (wallCount.get(r.wall) ?? 0) + 1);
+  const seenWall = new Map<string, number>();
+  for (const r of collected) {
+    const n = wallCount.get(r.wall) ?? 0;
+    const ord = (seenWall.get(r.wall) ?? 0) + 1;
+    seenWall.set(r.wall, ord);
+    let ms = r.utcMs;
+    // Two-row repeated hour: first in file = EDT (one hour earlier).
+    if (n === 2 && ord === 1) ms = r.utcMs - 3600_000;
+    if (ms === startMs) return { lmp: r.lmp, upstreamUrl: url };
+  }
+  return null;
+}
+
+async function fetchNyisoRtLbmpOnce(
+  node: string,
+  intervalStartIso: string,
+  startMs: number,
+  timeoutMs: number,
+): Promise<NyisoRtLbmp | null> {
+  const url = gridFallbackUrl(node, intervalStartIso);
+  if (!url) {
+    throw new Error("fetchNyisoRtLbmp: no MIS URL for node " + node);
+  }
+  const text = await fetchText(url, timeoutMs);
+  return parseNyisoRtLbmpFromCsv(text, node, startMs, url);
+}
+
+/**
+ * On-demand NYISO realtime LBMP for one zone + 5-minute interval,
+ * from the official dated MIS CSV (the same file the ingester uses).
+ * Historical hours are therefore revalidatable after the §20.3 close
+ * (J1 residual 2 / r3). A well-formed CSV with no matching row is a
+ * genuine miss (null, no retry). Transport failures retry up to
+ * NYISO_LIVE_ATTEMPTS. Single-flighted per node+interval.
+ */
+export async function fetchNyisoRtLbmp(
+  node: string,
+  intervalStartIso: string,
+  timeoutMs: number = 120_000,
+): Promise<NyisoRtLbmp | null> {
+  const startMs = Date.parse(intervalStartIso);
+  if (Number.isNaN(startMs) || !isStoreableGridIntervalKey(new Date(startMs).toISOString())) {
+    throw new Error("fetchNyisoRtLbmp: unparseable interval " + intervalStartIso);
+  }
+  const key = node + "|" + new Date(startMs).toISOString();
+  const existing = nyisoLiveInflight.get(key);
+  if (existing) return existing;
+  const started = Date.now();
+  const work = (async (): Promise<NyisoRtLbmp | null> => {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= NYISO_LIVE_ATTEMPTS; attempt++) {
+      const remaining = timeoutMs - (Date.now() - started);
+      if (remaining <= 0) {
+        throw lastErr instanceof Error
+          ? lastErr
+          : new Error("fetchNyisoRtLbmp: budget exhausted for " + node);
+      }
+      try {
+        return await fetchNyisoRtLbmpOnce(node, intervalStartIso, startMs, remaining);
+      } catch (err) {
+        lastErr = err;
+        if (attempt >= NYISO_LIVE_ATTEMPTS) throw err;
+        const wait = Math.min(CAISO_RETRY_DELAY_MS, timeoutMs - (Date.now() - started) - 1);
+        if (wait <= 0) throw err;
+        await sleep(wait);
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error("fetchNyisoRtLbmp: retries exhausted");
+  })().finally(() => {
+    if (nyisoLiveInflight.get(key) === work) nyisoLiveInflight.delete(key);
+  });
+  nyisoLiveInflight.set(key, work);
+  return work;
 }
 
 export async function runIngesterOnce(): Promise<{ fetched: number; failed: string[] }> {
