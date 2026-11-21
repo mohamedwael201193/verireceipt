@@ -42,6 +42,12 @@ import {
 import { getReceiptEvidence } from "../src/core/db";
 import { stopTvlListsRefreshTimer } from "../src/handlers/tvl";
 
+// PG-MIGRATE (2026-11-21): this file is SQLite white-box — it seeds and tampers the SQLite file directly (raw UPDATE of blobs, WAL/integrity guards).
+// Pinned to the SQLite backend even when the suite runs with DATABASE_URL;
+// the same semantics are asserted on Postgres in tests/pg-store.test.ts.
+import { __setStorageBackendForTests } from "../src/core/storage";
+__setStorageBackendForTests("sqlite");
+
 const sha = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 let app: FastifyInstance;
 

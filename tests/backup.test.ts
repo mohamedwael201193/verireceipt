@@ -55,6 +55,12 @@ import {
 } from "../src/jobs/backup";
 import type { Receipt } from "../src/core/receipt";
 
+// PG-MIGRATE (2026-11-21): this file is SQLite white-box — it the GitHub backup job is SQLite-file-only (VACUUM INTO).
+// Pinned to the SQLite backend even when the suite runs with DATABASE_URL;
+// the same semantics are asserted on Postgres in tests/pg-store.test.ts.
+import { __setStorageBackendForTests } from "../src/core/storage";
+__setStorageBackendForTests("sqlite");
+
 const STUB_TOKEN = "stub-token-for-tests-only";
 
 function utcDayIso(daysAgo: number, hourUtc: number): string {

@@ -46,7 +46,8 @@
 import { createHash } from "crypto";
 import { gunzip } from "zlib";
 import { promisify } from "util";
-import { getEvidenceBlob, getReceiptMeta, getReceiptPages, type StoredEvidenceBlob } from "./db";
+import type { StoredEvidenceBlob } from "./db";
+import { getEvidenceBlob, getReceiptMeta, getReceiptPages } from "./storage";
 
 const gunzipAsync = promisify(gunzip);
 
@@ -150,7 +151,7 @@ export async function checkEvidence(
     // (synchronous) blob read, so the two never form one long block.
     await yieldToLoop();
     evidenceVerifyStats.blobReads += 1;
-    const blob = getEvidenceBlob(id, part);
+    const blob = await getEvidenceBlob(id, part);
     if (!blob || blob.gzip === null) return { status: "missing", bytes: 0 }; // pruned meanwhile: not cached
     if (pauseAfterBlobRead) await pauseAfterBlobRead();
     await yieldToLoop();
@@ -183,21 +184,29 @@ export function recordVerified(
   status: "ok" | "corrupt",
   bytes: number,
   stored?: { sha256: string; evidenceBytes: number },
-): void {
-  let row = stored;
-  if (!row) {
+): Promise<void> {
+  const apply = (row: { sha256: string; evidenceBytes: number }) => {
+    const key = cacheKey(id, part, row.sha256, row.evidenceBytes);
+    keyGen.set(key, currentGen(key) + 1);
+    remember(key, { status, bytes: status === "ok" ? bytes : 0 });
+  };
+  // PG-MIGRATE: with `stored` given the bump is still synchronous (no
+  // await before it); only the metadata lookup path is async now.
+  if (stored) {
+    apply(stored);
+    return Promise.resolve();
+  }
+  return (async () => {
+    let row: { sha256: string; evidenceBytes: number } | undefined;
     if (part === null) {
-      const m = getReceiptMeta(id);
+      const m = await getReceiptMeta(id);
       if (m) row = { sha256: m.raw_response_sha256, evidenceBytes: m.evidence_bytes };
     } else {
-      const pg = getReceiptPages(id).find((x) => x.page_index === part);
+      const pg = (await getReceiptPages(id)).find((x) => x.page_index === part);
       if (pg) row = { sha256: pg.raw_response_sha256, evidenceBytes: pg.evidence_bytes };
     }
-  }
-  if (!row) return;
-  const key = cacheKey(id, part, row.sha256, row.evidenceBytes);
-  keyGen.set(key, currentGen(key) + 1);
-  remember(key, { status, bytes: status === "ok" ? bytes : 0 });
+    if (row) apply(row);
+  })();
 }
 
 /** Test hook: forget every cached verdict. */

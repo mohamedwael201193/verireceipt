@@ -1239,6 +1239,12 @@ describe("GRID round-2 J2: refusal-matrix gaps (M6)", () => {
 
 import { deflateRawSync } from "zlib";
 
+// PG-MIGRATE (2026-11-21): this file is SQLite white-box — it seeds grid_cache through raw SQLite SQL and the sync SQLite writers.
+// Pinned to the SQLite backend even when the suite runs with DATABASE_URL;
+// the same semantics are asserted on Postgres in tests/pg-store.test.ts.
+import { __setStorageBackendForTests } from "../src/core/storage";
+__setStorageBackendForTests("sqlite");
+
 /** Minimal one-file deflate zip (local header + central dir + EOCD), matching unzipSingleFile's parser. Copied from J2 probe D. */
 function makeCaisoZip(name: string, content: string): Buffer {
   const data = Buffer.from(content, "utf8");

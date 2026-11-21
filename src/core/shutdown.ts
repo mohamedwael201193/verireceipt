@@ -15,7 +15,7 @@ import type { FastifyInstance } from "fastify";
 export interface ShutdownDeps {
   /** Stop background timers (ingester, refresh). Must not throw. */
   stopTimers?: () => void;
-  /** Close storage after the HTTP server drained. */
+  /** Close storage after the HTTP server drained (sync or async). */
   closeDb?: () => unknown;
   /** Exit hook (tests inject a spy). Default: process.exit. */
   exit?: (code: number) => void;
@@ -85,12 +85,18 @@ export function installGracefulShutdown(
       reap();
       await Promise.race([closing, deadline]);
       clearInterval(reaper);
-      if (timer) clearTimeout(timer);
       try {
-        deps.closeDb?.();
+        // PG-MIGRATE r2 (J2 M1): closeDb may be async (Postgres
+        // pool.end()). The ONE deadline stays armed across the drain AND
+        // the close — it is cleared only after this race — so a hung
+        // close can never block exit(): exit(1) fires at timeoutMs
+        // (20 s total, under Render's 30 s SIGKILL window). A closeDb
+        // that throws synchronously is caught here too.
+        await Promise.race([Promise.resolve().then(() => deps.closeDb?.()), deadline]);
       } catch {
         // closeDb never throws in production; belt-and-braces
       }
+      if (timer) clearTimeout(timer);
       const ms = Date.now() - started;
       log(
         timedOut

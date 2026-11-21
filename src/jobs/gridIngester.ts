@@ -38,6 +38,8 @@
 
 import { inflateRawSync } from "zlib";
 import { getDb, markGridRevalidateSuccess, purgeGridCacheOverflow } from "../core/db";
+import { storageBackend } from "../core/storage";
+import { saveGridPriceRowsPg } from "../core/pgStore";
 import { recordJobSkipped, startJob } from "../core/loopLag";
 import {
   gridMarketKind,
@@ -227,8 +229,20 @@ export interface GridPriceRow {
  * per-batch preserves the existing failure isolation (a later
  * file/node failing does not lose an earlier batch).
  */
-export function saveGridPriceBatch(rows: GridPriceRow[]): void {
-  if (rows.length === 0) return;
+/**
+ * PG-MIGRATE (2026-11-21): the batch guards of saveGridPriceBatch, shared
+ * verbatim by the SQLite writer below and the Postgres writer
+ * (writeGridPriceBatch -> pgStore.saveGridPriceRowsPg): a batch with one
+ * bad row stores NOTHING on either backend.
+ */
+export function validateGridPriceRows(rows: GridPriceRow[]): void {
+  // PG-MIGRATE r2 (J2 m3): NUL refused on both stores.
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if ([r.node, r.intervalStart, r.market, r.ingestedAt, r.upstreamUrl].some((v) => typeof v === "string" && v.includes("\u0000"))) {
+      throw new Error("saveGridPriceBatch refuses row " + i + " with a NUL character in a text field");
+    }
+  }
   // Round-7 guard-criterion fix (F1, defense-in-depth): validate EVERY
   // row BEFORE opening the transaction — a batch carrying an empty node
   // or market throws and stores NOTHING (not even its clean rows), so a
@@ -276,6 +290,11 @@ export function saveGridPriceBatch(rows: GridPriceRow[]): void {
       );
     }
   }
+}
+
+export function saveGridPriceBatch(rows: GridPriceRow[]): void {
+  if (rows.length === 0) return;
+  validateGridPriceRows(rows);
   const db = getDb();
   const stmt = db.prepare(
     `INSERT OR REPLACE INTO grid_cache
@@ -294,6 +313,22 @@ export function saveGridPriceBatch(rows: GridPriceRow[]): void {
   });
   runBatch(rows);
   purgeGridCacheOverflow();
+}
+
+/**
+ * PG-MIGRATE (2026-11-21): the ingester's write path. Postgres backend:
+ * validate (same guards), then ONE transaction of chunked upserts +
+ * revalidation marks, then the same purge (pgStore.saveGridPriceRowsPg).
+ * SQLite backend: exactly the old synchronous saveGridPriceBatch.
+ */
+export async function writeGridPriceBatch(rows: GridPriceRow[]): Promise<void> {
+  if (rows.length === 0) return;
+  if (storageBackend() === "postgres") {
+    validateGridPriceRows(rows);
+    await saveGridPriceRowsPg(rows);
+    return;
+  }
+  saveGridPriceBatch(rows);
 }
 
 function errMsg(err: unknown): string {
@@ -609,7 +644,7 @@ async function ingestElering(eurUsd: number): Promise<{ count: number; failed: s
     }
   }
   // One transaction for the whole source batch (see saveGridPriceBatch).
-  saveGridPriceBatch(rows);
+  await writeGridPriceBatch(rows);
   const count = rows.length;
   const failed = eleringMissingZones(perZoneCounts);
   for (const msg of failed) console.error("[grid-ingester] " + msg);
@@ -1137,7 +1172,7 @@ async function ingestNyiso(): Promise<number> {
     // One transaction for this file's batch (see saveGridPriceBatch):
     // a failing row rolls the file's batch back and throws to
     // runIngesterOnce(), which logs it and continues to the next source.
-    saveGridPriceBatch(pending);
+    await writeGridPriceBatch(pending);
     count += pending.length;
   }
   // No "NYISO: " prefix here: runIngesterOnce() adds it (a prefix in both
@@ -1465,7 +1500,7 @@ async function ingestCaiso(): Promise<number> {
       pending.push({ node, intervalStart, lmp, market: "CAISO", ingestedAt, upstreamUrl: url });
     }
     // One transaction for this node's batch (see saveGridPriceBatch).
-    saveGridPriceBatch(pending);
+    await writeGridPriceBatch(pending);
     count += pending.length;
   }
   // No "CAISO: " prefix here: runIngesterOnce() adds it (a prefix in both

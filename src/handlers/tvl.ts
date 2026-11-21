@@ -41,11 +41,12 @@
 //     the history point carries its own timestamp for `as_of` while the
 //     /v2/chains field does not.
 
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, unlink, writeFile } from 'fs/promises';
 import { dirname, join, resolve } from 'path';
 import { ApiError, badRequest, unprocessable, upstreamUnavailable } from '../core/errors';
 import { envelope, makeReceipt, stableStringify } from '../core/receipt';
-import { saveReceipt } from '../core/db';
+import { saveReceipt } from '../core/storage';
 
 export const INTENT = 'TVL_LOOKUP_GENERAL';
 
@@ -1171,6 +1172,17 @@ function diskListsPaths(): { protocolsPath: string; chainsPath: string } {
   };
 }
 
+/**
+ * PG-MIGRATE r2 (J1 m5): true when BOTH lists cache files exist (e.g. the
+ * Render disk is still attached). server.ts then skips the pre-listen
+ * warm wait: warmLists() serves the disk copy, so waiting would only
+ * lengthen the disk-attached deploy gap (up to ~70 s) for no gain.
+ */
+export function tvlDiskListsPresent(): boolean {
+  const { protocolsPath, chainsPath } = diskListsPaths();
+  return existsSync(protocolsPath) && existsSync(chainsPath);
+}
+
 async function readDiskLists(): Promise<{
   protocols?: DiskListsEntry<ProtocolEntry>;
   chains?: DiskListsEntry<ChainEntry>;
@@ -2133,7 +2145,7 @@ export async function handleTvl(
       });
       const receipt = makeReceipt(INTENT, tvlUrl, evidence, '1/1 primary source');
       try {
-        saveReceipt(receipt, evidence);
+        await saveReceipt(receipt, evidence);
       } catch {
         // Persistence must never fail the answer.
       }
@@ -2213,7 +2225,7 @@ export async function handleTvl(
     });
     const receipt = makeReceipt(INTENT, upstreamUrl, evidence, '1/1 primary source');
     try {
-      saveReceipt(receipt, evidence);
+      await saveReceipt(receipt, evidence);
     } catch {
       // Persistence must never fail the answer.
     }
@@ -2268,7 +2280,7 @@ export async function handleTvl(
   });
   const receipt = makeReceipt(INTENT, upstreamUrl, evidence, '1/1 primary source');
   try {
-    saveReceipt(receipt, evidence);
+    await saveReceipt(receipt, evidence);
   } catch {
     // Persistence must never fail the answer.
   }

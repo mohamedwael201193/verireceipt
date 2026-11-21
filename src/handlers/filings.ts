@@ -23,7 +23,7 @@
 
 import { ApiError, badRequest, unprocessable, upstreamUnavailable } from '../core/errors';
 import { envelope, makeReceipt, sha256Hex } from '../core/receipt';
-import { saveReceipt } from '../core/db';
+import { saveReceipt } from '../core/storage';
 import { resolveEntitySpans } from './filingsEntity';
 import {
   assertNoUnconsumedFormTokens,
@@ -95,8 +95,8 @@ export interface FilingsDeps {
   timeoutMs?: number;
   /** Whole-answer SEC budget (ms); default SEC_DEADLINE_MS. */
   deadlineMs?: number;
-  /** Receipt persistence (tests inject a failing store); default core/db saveReceipt. */
-  saveReceiptImpl?: typeof saveReceipt;
+  /** Receipt persistence (tests inject a failing store); default core/storage saveReceipt (sync or async). */
+  saveReceiptImpl?: (...args: Parameters<typeof saveReceipt>) => void | Promise<void>;
 }
 
 /** Per-request timeout for every SEC fetch (tickers, submissions, history pages). */
@@ -2265,7 +2265,7 @@ export async function handleFilings(
   // carry an audit_url whose /raw would 404, so a failed save FAILS
   // CLOSED (500 RECEIPT_STORE_FAILED, no answer).
   try {
-    (deps.saveReceiptImpl ?? saveReceipt)(
+    await (deps.saveReceiptImpl ?? saveReceipt)(
       receipt,
       rawBody,
       older.pages.map((p, i) => ({ url: p.url, raw_response_sha256: p.raw_response_sha256, body: older.bodies[i] })),

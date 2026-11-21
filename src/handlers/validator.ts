@@ -106,7 +106,7 @@
 
 import { ApiError, badRequest, unprocessable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
-import { saveReceipt } from "../core/db";
+import { saveReceipt } from "../core/storage";
 import { TIMEOUT_MS } from "../config/limits";
 
 export const INTENT = "VALIDATOR_PERFORMANCE_VERIFY_GENERAL";
@@ -1201,7 +1201,7 @@ export async function handleValidator(
   const agreeingSources = BEACON_SOURCES.filter((_, i) => group.includes(i));
   const receipt = makeReceipt(INTENT, leg.sourceUrl, leg.rawBody, votes);
   try {
-    saveReceipt(receipt, leg.rawBody);
+    await saveReceipt(receipt, leg.rawBody);
   } catch (err) {
     // F5: a failed persist is logged, never silent (txLookup.ts precedent)
     // — the answer still ships, but a receipt_id whose audit URL 404s

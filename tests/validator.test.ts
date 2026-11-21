@@ -32,7 +32,8 @@ afterAll(() => {
 
 import { ApiError } from "../src/core/errors";
 import { sha256Hex, type Receipt } from "../src/core/receipt";
-import { getDb, getReceiptEvidence } from "../src/core/db";
+import { getReceiptEvidence } from "../src/core/storage";
+import { countReceipts } from "./helpers/storeView";
 import {
   BEACON_SOURCES,
   INTENT,
@@ -89,10 +90,8 @@ async function expectApiError(
   throw new Error("expected ApiError " + status + " " + code + " but call succeeded");
 }
 
-function receiptCount(): number {
-  const row = getDb().prepare("SELECT COUNT(*) AS n FROM miner_receipts").get() as { n: number };
-  return row.n;
-}
+// PG-MIGRATE: backend-agnostic (tests/helpers/storeView.ts).
+const receiptCount = (): Promise<number> => countReceipts();
 
 /** Minimal beacon API validator body (standard path shape). */
 function beaconBody(
@@ -253,7 +252,7 @@ describe("handleValidator agreement (stub fetch)", () => {
     expect(res.source).toBe(BEACON_SOURCES[0] + " + " + BEACON_SOURCES[1]);
     expect(receipt.raw_response_sha256).toBe(sha256Hex(body));
     expect(receipt.receipt_id).toMatch(/^rcpt_[A-Z0-9]{26}$/);
-    const ev = getReceiptEvidence(receipt.receipt_id);
+    const ev = await getReceiptEvidence(receipt.receipt_id);
     expect(ev.found).toBe(true);
     expect(ev.evidence?.toString("utf8")).toBe(body);
   });
@@ -284,7 +283,7 @@ describe("handleValidator agreement (stub fetch)", () => {
 
 describe("handleValidator fail-closed (stub fetch)", () => {
   it("2-of-2 disagreement -> 502 QUORUM_UNREACHABLE, no receipt minted", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     await expectApiError(
       handleValidator(
         { validator_index: "1" },
@@ -298,7 +297,7 @@ describe("handleValidator fail-closed (stub fetch)", () => {
       502,
       "QUORUM_UNREACHABLE",
     );
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("status disagreement -> 502 QUORUM_UNREACHABLE", async () => {
@@ -318,7 +317,7 @@ describe("handleValidator fail-closed (stub fetch)", () => {
   });
 
   it("one source down -> 502 QUORUM_UNREACHABLE, never a single-source answer", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     await expectApiError(
       handleValidator(
         { validator_index: "1" },
@@ -332,7 +331,7 @@ describe("handleValidator fail-closed (stub fetch)", () => {
       502,
       "QUORUM_UNREACHABLE",
     );
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("one source 404 -> 502 QUORUM_UNREACHABLE", async () => {
@@ -378,7 +377,7 @@ describe("handleValidator fail-closed (stub fetch)", () => {
 
   // J2 fix round (F1–F4): each new fail-closed check gets a stub test.
   it("F1: both legs return a DIFFERENT index (ask 1, body 999) -> 502, no receipt", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     await expectApiError(
       handleValidator(
         { validator_index: "1" },
@@ -387,11 +386,11 @@ describe("handleValidator fail-closed (stub fetch)", () => {
       502,
       "QUORUM_UNREACHABLE",
     );
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("F1: one leg returns a different index -> 502, no receipt", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     await expectApiError(
       handleValidator(
         { validator_index: "1" },
@@ -405,11 +404,11 @@ describe("handleValidator fail-closed (stub fetch)", () => {
       502,
       "QUORUM_UNREACHABLE",
     );
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("F2: both legs execution_optimistic=true -> 502, no receipt", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     await expectApiError(
       handleValidator(
         { validator_index: "1" },
@@ -423,11 +422,11 @@ describe("handleValidator fail-closed (stub fetch)", () => {
       502,
       "QUORUM_UNREACHABLE",
     );
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("F3: both legs agree on an unknown status -> 502, no receipt", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     await expectApiError(
       handleValidator(
         { validator_index: "1" },
@@ -436,11 +435,11 @@ describe("handleValidator fail-closed (stub fetch)", () => {
       502,
       "QUORUM_UNREACHABLE",
     );
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("F4: both legs 404 (nonexistent validator) -> 422 VALIDATOR_NOT_FOUND, no receipt", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     await expectApiError(
       handleValidator(
         { validator_index: "99999999" },
@@ -454,7 +453,7 @@ describe("handleValidator fail-closed (stub fetch)", () => {
       422,
       "VALIDATOR_NOT_FOUND",
     );
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   // J2 fix round 2 (F6): the F4 settlement wait must be bounded by
@@ -464,7 +463,7 @@ describe("handleValidator fail-closed (stub fetch)", () => {
   // Each test carries a 5 s vitest timeout as its own watchdog, so a
   // regression hangs the test, not the suite.
   it("F6: 404 + never-settling leg -> 502 within timeoutMs (no hang)", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     const hanging = (_url: unknown) => new Promise<Response>(() => {});
     const fast404 = makeStubFetch([
       { status: 404, body: "nf" },
@@ -485,11 +484,11 @@ describe("handleValidator fail-closed (stub fetch)", () => {
     // wait adds at most timeoutMs. Generous ceiling for a loaded VM,
     // still far below the 4000 ms probe watchdog.
     expect(Date.now() - t0).toBeLessThan(2000);
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   }, 5000);
 
   it("F6: 404 + slow-but-finite leg (1200ms) -> 502 within timeoutMs", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     const slow = async (_url: unknown): Promise<Response> => {
       await new Promise<void>((r) => setTimeout(r, 1200));
       return {
@@ -516,11 +515,11 @@ describe("handleValidator fail-closed (stub fetch)", () => {
     // Must return before the 1200 ms leg settles: proves the wait is
     // bounded by timeoutMs, not by the slowest leg.
     expect(Date.now() - t0).toBeLessThan(1100);
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   }, 5000);
 
   it("F6: both 404 with 2nd leg delayed 300ms -> still 422 VALIDATOR_NOT_FOUND", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     const delayed404 = async (_url: unknown): Promise<Response> => {
       await new Promise<void>((r) => setTimeout(r, 300));
       return { ok: false, status: 404, text: async () => "nf" } as unknown as Response;
@@ -539,13 +538,13 @@ describe("handleValidator fail-closed (stub fetch)", () => {
       422,
       "VALIDATOR_NOT_FOUND",
     );
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   }, 5000);
 
   // J2 fix round 2 (F7): execution_optimistic must be an explicit
   // boolean. Missing / "true" / 1 / null are malformed and fail closed.
   it("F7: execution_optimistic missing / non-boolean -> 502, no receipt (each variant)", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     const variants: Array<{ label: string; body: string }> = [
       {
         label: "missing",
@@ -574,11 +573,11 @@ describe("handleValidator fail-closed (stub fetch)", () => {
         "QUORUM_UNREACHABLE",
       );
     }
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("F7: one leg with non-boolean execution_optimistic -> 502, no receipt", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     await expectApiError(
       handleValidator(
         { validator_index: "1" },
@@ -595,7 +594,7 @@ describe("handleValidator fail-closed (stub fetch)", () => {
       502,
       "QUORUM_UNREACHABLE",
     );
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 });
 

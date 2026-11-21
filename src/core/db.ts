@@ -1129,11 +1129,45 @@ export interface ReceiptPageInput {
   raw_response_sha256?: string;
 }
 
-export function saveReceipt(
+/**
+ * PG-MIGRATE (2026-11-21): the backend-independent half of saveReceipt —
+ * fetched_at check, evidence/page hash checks, gzip, and the
+ * whole-budget rule — shared VERBATIM by the SQLite writer below and the
+ * Postgres writer (src/core/pgStore.ts), so both refuse exactly the same
+ * inputs and store exactly the same gzipped bytes.
+ */
+export interface PreparedReceiptWrite {
+  evidenceGzip: Buffer | null;
+  evidenceBytes: number;
+  pageRows: Array<{ index: number; url: string; digest: string; gzip: Buffer | null; bytes: number }>;
+}
+
+export function prepareReceiptWrite(
   r: Receipt,
   evidence?: string | Buffer,
   pages: ReceiptPageInput[] = [],
-): void {
+): PreparedReceiptWrite {
+  // PG-MIGRATE r2 (J2 m3): NUL (U+0000) can never be stored in a Postgres
+  // TEXT column, and SQLite would silently accept it — refuse it here, in
+  // the shared write path, so both stores reject the same inputs. No
+  // legitimate receipt field or page URL contains NUL.
+  const nulField = (
+    [
+      ["receipt_id", r.receipt_id],
+      ["intent", r.intent],
+      ["upstream_url", r.upstream_url],
+      ["raw_response_sha256", r.raw_response_sha256],
+      ["fetched_at", r.fetched_at],
+      ["quorum_votes", r.quorum_votes],
+      ...pages.map((p, i) => [`upstream page ${i} url`, p.url] as [string, unknown]),
+    ] as Array<[string, unknown]>
+  ).find(([, v]) => typeof v === "string" && v.includes("\u0000"));
+  if (nulField) {
+    throw new Error(
+      `verireceipt: refusing to save receipt ${String(r.receipt_id).replace(/\u0000/g, "\\0")}: ` +
+        `${nulField[0]} contains a NUL character`,
+    );
+  }
   // F4(b): defense in depth at write time — a malformed fetched_at can
   // never reach the table through this path, so it can never be silently
   // dropped from every daily export later. The only production caller
@@ -1202,6 +1236,15 @@ export function saveReceipt(
       p.bytes = 0;
     }
   }
+  return { evidenceGzip, evidenceBytes, pageRows };
+}
+
+export function saveReceipt(
+  r: Receipt,
+  evidence?: string | Buffer,
+  pages: ReceiptPageInput[] = [],
+): void {
+  const { evidenceGzip, evidenceBytes, pageRows } = prepareReceiptWrite(r, evidence, pages);
   const database = getDb();
   // INSERT OR IGNORE: receipts are immutable audit records — a colliding
   // receipt_id must never silently rewrite an existing row. (OR REPLACE
@@ -1266,6 +1309,50 @@ export interface ReceiptEvidence {
 }
 
 /**
+ * PG-MIGRATE r2: the ONLY error a stored-evidence getter throws for bad
+ * bytes. Routes map exactly this class to 500 EVIDENCE_CORRUPT (and cache
+ * "corrupt"); anything else — on Postgres, a dropped/reset/timed-out
+ * connection — is a storage failure and must surface as a 502, never as
+ * corruption (found re-running J2's RST fault injection on r2).
+ */
+export class EvidenceCorruptError extends Error {
+  readonly code = "EVIDENCE_CORRUPT";
+}
+
+/**
+ * PG-MIGRATE (2026-11-21): decode one stored evidence row, shared by the
+ * SQLite and Postgres readers. Fails closed exactly as before: a gunzip
+ * failure, output past evidence_bytes + 1 (G10 r4, J2 m2), or bytes that
+ * no longer hash to the stored digest / length throw — wrong bytes are
+ * never returned. `what` is the error-message subject
+ * ("stored evidence for receipt X" / "stored page N for receipt X").
+ */
+export function decodeEvidenceRow(
+  row: { raw_response_sha256: string; evidence_gzip: Buffer | null; evidence_bytes: number } | undefined | null,
+  what: string,
+): ReceiptEvidence {
+  if (!row) return { found: false, evidence: null, sha256: null, evidenceBytes: 0 };
+  if (row.evidence_gzip === null || row.evidence_gzip === undefined) {
+    return { found: true, evidence: null, sha256: row.raw_response_sha256, evidenceBytes: 0 };
+  }
+  const corrupt = () =>
+    new EvidenceCorruptError(
+      `verireceipt: ${what} does not match ` +
+        `raw_response_sha256 ${row.raw_response_sha256} (corrupt evidence blob)`,
+    );
+  let evidence: Buffer;
+  try {
+    evidence = gunzipSync(row.evidence_gzip, { maxOutputLength: row.evidence_bytes + 1 });
+  } catch {
+    throw corrupt();
+  }
+  if (evidence.length !== row.evidence_bytes || sha256Hex(evidence) !== row.raw_response_sha256) {
+    throw corrupt();
+  }
+  return { found: true, evidence, sha256: row.raw_response_sha256, evidenceBytes: row.evidence_bytes };
+}
+
+/**
  * Fetch a receipt's stored evidence (receipt-fix, 2026-11-20). Throws
  * when the stored blob is corrupt (gunzip failure, output past
  * evidence_bytes + 1, or the decompressed bytes no longer hash to the
@@ -1283,37 +1370,7 @@ export function getReceiptEvidence(receiptId: string): ReceiptEvidence {
     .get(receiptId) as
     | { raw_response_sha256: string; evidence_gzip: Buffer | null; evidence_bytes: number }
     | undefined;
-  if (!row) {
-    return { found: false, evidence: null, sha256: null, evidenceBytes: 0 };
-  }
-  if (row.evidence_gzip === null || row.evidence_gzip === undefined) {
-    return { found: true, evidence: null, sha256: row.raw_response_sha256, evidenceBytes: 0 };
-  }
-  let evidence: Buffer;
-  try {
-    // Fail closed if a tampered gzip expands past the recorded length (G10 r4, J2 m2).
-    evidence = gunzipSync(row.evidence_gzip, { maxOutputLength: row.evidence_bytes + 1 });
-  } catch {
-    throw new Error(
-      `verireceipt: stored evidence for receipt ${receiptId} does not match ` +
-        `raw_response_sha256 ${row.raw_response_sha256} (corrupt evidence blob)`,
-    );
-  }
-  if (
-    evidence.length !== row.evidence_bytes ||
-    sha256Hex(evidence) !== row.raw_response_sha256
-  ) {
-    throw new Error(
-      `verireceipt: stored evidence for receipt ${receiptId} does not match ` +
-        `raw_response_sha256 ${row.raw_response_sha256} (corrupt evidence blob)`,
-    );
-  }
-  return {
-    found: true,
-    evidence,
-    sha256: row.raw_response_sha256,
-    evidenceBytes: row.evidence_bytes,
-  };
+  return decodeEvidenceRow(row, `stored evidence for receipt ${receiptId}`);
 }
 
 /** Stored receipt metadata (G10): everything GET /receipts/:id serves. */
@@ -1383,27 +1440,7 @@ export function getReceiptPageEvidence(receiptId: string, pageIndex: number): Re
     .get(receiptId, pageIndex) as
     | { raw_response_sha256: string; evidence_gzip: Buffer | null; evidence_bytes: number }
     | undefined;
-  if (!row) return { found: false, evidence: null, sha256: null, evidenceBytes: 0 };
-  if (row.evidence_gzip === null || row.evidence_gzip === undefined) {
-    return { found: true, evidence: null, sha256: row.raw_response_sha256, evidenceBytes: 0 };
-  }
-  let evidence: Buffer;
-  try {
-    // Fail closed if a tampered gzip expands past the recorded length (G10 r4, J2 m2).
-    evidence = gunzipSync(row.evidence_gzip, { maxOutputLength: row.evidence_bytes + 1 });
-  } catch {
-    throw new Error(
-      `verireceipt: stored page ${pageIndex} for receipt ${receiptId} does not match ` +
-        `raw_response_sha256 ${row.raw_response_sha256} (corrupt evidence blob)`,
-    );
-  }
-  if (evidence.length !== row.evidence_bytes || sha256Hex(evidence) !== row.raw_response_sha256) {
-    throw new Error(
-      `verireceipt: stored page ${pageIndex} for receipt ${receiptId} does not match ` +
-        `raw_response_sha256 ${row.raw_response_sha256} (corrupt evidence blob)`,
-    );
-  }
-  return { found: true, evidence, sha256: row.raw_response_sha256, evidenceBytes: row.evidence_bytes };
+  return decodeEvidenceRow(row, `stored page ${pageIndex} for receipt ${receiptId}`);
 }
 
 /** A stored evidence blob as-is (still gzipped), for async verification (G10 r3). */
@@ -1502,14 +1539,20 @@ export function getGridPrice(
   };
 }
 
-export function saveGridPrice(
+/**
+ * PG-MIGRATE (2026-11-21): saveGridPrice's input guards, shared verbatim
+ * by the SQLite writer and the Postgres writer (src/core/pgStore.ts).
+ */
+export function validateGridPriceWrite(
   nodeOrZone: string,
   intervalStart: string,
   lmp: number,
   market: string,
-  ingestedAt?: string,
-  upstreamUrl?: string,
 ): void {
+  // PG-MIGRATE r2 (J2 m3): NUL is refused on both stores (see prepareReceiptWrite).
+  if ([nodeOrZone, intervalStart, market].some((v) => typeof v === "string" && v.includes("\u0000"))) {
+    throw new Error("saveGridPrice refuses a NUL character in node_or_zone, interval_start or market");
+  }
   // Round-7 guard-criterion fix (F1, defense-in-depth): a write carrying
   // an empty node or market must FAIL LOUDLY, never silently store — the
   // schema's TEXT NOT NULL blocks NULL only, so "" would otherwise land
@@ -1552,6 +1595,17 @@ export function saveGridPrice(
         ")",
     );
   }
+}
+
+export function saveGridPrice(
+  nodeOrZone: string,
+  intervalStart: string,
+  lmp: number,
+  market: string,
+  ingestedAt?: string,
+  upstreamUrl?: string,
+): void {
+  validateGridPriceWrite(nodeOrZone, intervalStart, lmp, market);
   const database = getDb();
   database
     .prepare(
@@ -1633,6 +1687,37 @@ export function purgeGridCacheOverflow(
       `SELECT node_or_zone, interval_start, market FROM grid_cache`,
     )
     .all() as Array<{ node_or_zone: string; interval_start: string; market: string }>;
+  const victims = selectGridEvictions(rows, total, maxRows, nowMs);
+  const del = database.prepare(
+    "DELETE FROM grid_cache WHERE node_or_zone = ? AND interval_start = ?",
+  );
+  const delMeta = database.prepare(
+    "DELETE FROM grid_cache_revalidate WHERE node_or_zone = ? AND interval_start = ?",
+  );
+  const run = database.transaction(() => {
+    for (const r of victims) {
+      del.run(r.node_or_zone, r.interval_start);
+      delMeta.run(r.node_or_zone, r.interval_start);
+    }
+  });
+  run();
+  return victims.length;
+}
+
+/**
+ * PG-MIGRATE (2026-11-21): the eviction choice of purgeGridCacheOverflow
+ * as a pure function, shared by the SQLite and Postgres purges so both
+ * evict exactly the same keys in exactly the same order (r3 order:
+ * invalid keys, then final, then correction-window, then provisional;
+ * official reference keys never; invalid keys even under the cap).
+ */
+export function selectGridEvictions(
+  rows: Array<{ node_or_zone: string; interval_start: string; market: string }>,
+  total: number,
+  maxRows: number,
+  nowMs: number,
+): Array<{ node_or_zone: string; interval_start: string }> {
+  rows = rows.slice();
   rows.sort((a, b) => {
     const pa = gridCacheEvictionPriority(a.node_or_zone, a.interval_start, a.market, nowMs);
     const pb = gridCacheEvictionPriority(b.node_or_zone, b.interval_start, b.market, nowMs);
@@ -1643,27 +1728,16 @@ export function purgeGridCacheOverflow(
     if (a.node_or_zone > b.node_or_zone) return 1;
     return 0;
   });
-  const del = database.prepare(
-    "DELETE FROM grid_cache WHERE node_or_zone = ? AND interval_start = ?",
-  );
-  const delMeta = database.prepare(
-    "DELETE FROM grid_cache_revalidate WHERE node_or_zone = ? AND interval_start = ?",
-  );
   let remaining = total;
-  let deleted = 0;
-  const run = database.transaction(() => {
-    for (const r of rows) {
-      const rank = gridCacheEvictionPriority(r.node_or_zone, r.interval_start, r.market, nowMs);
-      if (rank >= GRID_EVICT_REFERENCE) continue;
-      // Invalid interval keys are always evicted, even when the table
-      // is already at or under the cap — they are never legal rows.
-      if (remaining <= maxRows && rank > GRID_EVICT_INVALID) continue;
-      del.run(r.node_or_zone, r.interval_start);
-      delMeta.run(r.node_or_zone, r.interval_start);
-      remaining -= 1;
-      deleted += 1;
-    }
-  });
-  run();
-  return deleted;
+  const out: Array<{ node_or_zone: string; interval_start: string }> = [];
+  for (const r of rows) {
+    const rank = gridCacheEvictionPriority(r.node_or_zone, r.interval_start, r.market, nowMs);
+    if (rank >= GRID_EVICT_REFERENCE) continue;
+    // Invalid interval keys are always evicted, even when the table
+    // is already at or under the cap — they are never legal rows.
+    if (remaining <= maxRows && rank > GRID_EVICT_INVALID) continue;
+    out.push({ node_or_zone: r.node_or_zone, interval_start: r.interval_start });
+    remaining -= 1;
+  }
+  return out;
 }

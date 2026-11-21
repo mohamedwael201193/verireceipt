@@ -17,7 +17,7 @@ mkdirSync(SCRATCH, { recursive: true });
 process.env.SQLITE_PATH = join(mkdtempSync(join(SCRATCH, 'db-')), 'verireceipt.sqlite');
 
 import { ApiError } from '../src/core/errors';
-import { getReceiptEvidence, getReceiptPageEvidence, getReceiptPages } from '../src/core/db';
+import { getReceiptEvidence, getReceiptPageEvidence, getReceiptPages } from '../src/core/storage';
 import { handleFilings, parsePeriod, __clearTickersCacheForTests, __seedTickersCacheForTests } from '../src/handlers/filings';
 import { EDGAR_FORM_TYPES, EDGAR_FORM_TYPES_SOURCE } from '../src/handlers/edgarFormTypes';
 import { canonicalFormOrThrow } from '../src/handlers/filingsForms';
@@ -413,16 +413,16 @@ describe('A1 r8 stubbed: findings', () => {
     const pageBody = JSON.stringify(recentOf([['0000320193-10-000001', '2010-01-25', '10-Q'], ['0000320193-10-000097', '2010-10-27', '10-K']]));
     const r = await handleFilings({ entity: 'AAPL', period: '2010' }, { fetchImpl: stub({ files, pages: { [name]: pageBody } }) });
     const receipt = r.receipt as { receipt_id: string; raw_response_sha256: string };
-    const main = getReceiptEvidence(receipt.receipt_id);
+    const main = await getReceiptEvidence(receipt.receipt_id);
     expect(main.found).toBe(true);
     expect(main.evidence).not.toBeNull();
     expect(sha(main.evidence as Buffer)).toBe(receipt.raw_response_sha256);
-    const pages = getReceiptPages(receipt.receipt_id);
+    const pages = await getReceiptPages(receipt.receipt_id);
     const upstreamPages = r.upstream_pages as Array<{ url: string; raw_response_sha256: string }>;
     expect(pages.length).toBe(1);
     expect(pages[0].url).toBe(upstreamPages[0].url);
     expect(pages[0].raw_response_sha256).toBe(sha(pageBody));
-    const pe = getReceiptPageEvidence(receipt.receipt_id, 0);
+    const pe = await getReceiptPageEvidence(receipt.receipt_id, 0);
     expect((pe.evidence as Buffer).toString('utf8')).toBe(pageBody);
     expect(r.upstream_bundle_sha256).toBe(
       sha([`${(r.receipt as { upstream_url: string }).upstream_url} ${receipt.raw_response_sha256}`, `${upstreamPages[0].url} ${sha(pageBody)}`].join('\n')),

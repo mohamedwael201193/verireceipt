@@ -70,6 +70,59 @@ describe("installGracefulShutdown (unit)", () => {
     expect(calls).toEqual(["db", "exit:1"]);
   });
 
+  it("a HUNG closeDb cannot block exit: the one deadline stays armed and exit(1) fires (r2, J2 M1)", async () => {
+    const app = Fastify();
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const calls: string[] = [];
+    const h = installGracefulShutdown(
+      app,
+      {
+        closeDb: () => {
+          calls.push("db");
+          return new Promise<void>(() => undefined); // never settles (stalled pool.end)
+        },
+        exit: (c) => calls.push(`exit:${c}`),
+        timeoutMs: 300,
+        log: () => undefined,
+      },
+      [],
+    );
+    const t0 = Date.now();
+    await h.shutdown("SIGTERM");
+    const took = Date.now() - t0;
+    expect(calls).toEqual(["db", "exit:1"]);
+    expect(took).toBeGreaterThanOrEqual(280);
+    expect(took).toBeLessThan(1500);
+  });
+
+  it("a closeDb that throws synchronously still exits 0 after a clean drain", async () => {
+    const app = Fastify();
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const calls: string[] = [];
+    const h = installGracefulShutdown(
+      app,
+      {
+        closeDb: () => {
+          calls.push("db");
+          throw new Error("boom");
+        },
+        exit: (c) => calls.push(`exit:${c}`),
+        timeoutMs: 2000,
+        log: () => undefined,
+      },
+      [],
+    );
+    await h.shutdown("SIGTERM");
+    expect(calls).toEqual(["db", "exit:0"]);
+  });
+
+  it("the shutdown budget (drain + close) and the pool-close cap fit inside Render's 30 s SIGKILL window", async () => {
+    const { DEFAULT_SHUTDOWN_TIMEOUT_MS } = await import("../src/core/shutdown");
+    const { PG_CLOSE_WAIT_MS } = await import("../src/core/pgStore");
+    expect(DEFAULT_SHUTDOWN_TIMEOUT_MS).toBeLessThan(30_000);
+    expect(PG_CLOSE_WAIT_MS).toBeLessThan(DEFAULT_SHUTDOWN_TIMEOUT_MS);
+  });
+
   it("registers and removes real signal listeners", () => {
     const app = Fastify();
     const before = process.listenerCount("SIGTERM");
@@ -92,6 +145,7 @@ describe("built server under a real SIGTERM (process)", () => {
         ...process.env,
         PORT: String(port),
         SQLITE_PATH: dbPath,
+        DATABASE_URL: "", // this case is the SQLite layout even when the suite runs on Postgres
         SEC_USER_AGENT: process.env.SEC_USER_AGENT ?? "verireceipt-test test@example.invalid",
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -117,4 +171,39 @@ describe("built server under a real SIGTERM (process)", () => {
     expect(out).toMatch(/shutdown complete in \d+ms/);
     expect(existsSync(dbPath + "-wal")).toBe(false);
   }, 60000);
+});
+
+describe.skipIf(!(process.env.DATABASE_URL ?? "").trim())("built server on Postgres (process)", () => {
+  it("boots on DATABASE_URL, /health reports storage ok, SIGTERM drains + ends the pool, exit 0", async () => {
+    execFileSync("npx", ["tsc", "-p", "tsconfig.json"], { stdio: "ignore" });
+    const port = 20000 + Math.floor(Math.random() * 20000);
+    const child = spawn(process.execPath, ["dist/server.js"], {
+      env: {
+        ...process.env,
+        PORT: String(port),
+        SEC_USER_AGENT: process.env.SEC_USER_AGENT ?? "verireceipt-test test@example.invalid",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    child.stdout.on("data", (d) => (out += String(d)));
+    child.stderr.on("data", (d) => (out += String(d)));
+    const deadline = Date.now() + 80000; // includes the capped pre-listen TVL warm
+    while (!out.includes("listening on") && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(out).toContain("listening on");
+    expect(out).not.toContain("db ready"); // SQLite never opened on the Postgres layout
+    let health: { storage?: { backend: string; ok: boolean | null } } = {};
+    for (let i = 0; i < 30; i++) {
+      health = (await (await fetch(`http://127.0.0.1:${port}/health`)).json()) as typeof health;
+      if (health.storage?.ok !== null) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(health.storage).toMatchObject({ backend: "postgres", ok: true });
+    const exited = new Promise<number | null>((r) => child.on("exit", (c) => r(c)));
+    child.kill("SIGTERM");
+    expect(await exited).toBe(0);
+    expect(out).toMatch(/shutdown complete in \d+ms/);
+  }, 120000);
 });

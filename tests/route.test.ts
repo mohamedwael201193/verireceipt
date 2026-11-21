@@ -3,13 +3,13 @@
 // mainnet RPCs and REAL quoter contracts (no mocks anywhere in handler code).
 // The stubbed-RPC tests below run local HTTP JSON-RPC servers and exercise
 // the handler through handleRouteWithRpcs with injectable RPC URLs.
+import { countReceipts, storedReceiptRow } from "./helpers/storeView";
 import { describe, expect, it } from "vitest";
 import { createServer } from "http";
 import { mkdtempSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 import type { AddressInfo } from "net";
-import Database from "better-sqlite3";
 import { ApiError } from "../src/core/errors";
 import {
   applyAbsoluteCap,
@@ -3257,29 +3257,13 @@ describe("round 11 (A7 ROUTE gate): ±1 block tolerance + min pin, 8 s deadline,
         // lowest-index hedged win) — the stored upstream must be that
         // same URL, not the quorum-first or a failover RPC.
         expect(receipt.upstream_url).toBe(a.url);
-        const db = new Database(process.env.SQLITE_PATH as string, { readonly: true });
-        try {
-          const row = db
-            .prepare(
-              "SELECT receipt_id, intent, upstream_url, raw_response_sha256, evidence_bytes FROM miner_receipts WHERE receipt_id = ?",
-            )
-            .get(receipt.receipt_id as string) as
-            | {
-                receipt_id: string;
-                intent: string;
-                upstream_url: string;
-                raw_response_sha256: string;
-                evidence_bytes: number;
-              }
-            | undefined;
-          expect(row).toBeDefined();
-          expect(row?.intent).toBe("OPTIMAL_EXECUTION_ROUTE_GENERAL");
-          expect(row?.upstream_url).toBe(a.url);
-          expect(row?.raw_response_sha256).toBe(receipt.raw_response_sha256);
-          expect(row?.evidence_bytes).toBeGreaterThan(0);
-        } finally {
-          db.close();
-        }
+        // PG-MIGRATE: backend-agnostic read-back (tests/helpers/storeView.ts).
+        const row = await storedReceiptRow(receipt.receipt_id as string);
+        expect(row).toBeDefined();
+        expect(row?.intent).toBe("OPTIMAL_EXECUTION_ROUTE_GENERAL");
+        expect(row?.upstream_url).toBe(a.url);
+        expect(row?.raw_response_sha256).toBe(receipt.raw_response_sha256);
+        expect(row?.evidence_bytes).toBeGreaterThan(0);
       } finally {
         await a.close();
         await b.close();
@@ -3295,19 +3279,9 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
   const HASH3 = "0x" + "ef".repeat(32);
   const nowSec = () => Math.floor(Date.now() / 1000);
 
-  function countRouteReceipts(): number {
-    const db = new Database(process.env.SQLITE_PATH as string, { readonly: true });
-    try {
-      const row = db
-        .prepare(
-          "SELECT COUNT(*) AS n FROM miner_receipts WHERE intent = 'OPTIMAL_EXECUTION_ROUTE_GENERAL'",
-        )
-        .get() as { n: number };
-      return row.n;
-    } finally {
-      db.close();
-    }
-  }
+  // PG-MIGRATE: backend-agnostic (tests/helpers/storeView.ts).
+  const countRouteReceipts = (): Promise<number> => countReceipts("OPTIMAL_EXECUTION_ROUTE_GENERAL");
+
 
   it(
     "F1 (J2 P1): min leg FAILS on eth_call, healthy higher leg at N+1 (parentHash-bound) serves -> 200 at the MIN pin N, upstream is the higher leg, confidence 0.9 (only 1 RPC served quotes)",
@@ -3579,7 +3553,7 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
       const a = await mk();
       const b = await mk();
       try {
-        const before = countRouteReceipts();
+        const before = (await countRouteReceipts());
         const startedAt = Date.now();
         await expect(
           handleRouteWithRpcs({ pair: "ETH/USDC" }, [a.url, b.url], 100),
@@ -3590,7 +3564,7 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
         // receipt would have landed by now. Then the count must be
         // unchanged — the aborted work persisted nothing.
         await new Promise((resolve) => setTimeout(resolve, 2000));
-        expect(countRouteReceipts()).toBe(before);
+        expect((await countRouteReceipts())).toBe(before);
       } finally {
         await a.close();
         await b.close();
@@ -3630,15 +3604,8 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
         expect(result.confidence).toBe(1.0);
         const receipt = result.receipt as Record<string, unknown>;
         expect(typeof receipt.receipt_id).toBe("string");
-        const db = new Database(process.env.SQLITE_PATH as string, { readonly: true });
-        try {
-          const row = db
-            .prepare("SELECT receipt_id FROM miner_receipts WHERE receipt_id = ?")
-            .get(receipt.receipt_id as string) as { receipt_id: string } | undefined;
-          expect(row?.receipt_id).toBe(receipt.receipt_id);
-        } finally {
-          db.close();
-        }
+        const row = await storedReceiptRow(receipt.receipt_id as string);
+        expect(row?.receipt_id).toBe(receipt.receipt_id);
       } finally {
         await a.close();
         await b.close();
@@ -3667,7 +3634,7 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
       const b = await mk();
       const c = await mk();
       try {
-        const before = countRouteReceipts();
+        const before = (await countRouteReceipts());
         const startedAt = Date.now();
         let code: string | undefined;
         try {
@@ -3686,7 +3653,7 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
         const elapsedMs = Date.now() - startedAt;
         console.log(`F5 over-budget wall: ${elapsedMs} ms (code ${code})`);
         expect(elapsedMs).toBeLessThan(5000);
-        expect(countRouteReceipts()).toBe(before);
+        expect((await countRouteReceipts())).toBe(before);
       } finally {
         await a.close();
         await b.close();

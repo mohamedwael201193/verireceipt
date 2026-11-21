@@ -10,12 +10,20 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { handleTx } from "./handlers/txLookup";
 import { handleFilings } from "./handlers/filings";
-import { handleTvl, startTvlListsRefreshTimer, stopTvlListsRefreshTimer, warmLists } from "./handlers/tvl";
+import { handleTvl, startTvlListsRefreshTimer, stopTvlListsRefreshTimer, tvlDiskListsPresent, warmLists } from "./handlers/tvl";
 import { handleRoute } from "./handlers/optimalRoute";
 import { handleGridPrice } from "./handlers/gridPrice";
 import { handleValidator } from "./handlers/validator";
 import { ApiError, badRequest, errorBody } from "./core/errors";
-import { closeDb, getDb } from "./core/db";
+import { getDb } from "./core/db";
+import {
+  closeStorage,
+  getStorageHealth,
+  initStorage,
+  startStoragePinger,
+  stopStoragePinger,
+  storageBackend,
+} from "./core/storage";
 import { installGracefulShutdown } from "./core/shutdown";
 import { registerReceiptRoutes } from "./core/receiptRoutes";
 import { getJobsSnapshot, getLoopLagSnapshot, startLoopLagSampler } from "./core/loopLag";
@@ -28,6 +36,9 @@ import {
 } from "./core/upstreams";
 
 const startedAtMs = Date.now();
+
+/** Max boot wait for the TVL lists warm on the no-disk (Postgres) layout. */
+export const TVL_PRELISTEN_WARM_CAP_MS = 45_000;
 
 /**
  * Deployed git SHA for /health (A6): Render sets RENDER_GIT_COMMIT to
@@ -111,7 +122,10 @@ export function buildServer(): FastifyInstance {
 
   // Initialise storage (creates tables on first run). Handlers rely on it
   // for receipt persistence and the grid-price cache.
-  getDb();
+  // PG-MIGRATE (2026-11-21): SQLite opens synchronously here as before;
+  // the Postgres backend is async — main() awaits initStorage() before
+  // listen(), and every store call also ensures the schema lazily.
+  if (storageBackend() === "sqlite") getDb();
 
   // RENDER-SLOWNESS (2026-11-20): start the 1 s event-loop-lag sampler
   // (src/core/loopLag.ts). Idempotent and unref'd; its snapshot is
@@ -170,6 +184,10 @@ export function buildServer(): FastifyInstance {
       loop_lag_ms: loopLag,
       jobs: getJobsSnapshot(),
       git_sha: gitSha(),
+      // PG-MIGRATE (2026-11-21): ADDITIVE. In-memory snapshot of the
+      // background storage ping (core/storage.ts, every 15 s, 2 s cap) —
+      // /health never awaits the database.
+      storage: getStorageHealth(),
     };
   });
 
@@ -304,13 +322,37 @@ export async function main(): Promise<FastifyInstance> {
   // Fire-and-forget: this must never block listen() or crash startup
   // (warmLists never throws). PRESERVE THIS CALL on any later server.ts
   // rewrite.
-  void warmLists().catch(() => undefined);
+  const lists = warmLists().catch(() => undefined);
   // TVL lists hourly refresh timer (round-2 fix, 2026-11-20, tvl.ts):
   // refreshes the lists BEFORE the 24h TTL expires, so a zero-traffic
   // server cannot hit the expiry window and serve a fast 502. Idempotent
   // and unref'd; a tick refreshes only when the cache is due (absent or
   // older than 22h), never on a fresh cache.
   startTvlListsRefreshTimer();
+
+  // PG-MIGRATE (2026-11-21): open the store BEFORE listen(). On Postgres
+  // this creates the schema and proves the connection; if it fails the
+  // boot fails (exit 1) and, with zero-downtime deploys, Render keeps the
+  // previous instance serving instead of routing to a broken one.
+  await initStorage();
+  startStoragePinger();
+  // Without the disk the TVL lists cache (tvl.ts listsCacheDir) is cold on
+  // every boot. Zero-downtime deploys keep the old instance serving until
+  // this one listens, so on the no-disk (Postgres) layout the boot waits
+  // for the warm — capped, never forever (warmLists never throws).
+  // r2 (J1 m5): skip the wait when the disk cache files exist (disk still
+  // attached, cutover step 3): warmLists serves them immediately.
+  if (storageBackend() === "postgres" && !tvlDiskListsPresent()) {
+    let capTimer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      lists,
+      new Promise<void>((r) => {
+        capTimer = setTimeout(r, TVL_PRELISTEN_WARM_CAP_MS);
+        if (typeof capTimer.unref === "function") capTimer.unref();
+      }),
+    ]);
+    if (capTimer) clearTimeout(capTimer);
+  }
 
   const rawPort = Number(process.env.PORT ?? "10000");
   const port = Number.isFinite(rawPort) && rawPort > 0 ? Math.floor(rawPort) : 10000;
@@ -333,8 +375,9 @@ export async function main(): Promise<FastifyInstance> {
     stopTimers: () => {
       if (ingesterTimer) clearInterval(ingesterTimer);
       stopTvlListsRefreshTimer();
+      stopStoragePinger();
     },
-    closeDb,
+    closeDb: closeStorage,
   });
   return app;
 }

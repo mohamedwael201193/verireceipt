@@ -9,5 +9,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts"],
+    // PG-MIGRATE: per-file Postgres schema when DATABASE_URL is set (no-op otherwise).
+    setupFiles: ["tests/helpers/pgSchemaSetup.ts"],
   },
 });

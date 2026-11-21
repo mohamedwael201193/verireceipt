@@ -51,7 +51,7 @@ import {
   markGridRevalidateAttempt,
   saveGridPrice,
   saveReceipt,
-} from "../core/db";
+} from "../core/storage";
 import {
   SUPPORTED_ZONES,
   fetchCaisoDamLmp,
@@ -157,7 +157,7 @@ export function resolveCaisoHubAlias(spelling: string): string | undefined {
   return Object.hasOwn(CAISO_HUB_ALIASES, key) ? CAISO_HUB_ALIASES[key] : undefined;
 }
 
-type GridCacheRow = NonNullable<ReturnType<typeof getGridPrice>>;
+type GridCacheRow = NonNullable<Awaited<ReturnType<typeof getGridPrice>>>;
 
 /**
  * Freshness for a cache row: ingested_at present, parseable, not in the
@@ -185,18 +185,18 @@ function isFreshGridRow(
   return isSettledGridInterval(intervalStart, windowMin, nowMs, market);
 }
 
-function gridRowNeedsRevalidation(
+async function gridRowNeedsRevalidation(
   node: string,
   intervalStart: string,
   market: string | null | undefined,
   row: GridCacheRow,
   nowMs: number,
-): boolean {
+): Promise<boolean> {
   const kind = gridMarketKind(market);
   if (!kind) return false;
   const startMs = Date.parse(intervalStart);
   if (Number.isNaN(startMs)) return false;
-  const st = getGridRevalidate(node, intervalStart);
+  const st = await getGridRevalidate(node, intervalStart);
   return needsGridRevalidation({
     kind,
     intervalStartMs: startMs,
@@ -208,8 +208,8 @@ function gridRowNeedsRevalidation(
 }
 
 
-function lastGridSuccessMs(node: string, intervalStart: string, row: GridCacheRow): number | null {
-  const st = getGridRevalidate(node, intervalStart);
+async function lastGridSuccessMs(node: string, intervalStart: string, row: GridCacheRow): Promise<number | null> {
+  const st = await getGridRevalidate(node, intervalStart);
   const raw = st?.last_success_at || row.ingested_at;
   if (!raw) return null;
   const ms = Date.parse(raw);
@@ -222,20 +222,20 @@ function lastGridSuccessMs(node: string, intervalStart: string, row: GridCacheRo
  * we are currently in the failed-attempt cooldown and will not fetch
  * again on this request.
  */
-function isPostCloseUnconfirmed(
+async function isPostCloseUnconfirmed(
   node: string,
   intervalStart: string,
   market: string | null | undefined,
   row: GridCacheRow,
   nowMs: number,
-): boolean {
+): Promise<boolean> {
   const kind = gridMarketKind(market);
   if (!kind) return false;
   const startMs = Date.parse(intervalStart);
   if (Number.isNaN(startMs)) return false;
   const close = provisionalCloseMs(kind, startMs);
   if (close === null || nowMs < close) return false;
-  const lastSuccess = lastGridSuccessMs(node, intervalStart, row);
+  const lastSuccess = await lastGridSuccessMs(node, intervalStart, row);
   if (lastSuccess === null) return true;
   return lastSuccess < close;
 }
@@ -382,10 +382,10 @@ export async function handleGridPrice(
   // serves a query for the other spelling (e.g. N.Y.C.) and vice versa.
   // The ingester writes both keys in production, but the handler must not
   // depend on that.
-  let row = getGridPrice(normalizedZone, intervalStart);
+  let row = await getGridPrice(normalizedZone, intervalStart);
   if (!row) {
     const alias = resolveGridAlias(normalizedZone);
-    if (alias) row = getGridPrice(alias, intervalStart);
+    if (alias) row = await getGridPrice(alias, intervalStart);
   }
   // A4 on-demand CAISO fetch (single hub): a missing hour is fetched
   // live from OASIS PRC_LMP DAM for exactly this hour and cached
@@ -405,7 +405,7 @@ export async function handleGridPrice(
     }
     if (fetched) {
       const ingestedAt = new Date().toISOString();
-      saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "CAISO", ingestedAt, fetched.upstreamUrl);
+      await saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "CAISO", ingestedAt, fetched.upstreamUrl);
       row = {
         lmp_usd_per_mwh: fetched.lmp,
         market: "CAISO",
@@ -443,7 +443,7 @@ export async function handleGridPrice(
   let stale = !isFreshGridRow(row, nowMs, intervalStart, windowMin, zone.market);
   const needsRefresh =
     !corruptRow &&
-    gridRowNeedsRevalidation(normalizedZone, intervalStart, zone.market, row, nowMs);
+    (await gridRowNeedsRevalidation(normalizedZone, intervalStart, zone.market, row, nowMs));
   let unconfirmed = false;
   // CAISO live path: refresh a stale row, repair a corrupt row even
   // when the interval is already past the provisional window (J2 m4:
@@ -459,7 +459,7 @@ export async function handleGridPrice(
     }
     if (fetched) {
       const ingestedAt = new Date().toISOString();
-      saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "CAISO", ingestedAt, fetched.upstreamUrl);
+      await saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "CAISO", ingestedAt, fetched.upstreamUrl);
       row = {
         lmp_usd_per_mwh: fetched.lmp,
         market: "CAISO",
@@ -471,7 +471,7 @@ export async function handleGridPrice(
     } else if (!corruptRow && !stale && needsRefresh) {
       // Valid post-provisional row, revalidation failed: keep it,
       // but do not label it verified / 1.0 (r3 / J2 minor 2).
-      markGridRevalidateAttempt(normalizedZone, intervalStart, new Date().toISOString());
+      await markGridRevalidateAttempt(normalizedZone, intervalStart, new Date().toISOString());
       unconfirmed = true;
     }
   }
@@ -486,7 +486,7 @@ export async function handleGridPrice(
     }
     if (fetched) {
       const ingestedAt = new Date().toISOString();
-      saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "NYISO", ingestedAt, fetched.upstreamUrl);
+      await saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "NYISO", ingestedAt, fetched.upstreamUrl);
       row = {
         lmp_usd_per_mwh: fetched.lmp,
         market: "NYISO",
@@ -495,7 +495,7 @@ export async function handleGridPrice(
       };
       fetchedLive = true;
     } else if (!corruptRow && needsRefresh) {
-      markGridRevalidateAttempt(normalizedZone, intervalStart, new Date().toISOString());
+      await markGridRevalidateAttempt(normalizedZone, intervalStart, new Date().toISOString());
       unconfirmed = true;
     }
   }
@@ -506,7 +506,7 @@ export async function handleGridPrice(
     !stale &&
     !corruptRow &&
     !fetchedLive &&
-    isPostCloseUnconfirmed(normalizedZone, intervalStart, zone.market, row, nowMs)
+    (await isPostCloseUnconfirmed(normalizedZone, intervalStart, zone.market, row, nowMs))
   ) {
     unconfirmed = true;
   }
@@ -644,7 +644,7 @@ export async function handleGridPrice(
   // F1 comment above and tests/grid.test.ts) — the stored evidence
   // makes it checkable without re-deriving anything.
   try {
-    saveReceipt(receipt, rawBody);
+    await saveReceipt(receipt, rawBody);
   } catch {
     // Persistence must never fail the answer.
   }

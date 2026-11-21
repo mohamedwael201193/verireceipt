@@ -422,7 +422,7 @@ import { request as httpsRequest, Agent as HttpsAgent } from "https";
 import { request as httpRequest, Agent as HttpAgent } from "http";
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
-import { saveReceipt } from "../core/db";
+import { saveReceipt } from "../core/storage";
 import { quorum2of3 } from "../core/quorum";
 import { MAINNET_RPCS } from "../config/chains";
 
@@ -1904,7 +1904,7 @@ async function handleRouteInner(
     );
   } else {
     try {
-      saveReceipt(receipt, receiptEvidence);
+      await saveReceipt(receipt, receiptEvidence);
     } catch (err) {
       console.warn(
         `verireceipt: failed to persist ROUTE receipt ${receipt.receipt_id}: ${err instanceof Error ? err.message : String(err)}`,

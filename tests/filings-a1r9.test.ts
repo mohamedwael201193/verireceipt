@@ -11,7 +11,7 @@ process.env.SQLITE_PATH = join(mkdtempSync(join(SCRATCH, 'db-')), 'verireceipt.s
 
 import type { FastifyInstance } from 'fastify';
 import { ApiError } from '../src/core/errors';
-import { getReceiptEvidence } from '../src/core/db';
+import { getReceiptEvidence } from '../src/core/storage';
 import {
   handleFilings,
   formFamily,
@@ -349,7 +349,7 @@ describe('A1 r9 stubbed: J2-r8 findings', () => {
     expect(e.message).not.toContain('disk full');
     // The normal path still persists the receipt.
     const r = await ask({ entity: 'Tesla, Inc.', period: '2023' });
-    expect(getReceiptEvidence((r.receipt as { receipt_id: string }).receipt_id)).not.toBeNull();
+    expect(await getReceiptEvidence((r.receipt as { receipt_id: string }).receipt_id)).not.toBeNull();
   });
 });
 

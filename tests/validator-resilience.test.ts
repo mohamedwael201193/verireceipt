@@ -26,7 +26,8 @@ afterAll(() => {
 
 import { ApiError } from "../src/core/errors";
 import { sha256Hex, type Receipt } from "../src/core/receipt";
-import { getDb, getReceiptEvidence } from "../src/core/db";
+import { getReceiptEvidence } from "../src/core/storage";
+import { countReceipts } from "./helpers/storeView";
 import {
   BEACON_SOURCES,
   MIN_RETRY_WINDOW_MS,
@@ -74,10 +75,8 @@ async function expectApiError(promise: Promise<unknown>, status: number, code: s
   throw new Error("expected ApiError " + status + " " + code + " but call succeeded");
 }
 
-function receiptCount(): number {
-  const row = getDb().prepare("SELECT COUNT(*) AS n FROM miner_receipts").get() as { n: number };
-  return row.n;
-}
+// PG-MIGRATE: backend-agnostic (tests/helpers/storeView.ts).
+const receiptCount = (): Promise<number> => countReceipts();
 
 function beaconBody(index: number, effectiveBalance: string, status: string, optimistic = false): string {
   return JSON.stringify({
@@ -195,7 +194,7 @@ describe("VR: retry on transient errors (stub fetch)", () => {
     expect(c0[1].at - c0[0].at).toBeGreaterThanOrEqual(RETRY_429_DEFAULT_DELAY_MS - 20);
     const receipt = res.receipt as Receipt;
     expect(receipt.quorum_votes).toBe("2/4 sources agreed");
-    expect(getReceiptEvidence(receipt.receipt_id).evidence?.toString("utf8")).toBe(OK1.body);
+    expect((await getReceiptEvidence(receipt.receipt_id)).evidence?.toString("utf8")).toBe(OK1.body);
     expect(receipt.raw_response_sha256).toBe(sha256Hex(OK1.body));
   });
 
@@ -243,7 +242,7 @@ describe("VR: retry on transient errors (stub fetch)", () => {
   }, 8000);
 
   it("no retry when the wait would leave < MIN_RETRY_WINDOW_MS of budget", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     const s = scripted([[{ status: 429, retryAfter: "1" }, OK1], [OK1], undefined]);
     await expectApiError(
       handleValidator({ validator_index: "1" }, { fetchImpl: s.fetchImpl, timeoutMs: 1500 }),
@@ -251,11 +250,11 @@ describe("VR: retry on transient errors (stub fetch)", () => {
       "QUORUM_UNREACHABLE",
     );
     expect(s.count(0)).toBe(1);
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("retry is bounded: persistent 503 -> exactly 2 attempts per source, then 502", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     const s = scripted([[{ status: 503 }], [{ status: 503 }], [{ status: 503 }]]);
     const t0 = Date.now();
     await expectApiError(handleValidator({ validator_index: "1" }, { fetchImpl: s.fetchImpl }), 502, "QUORUM_UNREACHABLE");
@@ -268,7 +267,7 @@ describe("VR: retry on transient errors (stub fetch)", () => {
     expect(Math.max(...counts)).toBeLessThanOrEqual(VALIDATOR_MAX_ATTEMPTS);
     expect(counts.filter((c) => c === 2).length).toBeGreaterThanOrEqual(2);
     expect(counts.reduce((a, b) => a + b, 0)).toBe(5);
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("non-transient statuses (400, 403, 404) and network errors are not retried", async () => {
@@ -295,7 +294,7 @@ describe("VR: execution_optimistic=true is retried once, never accepted", () => 
     expect(res.verdict).toBe("verified");
     expect(s.count(0)).toBe(2);
     const receipt = res.receipt as Receipt;
-    expect(getReceiptEvidence(receipt.receipt_id).evidence?.toString("utf8")).not.toContain('"execution_optimistic":true');
+    expect((await getReceiptEvidence(receipt.receipt_id)).evidence?.toString("utf8")).not.toContain('"execution_optimistic":true');
   });
 
   it("persistently optimistic source is dropped (2 attempts), others still verify", async () => {
@@ -306,12 +305,12 @@ describe("VR: execution_optimistic=true is retried once, never accepted", () => 
   });
 
   it("two persistently optimistic sources + one good -> 502, no receipt", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     const s = scripted([[OPT], [OPT], [OK1]]);
     await expectApiError(handleValidator({ validator_index: "1" }, { fetchImpl: s.fetchImpl }), 502, "QUORUM_UNREACHABLE");
     expect(s.count(0)).toBe(2);
     expect(s.count(1)).toBe(2);
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("502 message names each source's failure (operator diagnostics, no bodies)", async () => {
@@ -351,7 +350,7 @@ describe("VR: third source fallback (stub fetch)", () => {
   });
 
   it("NEVER single-source: two sources 429/down, one answers -> 502, no receipt", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     for (const script of [
       [[{ status: 429 }], [{ status: 429 }], [OK1]],
       [[OK1], [new Error("down")], [{ status: 503 }]],
@@ -359,7 +358,7 @@ describe("VR: third source fallback (stub fetch)", () => {
     ] as Array<Array<Step[] | undefined>>) {
       await expectApiError(handleValidator({ validator_index: "1" }, { fetchImpl: scripted(script).fetchImpl }), 502, "QUORUM_UNREACHABLE");
     }
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("502 while a retry is still pending says so (no stale reason)", async () => {
@@ -372,11 +371,11 @@ describe("VR: third source fallback (stub fetch)", () => {
   }, 8000);
 
   it("2-vs-1 split (dissent already received) -> 502 QUORUM_CONFLICT, no receipt", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     const dissent = { status: 200, body: beaconBody(1, "31000000000", "active_ongoing") };
     const s = scripted([[dissent], [{ ...OK1, delayMs: 20 }], [{ ...OK1, delayMs: 40 }]]);
     await expectApiError(handleValidator({ validator_index: "1" }, { fetchImpl: s.fetchImpl }), 502, "QUORUM_CONFLICT");
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("three-way disagreement -> 502 QUORUM_UNREACHABLE", async () => {
@@ -389,7 +388,7 @@ describe("VR: third source fallback (stub fetch)", () => {
   });
 
   it("not-found needs two 404s and no answer", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     resetValidatorCachesForTests();
     await expectApiError(
       handleValidator({ validator_index: "99999999" }, { fetchImpl: scripted([[NF], [NF], undefined]).fetchImpl }),
@@ -413,7 +412,7 @@ describe("VR: third source fallback (stub fetch)", () => {
       502,
       "QUORUM_UNREACHABLE",
     );
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("429 storm stays inside the request budget", async () => {
@@ -436,7 +435,7 @@ describe("V-M1: order-independent verdicts (wait while the third can still answe
   const at = (body: string, delayMs: number): Step[] => [{ status: 200, body, delayMs }];
 
   it("same answers {X, X, Y}: 502 QUORUM_CONFLICT for every source assignment and every arrival order", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     const delayOrders = [
       [20, 60, 120],
       [120, 20, 60],
@@ -459,7 +458,7 @@ describe("V-M1: order-independent verdicts (wait while the third can still answe
       }
     }
     expect(runs).toBe(18); // dissent first, middle and last, on each source
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   }, 20000);
 
   it("J2 S1: X@50, X@80, late dissent Y@600 (inside the budget) -> 502 QUORUM_CONFLICT, same as dissent-first", async () => {
@@ -470,10 +469,10 @@ describe("V-M1: order-independent verdicts (wait while the third can still answe
   });
 
   it("J2 S4: a WRONG pair Y@50, Y@60 with the correct X@400 is never certified", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     const s = scripted([at(Y, 50), at(Y, 60), at(X, 400)]);
     await expectApiError(handleValidator({ validator_index: "1" }, { fetchImpl: s.fetchImpl }), 502, "QUORUM_CONFLICT");
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("dissent inside the budget: pair at 20/40, dissent at 900 ms -> conflict", async () => {
@@ -525,17 +524,17 @@ describe("V-M1: order-independent verdicts (wait while the third can still answe
   });
 
   it("J1 scenario B: WRONG pair Y 50/60 + correct X at 1.1 s -> 502, never a wrong verified value", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     await expectApiError(
       handleValidator({ validator_index: "1" }, { fetchImpl: scripted([at(Y, 50), at(Y, 60), at(X, 1100)]).fetchImpl }),
       502,
       "QUORUM_CONFLICT",
     );
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 
   it("J1 scenario C: pair + third 429 (default 1.5 s back-off) then dissent on the retry -> 502 at ~1.5 s, third asked twice", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     const s = scripted([at(X, 50), at(X, 60), [{ status: 429 }, { status: 200, body: Y }]]);
     const t0 = Date.now();
     await expectApiError(handleValidator({ validator_index: "1" }, { fetchImpl: s.fetchImpl }), 502, "QUORUM_CONFLICT");
@@ -543,7 +542,7 @@ describe("V-M1: order-independent verdicts (wait while the third can still answe
     expect(s.count(2)).toBe(2);
     expect(wall).toBeGreaterThanOrEqual(RETRY_429_DEFAULT_DELAY_MS - 30);
     expect(wall).toBeLessThan(RETRY_429_DEFAULT_DELAY_MS + 500);
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   }, 8000);
 
   it("429 with Retry-After: 1, dissent on the retry -> 502; agreement on the retry -> verified 3/4", async () => {
@@ -626,7 +625,7 @@ describe("V-M1: order-independent verdicts (wait while the third can still answe
 
 describe("v-m1 (J2 round 2): a 404 next to an agreeing pair is a dissent", () => {
   it("[X, X, 404] -> 502 QUORUM_CONFLICT for every position/order, no receipt", async () => {
-    const before = receiptCount();
+    const before = (await receiptCount());
     for (let nf = 0; nf < 3; nf++) {
       for (const delays of [[10, 30, 60], [60, 10, 30], [30, 60, 10]]) {
         const script: Step[][] = [0, 1, 2].map((i) =>
@@ -639,6 +638,6 @@ describe("v-m1 (J2 round 2): a 404 next to an agreeing pair is a dissent", () =>
         );
       }
     }
-    expect(receiptCount()).toBe(before);
+    expect((await receiptCount())).toBe(before);
   });
 });

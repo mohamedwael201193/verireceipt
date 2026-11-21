@@ -85,7 +85,7 @@
 import { ApiError, badRequest } from "../core/errors";
 import { envelope, makeReceipt, stableStringify, type Receipt } from "../core/receipt";
 import { CHAIN_RPCS } from "../config/chains";
-import { saveReceipt } from "../core/db";
+import { saveReceipt } from "../core/storage";
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 /** R4 MINOR 1: a hex quantity must be 0x-prefixed hex. Decimal "123"
@@ -950,7 +950,7 @@ export async function handleTx(
   const evidence = buildTxEvidence(value.txResult, value.receiptResult);
   const receiptDoc: Receipt = makeReceipt(INTENT, value.rpcUrl, evidence, votes);
   try {
-    saveReceipt(receiptDoc, evidence);
+    await saveReceipt(receiptDoc, evidence);
   } catch (err) {
     // R2: a failed persist is logged, never silent — the answer still
     // ships (pre-existing behaviour), but the failure is now visible.

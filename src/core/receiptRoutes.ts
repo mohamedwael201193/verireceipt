@@ -53,7 +53,9 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ApiError, badRequest, errorBody } from "./errors";
-import { getReceiptEvidence, getReceiptMeta, getReceiptPageEvidence, getReceiptPages, type ReceiptEvidence, type StoredReceiptMeta } from "./db";
+import type { ReceiptEvidence, StoredReceiptMeta } from "./db";
+import { EvidenceCorruptError } from "./db";
+import { getReceiptEvidence, getReceiptMeta, getReceiptPageEvidence, getReceiptPages } from "./storage";
 import { RECEIPT_ID_RE, normalizeSha256Hex, publicBaseUrl, sha256Hex } from "./receipt";
 import { checkEvidence, recordVerified, type EvidenceStatus } from "./evidenceVerify";
 
@@ -131,15 +133,15 @@ export function ifNoneMatchHits(header: unknown, etag: string): boolean {
  * SHA-256 answers 500 RECEIPT_CORRUPT on all of them (previously meta
  * 500 but /raw 404).
  */
-function digestCorruption(id: string, metaRow?: StoredReceiptMeta | null): ApiError | null {
+async function digestCorruption(id: string, metaRow?: StoredReceiptMeta | null): Promise<ApiError | null> {
   // G10 r3: the metadata route passes the row it already read (one row
   // read per call instead of two).
-  const row = metaRow === undefined ? getReceiptMeta(id) : metaRow;
+  const row = metaRow === undefined ? await getReceiptMeta(id) : metaRow;
   if (!row) return null;
   if (normalizeSha256Hex(row.raw_response_sha256) === null) {
     return new ApiError(500, "RECEIPT_CORRUPT", `stored digest for ${id} is not a SHA-256`);
   }
-  for (const p of getReceiptPages(id)) {
+  for (const p of await getReceiptPages(id)) {
     if (normalizeSha256Hex(p.raw_response_sha256) === null) {
       return new ApiError(500, "RECEIPT_CORRUPT", `stored digest for ${id} page ${p.page_index} is not a SHA-256`);
     }
@@ -166,11 +168,11 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
     } catch (err) {
       return sendError(reply, err as ApiError);
     }
-    const row = getReceiptMeta(id);
+    const row = await getReceiptMeta(id);
     if (!row) return sendError(reply, notFound("RECEIPT_NOT_FOUND", `no receipt ${id}`));
     const base = publicBaseUrl();
     // A stored digest that is not a SHA-256 is corruption, not a format.
-    const corrupt = digestCorruption(id, row);
+    const corrupt = await digestCorruption(id, row);
     if (corrupt) return sendError(reply, corrupt);
     const digest = normalizeSha256Hex(row.raw_response_sha256) as string;
     // G10 r2 (J2 m3): evidence_available reflects what /raw would
@@ -183,7 +185,7 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
     const mainEv = row.evidence_available
       ? await checkEvidence(id, null, row.raw_response_sha256, row.evidence_bytes)
       : { status: "missing" as EvidenceStatus, bytes: 0 };
-    const pages = getReceiptPages(id);
+    const pages = await getReceiptPages(id);
     const upstreamPages: Array<Record<string, unknown>> = [];
     for (const p of pages) {
       const pageDigest = normalizeSha256Hex(p.raw_response_sha256) as string;
@@ -268,18 +270,21 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
     } catch (err) {
       return sendError(reply, err as ApiError);
     }
-    if (!getReceiptMeta(id)) return sendError(reply, notFound("RECEIPT_NOT_FOUND", `no receipt ${id}`));
-    const corrupt = digestCorruption(id);
+    if (!(await getReceiptMeta(id))) return sendError(reply, notFound("RECEIPT_NOT_FOUND", `no receipt ${id}`));
+    const corrupt = await digestCorruption(id);
     if (corrupt) return sendError(reply, corrupt);
     let ev: ReceiptEvidence;
     try {
-      ev = getReceiptPageEvidence(id, n);
-    } catch {
-      recordVerified(id, n, "corrupt", 0);
+      ev = await getReceiptPageEvidence(id, n);
+    } catch (err) {
+      // Only a decode/hash failure is corruption; a storage error (e.g. a
+      // Postgres connection reset) rethrows -> the error handler's 502.
+      if (!(err instanceof EvidenceCorruptError)) throw err;
+      await recordVerified(id, n, "corrupt", 0);
       return sendError(reply, new ApiError(500, "EVIDENCE_CORRUPT", `stored evidence for ${id} page ${n} failed its hash check`));
     }
     if (!ev.found) return sendError(reply, notFound("PAGE_NOT_FOUND", `receipt ${id} has no upstream page ${n}`));
-    if (ev.evidence !== null && ev.sha256 !== null) recordVerified(id, n, "ok", ev.evidence.length, { sha256: ev.sha256, evidenceBytes: ev.evidenceBytes });
+    if (ev.evidence !== null && ev.sha256 !== null) await recordVerified(id, n, "ok", ev.evidence.length, { sha256: ev.sha256, evidenceBytes: ev.evidenceBytes });
     return sendBytes(request, reply, ev, `receipt ${id} page ${n}`);
   };
 
@@ -290,19 +295,22 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
     } catch (err) {
       return sendError(reply, err as ApiError);
     }
-    const corrupt = digestCorruption(id);
+    const corrupt = await digestCorruption(id);
     if (corrupt) return sendError(reply, corrupt);
     let ev;
     try {
-      ev = getReceiptEvidence(id);
-    } catch {
+      ev = await getReceiptEvidence(id);
+    } catch (err) {
+      // Only a decode/hash failure is corruption; a storage error (e.g. a
+      // Postgres connection reset) rethrows -> the error handler's 502.
+      if (!(err instanceof EvidenceCorruptError)) throw err;
       // getReceiptEvidence throws only when the blob fails its own hash
       // or length check: never serve those bytes.
-      recordVerified(id, null, "corrupt", 0);
+      await recordVerified(id, null, "corrupt", 0);
       return sendError(reply, new ApiError(500, "EVIDENCE_CORRUPT", `stored evidence for ${id} failed its hash check`));
     }
     if (!ev.found) return sendError(reply, notFound("RECEIPT_NOT_FOUND", `no receipt ${id}`));
-    if (ev.evidence !== null && ev.sha256 !== null) recordVerified(id, null, "ok", ev.evidence.length, { sha256: ev.sha256, evidenceBytes: ev.evidenceBytes });
+    if (ev.evidence !== null && ev.sha256 !== null) await recordVerified(id, null, "ok", ev.evidence.length, { sha256: ev.sha256, evidenceBytes: ev.evidenceBytes });
     return sendBytes(request, reply, ev, `receipt ${id}`);
   };
 
