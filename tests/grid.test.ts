@@ -2044,6 +2044,35 @@ describe("GRID-NP15: a CAISO request with no node is answered for the NP15 hub (
     });
   });
 
+  it("unsuffixed trading-hub stems preserve each canonical hub and its evidence", async () => {
+    seedReferenceHubs();
+    await withNoNetwork(async () => {
+      for (const [stem, node, value] of [
+        ["TH_NP15_GEN", "TH_NP15_GEN-APND", OASIS_NP15],
+        ["TH_SP15_GEN", "TH_SP15_GEN-APND", OASIS_SP15],
+        ["TH_ZP26_GEN", "TH_ZP26_GEN-APND", OASIS_ZP26],
+      ] as const) {
+        expect(resolveCaisoHubAlias(stem)).toBe(node);
+        const canonical = await handleGridPrice({ node_or_zone: node, interval_start: REF_INTERVAL });
+        const alias = await handleGridPrice({ node_or_zone: stem, interval_start: REF_INTERVAL });
+        expect(alias.node_or_zone).toBe(node);
+        expect(alias.lmp_usd_per_mwh).toBe(value);
+        expect(alias.answer).toBe(canonical.answer);
+        expect(alias.market).toBe(canonical.market);
+        expect((alias.receipt as Record<string, unknown>).raw_response_sha256).toBe(
+          (canonical.receipt as Record<string, unknown>).raw_response_sha256,
+        );
+        expect((alias.receipt as Record<string, unknown>).upstream_url).toBe(
+          (canonical.receipt as Record<string, unknown>).upstream_url,
+        );
+      }
+    });
+    for (const bad of ["TH_NP15_GEN2", "TH_SP15_GEN-BOGUS", "TH_XYZ_GEN", "TH_NP15_GEN-APND-EXTRA"]) {
+      expect(resolveCaisoHubAlias(bad)).toBeUndefined();
+      await expectApiError(handleGridPrice({ node_or_zone: bad, interval_start: REF_INTERVAL }), 422, "UNSUPPORTED_ZONE");
+    }
+  });
+
   it("the system answer is the NP15 value even when NP15 is the max or the min of the three hubs", async () => {
     const now = new Date().toISOString();
     const t1 = "2026-09-13T15:00:00.000Z";

@@ -144,6 +144,7 @@ const CAISO_HUB_ALIASES: Record<string, string> = (() => {
       "caiso_" + hub,
       "caiso " + hub + " hub",
       "th_" + hub,
+      "th_" + hub + "_gen",
     ]) {
       out[spelling] = node;
     }
