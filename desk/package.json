@@ -12,7 +12,8 @@
     "test": "vitest run",
     "purchase": "tsx scripts/run-purchase.ts",
     "verify": "tsx scripts/verify-ledger.ts",
-    "export": "tsx scripts/export-frontend.ts"
+    "export": "tsx scripts/export-frontend.ts",
+    "policy": "tsx scripts/report-policy.ts"
   },
   "dependencies": {
     "viem": "2.58.4"
