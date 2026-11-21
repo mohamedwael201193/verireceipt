@@ -550,7 +550,10 @@ curl "$BASE/v1/tvl?protocol=aave-v3"
 curl "$BASE/v1/route?pair=ETH%2FUSDC"
 
 # 5. Grid price for a node and interval (CAISO example; use a recent past interval)
-curl "$BASE/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2026-11-20T06%3A00%3A00Z"`}</pre>
+curl "$BASE/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2026-11-20T06%3A00%3A00Z"
+
+# 6. Validator effective balance at the finalized state (gwei)
+curl "$BASE/v1/validator?validator_index=1"`}</pre>
             </div>
             <div className="vr-doc-actions">
               <Link className="vr-btn-accent vr-link-btn" to="/receipts#try-forms">

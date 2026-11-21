@@ -4,7 +4,7 @@ Verify every claim below against the live service at
 `https://verireceipt.onrender.com`. No account, no key, no login is needed.
 Each check is a single `curl`; the whole guide takes about two minutes.
 
-## 1. The five endpoints
+## 1. The six endpoints
 
 ```bash
 BASE=https://verireceipt.onrender.com
@@ -23,6 +23,9 @@ curl "$BASE/v1/route?pair=ETH%2FUSDC"
 
 # 5. Grid price — wholesale LMP for a node and interval (CAISO example)
 curl "$BASE/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2026-11-19T00%3A00%3A00Z"
+
+# 6. Validator effective balance at the finalized Ethereum state (gwei)
+curl "$BASE/v1/validator?validator_index=1"
 ```
 
 **What to check on each success response:**
@@ -30,10 +33,17 @@ curl "$BASE/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2026-11-1
 - The requested fields are present (`tx_hash`/`status`/`from`/`to`/
   `block_number`/`value_eth`; `entity`/`filing_count`/`filings`/`urls`;
   `protocol_or_chain`/`tvl_usd`/`chain_tvl_usd`/`as_of`; `amount_out`;
-  `lmp_usd_per_mwh`/`node_or_zone`/`market`/`interval_start`/`currency`).
+  `lmp_usd_per_mwh`/`node_or_zone`/`market`/`interval_start`/`currency`;
+  `validator_index`/`effective_balance`/`status`).
 - `confidence`, `verdict`, and `source` are present.
 - `receipt.raw_response_sha256` is present and is a 64-character
   lowercase hex string.
+
+Validator `effective_balance` is in gwei, not ETH. The endpoint reports effective
+balance and status at a finalized beacon state, not uptime, missed attestations
+or future returns. At least two of four public beacon sources must agree;
+conflicting in-budget replies or fewer than two agreements fail closed (502).
+The receipt digest checks stored evidence bytes, not independent source truth.
 
 ## 2. Refusal drills (fail-closed, never fabricated)
 
@@ -51,6 +61,10 @@ curl -i "$BASE/v1/route?pair=BTC%2FUSD"
 # 422 — future grid interval (no settlement data exists yet)
 curl -i "$BASE/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2999-01-01T00%3A00%3A00Z"
 # Expect: HTTP 422, error body, no invented price.
+
+# 400 — noncanonical validator index (leading zero)
+curl -i "$BASE/v1/validator?validator_index=01"
+# Expect: HTTP 400 INVALID_VALIDATOR_INDEX, no invented balance.
 ```
 
 ## 3. The 502 contract (upstream failure)

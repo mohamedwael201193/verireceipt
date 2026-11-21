@@ -49,6 +49,9 @@ curl "$BASE/v1/route?pair=ETH%2FUSDC"
 
 # 5. Grid price for a node and interval (CAISO example)
 curl "$BASE/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2026-11-19T00%3A00%3A00Z"
+
+# 6. Validator effective balance at the finalized Ethereum state (gwei)
+curl "$BASE/v1/validator?validator_index=1"
 ```
 
 ### Response shape
