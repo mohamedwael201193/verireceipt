@@ -740,7 +740,22 @@ export function getDb(): Database.Database {
       raw_response_sha256 TEXT NOT NULL,
       fetched_at TEXT NOT NULL,
       evidence_gzip BLOB,
-      evidence_bytes INTEGER NOT NULL DEFAULT 0
+      evidence_bytes INTEGER NOT NULL DEFAULT 0,
+      quorum_votes TEXT
+    );
+    -- G10 (2026-11-21): extra upstream pages a receipt's answer also
+    -- relied on (e.g. FILINGS older-submissions pages, upstream_pages[]
+    -- in the answer, each with its own sha256). page_index is the
+    -- 0-based position in upstream_pages[]. The main receipt digest
+    -- covers only the main document; each page is verified on its own.
+    CREATE TABLE IF NOT EXISTS miner_receipt_pages (
+      receipt_id TEXT NOT NULL,
+      page_index INTEGER NOT NULL,
+      url TEXT NOT NULL,
+      raw_response_sha256 TEXT NOT NULL,
+      evidence_gzip BLOB,
+      evidence_bytes INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (receipt_id, page_index)
     );
     CREATE TABLE IF NOT EXISTS grid_cache (
       node_or_zone TEXT NOT NULL,
@@ -770,7 +785,7 @@ export function getDb(): Database.Database {
     // Migrate pre-existing tables (created before the columns existed):
     // ADD COLUMN is idempotent via the PRAGMA check. Legacy rows keep
     // NULL evidence (evidence_bytes 0) — their hashes stay valid, but
-    // GET /receipts/:id/evidence 404s EVIDENCE_NOT_FOUND for them until
+    // GET /receipts/:id/raw 404s EVIDENCE_NOT_FOUND for them until
     // a fresh receipt is issued. evidence_gzip holds the zlib-gzipped
     // EXACT bytes that raw_response_sha256 hashes (see saveReceipt);
     // evidence_bytes is their uncompressed length.
@@ -785,6 +800,14 @@ export function getDb(): Database.Database {
       instance.exec(
         "ALTER TABLE miner_receipts ADD COLUMN evidence_bytes INTEGER NOT NULL DEFAULT 0",
       );
+    }
+    // G10 (2026-11-21): quorum_votes is part of the receipt the caller
+    // got (core/receipt.ts) but was never persisted, so GET /receipts/:id
+    // could not return the full receipt. Nullable: legacy rows (written
+    // before this column existed) keep NULL and are served as null —
+    // never a guessed value.
+    if (!receiptColNames.has("quorum_votes")) {
+      instance.exec("ALTER TABLE miner_receipts ADD COLUMN quorum_votes TEXT");
     }
     // R4/BLOCKER: boot-time integrity check. The round-2 claim that
     // "corrupt files already fail fast at first exec" was FALSE: the
@@ -974,7 +997,7 @@ export function isValidFetchedAt(value: string): boolean {
  * Total stored-evidence budget (gzipped bytes, across all receipts).
  * Receipt-fix (2026-11-20): evidence is what makes a receipt
  * re-verifiable — the exact bytes raw_response_sha256 hashes, served at
- * GET /receipts/:id/evidence. Most evidence is small (TX ~1 KB, GRID /
+ * GET /receipts/:id/raw. Most evidence is small (TX ~1 KB, GRID /
  * ROUTE a few KB, TVL canonical ~100 KB), so 50 MB holds hundreds of
  * receipts on the 1 GB Render disk with room for the DB itself. When
  * the budget is exceeded the OLDEST evidence blobs are dropped
@@ -1006,7 +1029,10 @@ export const PRUNE_OLDEST_EVIDENCE_SQL =
 function pruneEvidence(database: Database.Database, exceptReceiptId: string): void {
   for (;;) {
     const totalRow = database
-      .prepare(`SELECT COALESCE(SUM(LENGTH(evidence_gzip)), 0) AS total FROM miner_receipts`)
+      .prepare(
+        `SELECT (SELECT COALESCE(SUM(LENGTH(evidence_gzip)), 0) FROM miner_receipts)
+              + (SELECT COALESCE(SUM(LENGTH(evidence_gzip)), 0) FROM miner_receipt_pages) AS total`,
+      )
       .get() as { total: number };
     if (totalRow.total <= MAX_EVIDENCE_TOTAL_BYTES) return;
     // R2 (F3): the final tie-break is rowid (insertion order), not
@@ -1028,10 +1054,33 @@ function pruneEvidence(database: Database.Database, exceptReceiptId: string): vo
         `UPDATE miner_receipts SET evidence_gzip = NULL, evidence_bytes = 0 WHERE receipt_id = ?`,
       )
       .run(oldest.receipt_id);
+    // G10: a pruned receipt's page evidence goes with it (pages count
+    // toward the same budget; their metadata and digests stay).
+    database
+      .prepare(
+        `UPDATE miner_receipt_pages SET evidence_gzip = NULL, evidence_bytes = 0 WHERE receipt_id = ?`,
+      )
+      .run(oldest.receipt_id);
   }
 }
 
-export function saveReceipt(r: Receipt, evidence?: string | Buffer): void {
+/**
+ * One extra upstream page stored with a receipt (G10). `body` is the
+ * EXACT bytes fetched; `raw_response_sha256`, when given (e.g. the value
+ * the handler already put in upstream_pages[]), must equal sha256(body)
+ * or the save is refused, like the main evidence.
+ */
+export interface ReceiptPageInput {
+  url: string;
+  body: string | Buffer;
+  raw_response_sha256?: string;
+}
+
+export function saveReceipt(
+  r: Receipt,
+  evidence?: string | Buffer,
+  pages: ReceiptPageInput[] = [],
+): void {
   // F4(b): defense in depth at write time — a malformed fetched_at can
   // never reach the table through this path, so it can never be silently
   // dropped from every daily export later. The only production caller
@@ -1064,26 +1113,57 @@ export function saveReceipt(r: Receipt, evidence?: string | Buffer): void {
     evidenceGzip = gzipSync(evidenceBuf);
     evidenceBytes = evidenceBuf.length;
   }
+  // G10: verify + compress every extra page BEFORE writing anything, so
+  // a bad page refuses the whole save (no half-written receipt).
+  const pageRows = pages.map((page, i) => {
+    const buf = typeof page.body === "string" ? Buffer.from(page.body, "utf8") : page.body;
+    const digest = sha256Hex(buf);
+    if (page.raw_response_sha256 !== undefined && page.raw_response_sha256.replace(/^0x/i, "").toLowerCase() !== digest) {
+      throw new Error(
+        `verireceipt: refusing to save receipt ${r.receipt_id}: ` +
+          `upstream page ${i} bytes do not hash to its raw_response_sha256 ${page.raw_response_sha256}`,
+      );
+    }
+    if (typeof page.url !== "string" || page.url.length === 0) {
+      throw new Error(`verireceipt: refusing to save receipt ${r.receipt_id}: upstream page ${i} has no url`);
+    }
+    return { index: i, url: page.url, digest, gzip: gzipSync(buf), bytes: buf.length };
+  });
   const database = getDb();
   // INSERT OR IGNORE: receipts are immutable audit records — a colliding
   // receipt_id must never silently rewrite an existing row. (OR REPLACE
   // stays correct for grid_cache, which is a cache, not an audit record.)
-  database
-    .prepare(
-      `INSERT OR IGNORE INTO miner_receipts
-       (receipt_id, intent, upstream_url, raw_response_sha256, fetched_at, evidence_gzip, evidence_bytes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      r.receipt_id,
-      r.intent,
-      r.upstream_url,
-      r.raw_response_sha256,
-      r.fetched_at,
-      evidenceGzip,
-      evidenceBytes,
-    );
-  if (evidenceGzip !== null) {
+  const insertPage = database.prepare(
+    `INSERT OR IGNORE INTO miner_receipt_pages
+     (receipt_id, page_index, url, raw_response_sha256, evidence_gzip, evidence_bytes)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  database.transaction(() => {
+    const info = database
+      .prepare(
+        `INSERT OR IGNORE INTO miner_receipts
+         (receipt_id, intent, upstream_url, raw_response_sha256, fetched_at, evidence_gzip, evidence_bytes, quorum_votes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        r.receipt_id,
+        r.intent,
+        r.upstream_url,
+        r.raw_response_sha256,
+        r.fetched_at,
+        evidenceGzip,
+        evidenceBytes,
+        typeof r.quorum_votes === "string" ? r.quorum_votes : null,
+      );
+    // Pages only belong to the row this call created: a colliding id
+    // (ignored above) must not gain pages from a different answer.
+    if (info.changes === 1) {
+      for (const p of pageRows) {
+        insertPage.run(r.receipt_id, p.index, p.url, p.digest, p.gzip, p.bytes);
+      }
+    }
+  })();
+  if (evidenceGzip !== null || pageRows.length > 0) {
     try {
       pruneEvidence(database, r.receipt_id);
     } catch (err) {
@@ -1150,6 +1230,119 @@ export function getReceiptEvidence(receiptId: string): ReceiptEvidence {
     evidence,
     sha256: row.raw_response_sha256,
     evidenceBytes: row.evidence_bytes,
+  };
+}
+
+/** Stored receipt metadata (G10): everything GET /receipts/:id serves. */
+export interface StoredReceiptMeta {
+  receipt_id: string;
+  intent: string;
+  upstream_url: string;
+  raw_response_sha256: string;
+  fetched_at: string;
+  /** null for legacy rows written before quorum_votes was persisted. */
+  quorum_votes: string | null;
+  evidence_available: boolean;
+  evidence_bytes: number;
+}
+
+/**
+ * Read one receipt's metadata by its exact id (G10). Never reads or
+ * decompresses the evidence blob — only whether one is stored. Returns
+ * null when no row has that id. The id is bound as a parameter (no SQL
+ * built from it), and callers validate its shape before calling.
+ */
+/** Stored metadata for one extra upstream page (G10). */
+export interface StoredReceiptPage {
+  page_index: number;
+  url: string;
+  raw_response_sha256: string;
+  evidence_available: boolean;
+  evidence_bytes: number;
+}
+
+/** List a receipt's extra upstream pages in page_index order (never decompresses). */
+export function getReceiptPages(receiptId: string): StoredReceiptPage[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT page_index, url, raw_response_sha256, evidence_bytes,
+              (evidence_gzip IS NOT NULL) AS has_evidence
+       FROM miner_receipt_pages WHERE receipt_id = ? ORDER BY page_index ASC`,
+    )
+    .all(receiptId) as Array<{
+    page_index: number;
+    url: string;
+    raw_response_sha256: string;
+    evidence_bytes: number;
+    has_evidence: number;
+  }>;
+  return rows.map((row) => ({
+    page_index: row.page_index,
+    url: row.url,
+    raw_response_sha256: row.raw_response_sha256,
+    evidence_available: row.has_evidence === 1,
+    evidence_bytes: row.has_evidence === 1 ? row.evidence_bytes : 0,
+  }));
+}
+
+/**
+ * Fetch one extra page's exact bytes (G10). found=false when no such
+ * page row exists. Throws on a corrupt blob (gunzip failure, or bytes
+ * that no longer hash to the stored digest / length), like
+ * getReceiptEvidence — wrong bytes are never returned.
+ */
+export function getReceiptPageEvidence(receiptId: string, pageIndex: number): ReceiptEvidence {
+  const row = getDb()
+    .prepare(
+      `SELECT raw_response_sha256, evidence_gzip, evidence_bytes
+       FROM miner_receipt_pages WHERE receipt_id = ? AND page_index = ?`,
+    )
+    .get(receiptId, pageIndex) as
+    | { raw_response_sha256: string; evidence_gzip: Buffer | null; evidence_bytes: number }
+    | undefined;
+  if (!row) return { found: false, evidence: null, sha256: null, evidenceBytes: 0 };
+  if (row.evidence_gzip === null || row.evidence_gzip === undefined) {
+    return { found: true, evidence: null, sha256: row.raw_response_sha256, evidenceBytes: 0 };
+  }
+  const evidence = gunzipSync(row.evidence_gzip);
+  if (evidence.length !== row.evidence_bytes || sha256Hex(evidence) !== row.raw_response_sha256) {
+    throw new Error(
+      `verireceipt: stored page ${pageIndex} for receipt ${receiptId} does not match ` +
+        `raw_response_sha256 ${row.raw_response_sha256} (corrupt evidence blob)`,
+    );
+  }
+  return { found: true, evidence, sha256: row.raw_response_sha256, evidenceBytes: row.evidence_bytes };
+}
+
+export function getReceiptMeta(receiptId: string): StoredReceiptMeta | null {
+  const row = getDb()
+    .prepare(
+      `SELECT receipt_id, intent, upstream_url, raw_response_sha256, fetched_at,
+              quorum_votes, evidence_bytes, (evidence_gzip IS NOT NULL) AS has_evidence
+       FROM miner_receipts WHERE receipt_id = ?`,
+    )
+    .get(receiptId) as
+    | {
+        receipt_id: string;
+        intent: string;
+        upstream_url: string;
+        raw_response_sha256: string;
+        fetched_at: string;
+        quorum_votes: string | null;
+        evidence_bytes: number;
+        has_evidence: number;
+      }
+    | undefined;
+  if (!row) return null;
+  return {
+    receipt_id: row.receipt_id,
+    intent: row.intent,
+    upstream_url: row.upstream_url,
+    raw_response_sha256: row.raw_response_sha256,
+    fetched_at: row.fetched_at,
+    quorum_votes: row.quorum_votes ?? null,
+    evidence_available: row.has_evidence === 1,
+    evidence_bytes: row.has_evidence === 1 ? row.evidence_bytes : 0,
   };
 }
 

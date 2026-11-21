@@ -36,7 +36,7 @@ export function sha256Hex(data: string | Buffer): string {
  * body hashes differently per fetch. TVL receipts therefore hash a
  * PINNED canonical evidence object built from the parsed payload
  * (see src/handlers/tvl.ts), serialized with this function, and the
- * exact bytes are stored and served at GET /receipts/:id/evidence.
+ * exact bytes are stored and served at GET /receipts/:id/raw.
  * A re-hash of the SERVED bytes always matches; a re-fetch of the
  * upstream URL is not the verification path (see JUDGE.md §4).
  *
@@ -96,6 +96,44 @@ export function newReceiptId(): string {
   return "rcpt_" + id;
 }
 
+/**
+ * Public origin used in audit_url / raw_url. Validate PUBLIC_BASE_URL: an
+ * unparseable base falls back to the default, and a valid base contributes
+ * only its origin (any path is stripped, so e.g. "https://example.com/api"
+ * cannot produce a likely-404 audit path). Empty string still means "use
+ * the default". Read at call time so tests can set it.
+ */
+export function publicBaseUrl(): string {
+  const DEFAULT_BASE_URL = "https://verireceipt.onrender.com";
+  const rawBase = (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "") || DEFAULT_BASE_URL;
+  try {
+    return new URL(rawBase).origin;
+  } catch {
+    return DEFAULT_BASE_URL;
+  }
+}
+
+/**
+ * Receipt id shape (G10): "rcpt_" + 26 characters of A-Z0-9, exactly what
+ * newReceiptId() emits (and what every earlier build emitted). Anything
+ * else is a malformed id — rejected before any DB access.
+ */
+export const RECEIPT_ID_RE = /^rcpt_[A-Z0-9]{26}$/;
+
+/**
+ * Canonical receipt hash format (G10, documented in README "Receipts"):
+ * raw_response_sha256 is the SHA-256 of the exact evidence bytes as 64
+ * LOWERCASE hex characters with NO "0x" prefix — the same string
+ * `sha256sum` prints. Builds up to 66868d7 emitted "0x" + hex; rows
+ * stored by those builds are normalised to the canonical form when
+ * served. Returns null for anything that is not a SHA-256 digest.
+ */
+export function normalizeSha256Hex(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const hex = value.trim().toLowerCase().replace(/^0x/, "");
+  return /^[0-9a-f]{64}$/.test(hex) ? hex : null;
+}
+
 export function makeReceipt(
   intent: string,
   upstreamUrl: string,
@@ -103,18 +141,7 @@ export function makeReceipt(
   quorumVotes: string,
 ): Receipt {
   const receipt_id = newReceiptId();
-  // Validate PUBLIC_BASE_URL: an unparseable base falls back to the default,
-  // and a valid base contributes only its origin (any path is stripped, so
-  // e.g. "https://example.com/api" cannot produce a likely-404 audit path).
-  // Empty string still means "use the default".
-  const DEFAULT_BASE_URL = "https://verireceipt.onrender.com";
-  const rawBase = (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "") || DEFAULT_BASE_URL;
-  let baseUrl: string;
-  try {
-    baseUrl = new URL(rawBase).origin;
-  } catch {
-    baseUrl = DEFAULT_BASE_URL;
-  }
+  const baseUrl = publicBaseUrl();
   return {
     receipt_id,
     intent,

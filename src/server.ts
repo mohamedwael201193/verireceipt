@@ -16,6 +16,7 @@ import { handleGridPrice } from "./handlers/gridPrice";
 import { handleValidator } from "./handlers/validator";
 import { ApiError, badRequest, errorBody } from "./core/errors";
 import { getDb } from "./core/db";
+import { registerReceiptRoutes } from "./core/receiptRoutes";
 import { getJobsSnapshot, getLoopLagSnapshot, startLoopLagSampler } from "./core/loopLag";
 import {
   INTENT_PRIMARY_UPSTREAM,
@@ -194,6 +195,11 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/validator", async (request) =>
     trackIntent("validator", () => handleValidator(asQuery(request.query))),
   );
+
+  // G10: serve stored receipts + their exact raw evidence bytes
+  // (GET /receipts/:id, /receipts/:id/raw; /api/* aliases). See
+  // src/core/receiptRoutes.ts for the contract.
+  registerReceiptRoutes(app);
 
   return app;
 }
