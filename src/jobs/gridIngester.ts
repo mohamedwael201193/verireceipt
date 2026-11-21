@@ -1392,7 +1392,7 @@ export function isSettledGridInterval(
 
 const CAISO_NODES = ["TH_NP15_GEN-APND", "TH_SP15_GEN-APND", "TH_ZP26_GEN-APND"];
 
-/** The three CAISO hubs whose median answers a "CAISO" system request (A4). */
+/** The three CAISO trading hubs served (a "CAISO" system request is answered for NP15). */
 export const CAISO_HUB_NODES: readonly string[] = CAISO_NODES;
 
 /** CAISO OASIS PRC_LMP day-ahead market, USD/MWh, hourly intervals. */
@@ -1497,9 +1497,8 @@ async function ingestCaiso(): Promise<number> {
  * Timeout: OASIS SingleZip is SLOW — three identical 1-hour queries
  * took 12 s / 28 s / 47 s from this VM on 2026-11-20 — so the default
  * here is 120 s, NOT the ingester's 20 s FETCH_TIMEOUT_MS (which
- * would abort a healthy on-demand fetch). Callers fetch the three
- * system hubs in parallel, so a system answer costs ~one slow call,
- * not three.
+ * would abort a healthy on-demand fetch). A "CAISO" system request
+ * fetches one hub (NP15), so it costs one slow call.
  *
  * Returns null when OASIS answers but carries no LMP_PRC row for
  * this node + hour (no price exists to serve — the caller reports a

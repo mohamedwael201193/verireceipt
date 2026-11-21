@@ -192,7 +192,8 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
  * spellings follow SUPPORTED_ZONES (src/jobs/gridIngester.ts):
  * Elering EE/FI/LV/LT, NYISO ZONE_A–K + WEST/GENESE/CENTRL/NORTH/
  * "MHK VL"/CAPITL/"HUD VL"/MILLWD/DUNWOD/"N.Y.C."/LONGIL, CAISO
- * TH_NP15/SP15/ZP26_GEN-APND + "CAISO" (system). Anything else
+ * TH_NP15/SP15/ZP26_GEN-APND, "CAISO" (system) and the NP15/SP15/
+ * ZP26 short names. Anything else
  * (including an unknown zone, which 422s before any upstream is
  * touched and therefore never records) falls back to caiso-oasis.
  * Never throws.

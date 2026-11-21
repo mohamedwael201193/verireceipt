@@ -21,11 +21,14 @@ afterAll(() => {
 });
 
 import { ApiError } from "../src/core/errors";
+import { primaryUpstreamForGridZone } from "../src/core/upstreams";
 import { sha256Hex } from "../src/core/receipt";
 import { getDb, getGridRevalidate, saveGridPrice } from "../src/core/db";
 import {
   handleGridPrice,
   CAISO_SYSTEM_MARKET,
+  CAISO_SYSTEM_NODE,
+  resolveCaisoHubAlias,
   GRID_UNCONFIRMED_CONFIDENCE,
   GRID_UNCONFIRMED_VERDICT,
 } from "../src/handlers/gridPrice";
@@ -1914,7 +1917,8 @@ describe("GRID round-3: receipt hash is of the fields AS SERVED (F1)", () => {
 
 // ---------------------------------------------------------------------------
 // A4 (2026-11-20): on-demand CAISO OASIS day-ahead fetch + CAISO system
-// hub median. Additions only: no existing test above was edited except
+// request (GRID-NP15, 2026-11-21: answered for the NP15 trading hub;
+// it was a 3-hub median before). Additions only: no existing test above was edited except
 // the round-7 guard-code rename in the guard tests (same guard, new
 // code string). The live reference test
 // deletes the seeded reference rows first, so it proves the on-demand
@@ -1932,87 +1936,138 @@ function caisoLmpRow(node: string, startGmt: string, endGmt: string, lmp: number
   );
 }
 
-describe("GRID A4: CAISO system hub median (cached hubs, no network)", () => {
+describe("GRID-NP15: a CAISO request with no node is answered for the NP15 hub (cached hubs, no network)", () => {
   const REF_INTERVAL = "2026-09-13T14:00:00.000Z";
+  // The official GRID_POWER_PRICE_GENERAL comparator: tolerance_bps 30.
+  const TOLERANCE_BPS = 30;
+  // CAISO OASIS PRC_LMP DAM, LMP_PRC, 2026-09-13T14:00Z (fetched live
+  // 2026-11-21 by the deployed service; receipt evidence in the build note).
+  const OASIS_NP15 = 38.09459;
+  const OASIS_SP15 = 36.74434;
+  const OASIS_ZP26 = 36.79695;
 
   /** Seed the three hubs fresh with the live OASIS values for the reference hour. */
   function seedReferenceHubs(): void {
     const now = new Date().toISOString();
-    saveGridPrice("TH_NP15_GEN-APND", REF_INTERVAL, 38.09459, "CAISO", now);
-    saveGridPrice("TH_SP15_GEN-APND", REF_INTERVAL, 36.74434, "CAISO", now);
-    saveGridPrice("TH_ZP26_GEN-APND", REF_INTERVAL, 36.79695, "CAISO", now);
+    saveGridPrice("TH_NP15_GEN-APND", REF_INTERVAL, OASIS_NP15, "CAISO", now);
+    saveGridPrice("TH_SP15_GEN-APND", REF_INTERVAL, OASIS_SP15, "CAISO", now);
+    saveGridPrice("TH_ZP26_GEN-APND", REF_INTERVAL, OASIS_ZP26, "CAISO", now);
   }
 
-  it('"CAISO" -> median 36.79695 with the method stated in market + answer', async () => {
+  function bps(a: number, ref: number): number {
+    return (Math.abs(a - ref) / Math.abs(ref)) * 10_000;
+  }
+
+  /** No network: a CAISO request that hits a fresh cache must not call OASIS. */
+  async function withNoNetwork<T>(fn: () => Promise<T>): Promise<T> {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (() => Promise.reject(new Error("NETWORK MUST NOT BE CALLED"))) as typeof fetch;
+    try {
+      return await fn();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+
+  it('the official scored question ("CAISO", 2026-09-13T14:00Z) -> NP15 38.09459, within 30 bps of OASIS NP15', async () => {
     seedReferenceHubs();
-    const res = await handleGridPrice({ node_or_zone: "CAISO", interval_start: REF_INTERVAL });
-    expect(res.lmp_usd_per_mwh).toBe(36.79695);
-    expect(res.node_or_zone).toBe("CAISO");
+    const res = await withNoNetwork(() =>
+      handleGridPrice({ node_or_zone: "CAISO", interval_start: "2026-09-13T14:00:00Z" }),
+    );
+    expect(res.lmp_usd_per_mwh).toBe(OASIS_NP15);
+    expect(bps(res.lmp_usd_per_mwh as number, OASIS_NP15)).toBeLessThanOrEqual(TOLERANCE_BPS);
+    // The previous 3-hub median (36.79695) is 341 bps off NP15: outside tolerance.
+    expect(bps(OASIS_ZP26, OASIS_NP15)).toBeGreaterThan(TOLERANCE_BPS);
+    // Disclosure: the node used is named in node_or_zone, market and answer.
+    expect(res.node_or_zone).toBe("TH_NP15_GEN-APND");
+    expect(res.node_or_zone).toBe(CAISO_SYSTEM_NODE);
     expect(res.market).toBe(CAISO_SYSTEM_MARKET);
-    expect(res.market as string).toContain("system hub median of NP15/SP15/ZP26");
+    expect(res.market as string).toContain("NP15 trading hub TH_NP15_GEN-APND");
+    expect(res.market as string).toContain("request named no CAISO node");
+    expect(res.market as string).not.toContain("median");
     expect(res.interval_start).toBe(REF_INTERVAL);
     expect(res.currency).toBe("USD");
     expect(res.verdict).toBe("verified");
     expect(res.confidence).toBe(1.0);
     expect(res.source).toBe("CAISO OASIS PRC_LMP DAM");
-    // The prose names the method AND all three hub values.
-    expect(res.answer as string).toContain("CAISO system day-ahead LMP");
-    expect(res.answer as string).toContain("median");
-    expect(res.answer as string).toContain("NP15 $38.09");
-    expect(res.answer as string).toContain("SP15 $36.74");
-    expect(res.answer as string).toContain("ZP26 $36.80");
-    expect(res.answer as string).toContain("$36.80");
-    // Receipt hash recomputes from the served fields (node "CAISO",
-    // interval, median LMP, median market).
+    const answer = res.answer as string;
+    expect(answer).toContain("NP15 trading hub (TH_NP15_GEN-APND)");
+    expect(answer).toContain("$38.09");
+    expect(answer).toContain("named no CAISO pricing node");
+    expect(answer).toContain("TH_SP15_GEN-APND");
+    expect(answer).toContain("TH_ZP26_GEN-APND");
+    expect(answer).not.toContain("median");
+    // Receipt hash recomputes from the served fields.
     const receipt = res.receipt as Record<string, unknown>;
     expect(receipt.raw_response_sha256).toBe(
       sha256Hex(
         JSON.stringify({
-          node_or_zone: "CAISO",
+          node_or_zone: "TH_NP15_GEN-APND",
           interval_start: REF_INTERVAL,
-          lmp_usd_per_mwh: 36.79695,
+          lmp_usd_per_mwh: OASIS_NP15,
           market: CAISO_SYSTEM_MARKET,
         }),
       ),
     );
-    expect(receipt.quorum_votes as string).toContain("median of 3");
+    expect(receipt.quorum_votes as string).toContain("answered for the NP15 trading hub TH_NP15_GEN-APND");
     expect(receipt.upstream_url as string).toContain("oasis.caiso.com");
+    expect(receipt.upstream_url as string).toContain("TH_NP15_GEN-APND");
   });
 
-  it('"CAISO system" / "caiso" / "" / whitespace all resolve to the same median', async () => {
+  it('"CAISO system" / "caiso" / "" / whitespace / "CAISO day-ahead" all resolve to NP15', async () => {
     seedReferenceHubs();
-    for (const spelling of ["CAISO system", "caiso", "", "   ", "CAISO-SYSTEM"]) {
-      const res = await handleGridPrice({ node_or_zone: spelling, interval_start: REF_INTERVAL });
-      expect(res.lmp_usd_per_mwh).toBe(36.79695);
-      expect(res.node_or_zone).toBe("CAISO");
-      expect(res.market).toBe(CAISO_SYSTEM_MARKET);
-    }
+    await withNoNetwork(async () => {
+      for (const spelling of [
+        "CAISO system",
+        "caiso",
+        "",
+        "   ",
+        "CAISO-SYSTEM",
+        "caiso_system",
+        "CAISO system hub",
+        "CAISO day-ahead",
+        "CAISO day ahead",
+        "CAISO DAM",
+        "CAISO DA",
+      ]) {
+        const res = await handleGridPrice({ node_or_zone: spelling, interval_start: REF_INTERVAL });
+        expect(res.lmp_usd_per_mwh).toBe(OASIS_NP15);
+        expect(res.node_or_zone).toBe("TH_NP15_GEN-APND");
+        expect(res.market).toBe(CAISO_SYSTEM_MARKET);
+      }
+    });
   });
 
-  it("the median is the middle value, not a fixed hub", async () => {
+  it("the system answer is the NP15 value even when NP15 is the max or the min of the three hubs", async () => {
     const now = new Date().toISOString();
     const t1 = "2026-09-13T15:00:00.000Z";
     saveGridPrice("TH_NP15_GEN-APND", t1, 10, "CAISO", now);
     saveGridPrice("TH_SP15_GEN-APND", t1, 30, "CAISO", now);
     saveGridPrice("TH_ZP26_GEN-APND", t1, 20, "CAISO", now);
-    const r1 = await handleGridPrice({ node_or_zone: "CAISO", interval_start: t1 });
-    expect(r1.lmp_usd_per_mwh).toBe(20);
-    // A different hub is the median this time (NP15 is the max, SP15 the min).
+    const r1 = await withNoNetwork(() => handleGridPrice({ node_or_zone: "CAISO", interval_start: t1 }));
+    expect(r1.lmp_usd_per_mwh).toBe(10);
     const t2 = "2026-09-13T16:00:00.000Z";
     saveGridPrice("TH_NP15_GEN-APND", t2, 50, "CAISO", now);
     saveGridPrice("TH_SP15_GEN-APND", t2, 10, "CAISO", now);
     saveGridPrice("TH_ZP26_GEN-APND", t2, 30, "CAISO", now);
-    const r2 = await handleGridPrice({ node_or_zone: "CAISO", interval_start: t2 });
-    expect(r2.lmp_usd_per_mwh).toBe(30);
+    const r2 = await withNoNetwork(() => handleGridPrice({ node_or_zone: "CAISO", interval_start: t2 }));
+    expect(r2.lmp_usd_per_mwh).toBe(50);
   });
 
-  it("a missing hub -> 502 GRID_CACHE_MISS naming the hub (fetch stubbed to fail)", async () => {
-    const now = new Date().toISOString();
+  it("the system answer needs only NP15: missing SP15/ZP26 rows do not fail it and trigger no fetch", async () => {
     const t = "2026-09-13T17:00:00.000Z";
-    saveGridPrice("TH_NP15_GEN-APND", t, 38.09, "CAISO", now);
+    saveGridPrice("TH_NP15_GEN-APND", t, 38.09, "CAISO", new Date().toISOString());
+    const res = await withNoNetwork(() => handleGridPrice({ node_or_zone: "CAISO", interval_start: t }));
+    expect(res.lmp_usd_per_mwh).toBe(38.09);
+    expect(getGridPrice("TH_SP15_GEN-APND", t)).toBeNull();
+    expect(getGridPrice("TH_ZP26_GEN-APND", t)).toBeNull();
+  });
+
+  it("a missing NP15 hour + failed live fetch -> 502 GRID_CACHE_MISS naming TH_NP15_GEN-APND (never another hub)", async () => {
+    const now = new Date().toISOString();
+    const t = "2026-09-12T20:00:00.000Z";
     saveGridPrice("TH_SP15_GEN-APND", t, 36.74, "CAISO", now);
-    // ZP26 is NOT seeded: the handler tries the live fetch for it, the
-    // stub fails, and the median is refused (never computed from 2 hubs).
+    saveGridPrice("TH_ZP26_GEN-APND", t, 36.8, "CAISO", now);
     const realFetch = globalThis.fetch;
     globalThis.fetch = (() => Promise.reject(new Error("stubbed OASIS failure"))) as typeof fetch;
     try {
@@ -2021,27 +2076,24 @@ describe("GRID A4: CAISO system hub median (cached hubs, no network)", () => {
         502,
         "GRID_CACHE_MISS",
       );
-      expect(err.message).toContain("TH_ZP26_GEN-APND");
+      expect(err.message).toContain("TH_NP15_GEN-APND");
     } finally {
       globalThis.fetch = realFetch;
     }
   });
 
-  it("a settled historical hub older than the TTL is used without a live re-fetch (A9)", async () => {
-    const now = new Date().toISOString();
+  it("a settled historical NP15 row older than the TTL is used without a live re-fetch (A9)", async () => {
     const t = "2026-09-13T18:00:00.000Z";
-    saveGridPrice("TH_NP15_GEN-APND", t, 38.09, "CAISO", now);
-    saveGridPrice("TH_SP15_GEN-APND", t, 36.74, "CAISO", now);
-    saveGridPrice("TH_ZP26_GEN-APND", t, 36.8, "CAISO", minutesAgoIso(61));
+    saveGridPrice("TH_NP15_GEN-APND", t, 38.09, "CAISO", minutesAgoIso(61));
     let fetchCalls = 0;
     const realFetch = globalThis.fetch;
-    globalThis.fetch = ((url: unknown) => {
+    globalThis.fetch = (() => {
       fetchCalls++;
       return Promise.reject(new Error("stubbed OASIS failure"));
     }) as typeof fetch;
     try {
       const res = await handleGridPrice({ node_or_zone: "CAISO", interval_start: t });
-      expect(res.lmp_usd_per_mwh).toBe(36.8); // median of 36.74, 36.8, 38.09
+      expect(res.lmp_usd_per_mwh).toBe(38.09);
       expect(res.verdict).toBe("verified");
       expect(fetchCalls).toBe(0);
     } finally {
@@ -2049,12 +2101,10 @@ describe("GRID A4: CAISO system hub median (cached hubs, no network)", () => {
     }
   });
 
-  it("a stale hub on a recent unsettled hour + failed re-fetch -> 502 GRID_CACHE_STALE naming the hub", async () => {
-    const now = new Date().toISOString();
+  it("a stale NP15 row on a recent unsettled hour + failed re-fetch -> 502 GRID_CACHE_STALE naming the hub", async () => {
     const t = lastCompletedCaisoHourIso();
-    saveGridPrice("TH_NP15_GEN-APND", t, 38.09, "CAISO", now);
-    saveGridPrice("TH_SP15_GEN-APND", t, 36.74, "CAISO", now);
-    saveGridPrice("TH_ZP26_GEN-APND", t, 36.8, "CAISO", minutesAgoIso(61));
+    saveGridPrice("TH_NP15_GEN-APND", t, 38.09, "CAISO", minutesAgoIso(61));
+    saveGridPrice("TH_SP15_GEN-APND", t, 36.74, "CAISO", new Date().toISOString());
     const realFetch = globalThis.fetch;
     globalThis.fetch = (() => Promise.reject(new Error("stubbed OASIS failure"))) as typeof fetch;
     try {
@@ -2063,10 +2113,151 @@ describe("GRID A4: CAISO system hub median (cached hubs, no network)", () => {
         502,
         "GRID_CACHE_STALE",
       );
-      expect(err.message).toContain("TH_ZP26_GEN-APND");
+      expect(err.message).toContain("TH_NP15_GEN-APND");
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+
+  it("an unseeded system hour is fetched live for NP15 only, cached under NP15, and the hub query then hits the same row", async () => {
+    const HOUR = "2026-11-18T09:00:00.000Z";
+    expect(getGridPrice("TH_NP15_GEN-APND", HOUR)).toBeNull();
+    const zip = makeCaisoZip(
+      "PRC_LMP.csv",
+      [
+        CAISO_HEADER,
+        caisoLmpRow("TH_NP15_GEN-APND", "2026-11-18T09:00:00-00:00", "2026-11-18T10:00:00-00:00", 41.23456),
+      ].join("\n"),
+    );
+    const realFetch = globalThis.fetch;
+    const nodesFetched: string[] = [];
+    globalThis.fetch = (async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("oasis.caiso.com")) {
+        nodesFetched.push(new URL(u).searchParams.get("node") ?? "");
+        return new Response(new Uint8Array(zip), { status: 200 });
+      }
+      throw new Error("stubbed upstream failure");
+    }) as typeof fetch;
+    try {
+      const res = await handleGridPrice({ node_or_zone: "CAISO", interval_start: HOUR });
+      expect(res.lmp_usd_per_mwh).toBe(41.23456);
+      expect(res.node_or_zone).toBe("TH_NP15_GEN-APND");
+      expect(res.market).toBe(CAISO_SYSTEM_MARKET);
+      expect((res.receipt as Record<string, unknown>).quorum_votes as string).toContain("live CAISO OASIS");
+      expect(nodesFetched).toEqual(["TH_NP15_GEN-APND"]);
+      expect(getGridPrice("TH_NP15_GEN-APND", HOUR)?.lmp_usd_per_mwh).toBe(41.23456);
+      expect(getGridPrice("CAISO", HOUR)).toBeNull();
+      // Same cached row for an explicit hub query: plain hub answer, no new fetch.
+      const hub = await handleGridPrice({ node_or_zone: "TH_NP15_GEN-APND", interval_start: HOUR });
+      expect(hub.lmp_usd_per_mwh).toBe(41.23456);
+      expect(hub.market).toBe("CAISO");
+      expect(nodesFetched.length).toBe(1);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("explicit hubs keep their own values (SP15 / ZP26 are not answered with NP15)", async () => {
+    seedReferenceHubs();
+    await withNoNetwork(async () => {
+      const sp = await handleGridPrice({ node_or_zone: "TH_SP15_GEN-APND", interval_start: REF_INTERVAL });
+      expect(sp.lmp_usd_per_mwh).toBe(OASIS_SP15);
+      expect(sp.node_or_zone).toBe("TH_SP15_GEN-APND");
+      expect(sp.market).toBe("CAISO");
+      expect(sp.answer as string).not.toContain("named no CAISO");
+      const zp = await handleGridPrice({ node_or_zone: "TH_ZP26_GEN-APND", interval_start: REF_INTERVAL });
+      expect(zp.lmp_usd_per_mwh).toBe(OASIS_ZP26);
+      const np = await handleGridPrice({ node_or_zone: "TH_NP15_GEN-APND", interval_start: REF_INTERVAL });
+      expect(np.lmp_usd_per_mwh).toBe(OASIS_NP15);
+      expect(np.market).toBe("CAISO");
+      expect(np.answer as string).toBe(
+        "The LMP at TH_NP15_GEN-APND was $38.09 USD per MWh (CAISO) for the interval starting " + REF_INTERVAL + ".",
+      );
+    });
+  });
+
+  it("hub short names (NP15, CAISO NP15, SP15, ZP26, ...) resolve to the canonical hub; they were 422 before", async () => {
+    seedReferenceHubs();
+    const cases: Array<[string, string, number]> = [
+      ["NP15", "TH_NP15_GEN-APND", OASIS_NP15],
+      ["np15", "TH_NP15_GEN-APND", OASIS_NP15],
+      ["CAISO NP15", "TH_NP15_GEN-APND", OASIS_NP15],
+      ["caiso  np15", "TH_NP15_GEN-APND", OASIS_NP15],
+      ["CAISO-NP15", "TH_NP15_GEN-APND", OASIS_NP15],
+      ["CAISO_NP15", "TH_NP15_GEN-APND", OASIS_NP15],
+      ["NP15 hub", "TH_NP15_GEN-APND", OASIS_NP15],
+      ["CAISO NP15 hub", "TH_NP15_GEN-APND", OASIS_NP15],
+      ["TH_NP15", "TH_NP15_GEN-APND", OASIS_NP15],
+      [" SP15 ", "TH_SP15_GEN-APND", OASIS_SP15],
+      ["CAISO SP15", "TH_SP15_GEN-APND", OASIS_SP15],
+      ["ZP26", "TH_ZP26_GEN-APND", OASIS_ZP26],
+      ["caiso zp26", "TH_ZP26_GEN-APND", OASIS_ZP26],
+    ];
+    await withNoNetwork(async () => {
+      for (const [spelling, node, lmp] of cases) {
+        const res = await handleGridPrice({ node_or_zone: spelling, interval_start: REF_INTERVAL });
+        expect(res.lmp_usd_per_mwh).toBe(lmp);
+        expect(res.node_or_zone).toBe(node);
+        expect(res.market).toBe("CAISO");
+        const receipt = res.receipt as Record<string, unknown>;
+        expect(receipt.raw_response_sha256).toBe(
+          sha256Hex(JSON.stringify({ node_or_zone: node, interval_start: REF_INTERVAL, lmp_usd_per_mwh: lmp, market: "CAISO" })),
+        );
+      }
+    });
+    for (const [spelling, node] of cases) expect(resolveCaisoHubAlias(spelling)).toBe(node);
+  });
+
+  it("near-miss spellings stay 422 UNSUPPORTED_ZONE (no fuzzy match, no prototype keys)", async () => {
+    for (const bad of [
+      "NP16",
+      "NP 15",
+      "CAISO NP15X",
+      "SP15 ZP26",
+      "CAISO system median",
+      "caiso np15 gen",
+      "toString",
+      "__proto__",
+      "constructor",
+    ]) {
+      await expectApiError(
+        handleGridPrice({ node_or_zone: bad, interval_start: REF_INTERVAL }),
+        422,
+        "UNSUPPORTED_ZONE",
+      );
+      expect(resolveCaisoHubAlias(bad)).toBeUndefined();
+    }
+  });
+
+  it("a CAISO system request for an unfinished hour is still 422 FUTURE_INTERVAL; off-boundary still 422", async () => {
+    const future = futureIso(3);
+    await expectApiError(handleGridPrice({ node_or_zone: "CAISO", interval_start: future }), 422, "FUTURE_INTERVAL");
+    await expectApiError(
+      handleGridPrice({ node_or_zone: "CAISO", interval_start: "2026-09-13T14:15:00Z" }),
+      422,
+      "OFF_BOUNDARY_INTERVAL",
+    );
+    await expectApiError(
+      handleGridPrice({ node_or_zone: "NP15", interval_start: "2026-09-13T14:15:00Z" }),
+      422,
+      "OFF_BOUNDARY_INTERVAL",
+    );
+  });
+
+  it("error attribution: CAISO system + hub short names are attributed to caiso-oasis", () => {
+    for (const z of ["CAISO", "NP15", "CAISO NP15", "SP15", "ZP26", "TH_NP15_GEN-APND"]) {
+      expect(primaryUpstreamForGridZone(z)).toBe("caiso-oasis");
+    }
+  });
+
+  it("NYISO aliases are unaffected: N.Y.C. still echoes its own spelling", async () => {
+    const t = pastIso(30);
+    saveGridPrice("ZONE_J", t, 44.4, "NYISO", new Date().toISOString());
+    const res = await withNoNetwork(() => handleGridPrice({ node_or_zone: "N.Y.C.", interval_start: t }));
+    expect(res.lmp_usd_per_mwh).toBe(44.4);
+    expect(res.node_or_zone).toBe("N.Y.C.");
+    expect(res.market).toBe("NYISO");
   });
 });
 
@@ -2244,9 +2435,9 @@ describe("GRID A4: fetchCaisoDamLmp (stubbed zip)", () => {
   });
 });
 
-describe("GRID A4 LIVE: reference question 2026-09-13T14:00Z CAISO -> ~36.80", () => {
+describe("GRID-NP15 LIVE: reference question 2026-09-13T14:00Z CAISO -> NP15 ~38.09", () => {
   it(
-    "median of the three live OASIS hub values is within 0.30% of 36.79695",
+    "the CAISO answer is the live OASIS NP15 value, within 30 bps of 38.09459",
     async () => {
       const interval = "2026-09-13T14:00:00.000Z";
       // Delete any seeded reference rows first: this test must prove
@@ -2254,19 +2445,15 @@ describe("GRID A4 LIVE: reference question 2026-09-13T14:00Z CAISO -> ~36.80", (
       getDb().prepare("DELETE FROM grid_cache WHERE interval_start = ?").run(interval);
       expect(getGridPrice("TH_NP15_GEN-APND", interval)).toBeNull();
       const res = await handleGridPrice({ node_or_zone: "CAISO", interval_start: interval });
-      const hubs = ["TH_NP15_GEN-APND", "TH_SP15_GEN-APND", "TH_ZP26_GEN-APND"].map((node) => ({
-        node,
-        lmp: getGridPrice(node, interval)?.lmp_usd_per_mwh,
-      }));
-      console.log("[grid-test] A4 live CAISO hubs @ " + interval + ": " + JSON.stringify(hubs));
-      console.log("[grid-test] A4 live CAISO median: " + String(res.lmp_usd_per_mwh));
-      for (const h of hubs) expect(typeof h.lmp).toBe("number");
-      expect(hubs.map((h) => h.lmp)).toEqual([38.09459, 36.74434, 36.79695]);
-      expect(res.lmp_usd_per_mwh).toBe(36.79695);
-      expect(Math.abs((res.lmp_usd_per_mwh as number) - 36.79695) / 36.79695).toBeLessThan(0.003);
-      expect(res.node_or_zone).toBe("CAISO");
+      const np15 = getGridPrice("TH_NP15_GEN-APND", interval)?.lmp_usd_per_mwh;
+      console.log("[grid-test] NP15 live CAISO @ " + interval + ": " + String(res.lmp_usd_per_mwh));
+      expect(typeof np15).toBe("number");
+      expect(res.lmp_usd_per_mwh).toBe(np15);
+      expect(res.lmp_usd_per_mwh).toBe(38.09459);
+      expect((Math.abs((res.lmp_usd_per_mwh as number) - 38.09459) / 38.09459) * 10_000).toBeLessThanOrEqual(30);
+      expect(res.node_or_zone).toBe("TH_NP15_GEN-APND");
       expect(res.market).toBe(CAISO_SYSTEM_MARKET);
-      expect(res.answer as string).toContain("median");
+      expect(res.answer as string).toContain("NP15 trading hub");
     },
     180_000,
   );
@@ -2503,7 +2690,7 @@ describe("GRID A4-FIX F3: non-finite LMP is refused at write and at serve", () =
     expect(receiptCount()).toBe(before);
   });
 
-  it("a cached Infinity hub is never named in a verified median (OASIS down) -> 502 GRID_CACHE_INVALID", async () => {
+  it("a cached Infinity NP15 row is never served for a CAISO system request (OASIS down) -> 502 GRID_CACHE_INVALID", async () => {
     const interval = pastHourIso(24);
     seedNonFiniteRow("TH_NP15_GEN-APND", interval, Infinity);
     saveGridPrice("TH_SP15_GEN-APND", interval, 36.74, "CAISO", new Date().toISOString());
@@ -2650,17 +2837,17 @@ describe("GRID A4-FIX F6: a corrupt hub row + OASIS down -> 502 GRID_CACHE_INVAL
   }
 
 
-  it("median with an empty-market hub and a failed re-fetch -> GRID_CACHE_INVALID (not STALE)", async () => {
+  it("CAISO system request with an empty-market NP15 row and a failed re-fetch -> GRID_CACHE_INVALID (not STALE)", async () => {
     const interval = pastHourIso(25);
-    saveGridPrice("TH_NP15_GEN-APND", interval, 38.09, "CAISO", new Date().toISOString());
     saveGridPrice("TH_SP15_GEN-APND", interval, 36.74, "CAISO", new Date().toISOString());
+    saveGridPrice("TH_ZP26_GEN-APND", interval, 36.8, "CAISO", new Date().toISOString());
     getDb()
       .prepare(
         `INSERT OR REPLACE INTO grid_cache
          (node_or_zone, interval_start, lmp_usd_per_mwh, market, ingested_at, upstream_url)
          VALUES (?, ?, ?, ?, ?, ?)`,
       )
-      .run("TH_ZP26_GEN-APND", interval, 36.8, "", new Date().toISOString(), "https://oasis.caiso.com/x");
+      .run("TH_NP15_GEN-APND", interval, 38.09, "", new Date().toISOString(), "https://oasis.caiso.com/x");
     const realFetch = globalThis.fetch;
     globalThis.fetch = (() => Promise.reject(new Error("stubbed OASIS down"))) as typeof fetch;
     try {
@@ -2669,7 +2856,7 @@ describe("GRID A4-FIX F6: a corrupt hub row + OASIS down -> 502 GRID_CACHE_INVAL
         502,
         "GRID_CACHE_INVALID",
       );
-      expect(err.message).toContain("TH_ZP26_GEN-APND");
+      expect(err.message).toContain("TH_NP15_GEN-APND");
     } finally {
       globalThis.fetch = realFetch;
     }
@@ -2708,7 +2895,7 @@ describe("GRID A4-FIX F7: whitespace-tolerant CAISO system + hub spellings", () 
     saveGridPrice("TH_ZP26_GEN-APND", INTERVAL, 36.8, "CAISO", now);
   }
 
-  it('"caiso  system" / tab / nbsp / em-space all resolve to the median', async () => {
+  it('"caiso  system" / tab / nbsp / em-space all resolve to the system (NP15 hub)', async () => {
     seedHubs();
     const realFetch = globalThis.fetch;
     globalThis.fetch = (() => Promise.reject(new Error("NETWORK MUST NOT BE CALLED"))) as typeof fetch;
@@ -2721,8 +2908,9 @@ describe("GRID A4-FIX F7: whitespace-tolerant CAISO system + hub spellings", () 
         "caiso   system   hub",
       ]) {
         const res = await handleGridPrice({ node_or_zone: spelling, interval_start: INTERVAL });
-        expect(res.lmp_usd_per_mwh).toBe(36.8);
-        expect(res.node_or_zone).toBe("CAISO");
+        expect(res.lmp_usd_per_mwh).toBe(38.09);
+        expect(res.node_or_zone).toBe("TH_NP15_GEN-APND");
+        expect(res.market).toBe(CAISO_SYSTEM_MARKET);
       }
     } finally {
       globalThis.fetch = realFetch;

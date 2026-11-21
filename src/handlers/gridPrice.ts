@@ -14,9 +14,12 @@
 // exactly that hour (see fetchCaisoDamLmp in src/jobs/gridIngester.ts)
 // and the fetched row is cached before it is served, so a retry is a
 // cache hit. A "CAISO" / "CAISO system" / empty-ish node_or_zone
-// names the CAISO system and is answered as the median of the three
-// CAISO hubs NP15/SP15/ZP26, with the method stated in the market
-// field and the answer prose.
+// names no CAISO pricing node; it is answered for the NP15 trading
+// hub (TH_NP15_GEN-APND) day-ahead LMP, the hub a CAISO-only question
+// conventionally refers to. The node used is disclosed in
+// node_or_zone, in the market field and in the answer prose; an
+// explicit hub (TH_SP15_GEN-APND, TH_ZP26_GEN-APND, or the short
+// names NP15 / SP15 / ZP26) is answered for that hub.
 // Prices are written to the cache by src/jobs/gridIngester.ts from verified
 // keyless ISO feeds (Elering, NYISO, CAISO). Settlement windows come from
 // SUPPORTED_ZONES (NYISO 5 min, Elering 15 min, CAISO 60 min); the default
@@ -50,7 +53,6 @@ import {
   saveReceipt,
 } from "../core/db";
 import {
-  CAISO_HUB_NODES,
   SUPPORTED_ZONES,
   fetchCaisoDamLmp,
   fetchNyisoRtLbmp,
@@ -102,30 +104,66 @@ const CAISO_SYSTEM_REQUESTS: Record<string, true> = {
   "caiso-system": true,
   caiso_system: true,
   "caiso system hub": true,
+  "caiso day-ahead": true,
+  "caiso day ahead": true,
+  "caiso dam": true,
+  "caiso da": true,
 };
 
-/** Market string emitted for a CAISO system (median) answer — it states the method. */
+/**
+ * The node a CAISO request that names no pricing node is answered for:
+ * the NP15 trading hub (northern California). Its day-ahead LMP is the
+ * conventional "CAISO price" when only the ISO is named. The choice is
+ * disclosed on every such answer (node_or_zone, market, answer prose).
+ */
+export const CAISO_SYSTEM_NODE = "TH_NP15_GEN-APND";
+
+/** Market string emitted for a CAISO system answer — it states which node was used. */
 export const CAISO_SYSTEM_MARKET =
-  "CAISO day-ahead LMP (system hub median of NP15/SP15/ZP26)";
+  "CAISO day-ahead LMP (NP15 trading hub TH_NP15_GEN-APND; request named no CAISO node)";
+
+/**
+ * Short names for the three CAISO trading hubs, matched on the
+ * whitespace-normalised, lower-cased node_or_zone via Object.hasOwn.
+ * Each resolves to its canonical OASIS node; the answer is a plain hub
+ * answer for that node (node_or_zone is the canonical spelling). The
+ * canonical spellings themselves stay case-sensitive (see A4-FIX F7).
+ */
+const CAISO_HUB_ALIASES: Record<string, string> = (() => {
+  const out: Record<string, string> = {};
+  for (const [hub, node] of [
+    ["np15", "TH_NP15_GEN-APND"],
+    ["sp15", "TH_SP15_GEN-APND"],
+    ["zp26", "TH_ZP26_GEN-APND"],
+  ] as const) {
+    for (const spelling of [
+      hub,
+      hub + " hub",
+      "caiso " + hub,
+      "caiso-" + hub,
+      "caiso_" + hub,
+      "caiso " + hub + " hub",
+      "th_" + hub,
+    ]) {
+      out[spelling] = node;
+    }
+  }
+  return out;
+})();
+
+/** Canonical CAISO hub for a hub short name, or undefined. */
+export function resolveCaisoHubAlias(spelling: string): string | undefined {
+  const key = spelling.trim().replace(/\s+/g, " ").toLowerCase();
+  return Object.hasOwn(CAISO_HUB_ALIASES, key) ? CAISO_HUB_ALIASES[key] : undefined;
+}
 
 type GridCacheRow = NonNullable<ReturnType<typeof getGridPrice>>;
-
-/** One resolved CAISO hub hour: its price, when it was fetched, and from where. */
-interface ResolvedHubPrice {
-  node: string;
-  lmp: number;
-  ingestedAt: string;
-  upstreamUrl: string;
-  fromCache: boolean;
-  /** True when this hub was served after a failed post-close revalidation. */
-  unconfirmed?: boolean;
-}
 
 /**
  * Freshness for a cache row: ingested_at present, parseable, not in the
  * future, and within GRID_CACHE_TTL_MS — the same rule the handler's
- * staleness check applies (see below), factored out so the CAISO
- * on-demand path and the cache-only path cannot drift apart.
+ * staleness check applies (see below), factored out so every
+ * freshness decision uses one rule.
  */
 function isFreshGridRow(
   row: GridCacheRow,
@@ -211,207 +249,9 @@ function isCorruptGridRow(row: GridCacheRow): boolean {
   );
 }
 
-/**
- * Resolve one CAISO hub hour (system-median path only). A fresh cache
- * row with a non-empty market AND a finite price wins; otherwise the
- * hour is fetched live from OASIS (fetchCaisoDamLmp) and the fetched
- * row is CACHED via saveGridPrice before it is returned, so a retry
- * is a cache hit.
- * Returns the price, the string "stale" when a row exists but is stale
- * and the live fetch failed, the string "invalid" when a row exists
- * but is CORRUPT (empty market or non-finite LMP — A4-FIX F3/F6) and
- * the live fetch failed, or null when no usable row exists and the
- * live fetch failed or found no price. A corrupt row is NEVER served
- * from cache, even when fresh: it falls through to the live re-fetch,
- * and only if that fails does the median path report it as
- * GRID_CACHE_INVALID (never mislabelled GRID_CACHE_STALE).
- * A live fetch that succeeds is always cached — never served uncached.
- */
-async function resolveCaisoHubPrice(
-  node: string,
-  intervalStart: string,
-): Promise<ResolvedHubPrice | "stale" | "invalid" | null> {
-  const nowMs = Date.now();
-  const row = getGridPrice(node, intervalStart);
-  // A4-FIX F3/F6: corrupt = empty/whitespace market or a non-finite
-  // price (Infinity/NaN smuggled in via direct SQL — the writers now
-  // refuse both, but legacy/hand-seeded rows can still carry them).
-  const corrupt = row !== null && isCorruptGridRow(row);
-  const fresh = row !== null && isFreshGridRow(row, nowMs, intervalStart, 60, "CAISO") && !corrupt;
-  const needsRefresh =
-    row !== null && !corrupt && gridRowNeedsRevalidation(node, intervalStart, "CAISO", row, nowMs);
-  if (row && fresh && !needsRefresh) {
-    return {
-      node,
-      lmp: row.lmp_usd_per_mwh,
-      ingestedAt: row.ingested_at,
-      upstreamUrl: row.upstream_url,
-      fromCache: true,
-      unconfirmed: isPostCloseUnconfirmed(node, intervalStart, "CAISO", row, nowMs),
-    };
-  }
-  const hadRow = row !== null;
-  let fetched: { lmp: number; upstreamUrl: string } | null = null;
-  try {
-    fetched = await fetchCaisoDamLmp(node, intervalStart);
-  } catch {
-    fetched = null;
-  }
-  if (fetched) {
-    const ingestedAt = new Date().toISOString();
-    saveGridPrice(node, intervalStart, fetched.lmp, "CAISO", ingestedAt, fetched.upstreamUrl);
-    return { node, lmp: fetched.lmp, ingestedAt, upstreamUrl: fetched.upstreamUrl, fromCache: false };
-  }
-  // Failed revalidation of a still-valid post-provisional (or
-  // TTL-fresh) row: keep the cache, do not 502, record the attempt
-  // so we do not storm OASIS (J2 m1).
-  if (row && !corrupt && fresh) {
-    markGridRevalidateAttempt(node, intervalStart, new Date().toISOString());
-    return {
-      node,
-      lmp: row.lmp_usd_per_mwh,
-      ingestedAt: row.ingested_at,
-      upstreamUrl: row.upstream_url,
-      fromCache: true,
-      unconfirmed: true,
-    };
-  }
-  if (corrupt) return "invalid";
-  return hadRow ? "stale" : null;
-}
-
 function hhmmUtc(ms: number): string {
   const d = new Date(ms);
   return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0");
-}
-
-/**
- * Serve a CAISO system request (A4): the median of the three CAISO hub
- * LMPs (NP15/SP15/ZP26) for the hour. The three hubs resolve IN
- * PARALLEL (OASIS is slow — 12–47 s per call observed — so sequential
- * fetches would triple the wait); a hub whose cache row is fresh is
- * used as-is, a missing/stale hub is fetched live and cached first
- * (resolveCaisoHubPrice). The answer's node_or_zone is "CAISO", its
- * market is CAISO_SYSTEM_MARKET (which states the median method), and
- * the prose names all three hub values so the method is checkable.
- * The receipt hash covers the served fields (node "CAISO", interval,
- * median LMP, median market) exactly like the single-zone path, and
- * its upstream_url is the median hub's OASIS query URL — the query
- * that produced the median value. A hub that cannot be resolved at
- * all is a 502 (STALE if its row exists but is stale and the re-fetch
- * failed, else MISS): the median is never computed from fewer than
- * three hubs and never from a stale one.
- */
-async function serveCaisoSystemMedian(
-  intervalStart: string,
-  source: string,
-): Promise<Record<string, unknown>> {
-  const settled = await Promise.all(
-    CAISO_HUB_NODES.map((node) => resolveCaisoHubPrice(node, intervalStart)),
-  );
-  const prices: ResolvedHubPrice[] = [];
-  const missingHubs: string[] = [];
-  const staleHubs: string[] = [];
-  const invalidHubs: string[] = [];
-  for (let i = 0; i < settled.length; i++) {
-    const s = settled[i];
-    if (s === null) missingHubs.push(CAISO_HUB_NODES[i]);
-    else if (s === "stale") staleHubs.push(CAISO_HUB_NODES[i]);
-    else if (s === "invalid") invalidHubs.push(CAISO_HUB_NODES[i]);
-    else prices.push(s);
-  }
-  if (missingHubs.length > 0 || staleHubs.length > 0 || invalidHubs.length > 0) {
-    // A4-FIX F6: a corrupt hub row whose live re-fetch failed is
-    // INVALID, not STALE — the row's content is wrong, not merely old.
-    // It takes precedence: a corrupt hub is the most specific diagnosis.
-    if (invalidHubs.length > 0) {
-      throw upstreamUnavailable(
-        "GRID_CACHE_INVALID",
-        "cached CAISO hub price(s) " +
-          invalidHubs.join(", ") +
-          " at " +
-          intervalStart +
-          " are corrupt (empty market or non-finite LMP) and the live OASIS re-fetch failed",
-      );
-    }
-    if (staleHubs.length > 0) {
-      throw upstreamUnavailable(
-        "GRID_CACHE_STALE",
-        "cached CAISO hub price(s) " +
-          staleHubs.join(", ") +
-          " at " +
-          intervalStart +
-          " are stale and the live OASIS re-fetch failed",
-      );
-    }
-    throw upstreamUnavailable(
-      "GRID_CACHE_MISS",
-      "no CAISO hub price for " +
-        missingHubs.join(", ") +
-        " at " +
-        intervalStart +
-        " (live OASIS fetch found no price)",
-    );
-  }
-  const sorted = [...prices].sort((a, b) => a.lmp - b.lmp);
-  const median = sorted[1];
-  const hubText = prices
-    .map(
-      (p) =>
-        p.node.replace("TH_", "").replace("_GEN-APND", "") +
-        " $" +
-        p.lmp.toFixed(2),
-    )
-    .join(", ");
-  const rawBody = JSON.stringify({
-    node_or_zone: "CAISO",
-    interval_start: intervalStart,
-    lmp_usd_per_mwh: median.lmp,
-    market: CAISO_SYSTEM_MARKET,
-  });
-  const upstreamUrl = median.upstreamUrl || gridFallbackUrl(median.node, intervalStart);
-  const anyUnconfirmed = prices.some((p) => p.unconfirmed);
-  const receipt = makeReceipt(
-    "GRID_POWER_PRICE_GENERAL",
-    upstreamUrl,
-    rawBody,
-    anyUnconfirmed
-      ? "median of 3 CAISO OASIS PRC_LMP DAM hub rows (NP15/SP15/ZP26); " + FAILED_REVALIDATION
-      : "median of 3 CAISO OASIS PRC_LMP DAM hub rows (NP15/SP15/ZP26)",
-  );
-  receipt.fetched_at = median.ingestedAt;
-  try {
-    saveReceipt(receipt, rawBody);
-  } catch {
-    // Persistence must never fail the answer.
-  }
-  const answer =
-    "The CAISO system day-ahead LMP was $" +
-    median.lmp.toFixed(2) +
-    " USD per MWh (system hub median of " +
-    hubText +
-    "; CAISO day-ahead LMP) for the interval starting " +
-    intervalStart +
-    ".";
-  return envelope(
-    "GRID_POWER_PRICE_GENERAL",
-    {
-      lmp_usd_per_mwh: median.lmp,
-      node_or_zone: "CAISO",
-      market: CAISO_SYSTEM_MARKET,
-      interval_start: intervalStart,
-      currency: "USD",
-    },
-    receipt,
-    anyUnconfirmed
-      ? {
-          answer,
-          verdict: GRID_UNCONFIRMED_VERDICT,
-          confidence: GRID_UNCONFIRMED_CONFIDENCE,
-          source: source + " (" + FAILED_REVALIDATION + ")",
-        }
-      : { answer, verdict: "verified", confidence: 1.0, source },
-  );
 }
 
 export async function handleGridPrice(
@@ -464,13 +304,18 @@ export async function handleGridPrice(
   // Matched on the trimmed, lower-cased spelling via Object.hasOwn —
   // no prototype-chain lookup, so "toString" / "constructor" /
   // "__proto__" are UNSUPPORTED_ZONE, not hits on Object.prototype.
-  // The system borrows the NP15 zone's market/source/window (60 min);
-  // every other zone is looked up with Object.hasOwn for the same
+  // GRID-NP15: a system request is answered for CAISO_SYSTEM_NODE (the
+  // NP15 trading hub) through the single-hub flow below — same cache,
+  // on-demand OASIS fetch, revalidation and refusal rules as an
+  // explicit TH_NP15_GEN-APND query — and the node used is disclosed
+  // in node_or_zone, market and the answer. A hub short name (NP15,
+  // CAISO NP15, SP15, ZP26, ...) resolves to its canonical hub. Every
+  // other zone is looked up with Object.hasOwn for the same
   // prototype-chain reason.
   // A4-FIX F7: normalise whitespace before matching — collapse every
   // run of whitespace (spaces, tabs, nbsp, em-space, …) to one space
   // and trim, so "caiso  system" / "caiso\tsystem" /
-  // "caiso\u00a0system" resolve to the median like "caiso system",
+  // "caiso\u00a0system" resolve to the system like "caiso system",
   // and a single hub with a trailing space ("TH_NP15_GEN-APND ")
   // resolves to its canonical spelling instead of 422. The normalised
   // spelling is used for every lookup, fetch, receipt and answer
@@ -478,14 +323,17 @@ export async function handleGridPrice(
   // canonical name. Matching stays case-sensitive for single hubs
   // ("th_np15_gen-apnd" is still 422); only the system spellings are
   // lower-cased.
-  const normalizedZone = nodeOrZone.trim().replace(/\s+/g, " ");
-  const systemKey = normalizedZone.toLowerCase();
+  const requestedZone = nodeOrZone.trim().replace(/\s+/g, " ");
+  const systemKey = requestedZone.toLowerCase();
   const isCaisoSystem = Object.hasOwn(CAISO_SYSTEM_REQUESTS, systemKey);
-  const zone = isCaisoSystem
-    ? SUPPORTED_ZONES["TH_NP15_GEN-APND"]
-    : Object.hasOwn(SUPPORTED_ZONES, normalizedZone)
-      ? SUPPORTED_ZONES[normalizedZone]
-      : undefined;
+  const hubAlias = isCaisoSystem ? undefined : resolveCaisoHubAlias(requestedZone);
+  // The node every lookup, fetch, cache write, receipt and answer below
+  // uses: the NP15 hub for a system request, the canonical hub for a
+  // hub short name, else the normalised query spelling.
+  const normalizedZone = isCaisoSystem ? CAISO_SYSTEM_NODE : hubAlias ?? requestedZone;
+  const zone = Object.hasOwn(SUPPORTED_ZONES, normalizedZone)
+    ? SUPPORTED_ZONES[normalizedZone]
+    : undefined;
   if (!zone) {
     throw unprocessable(
       "UNSUPPORTED_ZONE",
@@ -528,15 +376,6 @@ export async function handleGridPrice(
         "-minute boundary; containing window starts " +
         hhmmUtc(containingStartMs),
     );
-  }
-
-  // A4: the CAISO system is answered by the median helper (own
-  // receipt/answer shape, median of all three hubs) — it returns
-  // before the single-zone flow below. The guard below (node/currency/
-  // market non-empty) is satisfied by construction there: node "CAISO",
-  // currency "USD", market CAISO_SYSTEM_MARKET (a non-empty constant).
-  if (isCaisoSystem) {
-    return await serveCaisoSystemMedian(intervalStart, zone.source);
   }
 
   // Alias fallback: a row stored under the paired spelling (e.g. ZONE_J)
@@ -600,7 +439,7 @@ export async function handleGridPrice(
   const ingestedMs = Date.parse(row.ingested_at);
   const futureIngested = !Number.isNaN(ingestedMs) && ingestedMs > nowMs;
   const corruptRow = isCorruptGridRow(row);
-  // Same freshness rule as the median path (TTL, or post-provisional).
+  // Freshness: TTL, or past the provisional window (isFreshGridRow).
   let stale = !isFreshGridRow(row, nowMs, intervalStart, windowMin, zone.market);
   const needsRefresh =
     !corruptRow &&
@@ -608,8 +447,8 @@ export async function handleGridPrice(
   let unconfirmed = false;
   // CAISO live path: refresh a stale row, repair a corrupt row even
   // when the interval is already past the provisional window (J2 m4:
-  // the median path already fell through to OASIS; the single-node
-  // path previously returned 502 GRID_CACHE_INVALID without a fetch),
+  // the single-node path previously returned 502 GRID_CACHE_INVALID
+  // without a fetch),
   // and revalidate at least once after the provisional close (J2 m1).
   if (zone.market === "CAISO" && (stale || corruptRow || needsRefresh)) {
     let fetched: { lmp: number; upstreamUrl: string } | null = null;
@@ -672,7 +511,7 @@ export async function handleGridPrice(
     unconfirmed = true;
   }
   if (stale) {
-    // A4-FIX F6 (same masking J2 found on the median path): a stale row
+    // A4-FIX F6: a stale row
     // that is ALSO corrupt (empty market or non-finite LMP) and whose
     // live re-fetch failed is INVALID, not STALE — the row's content
     // is wrong, not merely old. A stale-but-valid row still reports
@@ -743,8 +582,11 @@ export async function handleGridPrice(
 
   // Receipt hash (round-2 J2 F1 — documented exception, JUDGE.md §4;
   // corrected round-3): the hash covers the CONSTRUCTED JSON of the
-  // four fields AS SERVED below — the query's node_or_zone spelling
-  // plus the row's interval_start, lmp_usd_per_mwh, and market — NOT
+  // four fields AS SERVED below — the served node_or_zone (the query's
+  // normalised spelling; the canonical hub for a CAISO hub short name;
+  // TH_NP15_GEN-APND for a CAISO system request) plus the row's
+  // interval_start and lmp_usd_per_mwh and the served market (the
+  // row's market; CAISO_SYSTEM_MARKET for a CAISO system request) — NOT
   // the raw upstream feed bytes, and NOT the stored row's spelling
   // alone: an alias query (N.Y.C.) serving a ZONE_J row hashes
   // node_or_zone "N.Y.C.", so two spellings of one row yield different
@@ -762,11 +604,14 @@ export async function handleGridPrice(
   // NOT hashed: currency (a handler constant), answer (which rounds
   // the price via toFixed(2)), verdict, confidence, source, checked_at.
   const upstreamUrl = row.upstream_url || gridFallbackUrl(normalizedZone, intervalStart);
+  // GRID-NP15: a CAISO system request discloses the node it was
+  // answered for in the market field (hashed) as well as the prose.
+  const servedMarket = isCaisoSystem ? CAISO_SYSTEM_MARKET : row.market;
   const rawBody = JSON.stringify({
     node_or_zone: normalizedZone,
     interval_start: intervalStart,
     lmp_usd_per_mwh: row.lmp_usd_per_mwh,
-    market: row.market,
+    market: servedMarket,
   });
   let quorumVotes: string;
   if (fetchedLive && zone.market === "CAISO") {
@@ -779,6 +624,9 @@ export async function handleGridPrice(
     quorumVotes = "1/1 cache row from official ISO feed; " + FAILED_REVALIDATION;
   } else {
     quorumVotes = "1/1 cache row from verified ISO feed";
+  }
+  if (isCaisoSystem) {
+    quorumVotes += "; CAISO request with no node named, answered for the NP15 trading hub " + CAISO_SYSTEM_NODE;
   }
   const receipt = makeReceipt(
     "GRID_POWER_PRICE_GENERAL",
@@ -800,22 +648,29 @@ export async function handleGridPrice(
   } catch {
     // Persistence must never fail the answer.
   }
-  const answer =
-    "The LMP at " +
-    normalizedZone +
-    " was $" +
-    row.lmp_usd_per_mwh.toFixed(2) +
-    " USD per MWh (" +
-    row.market +
-    ") for the interval starting " +
-    intervalStart +
-    ".";
+  const answer = isCaisoSystem
+    ? "The CAISO day-ahead LMP at the NP15 trading hub (" +
+      CAISO_SYSTEM_NODE +
+      ") was $" +
+      row.lmp_usd_per_mwh.toFixed(2) +
+      " USD per MWh for the interval starting " +
+      intervalStart +
+      ". The request named no CAISO pricing node, so it was answered for NP15; ask for TH_SP15_GEN-APND or TH_ZP26_GEN-APND for the other CAISO hubs."
+    : "The LMP at " +
+      normalizedZone +
+      " was $" +
+      row.lmp_usd_per_mwh.toFixed(2) +
+      " USD per MWh (" +
+      row.market +
+      ") for the interval starting " +
+      intervalStart +
+      ".";
   return envelope(
     "GRID_POWER_PRICE_GENERAL",
     {
       lmp_usd_per_mwh: row.lmp_usd_per_mwh,
       node_or_zone: normalizedZone,
-      market: row.market,
+      market: servedMarket,
       interval_start: intervalStart,
       currency,
     },

@@ -157,7 +157,7 @@ const ENDPOINTS: EndpointDoc[] = [
       {
         name: 'node_or_zone',
         type: 'string',
-        description: 'Exactly one of: CAISO hubs TH_NP15_GEN-APND, TH_SP15_GEN-APND, TH_ZP26_GEN-APND, or CAISO when no CAISO node is named (median of the three hubs); NYISO zones ZONE_A to ZONE_K (NYISO names such as N.Y.C. also accepted); Elering zones EE, FI, LV, LT.',
+        description: 'Exactly one of: CAISO hubs TH_NP15_GEN-APND, TH_SP15_GEN-APND, TH_ZP26_GEN-APND, or CAISO when no CAISO node is named (answered for the NP15 trading hub TH_NP15_GEN-APND, which the answer states); the short names NP15, SP15, ZP26 (also CAISO NP15 etc.) resolve to their hub; NYISO zones ZONE_A to ZONE_K (NYISO names such as N.Y.C. also accepted); Elering zones EE, FI, LV, LT.',
       },
       {
         name: 'interval_start',
