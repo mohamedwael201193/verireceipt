@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigationType } from "react-router-dom";
 
 /** How long the page may stay quiet (no new child nodes anywhere) after
  *  the lazy route chunk has mounted before a missing hash target is
@@ -23,7 +23,8 @@ const NO_WAIT: WaitHandle = { cancel: () => undefined };
 function scrollToId(id: string): boolean {
   const el = document.getElementById(id);
   if (!el) return false;
-  el.scrollIntoView();
+  // Environments without scrollIntoView (jsdom) count as found.
+  if (typeof el.scrollIntoView === "function") el.scrollIntoView();
   return true;
 }
 
@@ -88,6 +89,23 @@ export default function ScrollToHash() {
   // navigation (the effect already handled it — never scroll twice)
   // from a same-hash re-click (no navigation — the effect never fires).
   const handledRef = useRef<{ pathname: string; hash: string; at: number } | null>(null);
+
+  // QA-11: an ordinary (PUSH/REPLACE) route change with no hash starts
+  // at the top — the old page's scroll offset used to carry over and land
+  // visitors near the footer. Back/forward (POP) keeps the browser's
+  // own restoration; a hash target is handled by the effect below.
+  const navType = useNavigationType();
+  const prevPathRef = useRef(pathname);
+  useEffect(() => {
+    if (prevPathRef.current === pathname) return;
+    prevPathRef.current = pathname;
+    if (hash || navType === "POP") return;
+    try {
+      window.scrollTo(0, 0);
+    } catch {
+      // jsdom / exotic environments without scrollTo: nothing to reset.
+    }
+  }, [pathname, hash, navType]);
 
   const startWait = useCallback((id: string) => {
     activeWaitRef.current.cancel();

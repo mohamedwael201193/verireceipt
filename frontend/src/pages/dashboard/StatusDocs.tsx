@@ -376,7 +376,7 @@ export default function StatusDocs({
       <div className="kpi-grid-4">
         <div className="card" style={{ padding: "15px 17px" }}>
           <div className="kpi-lbl">Compute Runtime</div>
-          <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 3 }}>Render Virginia · Node 20</div>
+          <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 3 }}>Render · Node 20</div>
           <div className="kpi-sub">
             {lastHealth
               ? `/health ${lastHealth.ok ? "ok" : `HTTP ${lastHealth.httpStatus}`}${lastHealth.uptime_s !== null ? ` · uptime ${lastHealth.uptime_s}s` : ""} · probed ${relativeAge(lastHealth.ts)}`
@@ -393,7 +393,7 @@ export default function StatusDocs({
         <div className="card" style={{ padding: "15px 17px" }}>
           <div className="kpi-lbl">Persistent Disk SQLite</div>
           <div className="mono" style={{ fontSize: 13.5, fontWeight: 500, marginBottom: 4 }}>/var/data/verireceipt.sqlite</div>
-          <div className="kpi-sub">WAL mode · survives every deploy</div>
+          <div className="kpi-sub">declared in render.yaml (region virginia, persistent disk) — the API does not report plan, region or disk: UNVERIFIED live</div>
         </div>
         <div className="card" style={{ padding: "15px 17px" }}>
           <div className="kpi-lbl">Grid Store (5-min ingester)</div>

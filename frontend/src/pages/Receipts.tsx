@@ -57,7 +57,7 @@
 
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, getValidator, ApiError } from '../lib/api';
 import { useHealth } from '../lib/hooks';
 import {
@@ -342,11 +342,16 @@ function VerifyPanel({
       )}
       <p className="vr-muted vr-small">
         Recorded audit URL:{' '}
-        <span className="vr-mono">
-          {typeof receipt.audit_url === 'string' ? receipt.audit_url : '—'}
-        </span>{' '}
+        {typeof receipt.audit_url === 'string' && /^https:\/\/[^\s]+$/.test(receipt.audit_url) ? (
+          <a className="vr-mono" href={receipt.audit_url} target="_blank" rel="noopener noreferrer">
+            {receipt.audit_url} ↗
+          </a>
+        ) : (
+          <span className="vr-mono">{typeof receipt.audit_url === 'string' ? receipt.audit_url : '—'}</span>
+        )}{' '}
         — the miner serves <span className="vr-mono">/receipts/:id</span> (live check
-        2026-11-21: HTTP 200); it is shown here as recorded text. Verification above tries{' '}
+        2026-11-21: HTTP 200). Opening it shows the stored receipt; it is not by itself a fresh
+        verification. Verification above tries{' '}
         <span className="vr-mono">/api/receipts/:id/raw</span> first and falls back to a live
         re-check only if that fetch fails.
       </p>
@@ -428,7 +433,7 @@ function TryItCard(props: TryItProps) {
     props;
   const data = result?.data ?? null;
   return (
-    <section className="vr-card vr-tryit" aria-label={`${title} try-it`}>
+    <section id={`try-${endpoint}`} className="vr-card vr-tryit" aria-label={`${title} try-it`}>
       <div className="vr-kicker">// {intent}</div>
       <h3 className="vr-h3">{title}</h3>
       <p className="vr-mono vr-small vr-muted" style={{ margin: '0 0 14px', overflowWrap: 'anywhere' }}>
@@ -574,6 +579,38 @@ export default function Receipts() {
     const id = window.setInterval(() => health.refetch(), 30000);
     return () => window.clearInterval(id);
   }, [health.refetch]);
+  // QA-11: a docs deep link (/receipts#try-<endpoint>) focuses that
+  // form's first input; ScrollToHash scrolls it into view.
+  const { hash: locationHash } = useLocation();
+  useEffect(() => {
+    const m = /^#try-([a-z]+)$/.exec(locationHash);
+    if (!m || !(m[1] in ENDPOINT_META)) return;
+    const section = document.getElementById(`try-${m[1]}`);
+    if (!section) return;
+    section.querySelector('input')?.focus({ preventScroll: true });
+    // Sections above the forms (health, ledger) grow after mount, which
+    // pushed the target back out of view after the first scroll (smoke
+    // 2026-11-21: form ~1150 px below the fold). Re-align on layout
+    // growth for a short window, and stop as soon as the visitor scrolls.
+    let stopped = false;
+    const align = () => {
+      if (!stopped && typeof section.scrollIntoView === 'function') section.scrollIntoView({ block: 'start' });
+    };
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(align) : null;
+    ro?.observe(document.body);
+    const stop = () => {
+      stopped = true;
+      ro?.disconnect();
+    };
+    const timer = window.setTimeout(stop, 2000);
+    const events = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+    events.forEach((ev) => window.addEventListener(ev, stop, { passive: true }));
+    return () => {
+      stop();
+      window.clearTimeout(timer);
+      events.forEach((ev) => window.removeEventListener(ev, stop));
+    };
+  }, [locationHash]);
   const [storedInit] = useState(readSessionReceipts);
   const [stored, setStored] = useState<StoredReceipt[]>(storedInit.entries);
   // Receipts that could not be persisted (corrupt/unavailable storage,
@@ -1304,7 +1341,7 @@ export default function Receipts() {
       <div className="vr-kicker" style={{ marginTop: 28 }}>
         // try-it · six live endpoints · each call returns its real receipt
       </div>
-      <div className="vr-tryit-grid">
+      <div id="try-forms" className="vr-tryit-grid">
         {(Object.keys(ENDPOINT_META) as EndpointKey[]).map((key) => (
           <TryItCard
             key={key}
@@ -1380,7 +1417,8 @@ const PAGE_CSS = `
 .vr-kv dt{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted,#8F8E8A)}
 .vr-kv dd{margin:0;word-break:break-word}
 .vr-tryit-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.vr-tryit{margin-bottom:0}
+.vr-tryit{margin-bottom:0;scroll-margin-top:84px}
+#try-forms{scroll-margin-top:84px}
 .vr-tryit-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:4px 0 12px}
 .vr-result{border-top:1px solid var(--border,rgba(255,255,255,.10));padding-top:14px}
 .vr-json{margin-top:14px}

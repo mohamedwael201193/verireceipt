@@ -138,7 +138,7 @@ const ENDPOINTS: EndpointDoc[] = [
       {
         name: 'pair',
         type: 'string',
-        description: 'The swap to route. Only ETH/USDC (sell exactly 1 ETH for USDC on Ethereum mainnet).',
+        description: 'The swap to route. Only ETH/USDC (sell exactly 1 ETH for USDC on Ethereum mainnet). pair is the only input: there is no amount, slippage or recipient parameter, and the quote size is always exactly 1 ETH.',
       },
     ],
     outputs: [{ name: 'amount_out', unit: 'USDC base units (6 decimals)' }],
@@ -206,7 +206,7 @@ const ERROR_ROWS: { status: number; code: string; meaning: string }[] = [
   { status: 400, code: 'MAX_PARAM_SIZE', meaning: 'Query parameter "entity" or "protocol" must not exceed 512 characters (miner.yaml MAX_PARAM_SIZE, machine-enforced).' },
   { status: 400, code: 'INVALID_PERIOD', meaning: 'Unparseable period value.' },
   { status: 400, code: 'MISSING_PROTOCOL', meaning: 'Query parameter "protocol" is required.' },
-  { status: 400, code: 'UNKNOWN_PARAM', meaning: 'A query parameter is not declared for that endpoint (for example index= on /v1/validator).' },
+  { status: 400, code: 'UNKNOWN_PARAM', meaning: 'A query parameter is not declared for that endpoint (for example index= on /v1/validator). Enforced today on /v1/validator and /v1/filings; the other endpoints currently ignore undeclared parameters — /v1/route quotes exactly 1 ETH whatever else is sent (amount= is not honoured).' },
   { status: 400, code: 'INVALID_NODE', meaning: 'node_or_zone is required.' },
   { status: 400, code: 'INVALID_INTERVAL', meaning: 'interval_start is required or is not a valid datetime.' },
   { status: 400, code: 'INVALID_VALIDATOR_INDEX', meaning: 'validator_index is required and must be a canonical non-negative decimal digit string (no sign, no leading zeros except 0 itself).' },
@@ -352,7 +352,7 @@ export default function Docs() {
               <tr><td className="vr-mono">receipt_id</td><td className="vr-mono">string</td><td>Unique receipt id, e.g. <span className="vr-mono">rcpt_…</span> (26 chars).</td></tr>
               <tr><td className="vr-mono">intent</td><td className="vr-mono">string</td><td>The Telegraph intent this answer serves.</td></tr>
               <tr><td className="vr-mono">upstream_url</td><td className="vr-mono">string</td><td>The exact upstream URL the answer was derived from.</td></tr>
-              <tr><td className="vr-mono">raw_response_sha256</td><td className="vr-mono">string</td><td>SHA-256 (<span className="vr-mono">0x</span> + 64 hex) of the raw upstream response bytes.</td></tr>
+              <tr><td className="vr-mono">raw_response_sha256</td><td className="vr-mono">string</td><td>SHA-256 of the raw upstream response bytes: 64 lowercase hex characters, no <span className="vr-mono">0x</span> prefix (equals <span className="vr-mono">sha256sum</span> of <span className="vr-mono">GET /receipts/:id/raw</span>).</td></tr>
               <tr><td className="vr-mono">quorum_votes</td><td className="vr-mono">string</td><td>e.g. <span className="vr-mono">3/3 sources agreed</span> (tx), <span className="vr-mono">1/1 primary source</span> (TVL).</td></tr>
               <tr><td className="vr-mono">fetched_at</td><td className="vr-mono">string</td><td>ISO-8601 UTC time the upstream was fetched.</td></tr>
               <tr><td className="vr-mono">audit_url</td><td className="vr-mono">string</td><td>Audit URL. <span className="vr-mono">GET /receipts/:id</span> returns the stored receipt and <span className="vr-mono">/receipts/:id/raw</span> the exact evidence bytes hashed into raw_response_sha256 (live check 2026-11-21: HTTP 200).</td></tr>
@@ -451,7 +451,7 @@ export default function Docs() {
             <a className="vr-btn-ghost vr-link-btn" href={ep.exampleUrl} target="_blank" rel="noreferrer">
               Open live response ↗
             </a>
-            <Link className="vr-btn-accent vr-link-btn" to="/receipts">
+            <Link className="vr-btn-accent vr-link-btn" to={`/receipts#try-${ep.key === 'grid-price' ? 'grid' : ep.key}`}>
               Try it live on /receipts →
             </Link>
             <CopyButton text={ep.exampleCurl} label={`Copy ${ep.path} example curl`} />
@@ -545,7 +545,7 @@ curl "$BASE/v1/route?pair=ETH%2FUSDC"
 curl "$BASE/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2026-11-20T06%3A00%3A00Z"`}</pre>
             </div>
             <div className="vr-doc-actions">
-              <Link className="vr-btn-accent vr-link-btn" to="/receipts">
+              <Link className="vr-btn-accent vr-link-btn" to="/receipts#try-forms">
                 Try them live on /receipts →
               </Link>
             </div>

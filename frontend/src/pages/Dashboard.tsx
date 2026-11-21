@@ -376,7 +376,7 @@ export default function Dashboard() {
           <div className="tele-group">
             <span style={{ display: "inline-flex", alignItems: "center", gap: 7, color: "var(--text)", fontWeight: 500 }}>
               <span className="pulse-ok" />
-              Render Virginia · {healthLabel}
+              Render (render.yaml: virginia) · {healthLabel}
             </span>
             <span className="sep">|</span>
             <span>

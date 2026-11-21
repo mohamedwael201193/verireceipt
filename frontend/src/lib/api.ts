@@ -58,7 +58,7 @@ export const MAX_RECEIPT_ID_LENGTH = 512;
  * title= attribute. Caps are generous against every legit live value —
  * fetched_at is an ISO timestamp (~24–32 chars), upstream_url is a real
  * upstream URL (live values are well under 200 chars; 2048 is the common
- * URL-length bound), and raw_response_sha256 is "0x" + 64 hex = 66 chars
+ * URL-length bound), and raw_response_sha256 is 64 bare hex chars (66 with an optional "0x")
  * (128 leaves ~2x headroom) — so no legit live receipt can trip them.
  */
 export const MAX_RECEIPT_FETCHED_AT_LENGTH = 128;

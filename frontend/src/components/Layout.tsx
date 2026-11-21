@@ -13,6 +13,7 @@ import {
   MINER_SLUG,
 } from "../config";
 import { frontendCommit, REPO_URL } from "../lib/buildCommit";
+import { BOND_REGISTRATION_ID } from "../lib/minerBond";
 import { useTheme } from "../hooks/useTheme";
 import ThemeToggle from "./ThemeToggle";
 
@@ -42,7 +43,13 @@ type HealthState = "checking" | "ok" | "down";
  *  unreachable, so a seq number could never drop a stale response —
  *  it was dead code implying a guarantee it cannot provide
  *  (J2 re-review minor 4). */
-function HealthPill() {
+/** Backend release as reported by the live API (/health git_sha) — QA-10.
+ *  Only a plain hex SHA is accepted; anything else reads as unknown. */
+export function parseBackendSha(v: unknown): string | null {
+  return typeof v === "string" && /^[0-9a-f]{7,40}$/.test(v) ? v : null;
+}
+
+function HealthPill({ onBackendSha }: { onBackendSha?: (sha: string | null) => void }) {
   const [health, setHealth] = useState<HealthState>("checking");
   const inFlightRef = useRef(false);
   const firstCheckRef = useRef(true);
@@ -64,9 +71,10 @@ function HealthPill() {
           setHealth("down");
           return;
         }
-        const data = (await res.json()) as { status?: string };
+        const data = (await res.json()) as { status?: string; git_sha?: unknown };
         if (cancelled) return;
         setHealth(data.status === "ok" ? "ok" : "down");
+        onBackendSha?.(parseBackendSha(data.git_sha));
       } catch {
         if (!cancelled) setHealth("down");
       } finally {
@@ -79,6 +87,8 @@ function HealthPill() {
       cancelled = true;
       window.clearInterval(id);
     };
+    // onBackendSha is a stable state setter; the poll must not restart.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -190,6 +200,7 @@ function MobileMenu({ pathname }: { pathname: string }) {
 export default function Layout() {
   const { theme, toggleTheme } = useTheme();
   const { pathname, search, hash } = useLocation();
+  const [backendSha, setBackendSha] = useState<string | null>(null);
 
   // (J2 C3 F2b / P-C3 B) Same-URL re-click nonce. A click on a CTA whose
   // URL equals the current location (e.g. "Start a probe" → /#probe while
@@ -243,7 +254,7 @@ export default function Layout() {
                 </NavLink>
               ))}
             </nav>
-            <HealthPill />
+            <HealthPill onBackendSha={setBackendSha} />
             <Link to="/#probe" className="btn-outline-accent" aria-label="Start a probe">
               <span className="cta-label-full">Start a probe</span>
               <span className="cta-label-short" aria-hidden="true">
@@ -342,7 +353,10 @@ export default function Layout() {
                 Diamond {DIAMOND_SHORT}
               </div>
               <div className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
-                Miner {MINER_ID} · {MINER_SLUG}
+                miner.yaml id {MINER_ID} · {MINER_SLUG}
+              </div>
+              <div className="mono" style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                node registration {BOND_REGISTRATION_ID} (on-chain bond)
               </div>
             </div>
             <div>
@@ -355,10 +369,24 @@ export default function Layout() {
                 auth: none · {BOND_DISPLAY}
               </div>
               <div className="mono" style={{ fontSize: 11, color: "var(--muted)", marginTop: 6, overflowWrap: "anywhere" }}>
+                frontend{" "}
                 <a href={`${REPO_URL}/commit/${BUILD.sha}`} target="_blank" rel="noreferrer" style={{ color: "var(--muted)" }}>
                   {BUILD.sha}
                 </a>
                 <div style={{ marginTop: 4 }}>{BUILD.label}</div>
+                <div style={{ marginTop: 6 }}>
+                  backend{" "}
+                  {backendSha ? (
+                    <a href={`${REPO_URL}/commit/${backendSha}`} target="_blank" rel="noreferrer" style={{ color: "var(--muted)" }}>
+                      {backendSha}
+                    </a>
+                  ) : (
+                    "unknown (no git_sha from /health yet)"
+                  )}
+                </div>
+                <div style={{ marginTop: 4 }}>
+                  frontend and backend deploy separately; a commit is deployed only where its SHA appears here
+                </div>
               </div>
             </div>
           </div>
