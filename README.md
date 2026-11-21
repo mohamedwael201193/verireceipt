@@ -153,6 +153,18 @@ ledger root. `npm run verify -- --write` records the epoch delivery proof
 (`GET /v1/blocks/{epoch}/deliveries/{receipt_hash}`) once the node has
 recorded that epoch's block. The official response also includes a Merkle `proof` and `deliveries_root`; we store the root and the proof length (`proof_nodes`) and shape-check the live proof (an array of 32-byte hex hashes plus the root). The leaf/node hash algorithm is not documented in the official docs, so we do not invent a proof walker. The receipt_hash ↔ signal binding comes from the paid X-PAYMENT-RESPONSE and is not re-derivable from public endpoints; a swap of receipt_hash and delivery_proof between two of our own same-intent rows, or substitution of another of our same-epoch, same-intent, same-amount deliveries (including a manual probe, `0x2a9181c9…95a1`), is not detectable. The committed `engine.result` on the three existing rows was backfilled from the captured paid replies (not fully public); ok numeric fields are re-checked against the live signal payload.
 
+Second run (epoch 32, 2026-11-21 17:36–17:37 UTC): seven escrow-paid tasks
+covering all six intents (GRID CAISO NP15 + NYISO Zone J, TVL aave-v3, TX
+of the Desk's own Sepolia deposit, FILINGS Apple Form 10-Q in calendar 2025,
+ROUTE ETH/USDC, VALIDATOR index 1), each VERIFIED. The ledger keeps one
+purchase per task per epoch. On this run the node shaped most text fields
+itself (`field_status` ok); an ok text field must equal the hash-verified raw
+answer at its mapped path. FILINGS text fields were still `unavailable` and are
+recovered from raw. The VALIDATOR reply reused the receipt the miner had cached
+for the same finalized state root from an unpaid probe about 3 minutes
+earlier (same `receipt_id`); its bytes still hash to the receipt. Epoch-32 delivery proofs stay `pending`
+until the node records that epoch's block.
+
 ## Running locally
 
 ```bash

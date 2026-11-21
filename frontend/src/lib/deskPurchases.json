@@ -410,5 +410,850 @@
         "source": "raw"
       }
     }
+  },
+  {
+    "version": 1,
+    "task_id": "m12-caiso-np15",
+    "mission": "M12",
+    "title": "Mission 12 · CAISO NP15 dispatch gate",
+    "intent": "GRID_POWER_PRICE_GENERAL",
+    "params": {
+      "node_or_zone": "TH_NP15_GEN-APND",
+      "interval_start": "2026-11-21T15:00:00Z"
+    },
+    "bought_at": "2026-11-21T17:36:06.000Z",
+    "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+    "miner_catalogue_id": "774921",
+    "nonce": "vr-desk-6db71ab2-cce6-4f55-bef2-2b4a9d1a891b",
+    "valid_after": "1795282558",
+    "valid_before": "1795282663",
+    "quoted_uusdc": "10000",
+    "telegraph_receipt": {
+      "receipt_hash": "0x1184cf63601c8766196e8de0ba9514f2243fb6f9b72739ac4008b6cfa29a4f6a",
+      "rail": "escrow",
+      "miner": "6152",
+      "amount_uusdc": "10000",
+      "epoch_id": 32,
+      "settlement": "epoch",
+      "chain": "telegraph",
+      "timestamp": 1795282566
+    },
+    "signal_hash": "0x206cba45ccaad5efccfd3f7fd51c0ebe8788969451c73c9b2b64730867fae5eb",
+    "engine": {
+      "miner_id": "774921",
+      "endpoint": "/v1/grid-price",
+      "result_shape": "intent",
+      "field_status": {
+        "lmp_usd_per_mwh": "ok",
+        "node_or_zone": "ok",
+        "market": "ok",
+        "interval_start": "ok",
+        "currency": "ok"
+      },
+      "duration_ms": 240,
+      "result": {
+        "lmp_usd_per_mwh": 62.90907,
+        "node_or_zone": "TH_NP15_GEN-APND",
+        "market": "CAISO",
+        "interval_start": "2026-11-21T15:00:00.000Z",
+        "currency": "USD"
+      }
+    },
+    "value_field": "lmp_usd_per_mwh",
+    "value": 62.90907,
+    "miner_receipt": {
+      "receipt_id": "rcpt_X7E2FW2XH0EAX18KYLZFEPF6U4",
+      "raw_response_sha256": "7ba1581f4c1616a0f429d4d608a4b903dc495309d29d9f1d53692452f3f8ab2d",
+      "upstream_url": "https://oasis.caiso.com/oasisapi/SingleZip?queryname=PRC_LMP&startdatetime=20261120T15:34-0000&enddatetime=20261121T17:34-0000&version=1&market_run_id=DAM&node=TH_NP15_GEN-APND&resultformat=6"
+    },
+    "raw_sha256_recomputed": "7ba1581f4c1616a0f429d4d608a4b903dc495309d29d9f1d53692452f3f8ab2d",
+    "raw_bytes": 123,
+    "checks": [
+      {
+        "name": "signal hash re-derived",
+        "ok": true,
+        "detail": "keccak256(payload)=0x206cba45ccaad5efccfd3f7fd51c0ebe8788969451c73c9b2b64730867fae5eb"
+      },
+      {
+        "name": "signal wallet is the payer",
+        "ok": true,
+        "detail": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3"
+      },
+      {
+        "name": "signal miner",
+        "ok": true,
+        "detail": "verireceipt"
+      },
+      {
+        "name": "signal intent",
+        "ok": true,
+        "detail": "GRID_POWER_PRICE_GENERAL"
+      },
+      {
+        "name": "engine value equals miner answer",
+        "ok": true,
+        "detail": "lmp_usd_per_mwh: engine=62.90907 miner=62.90907"
+      },
+      {
+        "name": "miner receipt present",
+        "ok": true,
+        "detail": "rcpt_X7E2FW2XH0EAX18KYLZFEPF6U4"
+      },
+      {
+        "name": "stored receipt metadata agrees",
+        "ok": true,
+        "detail": "7ba1581f4c1616a0f429d4d608a4b903dc495309d29d9f1d53692452f3f8ab2d"
+      },
+      {
+        "name": "sha256(stored raw bytes) = raw_response_sha256",
+        "ok": true,
+        "detail": "7ba1581f4c1616a0f429d4d608a4b903dc495309d29d9f1d53692452f3f8ab2d over 123 bytes"
+      }
+    ],
+    "verdict": "VERIFIED",
+    "delivery_proof": null,
+    "recovered_fields": {
+      "lmp_usd_per_mwh": {
+        "value": 62.90907,
+        "node_status": "ok",
+        "source": "node"
+      },
+      "node_or_zone": {
+        "value": "TH_NP15_GEN-APND",
+        "node_status": "ok",
+        "source": "node"
+      },
+      "market": {
+        "value": "CAISO",
+        "node_status": "ok",
+        "source": "node"
+      },
+      "interval_start": {
+        "value": "2026-11-21T15:00:00.000Z",
+        "node_status": "ok",
+        "source": "node"
+      },
+      "currency": {
+        "value": "USD",
+        "node_status": "ok",
+        "source": "node"
+      }
+    }
+  },
+  {
+    "version": 1,
+    "task_id": "m12-nyiso-zone-j",
+    "mission": "M12",
+    "title": "Mission 12 · NYISO Zone J dispatch gate",
+    "intent": "GRID_POWER_PRICE_GENERAL",
+    "params": {
+      "node_or_zone": "ZONE_J",
+      "interval_start": "2026-11-21T17:05:00Z"
+    },
+    "bought_at": "2026-11-21T17:36:13.000Z",
+    "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+    "miner_catalogue_id": "774921",
+    "nonce": "vr-desk-66fb6cad-2373-4f02-820e-5bb2a8ff575a",
+    "valid_after": "1795282564",
+    "valid_before": "1795282669",
+    "quoted_uusdc": "10000",
+    "telegraph_receipt": {
+      "receipt_hash": "0xab4f90df983606c2d3b998d266715a7187e58f6f997cbd0866d44cecfe7454d6",
+      "rail": "escrow",
+      "miner": "6152",
+      "amount_uusdc": "10000",
+      "epoch_id": 32,
+      "settlement": "epoch",
+      "chain": "telegraph",
+      "timestamp": 1795282573
+    },
+    "signal_hash": "0x6335f807d1d3e43030e3e728f1c361e39897144d108292834e71043edefa72c0",
+    "engine": {
+      "miner_id": "774921",
+      "endpoint": "/v1/grid-price",
+      "result_shape": "intent",
+      "field_status": {
+        "lmp_usd_per_mwh": "ok",
+        "node_or_zone": "ok",
+        "market": "ok",
+        "interval_start": "ok",
+        "currency": "ok"
+      },
+      "duration_ms": 236,
+      "result": {
+        "lmp_usd_per_mwh": 30.07,
+        "node_or_zone": "ZONE_J",
+        "market": "NYISO",
+        "interval_start": "2026-11-21T17:05:00.000Z",
+        "currency": "USD"
+      }
+    },
+    "value_field": "lmp_usd_per_mwh",
+    "value": 30.07,
+    "miner_receipt": {
+      "receipt_id": "rcpt_4X5CUDTXAV3MU2PSSSBMH1VGKZ",
+      "raw_response_sha256": "d868975294b7fec870329201737ed86ccdda12ff7ecaabaee3211202c378fbfc",
+      "upstream_url": "https://mis.nyiso.com/public/csv/realtime/20261121realtime_zone.csv"
+    },
+    "raw_sha256_recomputed": "d868975294b7fec870329201737ed86ccdda12ff7ecaabaee3211202c378fbfc",
+    "raw_bytes": 110,
+    "checks": [
+      {
+        "name": "signal hash re-derived",
+        "ok": true,
+        "detail": "keccak256(payload)=0x6335f807d1d3e43030e3e728f1c361e39897144d108292834e71043edefa72c0"
+      },
+      {
+        "name": "signal wallet is the payer",
+        "ok": true,
+        "detail": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3"
+      },
+      {
+        "name": "signal miner",
+        "ok": true,
+        "detail": "verireceipt"
+      },
+      {
+        "name": "signal intent",
+        "ok": true,
+        "detail": "GRID_POWER_PRICE_GENERAL"
+      },
+      {
+        "name": "engine value equals miner answer",
+        "ok": true,
+        "detail": "lmp_usd_per_mwh: engine=30.07 miner=30.07"
+      },
+      {
+        "name": "miner receipt present",
+        "ok": true,
+        "detail": "rcpt_4X5CUDTXAV3MU2PSSSBMH1VGKZ"
+      },
+      {
+        "name": "stored receipt metadata agrees",
+        "ok": true,
+        "detail": "d868975294b7fec870329201737ed86ccdda12ff7ecaabaee3211202c378fbfc"
+      },
+      {
+        "name": "sha256(stored raw bytes) = raw_response_sha256",
+        "ok": true,
+        "detail": "d868975294b7fec870329201737ed86ccdda12ff7ecaabaee3211202c378fbfc over 110 bytes"
+      }
+    ],
+    "verdict": "VERIFIED",
+    "delivery_proof": null,
+    "recovered_fields": {
+      "lmp_usd_per_mwh": {
+        "value": 30.07,
+        "node_status": "ok",
+        "source": "node"
+      },
+      "node_or_zone": {
+        "value": "ZONE_J",
+        "node_status": "ok",
+        "source": "node"
+      },
+      "market": {
+        "value": "NYISO",
+        "node_status": "ok",
+        "source": "node"
+      },
+      "interval_start": {
+        "value": "2026-11-21T17:05:00.000Z",
+        "node_status": "ok",
+        "source": "node"
+      },
+      "currency": {
+        "value": "USD",
+        "node_status": "ok",
+        "source": "node"
+      }
+    }
+  },
+  {
+    "version": 1,
+    "task_id": "m13-tvl-aave-v3",
+    "mission": "M13",
+    "title": "Mission 13 · Aave V3 TVL check",
+    "intent": "TVL_LOOKUP_GENERAL",
+    "params": {
+      "protocol": "aave-v3"
+    },
+    "bought_at": "2026-11-21T17:36:19.000Z",
+    "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+    "miner_catalogue_id": "774921",
+    "nonce": "vr-desk-199183a0-6935-43e5-b0f6-13f3e4aa247b",
+    "valid_after": "1795282571",
+    "valid_before": "1795282676",
+    "quoted_uusdc": "10000",
+    "telegraph_receipt": {
+      "receipt_hash": "0x89aa4abd16d410a6ce3f5025da5d2f3fda8fcd043cb3ed13f9947b81aeddf506",
+      "rail": "escrow",
+      "miner": "6152",
+      "amount_uusdc": "10000",
+      "epoch_id": 32,
+      "settlement": "epoch",
+      "chain": "telegraph",
+      "timestamp": 1795282579
+    },
+    "signal_hash": "0xde67896d56d95ca9d6fc295ded914cd07d881058b32689f104dae4f8ba5ea873",
+    "engine": {
+      "miner_id": "774921",
+      "endpoint": "/v1/tvl",
+      "result_shape": "intent",
+      "field_status": {
+        "protocol_or_chain": "ok",
+        "tvl_usd": "ok",
+        "chain_tvl_usd": "ok",
+        "as_of": "ok"
+      },
+      "duration_ms": 257,
+      "result": {
+        "protocol_or_chain": "aave-v3",
+        "tvl_usd": 15105939937.02122,
+        "chain_tvl_usd": 12975716883.25861,
+        "as_of": "2026-11-21T17:36:16.530Z"
+      }
+    },
+    "value_field": "tvl_usd",
+    "value": 15105939937.02122,
+    "miner_receipt": {
+      "receipt_id": "rcpt_LD3V9FBB6HU68DMWYMEQQEIVTX",
+      "raw_response_sha256": "895f7389267fd877ac5e51b3ba61f52335ee1102f38bd0a8ad1ffbb0c832d3b3",
+      "upstream_url": "https://api.llama.fi/tvl/aave-v3"
+    },
+    "raw_sha256_recomputed": "895f7389267fd877ac5e51b3ba61f52335ee1102f38bd0a8ad1ffbb0c832d3b3",
+    "raw_bytes": 246,
+    "checks": [
+      {
+        "name": "signal hash re-derived",
+        "ok": true,
+        "detail": "keccak256(payload)=0xde67896d56d95ca9d6fc295ded914cd07d881058b32689f104dae4f8ba5ea873"
+      },
+      {
+        "name": "signal wallet is the payer",
+        "ok": true,
+        "detail": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3"
+      },
+      {
+        "name": "signal miner",
+        "ok": true,
+        "detail": "verireceipt"
+      },
+      {
+        "name": "signal intent",
+        "ok": true,
+        "detail": "TVL_LOOKUP_GENERAL"
+      },
+      {
+        "name": "engine value equals miner answer",
+        "ok": true,
+        "detail": "tvl_usd: engine=15105939937.02122 miner=15105939937.02122"
+      },
+      {
+        "name": "miner receipt present",
+        "ok": true,
+        "detail": "rcpt_LD3V9FBB6HU68DMWYMEQQEIVTX"
+      },
+      {
+        "name": "stored receipt metadata agrees",
+        "ok": true,
+        "detail": "895f7389267fd877ac5e51b3ba61f52335ee1102f38bd0a8ad1ffbb0c832d3b3"
+      },
+      {
+        "name": "sha256(stored raw bytes) = raw_response_sha256",
+        "ok": true,
+        "detail": "895f7389267fd877ac5e51b3ba61f52335ee1102f38bd0a8ad1ffbb0c832d3b3 over 246 bytes"
+      }
+    ],
+    "verdict": "VERIFIED",
+    "delivery_proof": null,
+    "recovered_fields": {
+      "protocol_or_chain": {
+        "value": "aave-v3",
+        "node_status": "ok",
+        "source": "node"
+      },
+      "tvl_usd": {
+        "value": 15105939937.02122,
+        "node_status": "ok",
+        "source": "node"
+      },
+      "chain_tvl_usd": {
+        "value": 12975716883.25861,
+        "node_status": "ok",
+        "source": "node"
+      },
+      "as_of": {
+        "value": "2026-11-21T17:36:16.530Z",
+        "node_status": "ok",
+        "source": "node"
+      }
+    }
+  },
+  {
+    "version": 1,
+    "task_id": "m13-tx-desk-deposit",
+    "mission": "M13",
+    "title": "Mission 13 · Counterparty tx check (Desk escrow deposit, Sepolia)",
+    "intent": "ONCHAIN_TX_LOOKUP_GENERAL",
+    "params": {
+      "tx_hash": "0xe8696cc29652173b1fdce601cfbd5d61649583bf811163d778d412739b78d2d3",
+      "chain": "sepolia"
+    },
+    "bought_at": "2026-11-21T17:36:36.000Z",
+    "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+    "miner_catalogue_id": "774921",
+    "nonce": "vr-desk-a5a94afa-71d6-4387-8d90-bcf47e0727cd",
+    "valid_after": "1795282575",
+    "valid_before": "1795282680",
+    "quoted_uusdc": "10000",
+    "telegraph_receipt": {
+      "receipt_hash": "0x6625eba0a74e8b52ecdb8e49147b9f206fc3f0aec8d1bc614fb8d7ba3b2f587b",
+      "rail": "escrow",
+      "miner": "6152",
+      "amount_uusdc": "10000",
+      "epoch_id": 32,
+      "settlement": "epoch",
+      "chain": "telegraph",
+      "timestamp": 1795282596
+    },
+    "signal_hash": "0xcb9d8d0606819e74a5d22b38b6993b2a23b22da053708264b9bab3055f3939c7",
+    "engine": {
+      "miner_id": "774921",
+      "endpoint": "/v1/tx",
+      "result_shape": "intent",
+      "field_status": {
+        "tx_hash": "ok",
+        "status": "ok",
+        "from": "ok",
+        "to": "ok",
+        "block_number": "ok",
+        "value_eth": "ok"
+      },
+      "duration_ms": 607,
+      "result": {
+        "tx_hash": "0xe8696cc29652173b1fdce601cfbd5d61649583bf811163d778d412739b78d2d3",
+        "status": "confirmed",
+        "from": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+        "to": "0x72a70e949362670bf8bcead24efc5b8f950aa08b",
+        "block_number": 12176453,
+        "value_eth": 0
+      }
+    },
+    "value_field": "block_number",
+    "value": 12176453,
+    "miner_receipt": {
+      "receipt_id": "rcpt_PWGVL70FYNESOXD0PQJM5BDIFI",
+      "raw_response_sha256": "6f633fa2c7772e82a449e327b416e342dc17de2044f926c91ead1437e2764b0b",
+      "upstream_url": "https://ethereum-sepolia-rpc.publicnode.com"
+    },
+    "raw_sha256_recomputed": "6f633fa2c7772e82a449e327b416e342dc17de2044f926c91ead1437e2764b0b",
+    "raw_bytes": 3606,
+    "checks": [
+      {
+        "name": "signal hash re-derived",
+        "ok": true,
+        "detail": "keccak256(payload)=0xcb9d8d0606819e74a5d22b38b6993b2a23b22da053708264b9bab3055f3939c7"
+      },
+      {
+        "name": "signal wallet is the payer",
+        "ok": true,
+        "detail": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3"
+      },
+      {
+        "name": "signal miner",
+        "ok": true,
+        "detail": "verireceipt"
+      },
+      {
+        "name": "signal intent",
+        "ok": true,
+        "detail": "ONCHAIN_TX_LOOKUP_GENERAL"
+      },
+      {
+        "name": "engine value equals miner answer",
+        "ok": true,
+        "detail": "block_number: engine=12176453 miner=12176453"
+      },
+      {
+        "name": "miner receipt present",
+        "ok": true,
+        "detail": "rcpt_PWGVL70FYNESOXD0PQJM5BDIFI"
+      },
+      {
+        "name": "stored receipt metadata agrees",
+        "ok": true,
+        "detail": "6f633fa2c7772e82a449e327b416e342dc17de2044f926c91ead1437e2764b0b"
+      },
+      {
+        "name": "sha256(stored raw bytes) = raw_response_sha256",
+        "ok": true,
+        "detail": "6f633fa2c7772e82a449e327b416e342dc17de2044f926c91ead1437e2764b0b over 3606 bytes"
+      }
+    ],
+    "verdict": "VERIFIED",
+    "delivery_proof": null,
+    "recovered_fields": {
+      "tx_hash": {
+        "value": "0xe8696cc29652173b1fdce601cfbd5d61649583bf811163d778d412739b78d2d3",
+        "node_status": "ok",
+        "source": "node"
+      },
+      "status": {
+        "value": "confirmed",
+        "node_status": "ok",
+        "source": "node"
+      },
+      "from": {
+        "value": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+        "node_status": "ok",
+        "source": "node"
+      },
+      "to": {
+        "value": "0x72a70e949362670bf8bcead24efc5b8f950aa08b",
+        "node_status": "ok",
+        "source": "node"
+      },
+      "block_number": {
+        "value": 12176453,
+        "node_status": "ok",
+        "source": "node"
+      },
+      "value_eth": {
+        "value": 0,
+        "node_status": "ok",
+        "source": "node"
+      }
+    }
+  },
+  {
+    "version": 1,
+    "task_id": "m13-filings-aapl-10q-2025",
+    "mission": "M13",
+    "title": "Mission 13 · Apple Inc. Form 10-Q count, calendar 2025 (SEC EDGAR)",
+    "intent": "REGULATORY_FILING_MONITOR_GENERAL",
+    "params": {
+      "entity": "Form 10-Q filings by Apple Inc. (CIK 320193)",
+      "period": "calendar 2025"
+    },
+    "bought_at": "2026-11-21T17:37:05.000Z",
+    "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+    "miner_catalogue_id": "774921",
+    "nonce": "vr-desk-b14f2e49-c651-4dc2-974d-0f4951f623d0",
+    "valid_after": "1795282594",
+    "valid_before": "1795282699",
+    "quoted_uusdc": "10000",
+    "telegraph_receipt": {
+      "receipt_hash": "0x62791b7391743b7e2c92cc37595b0d829d7b879f2d33b36f3a214b6fbd48a338",
+      "rail": "escrow",
+      "miner": "6152",
+      "amount_uusdc": "10000",
+      "epoch_id": 32,
+      "settlement": "epoch",
+      "chain": "telegraph",
+      "timestamp": 1795282625
+    },
+    "signal_hash": "0x949ea0a401329336d52681627026ba30651f9cb4a29daf9a757a5fa7d0032d4c",
+    "engine": {
+      "miner_id": "774921",
+      "endpoint": "/v1/filings",
+      "result_shape": "intent",
+      "field_status": {
+        "entity": "unavailable",
+        "filing_count": "ok",
+        "filings": "unavailable",
+        "urls": "unavailable"
+      },
+      "duration_ms": 273,
+      "result": {
+        "entity": null,
+        "filing_count": 3,
+        "filings": null,
+        "urls": null
+      }
+    },
+    "value_field": "filing_count",
+    "value": 3,
+    "miner_receipt": {
+      "receipt_id": "rcpt_5OWRC3YVWFV8VJ6J4LENIBYK5B",
+      "raw_response_sha256": "f001022596bb110c821112a8b12f794e0d5c545475b7d5f0ccfb42d9b431e57b",
+      "upstream_url": "https://data.sec.gov/submissions/CIK0000320193.json"
+    },
+    "raw_sha256_recomputed": "f001022596bb110c821112a8b12f794e0d5c545475b7d5f0ccfb42d9b431e57b",
+    "raw_bytes": 164356,
+    "checks": [
+      {
+        "name": "signal hash re-derived",
+        "ok": true,
+        "detail": "keccak256(payload)=0x949ea0a401329336d52681627026ba30651f9cb4a29daf9a757a5fa7d0032d4c"
+      },
+      {
+        "name": "signal wallet is the payer",
+        "ok": true,
+        "detail": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3"
+      },
+      {
+        "name": "signal miner",
+        "ok": true,
+        "detail": "verireceipt"
+      },
+      {
+        "name": "signal intent",
+        "ok": true,
+        "detail": "REGULATORY_FILING_MONITOR_GENERAL"
+      },
+      {
+        "name": "engine value equals miner answer",
+        "ok": true,
+        "detail": "filing_count: engine=3 miner=3"
+      },
+      {
+        "name": "miner receipt present",
+        "ok": true,
+        "detail": "rcpt_5OWRC3YVWFV8VJ6J4LENIBYK5B"
+      },
+      {
+        "name": "stored receipt metadata agrees",
+        "ok": true,
+        "detail": "f001022596bb110c821112a8b12f794e0d5c545475b7d5f0ccfb42d9b431e57b"
+      },
+      {
+        "name": "sha256(stored raw bytes) = raw_response_sha256",
+        "ok": true,
+        "detail": "f001022596bb110c821112a8b12f794e0d5c545475b7d5f0ccfb42d9b431e57b over 164356 bytes"
+      }
+    ],
+    "verdict": "VERIFIED",
+    "delivery_proof": null,
+    "recovered_fields": {
+      "entity": {
+        "value": "Apple Inc.",
+        "node_status": "unavailable",
+        "source": "raw"
+      },
+      "filing_count": {
+        "value": 3,
+        "node_status": "ok",
+        "source": "node"
+      },
+      "filings": {
+        "value": [
+          "Form 10-Q filed 2025-08-01",
+          "Form 10-Q filed 2025-05-02",
+          "Form 10-Q filed 2025-01-31"
+        ],
+        "node_status": "unavailable",
+        "source": "raw"
+      },
+      "urls": {
+        "value": [
+          "https://www.sec.gov/Archives/edgar/data/320193/000032019325000073/aapl-20250628.htm",
+          "https://www.sec.gov/Archives/edgar/data/320193/000032019325000057/aapl-20250329.htm",
+          "https://www.sec.gov/Archives/edgar/data/320193/000032019325000008/aapl-20241228.htm"
+        ],
+        "node_status": "unavailable",
+        "source": "raw"
+      }
+    }
+  },
+  {
+    "version": 1,
+    "task_id": "m13-route-eth-usdc",
+    "mission": "M13",
+    "title": "Mission 13 · 1 ETH to USDC execution quote (Ethereum mainnet)",
+    "intent": "OPTIMAL_EXECUTION_ROUTE_GENERAL",
+    "params": {
+      "pair": "ETH/USDC"
+    },
+    "bought_at": "2026-11-21T17:37:07.000Z",
+    "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+    "miner_catalogue_id": "774921",
+    "nonce": "vr-desk-72358a1d-1de5-4f40-b9ad-c1856f2b6df5",
+    "valid_after": "1795282621",
+    "valid_before": "1795282726",
+    "quoted_uusdc": "10000",
+    "telegraph_receipt": {
+      "receipt_hash": "0x196ae4fa72718a30bd327f9f88af5297c19040bea2bc55e40dd68e92a0e3f37f",
+      "rail": "escrow",
+      "miner": "6152",
+      "amount_uusdc": "10000",
+      "epoch_id": 32,
+      "settlement": "epoch",
+      "chain": "telegraph",
+      "timestamp": 1795282627
+    },
+    "signal_hash": "0xe4ab7880d2e32aa97ebb4db6777b52e11f4ae8ac33aec393a18a78dca396b9b3",
+    "engine": {
+      "miner_id": "774921",
+      "endpoint": "/v1/route",
+      "result_shape": "intent",
+      "field_status": {
+        "amount_out": "ok"
+      },
+      "duration_ms": 559,
+      "result": {
+        "amount_out": 1678840828
+      }
+    },
+    "value_field": "amount_out",
+    "value": 1678840828,
+    "miner_receipt": {
+      "receipt_id": "rcpt_2UPXN00IHVQZF22T0RN4N881FK",
+      "raw_response_sha256": "cbb05915d19f210f4d36086ac79d59e4c7e7412df8fda29fbb875d4b9dd07d33",
+      "upstream_url": "https://eth-mainnet.public.blastapi.io"
+    },
+    "raw_sha256_recomputed": "cbb05915d19f210f4d36086ac79d59e4c7e7412df8fda29fbb875d4b9dd07d33",
+    "raw_bytes": 927,
+    "checks": [
+      {
+        "name": "signal hash re-derived",
+        "ok": true,
+        "detail": "keccak256(payload)=0xe4ab7880d2e32aa97ebb4db6777b52e11f4ae8ac33aec393a18a78dca396b9b3"
+      },
+      {
+        "name": "signal wallet is the payer",
+        "ok": true,
+        "detail": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3"
+      },
+      {
+        "name": "signal miner",
+        "ok": true,
+        "detail": "verireceipt"
+      },
+      {
+        "name": "signal intent",
+        "ok": true,
+        "detail": "OPTIMAL_EXECUTION_ROUTE_GENERAL"
+      },
+      {
+        "name": "engine value equals miner answer",
+        "ok": true,
+        "detail": "amount_out: engine=1678840828 miner=1678840828"
+      },
+      {
+        "name": "miner receipt present",
+        "ok": true,
+        "detail": "rcpt_2UPXN00IHVQZF22T0RN4N881FK"
+      },
+      {
+        "name": "stored receipt metadata agrees",
+        "ok": true,
+        "detail": "cbb05915d19f210f4d36086ac79d59e4c7e7412df8fda29fbb875d4b9dd07d33"
+      },
+      {
+        "name": "sha256(stored raw bytes) = raw_response_sha256",
+        "ok": true,
+        "detail": "cbb05915d19f210f4d36086ac79d59e4c7e7412df8fda29fbb875d4b9dd07d33 over 927 bytes"
+      }
+    ],
+    "verdict": "VERIFIED",
+    "delivery_proof": null,
+    "recovered_fields": {
+      "amount_out": {
+        "value": 1678840828,
+        "node_status": "ok",
+        "source": "node"
+      }
+    }
+  },
+  {
+    "version": 1,
+    "task_id": "m13-validator-1",
+    "mission": "M13",
+    "title": "Mission 13 · Beacon validator 1 effective balance",
+    "intent": "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
+    "params": {
+      "validator_index": "1"
+    },
+    "bought_at": "2026-11-21T17:37:09.000Z",
+    "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+    "miner_catalogue_id": "774921",
+    "nonce": "vr-desk-1a2ff492-c953-49b9-8f69-3a23fe582dfc",
+    "valid_after": "1795282623",
+    "valid_before": "1795282728",
+    "quoted_uusdc": "10000",
+    "telegraph_receipt": {
+      "receipt_hash": "0x6ac6f5b63e38c423744f6df68d1606f1bd5d44618f18765cb54a727ef040da58",
+      "rail": "escrow",
+      "miner": "6152",
+      "amount_uusdc": "10000",
+      "epoch_id": 32,
+      "settlement": "epoch",
+      "chain": "telegraph",
+      "timestamp": 1795282629
+    },
+    "signal_hash": "0xd17041cf5e15a534f5c3c6d3be92e420cc5a2e3be62fc784075d74345b6816e9",
+    "engine": {
+      "miner_id": "774921",
+      "endpoint": "/v1/validator",
+      "result_shape": "intent",
+      "field_status": {
+        "effective_balance": "ok"
+      },
+      "duration_ms": 1026,
+      "result": {
+        "effective_balance": 32000000000
+      }
+    },
+    "value_field": "effective_balance",
+    "value": 32000000000,
+    "miner_receipt": {
+      "receipt_id": "rcpt_03NKS18B2LVE21WB99QMNFX9X2",
+      "raw_response_sha256": "c26db58c57b34c0c6cfea50aa9f4c9937c0f65b274bf81815b971fff44d0b47a",
+      "upstream_url": "https://ethereum-beacon-api.publicnode.com/eth/v1/beacon/states/0x6789f18d07a2e87c41e1491f3c91e07a30dcac5f47117c74640daa8f3257d2f7/validators/1"
+    },
+    "raw_sha256_recomputed": "c26db58c57b34c0c6cfea50aa9f4c9937c0f65b274bf81815b971fff44d0b47a",
+    "raw_bytes": 524,
+    "checks": [
+      {
+        "name": "signal hash re-derived",
+        "ok": true,
+        "detail": "keccak256(payload)=0xd17041cf5e15a534f5c3c6d3be92e420cc5a2e3be62fc784075d74345b6816e9"
+      },
+      {
+        "name": "signal wallet is the payer",
+        "ok": true,
+        "detail": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3"
+      },
+      {
+        "name": "signal miner",
+        "ok": true,
+        "detail": "verireceipt"
+      },
+      {
+        "name": "signal intent",
+        "ok": true,
+        "detail": "VALIDATOR_PERFORMANCE_VERIFY_GENERAL"
+      },
+      {
+        "name": "engine value equals miner answer",
+        "ok": true,
+        "detail": "effective_balance: engine=32000000000 miner=32000000000"
+      },
+      {
+        "name": "miner receipt present",
+        "ok": true,
+        "detail": "rcpt_03NKS18B2LVE21WB99QMNFX9X2"
+      },
+      {
+        "name": "stored receipt metadata agrees",
+        "ok": true,
+        "detail": "c26db58c57b34c0c6cfea50aa9f4c9937c0f65b274bf81815b971fff44d0b47a"
+      },
+      {
+        "name": "sha256(stored raw bytes) = raw_response_sha256",
+        "ok": true,
+        "detail": "c26db58c57b34c0c6cfea50aa9f4c9937c0f65b274bf81815b971fff44d0b47a over 524 bytes"
+      }
+    ],
+    "verdict": "VERIFIED",
+    "delivery_proof": null,
+    "recovered_fields": {
+      "effective_balance": {
+        "value": 32000000000,
+        "node_status": "ok",
+        "source": "node"
+      }
+    }
   }
 ]

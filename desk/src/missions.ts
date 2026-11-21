@@ -37,6 +37,8 @@ export interface TaskCatalogEntry {
   node_or_zone?: string;
   market?: string;
   protocol?: string;
+  /** Every param of a fully static task, pinned exactly (the row's params must equal this). */
+  pinned_params?: Record<string, string>;
 }
 
 /** Pinned static identity of each Desk task. Must stay in sync with frontend/src/lib/taskCatalog.ts. */
@@ -64,6 +66,34 @@ export const TASK_CATALOG: Record<string, TaskCatalogEntry> = {
     valueField: "tvl_usd",
     protocol: "aave-v3",
   },
+  "m13-tx-desk-deposit": {
+    mission: "M13",
+    title: "Mission 13 · Counterparty tx check (Desk escrow deposit, Sepolia)",
+    intent: "ONCHAIN_TX_LOOKUP_GENERAL",
+    valueField: "block_number",
+    pinned_params: { tx_hash: "0xe8696cc29652173b1fdce601cfbd5d61649583bf811163d778d412739b78d2d3", chain: "sepolia" },
+  },
+  "m13-filings-aapl-10q-2025": {
+    mission: "M13",
+    title: "Mission 13 · Apple Inc. Form 10-Q count, calendar 2025 (SEC EDGAR)",
+    intent: "REGULATORY_FILING_MONITOR_GENERAL",
+    valueField: "filing_count",
+    pinned_params: { entity: "Form 10-Q filings by Apple Inc. (CIK 320193)", period: "calendar 2025" },
+  },
+  "m13-route-eth-usdc": {
+    mission: "M13",
+    title: "Mission 13 · 1 ETH to USDC execution quote (Ethereum mainnet)",
+    intent: "OPTIMAL_EXECUTION_ROUTE_GENERAL",
+    valueField: "amount_out",
+    pinned_params: { pair: "ETH/USDC" },
+  },
+  "m13-validator-1": {
+    mission: "M13",
+    title: "Mission 13 · Beacon validator 1 effective balance",
+    intent: "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
+    valueField: "effective_balance",
+    pinned_params: { validator_index: "1" },
+  },
 };
 
 export function catalogAgrees(r: {
@@ -83,6 +113,11 @@ export function catalogAgrees(r: {
   if (c.node_or_zone != null && r.params?.node_or_zone !== c.node_or_zone) return false;
   if (c.protocol != null && r.params?.protocol !== c.protocol) return false;
   if (c.market != null && r.recovered_fields?.market?.value !== c.market) return false;
+  if (c.pinned_params != null) {
+    const want = Object.keys(c.pinned_params).sort();
+    const got = r.params ? Object.keys(r.params).sort() : [];
+    if (want.length !== got.length || want.some((k, i) => k !== got[i] || r.params![k] !== c.pinned_params![k])) return false;
+  }
   return true;
 }
 
@@ -102,6 +137,9 @@ export function caisoHour(now: Date): string {
 export function nyisoInterval(now: Date): string {
   return new Date(Math.floor(now.getTime() / FIVE_MIN) * FIVE_MIN - 6 * FIVE_MIN).toISOString().replace(".000Z", "Z");
 }
+
+/** Fully static tasks (every param pinned in the catalog), bought in this order. */
+export const STATIC_TASK_IDS = ["m13-tx-desk-deposit", "m13-filings-aapl-10q-2025", "m13-route-eth-usdc", "m13-validator-1"] as const;
 
 export function planTasks(now: Date): DeskTask[] {
   const caiso = TASK_CATALOG["m12-caiso-np15"];
@@ -132,5 +170,9 @@ export function planTasks(now: Date): DeskTask[] {
       params: { protocol: tvl.protocol! },
       valueField: tvl.valueField,
     },
+    ...STATIC_TASK_IDS.map((id) => {
+      const c = TASK_CATALOG[id];
+      return { id, mission: c.mission, title: c.title, intent: c.intent, params: { ...c.pinned_params! }, valueField: c.valueField };
+    }),
   ];
 }

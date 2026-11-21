@@ -81,8 +81,13 @@ describe("J1 / J2 fields-r3 tampers (fields-fix r4)", () => {
     const bad = { ...honest.engine.field_status, lmp_usd_per_mwh: "unavailable" };
     expect(fieldStatusShapeOk(honest.intent, bad)).toBe(false);
     expect(storedLedgerAgrees({ ...honest, engine: { ...honest.engine, field_status: bad } }, v).failures).toContain("field_status");
+    // A non-number marked ok is a valid shape (the node now shapes text fields), but its engine
+    // value must equal the hash-verified raw answer: the honest row's engine.result.market is not "CAISO".
     const nonNumberOk = { ...honest.engine.field_status, market: "ok" };
-    expect(fieldStatusShapeOk(honest.intent, nonNumberOk)).toBe(false);
+    expect(fieldStatusShapeOk(honest.intent, nonNumberOk)).toBe(true);
+    expect(storedLedgerAgrees({ ...honest, engine: { ...honest.engine, field_status: nonNumberOk } }, v).failures).toContain("engine.result.market");
+    const forgedText = { ...honest, engine: { ...honest.engine, field_status: nonNumberOk, result: { ...honest.engine.result, market: "NYISO" } } };
+    expect(storedLedgerAgrees(forgedText, v).failures).toContain("engine.result.market");
   });
 
   it("fills recovered fields only when every check passed", async () => {

@@ -61,6 +61,7 @@ export interface DeskPurchase {
 export function formatRecoveredValue(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value.join(" · ");
   return JSON.stringify(value);
 }
 
@@ -68,6 +69,8 @@ function recoveredValueTypeOk(value: unknown): boolean {
   if (value === null) return true;
   if (typeof value === "string") return true;
   if (typeof value === "number" && Number.isFinite(value)) return true;
+  // List answer fields (FILINGS filings / urls) recover as arrays of strings.
+  if (Array.isArray(value) && value.length <= 1000 && value.every((v) => typeof v === "string")) return true;
   return false;
 }
 
@@ -171,7 +174,7 @@ export function assertPurchases(rows: unknown): DeskPurchase[] {
           throw new Error("deskPurchases.json has a malformed recovered_fields entry");
         }
         if (!recoveredValueTypeOk(f.value)) {
-          throw new Error("deskPurchases.json has a recovered_fields value that is not a string, number, or null");
+          throw new Error("deskPurchases.json has a recovered_fields value that is not a string, number, list of strings, or null");
         }
         if (f.source === "raw" && typeof f.value === "number") {
           throw new Error("deskPurchases.json claims a numeric field was recovered from raw");
@@ -180,7 +183,8 @@ export function assertPurchases(rows: unknown): DeskPurchase[] {
     }
   }
   const keys: Array<[string, (r: DeskPurchase) => string | undefined, boolean?]> = [
-    ["task_id", (r) => r.task_id],
+    // One purchase per task per epoch: the same task may be bought again in a later epoch.
+    ["task_id", (r) => (r.task_id ? `${r.task_id}@${r.telegraph_receipt?.epoch_id ?? "?"}` : r.task_id)],
     ["receipt_hash", (r) => r.telegraph_receipt?.receipt_hash],
     ["signal_hash", (r) => r.signal_hash],
     ["nonce", (r) => r.nonce, true],

@@ -17,10 +17,10 @@
 // invent a walker.
 import { createHash } from "node:crypto";
 import { keccak256, toBytes } from "viem";
-import { ENGINE_URL, MINER_BASE_URL, NODE_URL, VERIRECEIPT_ONCHAIN_MINER_ID } from "./constants.js";
+import { ENGINE_URL, MAX_WINDOW_SECONDS, MINER_BASE_URL, NODE_URL, VERIRECEIPT_ONCHAIN_MINER_IDS } from "./constants.js";
 import { catalogAgrees, valueFieldPinned } from "./missions.js";
 import type { Fetch } from "./client.js";
-import { FIELD_FORMAT, formatFor, isNumericField, reconcileShaped, type FieldStatus, type ReconciledField } from "../../src/core/shapedFields.js";
+import { FIELD_FORMAT, formatFor, isNumericField, mappingFor, readPath, reconcileShaped, type FieldStatus, type ReconciledField } from "../../src/core/shapedFields.js";
 
 export function sortKeysDeep(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(sortKeysDeep);
@@ -190,7 +190,7 @@ export function receiptPendingShape(r: LedgerIdentity): { ok: boolean; failures:
   if (r.telegraph_receipt.rail !== "escrow") failures.push("rail != escrow");
   if (!RECEIPT_HASH_RE.test(r.telegraph_receipt.receipt_hash)) failures.push("receipt_hash shape");
   if (!Number.isSafeInteger(r.telegraph_receipt.epoch_id) || r.telegraph_receipt.epoch_id < 0) failures.push("epoch_id shape");
-  if (typeof r.telegraph_receipt.miner !== "string" || r.telegraph_receipt.miner !== VERIRECEIPT_ONCHAIN_MINER_ID) {
+  if (typeof r.telegraph_receipt.miner !== "string" || !VERIRECEIPT_ONCHAIN_MINER_IDS.includes(r.telegraph_receipt.miner)) {
     failures.push("miner");
   }
   return { ok: failures.length === 0, failures };
@@ -235,8 +235,13 @@ export function boughtAtAgrees(boughtAt: string, receiptTimestampSec?: number, s
     else if (Math.abs(bought - receiptTimestampSec * 1000) > BOUGHT_AT_SLACK_MS) failures.push("bought_at vs receipt timestamp");
   }
   if (signalTimestamp != null && signalTimestamp !== "") {
+    // The miner answers (signal timestamp) before the node settles the receipt (bought_at), and the
+    // node may spend seconds shaping fields in between (25 s seen on a FILINGS ask). The answer must
+    // fall inside the signed authorization window: at most MAX_WINDOW_SECONDS before bought_at.
     const sig = parseTimeMs(signalTimestamp);
-    if (sig == null || Math.abs(bought - sig) > BOUGHT_AT_SLACK_MS) failures.push("bought_at vs signal timestamp");
+    if (sig == null || sig > bought + BOUGHT_AT_SLACK_MS || sig < bought - MAX_WINDOW_SECONDS * 1000 - BOUGHT_AT_SLACK_MS) {
+      failures.push("bought_at vs signal timestamp");
+    }
   }
   return { ok: failures.length === 0, failures };
 }
@@ -256,11 +261,33 @@ export function fieldStatusShapeOk(intent: string, status: Record<string, string
   for (const k of keys) {
     const st = status[k];
     if (st !== "ok" && st !== "missing" && st !== "rejected" && st !== "unavailable") return false;
+    // Number fields are computed in code and must be ok. Non-number fields come from the node's
+    // parser call: ok (the node shaped it) or unavailable (parser timed out); both are honest,
+    // and an ok non-number must equal the hash-verified raw answer (okTextEngineAgrees).
     const wantOk = formatFor(intent, k)?.type === "number";
     if (wantOk && st !== "ok") return false;
-    if (!wantOk && st === "ok") return false;
   }
   return true;
+}
+
+/** For ok non-number fields, engine.result[f] must equal the hash-verified raw answer at the field's mapped path. */
+export function okTextEngineAgrees(
+  engineResult: Record<string, unknown> | undefined,
+  fieldStatus: Record<string, string> | undefined,
+  payloadResponse: Record<string, unknown> | null,
+  intent: string,
+): { ok: boolean; failures: string[] } {
+  const failures: string[] = [];
+  if (!fieldStatus) return { ok: true, failures };
+  const mapping = mappingFor(intent);
+  for (const [f, st] of Object.entries(fieldStatus)) {
+    if (st !== "ok" || isNumericField(intent, f)) continue;
+    const m = mapping && Object.hasOwn(mapping, f) ? mapping[f] : undefined;
+    if (!engineResult || !payloadResponse || !m || !valuesAgree(engineResult[f], readPath(payloadResponse, m.path))) {
+      failures.push(`engine.result.${f}`);
+    }
+  }
+  return { ok: failures.length === 0, failures };
 }
 
 /** For ok numeric fields, engine.result[f] must equal the live payload.response[f]. */
@@ -319,13 +346,14 @@ export function storedLedgerAgrees(r: LedgerIdentity, v: VerifyOutput): { ok: bo
     failures.push("engine.result vs value");
   }
   failures.push(...okNumericEngineAgrees(r.engine?.result, r.engine?.field_status, v.payloadResponse, r.intent).failures);
+  failures.push(...okTextEngineAgrees(r.engine?.result, r.engine?.field_status, v.payloadResponse, r.intent).failures);
   return { ok: failures.length === 0, failures };
 }
 
 export function uniquePurchaseIds(
   rows: Array<{
     task_id?: string;
-    telegraph_receipt?: { receipt_hash?: string };
+    telegraph_receipt?: { receipt_hash?: string; epoch_id?: number };
     signal_hash?: string;
     nonce?: string;
     miner_receipt?: { receipt_id?: string } | null;
@@ -341,7 +369,8 @@ export function uniquePurchaseIds(
       else seen.set(key, i);
     });
   };
-  track("task_id", rows.map((r) => r.task_id));
+  // One purchase per task per epoch: the same task may be bought again in a later epoch.
+  track("task_id", rows.map((r) => (r.task_id ? `${r.task_id}@${r.telegraph_receipt?.epoch_id ?? "?"}` : r.task_id)));
   track("receipt_hash", rows.map((r) => r.telegraph_receipt?.receipt_hash));
   track("signal_hash", rows.map((r) => r.signal_hash));
   track("nonce", rows.map((r) => r.nonce), true);
@@ -488,8 +517,8 @@ export function deliveryIsOk(
   if (String(d.delivery.payer ?? "").toLowerCase() !== payer.toLowerCase()) return false;
   if (Number(d.delivery.usdc) !== Number(receipt.amount_uusdc)) return false;
   if (intent != null && String(d.delivery.intent ?? "") !== intent) return false;
-  if (String(d.delivery.miner_id ?? "") !== VERIRECEIPT_ONCHAIN_MINER_ID) return false;
-  if (receipt.miner !== undefined && receipt.miner !== VERIRECEIPT_ONCHAIN_MINER_ID) return false;
+  if (!VERIRECEIPT_ONCHAIN_MINER_IDS.includes(String(d.delivery.miner_id ?? ""))) return false;
+  if (receipt.miner !== undefined && (!VERIRECEIPT_ONCHAIN_MINER_IDS.includes(receipt.miner) || String(d.delivery.miner_id) !== receipt.miner)) return false;
   return true;
 }
 

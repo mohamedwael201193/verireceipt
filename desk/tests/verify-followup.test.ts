@@ -54,6 +54,14 @@ describe("desk-d-followup tampers (J2 M1, J1/J2 minors)", () => {
     expect(uniquePurchaseIds([caiso, { ...nyiso, task_id: caiso.task_id }]).failures.join(" ")).toMatch(/duplicate task_id/);
   });
 
+  it("the same task may be bought once per epoch: a later-epoch row of the same task passes, a same-epoch repeat fails", () => {
+    const later = recs.find((r) => r.task_id === "m12-caiso-np15" && r.telegraph_receipt.epoch_id !== caiso.telegraph_receipt.epoch_id);
+    expect(later).toBeTruthy();
+    expect(uniquePurchaseIds([caiso, later!]).ok).toBe(true);
+    const sameEpoch = { ...later!, telegraph_receipt: { ...later!.telegraph_receipt, epoch_id: caiso.telegraph_receipt.epoch_id } };
+    expect(uniquePurchaseIds([caiso, sameEpoch]).failures.join(" ")).toMatch(/duplicate task_id/);
+  });
+
   it("J1 Minor 3: missing or non-string title, bought_at, or miner fails (not skipped)", async () => {
     const v = await live();
     const { title: _t, ...noTitle } = caiso;

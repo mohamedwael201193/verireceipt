@@ -17,9 +17,23 @@ import { formatDate, shortHash } from "./utils";
 
 function formatValue(p: DeskPurchase): string {
   if (typeof p.value !== "number") return "—";
-  return p.value_field === "tvl_usd"
-    ? `$${Math.round(p.value).toLocaleString("en-US")}`
-    : `${p.value} USD/MWh`;
+  switch (p.value_field) {
+    case "tvl_usd":
+      return `$${Math.round(p.value).toLocaleString("en-US")}`;
+    case "lmp_usd_per_mwh":
+      return `${p.value} USD/MWh`;
+    case "block_number":
+      return `block ${p.value}`;
+    case "filing_count":
+      return `${p.value} filing${p.value === 1 ? "" : "s"}`;
+    case "amount_out":
+      // USDC base units (6 decimals) for selling exactly 1 ETH.
+      return `${p.value} USDC base units (${(p.value / 1e6).toFixed(2)} USDC)`;
+    case "effective_balance":
+      return `${p.value} gwei`;
+    default:
+      return String(p.value);
+  }
 }
 
 export default function EscrowPurchases({ rows, loadError }: { rows?: DeskPurchase[]; loadError?: string | null }) {
@@ -115,7 +129,7 @@ export default function EscrowPurchases({ rows, loadError }: { rows?: DeskPurcha
                       <td className="mono" style={{ fontSize: 11, color: "var(--soft)" }}>{Object.values(p.params).join(" · ")}</td>
                       <td className="mono" style={{ fontSize: 11 }}>{formatValue(p)}
                         {recoveredFromRaw(p).length ? (
-                          <div style={{ marginTop: 4, color: "var(--soft)" }}>
+                          <div style={{ marginTop: 4, color: "var(--soft)", overflowWrap: "anywhere" }}>
                             {recoveredFromRaw(p).map((f) => (
                               <div key={f.field}>{f.field}: {formatRecoveredValue(f.value)}</div>
                             ))}

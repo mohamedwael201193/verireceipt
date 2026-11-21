@@ -29,9 +29,10 @@ describe("EscrowPurchases panel", () => {
   });
 
   it("Epochs KPI says charged in these ledger roots for the committed included proofs", () => {
-    render(<MemoryRouter><EscrowPurchases /></MemoryRouter>);
+    const e31 = DESK_PURCHASES.filter((p) => p.telegraph_receipt.epoch_id === 31);
+    render(<MemoryRouter><EscrowPurchases rows={e31} /></MemoryRouter>);
     expect(screen.getByText("charged in these ledger roots")).toBeTruthy();
-    expect(screen.getAllByText("#31 · included")).toHaveLength(DESK_PURCHASES.length);
+    expect(screen.getAllByText("#31 · included")).toHaveLength(3);
   });
   it("Epochs KPI does not say charged when a supplied row is still pending", () => {
     const pending: DeskPurchase = { ...DESK_PURCHASES[0], delivery_proof: null };
@@ -119,3 +120,17 @@ describe("EscrowPurchases panel", () => {
     expect(screen.queryByText("recovered from hash-verified raw")).toBeNull();
     expect(screen.queryByText("market: CAISO")).toBeNull();
   });
+
+describe("EscrowPurchases value units", () => {
+  it("labels each intent's value in its own unit, never USD/MWh outside GRID", () => {
+    render(<MemoryRouter><EscrowPurchases /></MemoryRouter>);
+    for (const p of DESK_PURCHASES) {
+      if (p.value_field === "lmp_usd_per_mwh") continue;
+      expect(screen.queryByText(new RegExp(`^${p.value} USD/MWh`))).toBeNull();
+    }
+    const tx = DESK_PURCHASES.find((p) => p.value_field === "block_number");
+    if (tx) expect(screen.getAllByText(new RegExp(`block ${tx.value}`)).length).toBeGreaterThan(0);
+    const v = DESK_PURCHASES.find((p) => p.value_field === "effective_balance");
+    if (v) expect(screen.getAllByText(new RegExp(`${v.value} gwei`)).length).toBeGreaterThan(0);
+  });
+});

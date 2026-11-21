@@ -94,6 +94,11 @@ describe("deliveryIsOk (J2 Minor 2)", () => {
     expect(deliveryIsOk({ ...included, delivery: { ...included.delivery, usdc: 1 } }, receipt, payer)).toBe(false);
     expect(deliveryIsOk({ ...included, delivery: { ...included.delivery, receipt_hash: "0x" + "cd".repeat(32) } }, receipt, payer)).toBe(false);
   });
+  it("the delivery's miner_id must be one of our registration ids and equal the receipt's miner", () => {
+    expect(deliveryIsOk(included, { ...receipt, miner: "6152" }, payer)).toBe(true);
+    expect(deliveryIsOk({ ...included, delivery: { ...included.delivery, miner_id: "6159" } }, receipt, payer)).toBe(false);
+    expect(deliveryIsOk(included, { ...receipt, miner: "6159" }, payer)).toBe(false);
+  });
 });
 
 describe("checkDelivery status mapping", () => {

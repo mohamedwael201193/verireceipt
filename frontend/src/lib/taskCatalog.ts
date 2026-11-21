@@ -10,6 +10,8 @@ export interface TaskCatalogEntry {
   node_or_zone?: string;
   market?: string;
   protocol?: string;
+  /** Every param of a fully static task, pinned exactly (the row's params must equal this). */
+  pinned_params?: Record<string, string>;
 }
 
 export const VALUE_FIELD_BY_INTENT: Record<string, string> = {
@@ -45,6 +47,34 @@ export const TASK_CATALOG: Record<string, TaskCatalogEntry> = {
     valueField: "tvl_usd",
     protocol: "aave-v3",
   },
+  "m13-tx-desk-deposit": {
+    mission: "M13",
+    title: "Mission 13 · Counterparty tx check (Desk escrow deposit, Sepolia)",
+    intent: "ONCHAIN_TX_LOOKUP_GENERAL",
+    valueField: "block_number",
+    pinned_params: { tx_hash: "0xe8696cc29652173b1fdce601cfbd5d61649583bf811163d778d412739b78d2d3", chain: "sepolia" },
+  },
+  "m13-filings-aapl-10q-2025": {
+    mission: "M13",
+    title: "Mission 13 · Apple Inc. Form 10-Q count, calendar 2025 (SEC EDGAR)",
+    intent: "REGULATORY_FILING_MONITOR_GENERAL",
+    valueField: "filing_count",
+    pinned_params: { entity: "Form 10-Q filings by Apple Inc. (CIK 320193)", period: "calendar 2025" },
+  },
+  "m13-route-eth-usdc": {
+    mission: "M13",
+    title: "Mission 13 · 1 ETH to USDC execution quote (Ethereum mainnet)",
+    intent: "OPTIMAL_EXECUTION_ROUTE_GENERAL",
+    valueField: "amount_out",
+    pinned_params: { pair: "ETH/USDC" },
+  },
+  "m13-validator-1": {
+    mission: "M13",
+    title: "Mission 13 · Beacon validator 1 effective balance",
+    intent: "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
+    valueField: "effective_balance",
+    pinned_params: { validator_index: "1" },
+  },
 };
 
 export function catalogAgrees(r: {
@@ -64,6 +94,11 @@ export function catalogAgrees(r: {
   if (c.node_or_zone != null && r.params?.node_or_zone !== c.node_or_zone) return false;
   if (c.protocol != null && r.params?.protocol !== c.protocol) return false;
   if (c.market != null && r.recovered_fields?.market?.value !== c.market) return false;
+  if (c.pinned_params != null) {
+    const want = Object.keys(c.pinned_params).sort();
+    const got = r.params ? Object.keys(r.params).sort() : [];
+    if (want.length !== got.length || want.some((k, i) => k !== got[i] || r.params![k] !== c.pinned_params![k])) return false;
+  }
   return true;
 }
 

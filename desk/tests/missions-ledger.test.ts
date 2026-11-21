@@ -12,9 +12,23 @@ describe("mission plan", () => {
   });
   it("plans the M12 gates (CAISO NP15, NYISO Zone J) and the M13 TVL check with schema params", () => {
     const t = planTasks(now);
-    expect(t.map((x) => x.id)).toEqual(["m12-caiso-np15", "m12-nyiso-zone-j", "m13-tvl-aave-v3"]);
+    expect(t.map((x) => x.id)).toEqual([
+      "m12-caiso-np15", "m12-nyiso-zone-j", "m13-tvl-aave-v3",
+      "m13-tx-desk-deposit", "m13-filings-aapl-10q-2025", "m13-route-eth-usdc", "m13-validator-1",
+    ]);
     expect(Object.keys(t[0].params).sort()).toEqual(["interval_start", "node_or_zone"]);
     expect(Object.keys(t[2].params)).toEqual(["protocol"]);
+    expect(t[3].params).toEqual({ tx_hash: "0xe8696cc29652173b1fdce601cfbd5d61649583bf811163d778d412739b78d2d3", chain: "sepolia" });
+    expect(t[4].params).toEqual({ entity: "Form 10-Q filings by Apple Inc. (CIK 320193)", period: "calendar 2025" });
+    expect(t[5].params).toEqual({ pair: "ETH/USDC" });
+    expect(t[6].params).toEqual({ validator_index: "1" });
+  });
+  it("a static task's params must equal the catalog pin exactly", () => {
+    const base = { task_id: "m13-route-eth-usdc", mission: "M13", title: "Mission 13 · 1 ETH to USDC execution quote (Ethereum mainnet)", intent: "OPTIMAL_EXECUTION_ROUTE_GENERAL", value_field: "amount_out" };
+    expect(catalogAgrees({ ...base, params: { pair: "ETH/USDC" } })).toBe(true);
+    expect(catalogAgrees({ ...base, params: { pair: "BTC/USDC" } })).toBe(false);
+    expect(catalogAgrees({ ...base, params: { pair: "ETH/USDC", amount: "2" } })).toBe(false);
+    expect(catalogAgrees({ ...base, params: {} })).toBe(false);
   });
 });
 

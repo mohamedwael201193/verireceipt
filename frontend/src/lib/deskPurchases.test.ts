@@ -100,15 +100,24 @@ describe("isEndToEndVerified / assertPurchases (J2 Minor 3)", () => {
 });
 
 describe("epochChargeSubtext / deliveryStatus (J1 Medium, J2 Minor 1–2)", () => {
-  it("committed rows are included in recorded epoch 31 and billed in those ledger roots", () => {
-    for (const p of DESK_PURCHASES) {
+  it("committed epoch-31 rows are included in recorded epoch 31; later epochs are included or still pending", () => {
+    const e31 = DESK_PURCHASES.filter((p) => p.telegraph_receipt.epoch_id === 31);
+    expect(e31).toHaveLength(3);
+    for (const p of e31) {
       expect(deliveryStatus(p)).toBe("included");
       expect(p.delivery_proof?.status).toBe("included");
       expect(p.delivery_proof?.deliveries_root).toBe("0x8a2c6d8ca02026c9cf055c8a2c40f5d4bc87ecbdcb7f674f24fc786ebf4a5005");
-      expect(p.telegraph_receipt.epoch_id).toBe(31);
     }
-    expect(epochChargeSubtext(DESK_PURCHASES)).toBe("charged in these ledger roots");
-    expect(summarize(DESK_PURCHASES).epochsSubtext).toBe("charged in these ledger roots");
+    expect(epochChargeSubtext(e31)).toBe("charged in these ledger roots");
+    const later = DESK_PURCHASES.filter((p) => p.telegraph_receipt.epoch_id !== 31);
+    for (const p of later) {
+      expect(p.telegraph_receipt.epoch_id).toBeGreaterThan(31);
+      expect(["included", "pending"]).toContain(deliveryStatus(p));
+    }
+    const allIncluded = DESK_PURCHASES.every((p) => deliveryStatus(p) === "included");
+    expect(summarize(DESK_PURCHASES).epochsSubtext).toBe(
+      allIncluded ? "charged in these ledger roots" : "some billed in a recorded ledger root; others pending epoch submission",
+    );
   });
   it("says charged in these ledger roots only when every delivery is included", () => {
     const included = row({ delivery_proof: { status: "included", checked_at: "2026-11-21T00:00:00Z", deliveries_root: "0x" + "ab".repeat(32) } });
@@ -200,11 +209,14 @@ describe("recovered fields on the committed ledger (J2 fields H1 / M1)", () => {
   it("every committed VERIFIED row carries raw-recovered values and does not treat them as node-ok", () => {
     for (const p of DESK_PURCHASES) {
       const recovered = recoveredFromRaw(p);
-      expect(recovered.length).toBeGreaterThan(0);
+      const unavailable = Object.values(p.recovered_fields ?? {}).filter((f) => f.node_status === "unavailable");
+      // Epoch-31 rows had every text field unavailable; later rows recover exactly the unavailable ones.
+      if (p.telegraph_receipt.epoch_id === 31) expect(recovered.length).toBeGreaterThan(0);
+      expect(recovered.length).toBe(unavailable.length);
       for (const f of recovered) {
         expect(p.recovered_fields![f.field].source).toBe("raw");
         expect(p.recovered_fields![f.field].node_status).toBe("unavailable");
-        expect(typeof f.value === "string" || typeof f.value === "number").toBe(true);
+        expect(typeof f.value === "string" || typeof f.value === "number" || (Array.isArray(f.value) && f.value.every((x) => typeof x === "string"))).toBe(true);
       }
     }
     const caiso = DESK_PURCHASES.find((p) => p.task_id === "m12-caiso-np15")!;
@@ -242,8 +254,13 @@ describe("recovered fields on the committed ledger (J2 fields H1 / M1)", () => {
         currency: { value: { toString: null }, node_status: "unavailable", source: "raw" },
       },
     });
-    expect(() => assertPurchases([bad])).toThrow(/not a string, number, or null/);
+    expect(() => assertPurchases([bad])).toThrow(/not a string, number, list of strings, or null/);
     expect(formatRecoveredValue({ toString: null })).toBe('{"toString":null}');
+    const mixedList = row({
+      recovered_fields: { ...(DESK_PURCHASES[0].recovered_fields ?? {}), currency: { value: ["a", 1], node_status: "unavailable", source: "raw" } },
+    });
+    expect(() => assertPurchases([mixedList])).toThrow(/list of strings/);
+    expect(formatRecoveredValue(["Form 10-Q filed 2025-08-01", "Form 10-Q filed 2025-05-02"])).toBe("Form 10-Q filed 2025-08-01 · Form 10-Q filed 2025-05-02");
   });
 });
 
