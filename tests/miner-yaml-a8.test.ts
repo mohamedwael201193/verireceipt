@@ -115,12 +115,16 @@ describe("A8 miner.yaml vs the official intent schemas", () => {
     expect(ep.match(/- value: /g)).toHaveLength(1);
   });
 
-  it("VALIDATOR: validator_index is a canonical digit string (node cannot send integer) and the description states the 2-of-3 quorum", () => {
+  it("VALIDATOR: validator_index is a canonical digit string (node cannot send integer) and the description states the 2-of-4 finalized-state quorum", () => {
     const ep = block("  - path: /v1/validator").join("\n");
     expect(ep).toContain("- name: validator_index\n            type: string\n");
     expect(ep).toContain("canonical decimal");
-    expect(ep).toContain("2-of-3 quorum");
+    expect(ep).toContain("2-of-4 quorum");
+    expect(ep).toContain("finalized state");
+    expect(ep).toContain("any source that disagrees");
     expect(ep).not.toMatch(/two public beacon APIs/);
+    expect(ep).not.toContain("2-of-3 quorum");
+    expect(ep).not.toContain("head state");
     const m = block("  VALIDATOR_PERFORMANCE_VERIFY_GENERAL:").join("\n");
     expect(m).toContain("        from: validator_index");
     expect(m).not.toMatch(/validator_index:[\s\S]*how:/);

@@ -20,11 +20,15 @@ came from the stated source, unaltered.
 | `TVL_LOOKUP_GENERAL` | `GET /v1/tvl` | DeFi TVL (USD) for a protocol or chain, via DeFiLlama |
 | `OPTIMAL_EXECUTION_ROUTE_GENERAL` | `GET /v1/route` | Block-pinned quote for selling exactly 1 ETH for USDC on Ethereum mainnet (best quote across Uniswap V2/V3, SushiSwap V2) |
 | `GRID_POWER_PRICE_GENERAL` | `GET /v1/grid-price` | Wholesale locational marginal price (USD/MWh) from official public feeds (CAISO OASIS day-ahead, NYISO real-time, Elering 15-minute prices converted EUR→USD) |
-| `VALIDATOR_PERFORMANCE_VERIFY_GENERAL` | `GET /v1/validator` | Effective balance (gwei) of an Ethereum beacon-chain validator at head, from a 2-of-3 public beacon API quorum |
+| `VALIDATOR_PERFORMANCE_VERIFY_GENERAL` | `GET /v1/validator` | Effective balance (gwei) of an Ethereum beacon-chain validator at the finalized state, from a 2-of-4 public beacon API quorum |
 
 Every response includes `receipt.raw_response_sha256` — the SHA-256 of the raw
 upstream response the answer was derived from. See
 [JUDGE.md](JUDGE.md) for the 30-second recomputation check.
+
+A `/v1/validator` answer waits only for source replies that arrive inside the
+4.5 s request budget. A response that arrives after the budget is not counted:
+it cannot complete a quorum and it cannot flip a verified pair into a conflict.
 
 ## 30-second examples
 

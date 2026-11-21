@@ -375,7 +375,17 @@ function beaconBody(index: number, eff: string, status: string): string {
 describe("end-to-end: /v1/validator -> receipt -> /raw re-hash (stubbed beacon upstream)", () => {
   it("sha256(/raw body) == receipt.raw_response_sha256 and == metadata digest", async () => {
     const body = beaconBody(1, "32000000000", "active_ongoing");
-    const stub = vi.fn(async () => new Response(body, { status: 200, headers: { "content-type": "application/json" } }));
+    const finalizedRoot = "0x" + "ab".repeat(32);
+    const rootBody = JSON.stringify({
+      data: { root: finalizedRoot },
+      execution_optimistic: false,
+      finalized: true,
+    });
+    const stub = vi.fn(async (url: string | URL | Request) => {
+      const u = String(url);
+      const payload = /\/eth\/v1\/beacon\/states\/[^/]+\/root\/?$/.test(u) ? rootBody : body;
+      return new Response(payload, { status: 200, headers: { "content-type": "application/json" } });
+    });
     vi.stubGlobal("fetch", stub);
     let res;
     try {
@@ -384,6 +394,7 @@ describe("end-to-end: /v1/validator -> receipt -> /raw re-hash (stubbed beacon u
       vi.unstubAllGlobals();
     }
     expect(res.statusCode).toBe(200);
+    expect(res.json().finalized_state_root).toBe(finalizedRoot);
     const receipt = res.json().receipt;
     expect(receipt.raw_response_sha256).toBe(sha(body));
     const raw = await app.inject({ method: "GET", url: new URL(receipt.audit_url).pathname + "/raw" });

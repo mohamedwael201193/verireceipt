@@ -110,7 +110,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '  EDGAR filing counts by company, form type and period, DeFi TVL\n' +
     '  (DeFiLlama), block-pinned 1 ETH -> USDC execution quotes on Ethereum\n' +
     '  mainnet, wholesale grid power prices (CAISO, NYISO, Elering), and Ethereum\n' +
-    '  beacon-chain validator effective balances (2-of-3 beacon API quorum). It\n' +
+    '  beacon-chain validator effective balances (2-of-4 beacon API quorum). It\n' +
     '  refuses (400/422/502/504) rather than guessing.\n' +
     'base_url: https://verireceipt.onrender.com\n' +
     '\n' +
@@ -305,10 +305,10 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    method: GET\n' +
     '    description: >-\n' +
     '      Returns the effective balance in gwei of one Ethereum beacon-chain\n' +
-    '      validator at the head state, read from three independently operated\n' +
-    '      public beacon APIs (2-of-3 quorum): answered only when at least two\n' +
-    '      sources agree on effective_balance and status; fewer than two\n' +
-    '      agreeing sources, or a third source that disagrees, fails closed\n' +
+    '      validator at the finalized state, read from four independently\n' +
+    '      operated public beacon APIs (2-of-4 quorum): answered only when at\n' +
+    '      least two sources agree on effective_balance and status; fewer than\n' +
+    '      two agreeing sources, or any source that disagrees, fails closed\n' +
     '      (502, no answer). Returns validator_index, effective_balance, status\n' +
     '      and a SHA-256 receipt. Use for questions such as "What is the\n' +
     '      effective balance of Ethereum validator index 1, in gwei?".\n' +

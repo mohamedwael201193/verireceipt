@@ -31,11 +31,16 @@
 // bind fails the leg; it is not counted as a value vote.
 //
 // Verified-result cache: once 2-of-N agree on a finalized state, the
-// envelope (including the original receipt) is cached under
-// (validator_index, finalized state root) and served unchanged until
-// the agreed root advances, at which point the index is re-verified.
+// envelope (including the original receipt and finalized_state_root)
+// is cached under (validator_index, finalized state root) and served
+// unchanged until the agreed root advances, at which point the index
+// is re-verified. Every verified envelope names the finalized root it
+// is bound to; a cached envelope is never relabelled as a newer root.
+// After the 12 s root-cache TTL, a failed fresh root quorum fails
+// closed (502) instead of presenting a last-known root as current.
 // A cached answer is NEVER used as a cross-check vote for a different
 // (or unknown) root, and is never served as a 1-of-N substitute.
+// The verified Map is a bounded LRU (VERIFIED_CACHE_MAX_ENTRIES).
 //
 // Rate-aware pacing: a 429 on any host puts that host in a cooldown
 // (Retry-After, capped). ChainSafe additionally has a 1-token bucket
@@ -52,7 +57,10 @@
 // computed once over everything that arrived, so the same three answers
 // give the same verdict whatever order they arrive in, anywhere inside
 // the budget — including a dissent that only comes back on a 429 retry.
-// When the third source has DEFINITIVELY failed (non-retryable status,
+// A source that answers only after the 4.5 s budget is not counted
+// (it cannot complete a quorum and cannot flip a verified pair into
+// a conflict). When an unsettled source has DEFINITIVELY failed
+// (non-retryable status,
 // optimistic again after its retry, no budget left for a retry, network
 // error, timeout), the pair is decided at once, with no fixed wait. A
 // source that never answers inside the budget does not count and does
@@ -230,12 +238,12 @@ export const ROOT_RESOLVE_BUDGET_MS = 800;
 /** Agreed finalized-root cache TTL (finality advances every ~12 min; 12 s is conservative). */
 export const FINALIZED_ROOT_CACHE_TTL_MS = 12_000;
 /**
- * If a fresh root quorum cannot be formed, reuse the last agreed root
- * only if it is younger than this (well under one epoch). This is a
- * last-observed current-root identifier, never a stale value used as
- * a cross-check vote.
+ * Max entries in the verified-result Map (LRU). Unique (index, root)
+ * keys evict the least-recently used entry when the cap is reached.
+ * 10,000 is well above a session's first-seen indexes for one root
+ * (and a handful of recent finalized roots) and bounds process memory.
  */
-export const LAST_KNOWN_ROOT_MAX_AGE_MS = 60_000;
+export const VERIFIED_CACHE_MAX_ENTRIES = 10_000;
 /** ChainSafe token-bucket capacity. Observed 2026-11-21: 1–2 successes then nginx 429. */
 export const CHAINSAFE_BUCKET_CAPACITY = 1;
 /** ChainSafe token refill interval (ms). */
@@ -343,6 +351,28 @@ function verifiedCacheKey(index: number, root: string): string {
   return `${index}:${root.toLowerCase()}`;
 }
 
+/** Move `key` to the most-recently-used end and evict if over cap. */
+function rememberVerified(key: string, entry: VerifiedCacheEntry): void {
+  if (verifiedCache.has(key)) verifiedCache.delete(key);
+  verifiedCache.set(key, entry);
+  while (verifiedCache.size > VERIFIED_CACHE_MAX_ENTRIES) {
+    const oldest = verifiedCache.keys().next().value;
+    if (oldest === undefined) break;
+    verifiedCache.delete(oldest);
+  }
+}
+
+function takeVerified(index: number, root: string): VerifiedCacheEntry | undefined {
+  const key = verifiedCacheKey(index, root);
+  const hit = verifiedCache.get(key);
+  if (hit === undefined) return undefined;
+  // Refresh LRU order on a hit so a frequently served (index, root)
+  // is not evicted ahead of a colder entry.
+  verifiedCache.delete(key);
+  verifiedCache.set(key, hit);
+  return hit;
+}
+
 function refillChainSafeBucket(now: number): void {
   if (now < chainsafeBucket.cooldownUntilMs) {
     chainsafeBucket.tokens = 0;
@@ -375,6 +405,28 @@ export function resetValidatorCachesForTests(nowMs: number = Date.now()): void {
 /** Test-only: inspect the verified cache size. */
 export function verifiedCacheSizeForTests(): number {
   return verifiedCache.size;
+}
+
+/** Test-only: whether (index, root) is in the verified cache. */
+export function verifiedCacheHasForTests(index: number, root: string): boolean {
+  return verifiedCache.has(verifiedCacheKey(index, root));
+}
+
+/**
+ * Test-only: insert via the production LRU path (so cap / eviction
+ * can be exercised without 10,000 live quorum calls).
+ */
+export function rememberVerifiedForTests(
+  index: number,
+  root: string,
+  envelope: Record<string, unknown> = { validator_index: index, finalized_state_root: root },
+): void {
+  rememberVerified(verifiedCacheKey(index, root), { envelope, root, index });
+}
+
+/** Test-only: LRU-touch a cached entry the same way a cache hit does. */
+export function touchVerifiedForTests(index: number, root: string): boolean {
+  return takeVerified(index, root) !== undefined;
 }
 
 export function isChainSafeBase(base: string): boolean {
@@ -679,8 +731,9 @@ async function fetchStateRoot(
  * sources. ChainSafe is not queried here (rate budget reserved for a
  * validator leg). Optimistic roots that match the majority are ignored,
  * not counted and not treated as dissent; a different root from any
- * source (optimistic or not) is a conflict. On failure, a last-known
- * root younger than LAST_KNOWN_ROOT_MAX_AGE_MS may be reused.
+ * source (optimistic or not) is a conflict. After the 12 s TTL, a
+ * failed fresh quorum returns undefined (the handler fails closed);
+ * a last-known root is never presented as the current root.
  *
  * Each probe is hard-capped at the root budget (and the request
  * deadline) so a source that ignores AbortSignal cannot hang the
@@ -747,9 +800,9 @@ async function resolveFinalizedRoot(
       return agreed;
     }
   }
-  if (finalizedRootCache && nowMs - finalizedRootCache.atMs < LAST_KNOWN_ROOT_MAX_AGE_MS) {
-    return finalizedRootCache.root;
-  }
+  // A9 r3 (J2 m1): do not reuse a last-known root as the current
+  // identifier. After the 12 s TTL, fail closed rather than serve a
+  // previous root as if it were still current.
   return undefined;
 }
 
@@ -966,11 +1019,16 @@ export async function handleValidator(
   const startedAt = Date.now();
   const deadlineAt = startedAt + timeoutMs;
   const agreedRoot = await resolveFinalizedRoot(fetchImpl, timeoutMs, deadlineAt, nowFn());
-  if (agreedRoot !== undefined) {
-    const hit = verifiedCache.get(verifiedCacheKey(index, agreedRoot));
-    if (hit !== undefined) {
-      return hit.envelope;
-    }
+  if (agreedRoot === undefined) {
+    throw new ApiError(
+      502,
+      "QUORUM_UNREACHABLE",
+      "quorum unreachable: could not agree on a current finalized state root (fail closed; a last-known root is never presented as current)",
+    );
+  }
+  const hit = takeVerified(index, agreedRoot);
+  if (hit !== undefined) {
+    return hit.envelope;
   }
   const n = BEACON_SOURCES.length;
   // Per-source outcome, filled in as each leg settles.
@@ -1154,23 +1212,22 @@ export async function handleValidator(
   }
   const answer =
     `Validator ${index} has an effective balance of ${leg.effectiveBalance} gwei ` +
-    `(status ${leg.status}), verified by ${votes}.`;
+    `(status ${leg.status}), verified by ${votes} at finalized state root ${agreedRoot}.`;
   const result = envelope(
     INTENT,
     {
       validator_index: index,
       effective_balance: leg.effectiveBalance,
       status: leg.status,
+      finalized_state_root: agreedRoot,
     },
     receipt,
     { answer, verdict: "verified", confidence: 1.0, source: agreeingSources.join(" + ") },
   );
-  if (agreedRoot !== undefined) {
-    verifiedCache.set(verifiedCacheKey(index, agreedRoot), {
-      envelope: result,
-      root: agreedRoot,
-      index,
-    });
-  }
+  rememberVerified(verifiedCacheKey(index, agreedRoot), {
+    envelope: result,
+    root: agreedRoot,
+    index,
+  });
   return result;
 }

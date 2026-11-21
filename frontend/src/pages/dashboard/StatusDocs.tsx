@@ -112,7 +112,7 @@ function endpointDefs(): EndpointDef[] {
       key: "validator",
       path: "/v1/validator",
       role: "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
-      src: "2-of-N beacon-node quorum (Lodestar, PublicNode, Stakely)",
+      src: "2-of-4 beacon-node quorum (Lodestar, PublicNode, Stakely, blockreq)",
       intent: "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
       query: "validator_index=1",
       requestUrl: directUrl("/v1/validator", { validator_index: "1" }),
@@ -426,7 +426,7 @@ export default function StatusDocs({
           <div style={{ fontSize: 16, fontWeight: 500, color: answeredEndpoints === 6 ? "var(--ok)" : "var(--text)", marginBottom: 3 }}>
             {answeredEndpoints} / 6
           </div>
-          <div className="kpi-sub">4.5s abort cap · 2-of-3 quorum</div>
+          <div className="kpi-sub">4.5s abort cap · 2-of-4 quorum · after-budget replies not counted</div>
         </div>
         <div className="card" style={{ padding: "15px 17px" }}>
           <div className="kpi-lbl">Persistent Disk SQLite</div>

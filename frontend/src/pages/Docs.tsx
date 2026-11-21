@@ -178,7 +178,7 @@ const ENDPOINTS: EndpointDoc[] = [
     path: '/v1/validator',
     intent: 'VALIDATOR_PERFORMANCE_VERIFY_GENERAL',
     description:
-      'Returns the effective balance in gwei of one Ethereum beacon-chain validator at the head state, read from three independently operated public beacon APIs (2-of-3 quorum): answered only when at least two sources agree on effective_balance and status; fewer than two agreeing sources, or a third source that disagrees, fails closed (502, no answer). Returns validator_index, effective_balance, status and a SHA-256 receipt.',
+      'Returns the effective balance in gwei of one Ethereum beacon-chain validator at the finalized state, read from four independently operated public beacon APIs (2-of-4 quorum): answered only when at least two sources agree on effective_balance and status; fewer than two agreeing sources, or any source that disagrees, fails closed (502, no answer). Returns validator_index, effective_balance, status and a SHA-256 receipt. Use for questions such as "What is the effective balance of Ethereum validator index 1, in gwei?".',
     params: [
       {
         name: 'validator_index',

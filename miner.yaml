@@ -12,7 +12,7 @@ description: >-
   EDGAR filing counts by company, form type and period, DeFi TVL
   (DeFiLlama), block-pinned 1 ETH -> USDC execution quotes on Ethereum
   mainnet, wholesale grid power prices (CAISO, NYISO, Elering), and Ethereum
-  beacon-chain validator effective balances (2-of-3 beacon API quorum). It
+  beacon-chain validator effective balances (2-of-4 beacon API quorum). It
   refuses (400/422/502/504) rather than guessing.
 base_url: https://verireceipt.onrender.com
 
@@ -207,10 +207,10 @@ endpoints:
     method: GET
     description: >-
       Returns the effective balance in gwei of one Ethereum beacon-chain
-      validator at the head state, read from three independently operated
-      public beacon APIs (2-of-3 quorum): answered only when at least two
-      sources agree on effective_balance and status; fewer than two
-      agreeing sources, or a third source that disagrees, fails closed
+      validator at the finalized state, read from four independently
+      operated public beacon APIs (2-of-4 quorum): answered only when at
+      least two sources agree on effective_balance and status; fewer than
+      two agreeing sources, or any source that disagrees, fails closed
       (502, no answer). Returns validator_index, effective_balance, status
       and a SHA-256 receipt. Use for questions such as "What is the
       effective balance of Ethereum validator index 1, in gwei?".
