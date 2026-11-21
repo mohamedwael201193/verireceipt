@@ -33,7 +33,7 @@ export interface DeskPurchase {
     timestamp: number;
   };
   signal_hash: string;
-  engine: { miner_id: string; endpoint: string; result_shape: string; field_status: Record<string, string>; duration_ms: number | null };
+  engine: { miner_id: string; endpoint: string; result_shape: string; field_status: Record<string, string>; duration_ms: number | null; result?: Record<string, unknown> };
   value_field: string;
   value: unknown;
   miner_receipt: { receipt_id: string; raw_response_sha256: string; upstream_url?: string } | null;
@@ -53,6 +53,29 @@ export interface DeskPurchase {
     miner_id?: string;
     proof_nodes?: number;
   } | null;
+  recovered_fields?: Record<string, { value: unknown; node_status: string; source: "node" | "raw" | "none" }> | null;
+}
+
+/** Safe display of a recovered value: never calls String() on a hostile object. */
+export function formatRecoveredValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return JSON.stringify(value);
+}
+
+function recoveredValueTypeOk(value: unknown): boolean {
+  if (value === null) return true;
+  if (typeof value === "string") return true;
+  if (typeof value === "number" && Number.isFinite(value)) return true;
+  return false;
+}
+
+/** Fields filled from the hash-verified raw answer. Shown only on VERIFIED rows, never for numeric values. */
+export function recoveredFromRaw(p: DeskPurchase): Array<{ field: string; value: unknown }> {
+  if (purchaseVerdict(p) !== "VERIFIED" || !p.recovered_fields) return [];
+  return Object.entries(p.recovered_fields)
+    .filter(([, f]) => f && f.source === "raw" && typeof f.value !== "number" && recoveredValueTypeOk(f.value))
+    .map(([field, f]) => ({ field, value: f.value }));
 }
 
 /** Must stay in sync with desk/src/verify.ts EXPECTED_VERIFY_CHECKS. */
@@ -134,6 +157,19 @@ export function assertPurchases(rows: unknown): DeskPurchase[] {
     const receiptMs = typeof r.telegraph_receipt?.timestamp === "number" ? r.telegraph_receipt.timestamp * 1000 : NaN;
     if (!Number.isFinite(bought) || !Number.isFinite(receiptMs) || Math.abs(bought - receiptMs) > BOUGHT_AT_SLACK_MS) {
       throw new Error("deskPurchases.json has a bought_at that is inconsistent with the receipt timestamp");
+    }
+    if (r.recovered_fields) {
+      for (const [, f] of Object.entries(r.recovered_fields)) {
+        if (!f || (f.source !== "node" && f.source !== "raw" && f.source !== "none")) {
+          throw new Error("deskPurchases.json has a malformed recovered_fields entry");
+        }
+        if (!recoveredValueTypeOk(f.value)) {
+          throw new Error("deskPurchases.json has a recovered_fields value that is not a string, number, or null");
+        }
+        if (f.source === "raw" && typeof f.value === "number") {
+          throw new Error("deskPurchases.json claims a numeric field was recovered from raw");
+        }
+      }
     }
   }
   const keys: Array<[string, (r: DeskPurchase) => string | undefined]> = [

@@ -20,6 +20,7 @@ import { keccak256, toBytes } from "viem";
 import { ENGINE_URL, MINER_BASE_URL, NODE_URL } from "./constants.js";
 import { catalogAgrees, valueFieldPinned } from "./missions.js";
 import type { Fetch } from "./client.js";
+import { FIELD_FORMAT, formatFor, isNumericField, reconcileShaped, type FieldStatus, type ReconciledField } from "../../src/core/shapedFields.js";
 
 export function sortKeysDeep(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(sortKeysDeep);
@@ -72,6 +73,8 @@ export interface VerifyInput {
   engineResult: Record<string, unknown>;
   /** The intent that was purchased; pinned to payload.intent_id. */
   intent: string;
+  /** Node field_status from the paid reply (needed to reconcile shaped fields). */
+  fieldStatus?: Record<string, FieldStatus>;
 }
 
 export interface VerifyOutput {
@@ -85,6 +88,9 @@ export interface VerifyOutput {
   request: string | null;
   requestParams: Record<string, string> | null;
   signalTimestamp: string | null;
+  /** Reconciled fields, filled only when every verify check passed. */
+  fields: Record<string, ReconciledField> | null;
+  payloadResponse: Record<string, unknown> | null;
 }
 
 const RECEIPT_ID = /^rcpt_[A-Z0-9]{26}$/;
@@ -168,6 +174,11 @@ export interface LedgerIdentity {
   quoted_uusdc: string;
   telegraph_receipt: { receipt_hash: string; rail: string; amount_uusdc: string; epoch_id: number; miner?: string; timestamp?: number };
   delivery_proof?: StoredDeliveryProof | null;
+  recovered_fields?: Record<string, { value: unknown; node_status: string; source: "node" | "raw" | "none" }> | null;
+  engine?: {
+    result?: Record<string, unknown>;
+    field_status?: Record<string, string>;
+  };
 }
 
 /** Shape checks that apply while the epoch delivery is still pending. */
@@ -227,6 +238,54 @@ export function boughtAtAgrees(boughtAt: string, receiptTimestampSec?: number, s
   return { ok: failures.length === 0, failures };
 }
 
+
+export function canonicalEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(sortKeysDeep(a)) === JSON.stringify(sortKeysDeep(b));
+}
+
+/** Stored field_status keys must equal FIELD_FORMAT keys, and `ok` exactly on number fields. */
+export function fieldStatusShapeOk(intent: string, status: Record<string, string> | undefined): boolean {
+  if (!status || !Object.hasOwn(FIELD_FORMAT, intent)) return false;
+  const fmt = FIELD_FORMAT[intent];
+  const keys = Object.keys(status).filter((k) => k !== "__proto__" && k !== "constructor" && k !== "prototype").sort();
+  const expected = Object.keys(fmt).sort();
+  if (keys.length !== expected.length || keys.some((k, i) => k !== expected[i])) return false;
+  for (const k of keys) {
+    const st = status[k];
+    if (st !== "ok" && st !== "missing" && st !== "rejected" && st !== "unavailable") return false;
+    const wantOk = formatFor(intent, k)?.type === "number";
+    if (wantOk && st !== "ok") return false;
+    if (!wantOk && st === "ok") return false;
+  }
+  return true;
+}
+
+/** For ok numeric fields, engine.result[f] must equal the live payload.response[f]. */
+export function okNumericEngineAgrees(
+  engineResult: Record<string, unknown> | undefined,
+  fieldStatus: Record<string, string> | undefined,
+  payloadResponse: Record<string, unknown> | null,
+  intent: string,
+): { ok: boolean; failures: string[] } {
+  const failures: string[] = [];
+  if (!engineResult || !fieldStatus || !payloadResponse) return { ok: true, failures };
+  for (const [f, st] of Object.entries(fieldStatus)) {
+    if (st !== "ok" || !isNumericField(intent, f)) continue;
+    if (!valuesAgree(engineResult[f], payloadResponse[f])) failures.push(`engine.result.${f}`);
+  }
+  return { ok: failures.length === 0, failures };
+}
+
+export function recoveredFieldsAgree(
+  stored: Record<string, { value: unknown; node_status: string; source: "node" | "raw" | "none" }> | null | undefined,
+  live: Record<string, ReconciledField> | null,
+): { ok: boolean; failures: string[] } {
+  const failures: string[] = [];
+  if (stored != null && live == null) failures.push("recovered_fields present but live fields are null");
+  if (live != null && !canonicalEqual(stored ?? null, live)) failures.push("recovered_fields");
+  return { ok: failures.length === 0, failures };
+}
+
 /** Fail when the committed row's identity, intent, params, or verdict/checks disagree with the live re-derivation. */
 export function storedLedgerAgrees(r: LedgerIdentity, v: VerifyOutput): { ok: boolean; failures: string[] } {
   const failures: string[] = [];
@@ -251,6 +310,12 @@ export function storedLedgerAgrees(r: LedgerIdentity, v: VerifyOutput): { ok: bo
   if (typeof r.bought_at === "string") {
     failures.push(...boughtAtAgrees(r.bought_at, r.telegraph_receipt.timestamp, v.signalTimestamp).failures);
   }
+  failures.push(...recoveredFieldsAgree(r.recovered_fields, v.fields).failures);
+  if (r.engine?.field_status && !fieldStatusShapeOk(r.intent, r.engine.field_status)) failures.push("field_status");
+  if (r.engine?.result && r.value_field && !valuesAgree(r.engine.result[r.value_field], r.value)) {
+    failures.push("engine.result vs value");
+  }
+  failures.push(...okNumericEngineAgrees(r.engine?.result, r.engine?.field_status, v.payloadResponse, r.intent).failures);
   return { ok: failures.length === 0, failures };
 }
 
@@ -310,8 +375,9 @@ export async function verifyPurchase(input: VerifyInput, f: Fetch = fetch): Prom
   let requestParams: Record<string, string> | null = null;
   let signalTimestamp: string | null = null;
 
+  let payloadResponse: Record<string, unknown> | null = null;
   const empty = (): VerifyOutput => ({
-    verified: false, checks, minerReceipt, rawSha256, rawBytes, payloadValue, intentId, request, requestParams, signalTimestamp,
+    verified: false, checks, minerReceipt, rawSha256, rawBytes, payloadValue, intentId, request, requestParams, signalTimestamp, fields: null, payloadResponse,
   });
 
   const sigRes = await f(`${ENGINE_URL}/v1/signal/${input.signalHash}`);
@@ -336,6 +402,7 @@ export async function verifyPurchase(input: VerifyInput, f: Fetch = fetch): Prom
   add("signal intent", intentOk, intentId ?? "no intent_id");
 
   const response = sig.payload?.response ?? {};
+  payloadResponse = response;
   payloadValue = response[input.valueField];
   const engineValue = input.engineResult[input.valueField];
   add("engine value equals miner answer", engineValue !== undefined && engineValue !== null && engineValue === payloadValue,
@@ -363,7 +430,11 @@ export async function verifyPurchase(input: VerifyInput, f: Fetch = fetch): Prom
   add("sha256(stored raw bytes) = raw_response_sha256", rawSha256 === r.raw_response_sha256,
     raw.ok ? `${rawSha256} over ${rawBytes} bytes` : `HTTP ${raw.status}`);
 
-  return { verified: checks.every((c) => c.ok), checks, minerReceipt, rawSha256, rawBytes, payloadValue, intentId, request, requestParams, signalTimestamp };
+  const verified = checks.every((c) => c.ok);
+  const fields = verified && input.fieldStatus
+    ? reconcileShaped({ intent: input.intent, result: input.engineResult, field_status: input.fieldStatus }, response, { rawVerified: true })
+    : null;
+  return { verified, checks, minerReceipt, rawSha256, rawBytes, payloadValue, intentId, request, requestParams, signalTimestamp, fields, payloadResponse };
 }
 
 export interface DeliveryProof {

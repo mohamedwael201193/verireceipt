@@ -105,3 +105,17 @@ describe("EscrowPurchases panel", () => {
     expect(screen.getByText("Escrow")).toBeTruthy();
   });
 });
+
+  it("shows recovered values labelled as recovered from hash-verified raw, not as node-ok", () => {
+    render(<MemoryRouter><EscrowPurchases rows={[DESK_PURCHASES[0]]} /></MemoryRouter>);
+    expect(screen.getByText("node_or_zone: TH_NP15_GEN-APND")).toBeTruthy();
+    expect(screen.getByText("market: CAISO")).toBeTruthy();
+    expect(screen.getAllByText("recovered from hash-verified raw").length).toBe(1);
+    expect(screen.queryByText(/node marked them ok|parser answered/i)).toBeNull();
+  });
+  it("does not show recovered values for an UNVERIFIED row", () => {
+    const u = { ...DESK_PURCHASES[0], verdict: "UNVERIFIED" as const, checks: [{ name: "x", ok: false, detail: "no" }] };
+    render(<MemoryRouter><EscrowPurchases rows={[u]} /></MemoryRouter>);
+    expect(screen.queryByText("recovered from hash-verified raw")).toBeNull();
+    expect(screen.queryByText("market: CAISO")).toBeNull();
+  });

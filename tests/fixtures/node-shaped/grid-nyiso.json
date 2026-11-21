@@ -1,0 +1,43 @@
+{
+  "captured": "2026-11-21 (Africa/Cairo); paid escrow ask_direct to miner 774921 (registration 6152), devnode",
+  "node": {
+    "intent": "GRID_POWER_PRICE_GENERAL",
+    "signal_hash": "0xed4a416f9a7b7fc331e797228584598a1711bd60a60e3a514e2286c46383ba8d",
+    "result_shape": "intent",
+    "result": {
+      "lmp_usd_per_mwh": 50.9,
+      "node_or_zone": null,
+      "market": null,
+      "interval_start": null,
+      "currency": null
+    },
+    "field_status": {
+      "lmp_usd_per_mwh": "ok",
+      "node_or_zone": "unavailable",
+      "market": "unavailable",
+      "interval_start": "unavailable",
+      "currency": "unavailable"
+    }
+  },
+  "raw": {
+    "answer": "The LMP at ZONE_J was $50.90 USD per MWh (NYISO) for the interval starting 2026-11-21T12:55:00.000Z.",
+    "checked_at": "2026-11-21T13:26:48.075Z",
+    "confidence": 1,
+    "currency": "USD",
+    "interval_start": "2026-11-21T12:55:00.000Z",
+    "lmp_usd_per_mwh": 50.9,
+    "market": "NYISO",
+    "node_or_zone": "ZONE_J",
+    "receipt": {
+      "audit_url": "https://verireceipt.onrender.com/receipts/rcpt_NERDD867HEBEQA7NFZA27D2S31",
+      "fetched_at": "2026-11-21T13:26:28.503Z",
+      "intent": "GRID_POWER_PRICE_GENERAL",
+      "quorum_votes": "1/1 cache row from verified ISO feed",
+      "raw_response_sha256": "bde8221a1c6983ffd8431ccbb5e56f7094f290292dbc5a2381f408c47ce2fb88",
+      "receipt_id": "rcpt_NERDD867HEBEQA7NFZA27D2S31",
+      "upstream_url": "https://mis.nyiso.com/public/csv/realtime/20261121realtime_zone.csv"
+    },
+    "source": "NYISO MIS realtime LBMP CSV",
+    "verdict": "verified"
+  }
+}

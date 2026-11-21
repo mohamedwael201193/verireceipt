@@ -12,7 +12,7 @@
 // proof column. Links are plain anchors: the Dashboard renders outside a
 // router in its tests, like the rest of the dashboard views.
 import { useState } from "react";
-import { auditLinks, deliveryStatus, DESK_PURCHASES, DESK_PURCHASES_LOAD_ERROR, purchaseVerdict, rehashStoredRaw, summarize, uusdcToUsd, type DeskPurchase, type RehashResult } from "../../lib/deskPurchases";
+import { auditLinks, deliveryStatus, DESK_PURCHASES, DESK_PURCHASES_LOAD_ERROR, formatRecoveredValue, purchaseVerdict, recoveredFromRaw, rehashStoredRaw, summarize, uusdcToUsd, type DeskPurchase, type RehashResult } from "../../lib/deskPurchases";
 import { formatDate, shortHash } from "./utils";
 
 function formatValue(p: DeskPurchase): string {
@@ -113,7 +113,15 @@ export default function EscrowPurchases({ rows, loadError }: { rows?: DeskPurcha
                       <td className="mono" style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap" }}>{formatDate(p.bought_at)}</td>
                       <td className="mono" style={{ fontSize: 11 }}>{p.title}</td>
                       <td className="mono" style={{ fontSize: 11, color: "var(--soft)" }}>{Object.values(p.params).join(" · ")}</td>
-                      <td className="mono" style={{ fontSize: 11 }}>{formatValue(p)}</td>
+                      <td className="mono" style={{ fontSize: 11 }}>{formatValue(p)}
+                        {recoveredFromRaw(p).length ? (
+                          <div style={{ marginTop: 4, color: "var(--soft)" }}>
+                            {recoveredFromRaw(p).map((f) => (
+                              <div key={f.field}>{f.field}: {formatRecoveredValue(f.value)}</div>
+                            ))}
+                            <div>recovered from hash-verified raw</div>
+                          </div>
+                        ) : null}</td>
                       <td className="mono" style={{ fontSize: 11 }}>{uusdcToUsd(Number(p.telegraph_receipt.amount_uusdc))} escrow</td>
                       <td className="mono" style={{ fontSize: 11 }} title={p.telegraph_receipt.receipt_hash}>
                         {shortHash(p.telegraph_receipt.receipt_hash)}

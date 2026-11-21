@@ -38,7 +38,14 @@
         "interval_start": "unavailable",
         "currency": "unavailable"
       },
-      "duration_ms": 241
+      "duration_ms": 241,
+      "result": {
+        "lmp_usd_per_mwh": 53.65098,
+        "node_or_zone": null,
+        "market": null,
+        "interval_start": null,
+        "currency": null
+      }
     },
     "value_field": "lmp_usd_per_mwh",
     "value": 53.65098,
@@ -94,7 +101,7 @@
     "verdict": "VERIFIED",
     "delivery_proof": {
       "status": "included",
-      "checked_at": "2026-11-21T16:04:35.443Z",
+      "checked_at": "2026-11-21T16:11:41.911Z",
       "deliveries_root": "0x8a2c6d8ca02026c9cf055c8a2c40f5d4bc87ecbdcb7f674f24fc786ebf4a5005",
       "epoch_id": 31,
       "receipt_hash": "0xc68e9408227f9c43cfb0a4459013fae085242268efb674b9628c3ed5f807b394",
@@ -103,6 +110,33 @@
       "intent": "GRID_POWER_PRICE_GENERAL",
       "miner_id": "6152",
       "proof_nodes": 9
+    },
+    "recovered_fields": {
+      "lmp_usd_per_mwh": {
+        "value": 53.65098,
+        "node_status": "ok",
+        "source": "node"
+      },
+      "node_or_zone": {
+        "value": "TH_NP15_GEN-APND",
+        "node_status": "unavailable",
+        "source": "raw"
+      },
+      "market": {
+        "value": "CAISO",
+        "node_status": "unavailable",
+        "source": "raw"
+      },
+      "interval_start": {
+        "value": "2026-11-21T11:00:00.000Z",
+        "node_status": "unavailable",
+        "source": "raw"
+      },
+      "currency": {
+        "value": "USD",
+        "node_status": "unavailable",
+        "source": "raw"
+      }
     }
   },
   {
@@ -144,7 +178,14 @@
         "interval_start": "unavailable",
         "currency": "unavailable"
       },
-      "duration_ms": 226
+      "duration_ms": 226,
+      "result": {
+        "lmp_usd_per_mwh": 50.9,
+        "node_or_zone": null,
+        "market": null,
+        "interval_start": null,
+        "currency": null
+      }
     },
     "value_field": "lmp_usd_per_mwh",
     "value": 50.9,
@@ -200,7 +241,7 @@
     "verdict": "VERIFIED",
     "delivery_proof": {
       "status": "included",
-      "checked_at": "2026-11-21T16:04:36.246Z",
+      "checked_at": "2026-11-21T16:11:42.906Z",
       "deliveries_root": "0x8a2c6d8ca02026c9cf055c8a2c40f5d4bc87ecbdcb7f674f24fc786ebf4a5005",
       "epoch_id": 31,
       "receipt_hash": "0xab7bea5812c35e9821b8926972104cd05a6d61c33435b7381350c2045ab93b68",
@@ -209,6 +250,33 @@
       "intent": "GRID_POWER_PRICE_GENERAL",
       "miner_id": "6152",
       "proof_nodes": 10
+    },
+    "recovered_fields": {
+      "lmp_usd_per_mwh": {
+        "value": 50.9,
+        "node_status": "ok",
+        "source": "node"
+      },
+      "node_or_zone": {
+        "value": "ZONE_J",
+        "node_status": "unavailable",
+        "source": "raw"
+      },
+      "market": {
+        "value": "NYISO",
+        "node_status": "unavailable",
+        "source": "raw"
+      },
+      "interval_start": {
+        "value": "2026-11-21T12:55:00.000Z",
+        "node_status": "unavailable",
+        "source": "raw"
+      },
+      "currency": {
+        "value": "USD",
+        "node_status": "unavailable",
+        "source": "raw"
+      }
     }
   },
   {
@@ -248,7 +316,13 @@
         "chain_tvl_usd": "ok",
         "as_of": "unavailable"
       },
-      "duration_ms": 253
+      "duration_ms": 253,
+      "result": {
+        "protocol_or_chain": null,
+        "tvl_usd": 14771569827.84391,
+        "chain_tvl_usd": 12690034044.50001,
+        "as_of": null
+      }
     },
     "value_field": "tvl_usd",
     "value": 14771569827.84391,
@@ -304,7 +378,7 @@
     "verdict": "VERIFIED",
     "delivery_proof": {
       "status": "included",
-      "checked_at": "2026-11-21T16:04:37.036Z",
+      "checked_at": "2026-11-21T16:11:43.723Z",
       "deliveries_root": "0x8a2c6d8ca02026c9cf055c8a2c40f5d4bc87ecbdcb7f674f24fc786ebf4a5005",
       "epoch_id": 31,
       "receipt_hash": "0x74c0f2d8cd8692e28db5c0addbb5894462c1123a6ab7b1ba68d6261b1355425a",
@@ -313,6 +387,28 @@
       "intent": "TVL_LOOKUP_GENERAL",
       "miner_id": "6152",
       "proof_nodes": 10
+    },
+    "recovered_fields": {
+      "protocol_or_chain": {
+        "value": "aave-v3",
+        "node_status": "unavailable",
+        "source": "raw"
+      },
+      "tvl_usd": {
+        "value": 14771569827.84391,
+        "node_status": "ok",
+        "source": "node"
+      },
+      "chain_tvl_usd": {
+        "value": 12690034044.50001,
+        "node_status": "ok",
+        "source": "node"
+      },
+      "as_of": {
+        "value": "2026-11-21T13:26:51.492Z",
+        "node_status": "unavailable",
+        "source": "raw"
+      }
     }
   }
 ]

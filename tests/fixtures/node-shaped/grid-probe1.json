@@ -1,0 +1,43 @@
+{
+  "captured": "2026-11-21 (Africa/Cairo); paid escrow ask_direct to miner 774921 (registration 6152), devnode",
+  "node": {
+    "intent": "GRID_POWER_PRICE_GENERAL",
+    "signal_hash": "0x4b7f1a6730acfc36554911a23320e31f024c24da819f7c043f3a32be12887d96",
+    "result_shape": "intent",
+    "result": {
+      "lmp_usd_per_mwh": 55.12858,
+      "node_or_zone": null,
+      "market": null,
+      "interval_start": null,
+      "currency": null
+    },
+    "field_status": {
+      "lmp_usd_per_mwh": "ok",
+      "node_or_zone": "unavailable",
+      "market": "unavailable",
+      "interval_start": "unavailable",
+      "currency": "unavailable"
+    }
+  },
+  "raw": {
+    "answer": "The LMP at TH_NP15_GEN-APND was $55.13 USD per MWh (CAISO) for the interval starting 2026-11-21T10:00:00.000Z.",
+    "checked_at": "2026-11-21T13:23:38.930Z",
+    "confidence": 1,
+    "currency": "USD",
+    "interval_start": "2026-11-21T10:00:00.000Z",
+    "lmp_usd_per_mwh": 55.12858,
+    "market": "CAISO",
+    "node_or_zone": "TH_NP15_GEN-APND",
+    "receipt": {
+      "audit_url": "https://verireceipt.onrender.com/receipts/rcpt_Z2MZ64HFJXL8SQZO135B79OEI6",
+      "fetched_at": "2026-11-21T13:21:30.102Z",
+      "intent": "GRID_POWER_PRICE_GENERAL",
+      "quorum_votes": "1/1 cache row from verified ISO feed",
+      "raw_response_sha256": "4b0c199ce3cf188c702694391bb8d028312027f2368e8bf75894a322447f2c48",
+      "receipt_id": "rcpt_Z2MZ64HFJXL8SQZO135B79OEI6",
+      "upstream_url": "https://oasis.caiso.com/oasisapi/SingleZip?queryname=PRC_LMP&startdatetime=20261120T11:21-0000&enddatetime=20261121T13:21-0000&version=1&market_run_id=DAM&node=TH_NP15_GEN-APND&resultformat=6"
+    },
+    "source": "CAISO OASIS PRC_LMP DAM",
+    "verdict": "verified"
+  }
+}

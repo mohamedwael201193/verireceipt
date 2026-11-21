@@ -1,0 +1,40 @@
+{
+  "captured": "2026-11-21 (Africa/Cairo); paid escrow ask_direct to miner 774921 (registration 6152), devnode",
+  "node": {
+    "intent": "TVL_LOOKUP_GENERAL",
+    "signal_hash": "0x645396d95546a3bd41c531f8ca57a08b45b3d196846bad04839caab635115ec2",
+    "result_shape": "intent",
+    "result": {
+      "protocol_or_chain": null,
+      "tvl_usd": 14771569827.84391,
+      "chain_tvl_usd": 12690034044.50001,
+      "as_of": null
+    },
+    "field_status": {
+      "protocol_or_chain": "unavailable",
+      "tvl_usd": "ok",
+      "chain_tvl_usd": "ok",
+      "as_of": "unavailable"
+    }
+  },
+  "raw": {
+    "answer": "Aave V3 has a total value locked of $14,771,569,828 as of 2026-11-21.",
+    "as_of": "2026-11-21T13:26:51.492Z",
+    "chain_tvl_usd": 12690034044.50001,
+    "checked_at": "2026-11-21T13:26:51.493Z",
+    "confidence": 1,
+    "protocol_or_chain": "aave-v3",
+    "receipt": {
+      "audit_url": "https://verireceipt.onrender.com/receipts/rcpt_LMJ876821Q9TWIB4EDRDNCICG7",
+      "fetched_at": "2026-11-21T13:26:51.492Z",
+      "intent": "TVL_LOOKUP_GENERAL",
+      "quorum_votes": "1/1 primary source",
+      "raw_response_sha256": "609c7aaba4703addf04f038a95c4f30ca1996abe4ad85e8faba2db910622b1e0",
+      "receipt_id": "rcpt_LMJ876821Q9TWIB4EDRDNCICG7",
+      "upstream_url": "https://api.llama.fi/tvl/aave-v3"
+    },
+    "source": "DeFiLlama API (https://api.llama.fi/tvl/aave-v3)",
+    "tvl_usd": 14771569827.84391,
+    "verdict": "verified"
+  }
+}

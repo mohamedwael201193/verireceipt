@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { assertPurchases, auditLinks, deliveryStatus, DESK_PURCHASES, epochChargeSubtext, EXPECTED_VERIFY_CHECKS, isEndToEndVerified, loadPurchases, purchaseVerdict, rehashStoredRaw, summarize, uusdcToUsd, type DeskPurchase } from "./deskPurchases";
+import { assertPurchases, auditLinks, deliveryStatus, DESK_PURCHASES, epochChargeSubtext, EXPECTED_VERIFY_CHECKS, formatRecoveredValue, isEndToEndVerified, loadPurchases, purchaseVerdict, recoveredFromRaw, rehashStoredRaw, summarize, uusdcToUsd, type DeskPurchase } from "./deskPurchases";
 import { sha256Hex } from "./receipt";
 
 describe("desk purchases (committed ledger)", () => {
@@ -192,5 +192,55 @@ describe("J1 / J2 r4 frontend guards", () => {
     expect(() => assertPurchases([a, { ...b, signal_hash: a.signal_hash }])).toThrow(/duplicate signal_hash/);
     expect(() => assertPurchases([a, { ...b, nonce: a.nonce }])).toThrow(/duplicate nonce/);
     expect(() => assertPurchases([a, { ...b, miner_receipt: { ...b.miner_receipt!, receipt_id: a.miner_receipt!.receipt_id } }])).toThrow(/duplicate miner_receipt.receipt_id/);
+  });
+});
+
+describe("recovered fields on the committed ledger (J2 fields H1 / M1)", () => {
+  it("every committed VERIFIED row carries raw-recovered values and does not treat them as node-ok", () => {
+    for (const p of DESK_PURCHASES) {
+      const recovered = recoveredFromRaw(p);
+      expect(recovered.length).toBeGreaterThan(0);
+      for (const f of recovered) {
+        expect(p.recovered_fields![f.field].source).toBe("raw");
+        expect(p.recovered_fields![f.field].node_status).toBe("unavailable");
+        expect(typeof f.value === "string" || typeof f.value === "number").toBe(true);
+      }
+    }
+    const caiso = DESK_PURCHASES.find((p) => p.task_id === "m12-caiso-np15")!;
+    expect(recoveredFromRaw(caiso).map((f) => [f.field, f.value])).toEqual([
+      ["node_or_zone", "TH_NP15_GEN-APND"],
+      ["market", "CAISO"],
+      ["interval_start", "2026-11-21T11:00:00.000Z"],
+      ["currency", "USD"],
+    ]);
+    const tvl = DESK_PURCHASES.find((p) => p.task_id === "m13-tvl-aave-v3")!;
+    expect(tvl.recovered_fields!.chain_tvl_usd).toEqual({ value: 12690034044.50001, node_status: "ok", source: "node" });
+    expect(recoveredFromRaw(tvl).map((f) => [f.field, f.value])).toEqual([
+      ["protocol_or_chain", "aave-v3"],
+      ["as_of", "2026-11-21T13:26:51.492Z"],
+    ]);
+  });
+  it("does not show recovered values on an UNVERIFIED row", () => {
+    const u = row({ verdict: "UNVERIFIED", checks: [{ name: "x", ok: false, detail: "no" }] });
+    expect(recoveredFromRaw(u)).toEqual([]);
+  });
+  it("does not treat a numeric field tagged source=raw as recovered", () => {
+    const bad = row({
+      recovered_fields: {
+        ...(DESK_PURCHASES[0].recovered_fields ?? {}),
+        tvl_usd: { value: 1, node_status: "unavailable", source: "raw" },
+      },
+    });
+    expect(recoveredFromRaw(bad).some((f) => f.field === "tvl_usd")).toBe(false);
+    expect(() => assertPurchases([bad])).toThrow(/numeric field was recovered from raw/);
+  });
+  it("assertPurchases rejects a recovered value that would crash String()", () => {
+    const bad = row({
+      recovered_fields: {
+        market: { value: { toString: null }, node_status: "unavailable", source: "raw" },
+      },
+    });
+    expect(() => assertPurchases([bad])).toThrow(/not a string, number, or null/);
+    expect(formatRecoveredValue({ toString: null })).toBe('{"toString":null}');
   });
 });

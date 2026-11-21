@@ -38,4 +38,4 @@ const records = await runDesk(
     },
   },
 );
-console.log(JSON.stringify(records.map((r) => ({ task: r.task_id, verdict: r.verdict, receipt_hash: r.telegraph_receipt.receipt_hash, epoch: r.telegraph_receipt.epoch_id, rcpt: r.miner_receipt?.receipt_id, value: r.value })), null, 2));
+console.log(JSON.stringify(records.map((r) => ({ task: r.task_id, verdict: r.verdict, receipt_hash: r.telegraph_receipt.receipt_hash, epoch: r.telegraph_receipt.epoch_id, rcpt: r.miner_receipt?.receipt_id, value: r.value, recovered: r.recovered_fields ? Object.fromEntries(Object.entries(r.recovered_fields).filter(([, f]) => f.source === "raw").map(([k, f]) => [k, f.value])) : null })), null, 2));

@@ -5,6 +5,7 @@ import { escrowAskMiner, type Fetch, type Payer, type RawResponse } from "./clie
 import { appendLedger, readLedger, spentOnUtcDay, type PurchaseRecord } from "./ledger.js";
 import { planTasks, type DeskTask } from "./missions.js";
 import { verifyPurchase } from "./verify.js";
+import type { FieldStatus } from "../../src/core/shapedFields.js";
 
 export interface AgentOptions {
   ledgerFile: string;
@@ -39,10 +40,10 @@ export async function runDesk(payer: Payer, opts: AgentOptions): Promise<Purchas
     const signalHash = String(body.signal_hash ?? "");
     const v = /^0x[0-9a-f]{64}$/.test(signalHash)
       ? await verifyPurchase(
-          { payer: paid.authorization.from, minerSlug: "verireceipt", signalHash, valueField: task.valueField, engineResult: body.result ?? {}, intent: task.intent },
+          { payer: paid.authorization.from, minerSlug: "verireceipt", signalHash, valueField: task.valueField, engineResult: body.result ?? {}, intent: task.intent, fieldStatus: body.field_status as Record<string, FieldStatus> },
           opts.f,
         )
-      : { verified: false, checks: [{ name: "signal_hash present", ok: false, detail: "no signal_hash in the reply" }], minerReceipt: null, rawSha256: null, rawBytes: null, payloadValue: undefined, intentId: null, request: null, requestParams: null };
+      : { verified: false, checks: [{ name: "signal_hash present", ok: false, detail: "no signal_hash in the reply" }], minerReceipt: null, rawSha256: null, rawBytes: null, payloadValue: undefined, intentId: null, request: null, requestParams: null, signalTimestamp: null, fields: null, payloadResponse: null };
     const rec: PurchaseRecord = {
       version: 1,
       task_id: task.id,
@@ -74,6 +75,7 @@ export async function runDesk(payer: Payer, opts: AgentOptions): Promise<Purchas
         result_shape: String(body.result_shape ?? ""),
         field_status: body.field_status ?? {},
         duration_ms: typeof body.duration_ms === "number" ? body.duration_ms : null,
+        result: body.result ?? {},
       },
       value_field: task.valueField,
       value: v.payloadValue ?? null,
@@ -85,6 +87,7 @@ export async function runDesk(payer: Payer, opts: AgentOptions): Promise<Purchas
       checks: v.checks,
       verdict: v.verified ? "VERIFIED" : "UNVERIFIED",
       delivery_proof: null,
+      recovered_fields: v.fields,
     };
     appendLedger(opts.ledgerFile, rec);
     log(`${task.id}: ${rec.verdict} receipt_hash=${rec.telegraph_receipt.receipt_hash} epoch=${rec.telegraph_receipt.epoch_id} rcpt=${rec.miner_receipt?.receipt_id ?? "-"}`);

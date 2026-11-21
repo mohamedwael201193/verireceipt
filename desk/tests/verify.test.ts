@@ -6,6 +6,7 @@ import {
   parseEngineRequest, receiptPendingShape, sha256Hex, signalHashOf, storedDeliveryAgrees, storedLedgerAgrees,
   uniquePurchaseIds, verifyPurchase, type DeliveryProof, type LedgerIdentity, type VerifyOutput,
 } from "../src/verify";
+import type { FieldStatus } from "../../src/core/shapedFields";
 import { readLedger } from "../src/ledger";
 
 
@@ -166,8 +167,9 @@ describe("J2 r3 tampers against storedLedgerAgrees (H1, M1)", () => {
       minerSlug: "verireceipt",
       signalHash: honest.signal_hash,
       valueField: honest.value_field,
-      engineResult: { [honest.value_field]: honest.value },
+      engineResult: { ...(honest.engine.result ?? {}), [honest.value_field]: honest.value },
       intent: honest.intent,
+      fieldStatus: honest.engine.field_status as Record<string, FieldStatus>,
     }, stubFetch());
   }
   function row(over: Record<string, unknown> = {}): LedgerIdentity {

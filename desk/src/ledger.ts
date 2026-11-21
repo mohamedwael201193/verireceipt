@@ -27,7 +27,7 @@ export interface PurchaseRecord {
     timestamp: number;
   };
   signal_hash: string;
-  engine: { miner_id: string; endpoint: string; result_shape: string; field_status: Record<string, string>; duration_ms: number | null };
+  engine: { miner_id: string; endpoint: string; result_shape: string; field_status: Record<string, string>; duration_ms: number | null; result?: Record<string, unknown> };
   value_field: string;
   value: unknown;
   miner_receipt: { receipt_id: string; raw_response_sha256: string; upstream_url?: string } | null;
@@ -47,6 +47,8 @@ export interface PurchaseRecord {
     miner_id?: string;
     proof_nodes?: number;
   } | null;
+  /** Re-derived from the hash-verified signal payload (and, for node-ok fields, engine.result). */
+  recovered_fields?: Record<string, { value: unknown; node_status: string; source: "node" | "raw" | "none" }> | null;
 }
 
 export function readLedger(file: string): PurchaseRecord[] {
@@ -69,7 +71,7 @@ export function spentOnUtcDay(records: PurchaseRecord[], now: Date): bigint {
     .reduce((s, r) => s + BigInt(r.telegraph_receipt.amount_uusdc), 0n);
 }
 
-/** Rewrite the ledger in place. After a purchase is recorded, `--write` may update `delivery_proof` (and, when the fields-fix path is applied, backfill `recovered_fields` / `engine.result`). */
+/** Rewrite the ledger in place. After a purchase is recorded, `--write` may update `delivery_proof` and backfill `recovered_fields`. `engine.result` for the three existing rows was backfilled from the captured paid replies (those replies are not fully public); ok numeric fields are re-checked against the live signal payload. */
 export function writeLedger(file: string, records: PurchaseRecord[]): void {
   writeFileSync(file, records.map((r) => JSON.stringify(r) + "\n").join(""));
 }

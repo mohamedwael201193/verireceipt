@@ -7,6 +7,7 @@ import {
   merkleProofShapeOk, parseEngineRequest, signalHashOf, storedDeliveryAgrees, storedLedgerAgrees,
   uniquePurchaseIds, verifyPurchase, type DeliveryProof, type StoredDeliveryProof,
 } from "../src/verify";
+import type { FieldStatus } from "../../src/core/shapedFields";
 import { TASK_CATALOG, VALUE_FIELD_BY_INTENT } from "../src/missions";
 import { VERIRECEIPT_ONCHAIN_MINER_ID } from "../src/constants";
 
@@ -94,8 +95,9 @@ describe("J2 r3 / J1 r3 tampers (desk-d r4)", () => {
       minerSlug: "verireceipt",
       signalHash: honest.signal_hash,
       valueField: honest.value_field,
-      engineResult: { [honest.value_field]: honest.value },
+      engineResult: { ...(honest.engine.result ?? {}), [honest.value_field]: honest.value },
       intent: honest.intent,
+      fieldStatus: honest.engine.field_status as Record<string, FieldStatus>,
     }, stubFetch());
   }
 
