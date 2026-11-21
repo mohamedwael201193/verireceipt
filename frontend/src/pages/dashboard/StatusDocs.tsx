@@ -9,14 +9,13 @@
 //   CLOSED" and "Fresh 2m ago" were canned; the cards now show how many
 //   endpoints actually answered and the age of the last live grid receipt.
 // - ERCOT/MISO are not served by the live API (the handler refuses them,
-//   e.g. HB_NORTH → 422 unsupported_zone), although miner.yaml prose
-//   still lists them as sources — the live API, not the prose, is the
-//   authority on what is served.
+//   e.g. HB_NORTH → 422 unsupported_zone), and miner.yaml no longer
+//   lists them — the live API is the authority on what is served.
 // - Doc snippets use the real GET endpoints and the real miner.yaml
 //   (id 774921, slug verireceipt); grid is /v1/grid-price (§8 A1/A2).
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx } from "../../lib/api";
+import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, getValidator } from "../../lib/api";
 import { DOC_SNIPPETS, DOC_TABS, type DocTabId } from "./docs";
 import type { LiveReceipt, ScopeSamples, ScopeSeriesKey } from "./types";
 import {
@@ -93,7 +92,7 @@ function endpointDefs(): EndpointDef[] {
       key: "route",
       path: "/v1/route",
       role: "OPTIMAL_EXECUTION_ROUTE_GENERAL",
-      src: "Uniswap V2/V3 + SushiSwap + Curve (block-pinned)",
+      src: "Uniswap V2/V3 + SushiSwap V2 (block-pinned)",
       intent: "OPTIMAL_EXECUTION_ROUTE_GENERAL",
       query: "pair=ETH/USDC",
       requestUrl: directUrl("/v1/route", { pair: "ETH/USDC" }),
@@ -108,6 +107,16 @@ function endpointDefs(): EndpointDef[] {
       query: `TH_NP15_GEN-APND · ${gridInterval}`,
       requestUrl: directUrl("/v1/grid-price", { node_or_zone: "TH_NP15_GEN-APND", interval_start: gridInterval }),
       fetcher: (signal) => getGridPrice({ node_or_zone: "TH_NP15_GEN-APND", interval_start: gridInterval }, signal),
+    },
+    {
+      key: "validator",
+      path: "/v1/validator",
+      role: "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
+      src: "2-of-N beacon-node quorum (Lodestar, PublicNode, Stakely)",
+      intent: "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
+      query: "validator_index=1",
+      requestUrl: directUrl("/v1/validator", { validator_index: "1" }),
+      fetcher: (signal) => getValidator({ validator_index: "1" }, signal),
     },
     {
       key: "health",
@@ -319,7 +328,7 @@ export default function StatusDocs({
     const intents = new Set(
       receipts.filter((r) => isVerified(r)).map((r) => r.intent),
     );
-    return ["ONCHAIN_TX_LOOKUP_GENERAL", "REGULATORY_FILING_MONITOR_GENERAL", "TVL_LOOKUP_GENERAL", "OPTIMAL_EXECUTION_ROUTE_GENERAL", "GRID_POWER_PRICE_GENERAL"].filter((i) => intents.has(i)).length;
+    return ["ONCHAIN_TX_LOOKUP_GENERAL", "REGULATORY_FILING_MONITOR_GENERAL", "TVL_LOOKUP_GENERAL", "OPTIMAL_EXECUTION_ROUTE_GENERAL", "GRID_POWER_PRICE_GENERAL", "VALIDATOR_PERFORMANCE_VERIFY_GENERAL"].filter((i) => intents.has(i)).length;
   }, [receipts]);
 
   const lastGrid = useMemo(
@@ -414,8 +423,8 @@ export default function StatusDocs({
         </div>
         <div className="card" style={{ padding: "15px 17px" }}>
           <div className="kpi-lbl">Endpoints Answered (this session)</div>
-          <div style={{ fontSize: 16, fontWeight: 500, color: answeredEndpoints === 5 ? "var(--ok)" : "var(--text)", marginBottom: 3 }}>
-            {answeredEndpoints} / 5
+          <div style={{ fontSize: 16, fontWeight: 500, color: answeredEndpoints === 6 ? "var(--ok)" : "var(--text)", marginBottom: 3 }}>
+            {answeredEndpoints} / 6
           </div>
           <div className="kpi-sub">4.5s abort cap · 2-of-3 quorum</div>
         </div>
@@ -508,7 +517,7 @@ export default function StatusDocs({
       </div>
       {activeDoc === "yaml" && (
         <div className="note-line" style={{ marginTop: 10 }}>
-          Verbatim from miner.yaml at base commit e35fb0a — re-sync this tab if miner.yaml changes.
+          Verbatim from the repo-root miner.yaml (a test enforces byte equality) — re-sync this tab if miner.yaml changes.
         </div>
       )}
       {activeDoc === "cast" && (

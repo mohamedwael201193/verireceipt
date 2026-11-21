@@ -116,6 +116,7 @@ const INTENT_TO_ENDPOINT: Record<string, SessionReceiptEndpoint> = {
   TVL_LOOKUP_GENERAL: "tvl",
   OPTIMAL_EXECUTION_ROUTE_GENERAL: "route",
   GRID_POWER_PRICE_GENERAL: "grid",
+  VALIDATOR_PERFORMANCE_VERIFY_GENERAL: "validator",
   // Short landing keys (pages/landing/*) map to the same endpoints.
   tx: "tx",
   sec: "filings",
@@ -123,6 +124,7 @@ const INTENT_TO_ENDPOINT: Record<string, SessionReceiptEndpoint> = {
   tvl: "tvl",
   route: "route",
   grid: "grid",
+  validator: "validator",
 };
 
 export function endpointForIntent(intent: string): SessionReceiptEndpoint | undefined {

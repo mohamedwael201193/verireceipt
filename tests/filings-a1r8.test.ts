@@ -399,7 +399,7 @@ describe('A1 r8 stubbed: findings', () => {
     ]);
     const r = await handleFilings({ entity: 'MS', period: '2023' }, { fetchImpl: stub({ rows: { 895421: rows } }) });
     expect(r.filing_count).toBe(1500);
-    expect((r.filings as unknown[]).length).toBe(1000);
+    expect((r.filings_detail as unknown[]).length).toBe(1000);
     expect((r.urls as unknown[]).length).toBe(1000);
     expect(r.filings_listed).toBe(1000);
     expect(r.filings_truncated).toBe(true);
@@ -496,7 +496,7 @@ describe('A1 r8 LIVE (real SEC EDGAR)', () => {
   it('size cap live: MS last 60 months lists 1000 filings with the full count (J2 measured 67,304)', async () => {
     const r = await live({ entity: 'MS', period: 'last 60 months' });
     expect(r.filings_truncated).toBe(true);
-    expect((r.filings as unknown[]).length).toBe(1000);
+    expect((r.filings_detail as unknown[]).length).toBe(1000);
     expect(r.filing_count as number).toBeGreaterThan(60_000);
     console.log(`LIVE MS last 60 months: filing_count=${r.filing_count}`);
   }, 300_000);

@@ -86,7 +86,7 @@ export const SESSION_RECEIPT_MAX_LABEL_LEN = 1200;
 export const SESSION_RECEIPT_MAX_PARAMS_LEN = 2000;
 export const SESSION_RECEIPT_MAX_SUMMARY_LEN = 2000;
 
-export type SessionReceiptEndpoint = "tx" | "filings" | "tvl" | "route" | "grid";
+export type SessionReceiptEndpoint = "tx" | "filings" | "tvl" | "route" | "grid" | "validator";
 
 export interface SessionReceipt {
   /** Per-call unique key (never the bare receipt_id — see module header).
@@ -158,7 +158,8 @@ export function isValidSessionReceipt(v: unknown): v is SessionReceipt {
     v.endpoint !== "filings" &&
     v.endpoint !== "tvl" &&
     v.endpoint !== "route" &&
-    v.endpoint !== "grid"
+    v.endpoint !== "grid" &&
+    v.endpoint !== "validator"
   ) {
     return false;
   }

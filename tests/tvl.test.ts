@@ -598,12 +598,23 @@ describe('handleTvl validation', () => {
     }
   });
 
-  it('>512 chars -> 400 PROTOCOL_TOO_LONG (513-char input)', async () => {
+  it('protocol length 513 -> 400 MAX_PARAM_SIZE; 511 and 512 are not a length 400', async () => {
     try {
       await handleTvl({ protocol: 'x'.repeat(513) }, { fetchImpl: fixtureFetch() });
       expect.unreachable('should have thrown');
     } catch (err) {
-      expectApiError(err, 400, 'PROTOCOL_TOO_LONG');
+      expectApiError(err, 400, 'MAX_PARAM_SIZE');
+    }
+    for (const n of [511, 512]) {
+      try {
+        await handleTvl({ protocol: 'x'.repeat(n) }, { fetchImpl: fixtureFetch() });
+        expect.unreachable('should have thrown');
+      } catch (err) {
+        const apiErr = err as ApiError;
+        expect(apiErr).toBeInstanceOf(ApiError);
+        expect(apiErr.status).not.toBe(400);
+        expect(apiErr.code).not.toBe('MAX_PARAM_SIZE');
+      }
     }
   });
 });
@@ -1766,21 +1777,23 @@ describe('handleTvl refusal matrix (400 / 422 / 502)', () => {
     }
   });
 
-  it('10,000-char protocol -> 400 PROTOCOL_TOO_LONG', async () => {
+  it('10,000-char protocol -> 400 MAX_PARAM_SIZE', async () => {
     try {
       await handleTvl({ protocol: 'x'.repeat(10000) }, { fetchImpl: fixtureFetch() });
       expect.unreachable('should have thrown');
     } catch (err) {
-      expectApiError(err, 400, 'PROTOCOL_TOO_LONG');
+      expectApiError(err, 400, 'MAX_PARAM_SIZE');
     }
   });
 
-  it('exactly-512-char protocol passes the length check and -> 422 (boundary)', async () => {
-    try {
-      await handleTvl({ protocol: 'x'.repeat(512) }, { fetchImpl: fixtureFetch() });
-      expect.unreachable('should have thrown');
-    } catch (err) {
-      expectApiError(err, 422, 'PROTOCOL_NOT_FOUND');
+  it('exactly-511 and 512-char protocol pass the length check and -> 422 (boundary)', async () => {
+    for (const n of [511, 512]) {
+      try {
+        await handleTvl({ protocol: 'x'.repeat(n) }, { fetchImpl: fixtureFetch() });
+        expect.unreachable('should have thrown');
+      } catch (err) {
+        expectApiError(err, 422, 'PROTOCOL_NOT_FOUND');
+      }
     }
   });
 

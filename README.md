@@ -1,24 +1,26 @@
 # VeriReceipt
 
 **VeriReceipt** is a zero-LLM, deterministic miner for the Telegraph network.
-It answers five intents with exact, sourced data — no model, no guessing, no
+It answers six intents with exact, sourced data — no model, no guessing, no
 hallucinated numbers. Every answer carries a **SHA-256 receipt** over the raw
 upstream response, so anyone can recompute the hash and verify the answer
 came from the stated source, unaltered.
 
 - **Base URL:** `https://verireceipt.onrender.com`
-- **Docs / health:** `https://verireceipt.onrender.com/docs`
+- **Docs:** `https://verireceipt.vercel.app/docs`
+- **Health:** `https://verireceipt.onrender.com/health`
 - **Config:** [`miner.yaml`](miner.yaml) (Telegraph miner registration file)
 
-## The five intents
+## The six intents
 
 | Intent | Endpoint | What it returns |
 | --- | --- | --- |
-| `ONCHAIN_TX_LOOKUP_GENERAL` | `GET /v1/tx` | Transaction status, from/to, block, value — from a 2-of-3 archive-RPC quorum (incl. OP-stack L1 data fee) |
-| `REGULATORY_FILING_MONITOR_GENERAL` | `GET /v1/filings` | SEC EDGAR filings for a company over a period, optionally of one EDGAR form type |
+| `ONCHAIN_TX_LOOKUP_GENERAL` | `GET /v1/tx` | Transaction status, from/to, block, value — from a 2-of-N archive-RPC quorum (the API body also carries the OP-stack L1 data fee on OP-stack chains) |
+| `REGULATORY_FILING_MONITOR_GENERAL` | `GET /v1/filings` | SEC EDGAR filing titles (newest first) for a company over a period, optionally of one EDGAR form type |
 | `TVL_LOOKUP_GENERAL` | `GET /v1/tvl` | DeFi TVL (USD) for a protocol or chain, via DeFiLlama |
-| `OPTIMAL_EXECUTION_ROUTE_GENERAL` | `GET /v1/route` | Block-pinned quote for selling exactly 1 ETH for USDC on Ethereum mainnet (Uniswap V2/V3, SushiSwap V2, Curve) |
-| `GRID_POWER_PRICE_GENERAL` | `GET /v1/grid-price` | Wholesale locational marginal price (USD/MWh) from official ISO feeds (CAISO, NYISO, ENTSO-E/Elering) |
+| `OPTIMAL_EXECUTION_ROUTE_GENERAL` | `GET /v1/route` | Block-pinned quote for selling exactly 1 ETH for USDC on Ethereum mainnet (best quote across Uniswap V2/V3, SushiSwap V2) |
+| `GRID_POWER_PRICE_GENERAL` | `GET /v1/grid-price` | Wholesale locational marginal price (USD/MWh) from official public feeds (CAISO OASIS day-ahead, NYISO real-time, Elering 15-minute prices converted EUR→USD) |
+| `VALIDATOR_PERFORMANCE_VERIFY_GENERAL` | `GET /v1/validator` | Effective balance (gwei) of an Ethereum beacon-chain validator at head, from a 2-of-3 public beacon API quorum |
 
 Every response includes `receipt.raw_response_sha256` — the SHA-256 of the raw
 upstream response the answer was derived from. See

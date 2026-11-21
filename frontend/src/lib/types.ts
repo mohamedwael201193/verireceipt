@@ -46,7 +46,10 @@ export interface TxResponse extends ReceiptedResponse {
 export interface FilingsResponse extends ReceiptedResponse {
   entity: string;
   filing_count: number;
-  filings: Filing[];
+  /** Official output: titles of the matching filings, newest first. */
+  filings: string[];
+  /** Undeclared companion: the same records as objects, same order as filings/urls. */
+  filings_detail?: Filing[];
   urls: string[];
 }
 
@@ -69,4 +72,10 @@ export interface GridPriceResponse extends ReceiptedResponse {
   market: string;
   interval_start: string;
   currency: string;
+}
+
+export interface ValidatorResponse extends ReceiptedResponse {
+  validator_index: string | number;
+  effective_balance: number;
+  status?: string;
 }

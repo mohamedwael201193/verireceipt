@@ -432,10 +432,23 @@ export async function handleValidator(
   query: Record<string, string | undefined>,
   deps: ValidatorDeps = {},
 ): Promise<Record<string, unknown>> {
-  // Param name: `validator_index` (declared in miner.yaml by A8).
-  // `index` is accepted as an alias so a request builder that sends
-  // the shorter name still reaches the same validation.
-  const rawIndex = query.validator_index ?? query.index;
+  // Official VALIDATOR_PERFORMANCE_VERIFY_GENERAL request max (live
+  // devnode schema 2026-11-21: param min 0, max 1000000000).
+  // miner.yaml declares this as MAX_PARAM_VALUE (machine-enforced).
+  const VALIDATOR_INDEX_MAX = 1_000_000_000;
+  const VALIDATOR_QUERY_KEYS = new Set(["validator_index"]);
+  // `index` is not a declared param (YAML and the official intent both
+  // name only validator_index). An undeclared key is 400 UNKNOWN_PARAM,
+  // never served as an alias.
+  for (const key of Object.keys(query)) {
+    if (!VALIDATOR_QUERY_KEYS.has(key)) {
+      throw badRequest(
+        "UNKNOWN_PARAM",
+        `Query parameter "${key}" is not supported; /v1/validator takes validator_index`,
+      );
+    }
+  }
+  const rawIndex = query.validator_index;
   if (rawIndex === undefined || !VALIDATOR_INDEX_RE.test(rawIndex)) {
     throw badRequest(
       "INVALID_VALIDATOR_INDEX",
@@ -447,6 +460,12 @@ export async function handleValidator(
     throw badRequest(
       "INVALID_VALIDATOR_INDEX",
       "validator_index must be a non-negative integer (e.g. 1)",
+    );
+  }
+  if (index > VALIDATOR_INDEX_MAX) {
+    throw badRequest(
+      "MAX_PARAM_VALUE",
+      "validator_index must be at most 1000000000",
     );
   }
 

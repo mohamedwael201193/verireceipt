@@ -97,7 +97,8 @@ describe("getFilings", () => {
       jsonResponse({
         entity: "Apple",
         filing_count: 94,
-        filings: [{ form: "4", accession: "x", filing_date: "2026-11-19", url: "https://example.com" }],
+        filings: ["Form 4 filed 2026-11-19"],
+        filings_detail: [{ form: "4", accession: "x", filing_date: "2026-11-19", url: "https://example.com" }],
         urls: ["https://example.com"],
         receipt: sampleReceipt,
       }),

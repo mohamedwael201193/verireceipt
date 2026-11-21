@@ -277,7 +277,7 @@
     }
 
     /* =========================================================================
-       7. STICKY SCROLL-DRIVEN IDE SECTION (Five intents.)
+       7. STICKY SCROLL-DRIVEN IDE SECTION (Six intents.)
        ========================================================================= */
     .ide-scroll-track { position: relative; min-height: 320vh; padding: 64px 0 88px; }
     .ide-sticky { position: sticky; top: 84px; }

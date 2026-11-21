@@ -1,17 +1,24 @@
 // Shared live-call dispatch: one intent key + params -> the lib call.
 // Used by the IDE, the desk stage, and the probe so every try-it form
 // hits the same real endpoints with the same params.
-import { getFilings, getGridPrice, getRoute, getTvl, getTx } from "../../lib/api";
+import { getFilings, getGridPrice, getRoute, getTvl, getTx, getValidator } from "../../lib/api";
 import type {
   FilingsResponse,
   GridPriceResponse,
   RouteResponse,
   TvlResponse,
   TxResponse,
+  ValidatorResponse,
 } from "../../lib/types";
 import type { IntentKey } from "./data";
 
-export type AnyResponse = TxResponse | FilingsResponse | TvlResponse | RouteResponse | GridPriceResponse;
+export type AnyResponse =
+  | TxResponse
+  | FilingsResponse
+  | TvlResponse
+  | RouteResponse
+  | GridPriceResponse
+  | ValidatorResponse;
 
 export async function callLive(key: IntentKey, p: Record<string, string>): Promise<AnyResponse> {
   switch (key) {
@@ -25,6 +32,8 @@ export async function callLive(key: IntentKey, p: Record<string, string>): Promi
       return getRoute({ pair: p.pair });
     case "grid":
       return getGridPrice({ node_or_zone: p.node_or_zone, interval_start: p.interval_start });
+    case "validator":
+      return getValidator({ validator_index: p.validator_index });
   }
 }
 
@@ -58,6 +67,12 @@ export function outcomeFor(
     case "grid": {
       const d = data as GridPriceResponse;
       return `${d.node_or_zone} $${d.lmp_usd_per_mwh.toFixed(2)} USD/MWh`;
+    }
+    case "validator": {
+      const d = data as ValidatorResponse;
+      const gwei = Number(d.effective_balance);
+      const eth = Number.isFinite(gwei) ? (gwei / 1e9).toFixed(4) : "—";
+      return `validator ${String(d.validator_index)} · ${eth} ETH effective`;
     }
   }
 }

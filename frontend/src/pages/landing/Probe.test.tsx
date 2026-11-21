@@ -41,6 +41,7 @@ const CHIP_LABELS = [
   "TVL: aave-v3",
   "Route: 1 ETH → USDC",
   "Grid: CAISO NP15",
+  "Validator: index 1",
   "422 Trap: Future Grid",
 ];
 

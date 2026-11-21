@@ -2003,7 +2003,7 @@ export async function handleTvl(
   const protocol = protocolRaw.trim();
   if (protocol.length > 512) {
     throw badRequest(
-      'PROTOCOL_TOO_LONG',
+      'MAX_PARAM_SIZE',
       'Query parameter "protocol" must not exceed 512 characters',
     );
   }

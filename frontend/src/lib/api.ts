@@ -11,6 +11,7 @@ import type {
   RouteResponse,
   TvlResponse,
   TxResponse,
+  ValidatorResponse,
 } from "./types";
 import { hasVisibleCharacter } from "./format";
 
@@ -625,6 +626,18 @@ export async function getGridPrice(
       node_or_zone: params.node_or_zone,
       interval_start: params.interval_start,
     }),
+    { expectReceipt: true, signal },
+  );
+}
+
+export async function getValidator(
+  params: { validator_index: string },
+  signal?: AbortSignal,
+): Promise<ValidatorResponse> {
+  assertValidParamsObject(params, "getValidator");
+  assertValidParam(params.validator_index, "validator_index");
+  return fetchJson<ValidatorResponse>(
+    buildUrl("/v1/validator", { validator_index: params.validator_index }),
     { expectReceipt: true, signal },
   );
 }

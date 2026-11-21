@@ -48,6 +48,7 @@ const ENDPOINT_PATH: Record<IntentKey, string> = {
   tvl: "/v1/tvl",
   route: "/v1/route",
   grid: "/v1/grid-price",
+  validator: "/v1/validator",
 };
 
 /** Same-origin API URL for an intent + params (mirrors lib/api buildUrl). */

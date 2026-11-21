@@ -172,13 +172,26 @@ describe("handleValidator validation", () => {
     expect(res.validator_index).toBe(0);
   });
 
-  it("accepts the `index` alias", async () => {
+  it("undeclared `index` alias is 400 UNKNOWN_PARAM, not served", async () => {
+    await expectApiError(handleValidator({ index: "1" }), 400, "UNKNOWN_PARAM");
+    await expectApiError(
+      handleValidator({ validator_index: "1", index: "2" }),
+      400,
+      "UNKNOWN_PARAM",
+    );
+  });
+
+  it("validator_index at the official max 1000000000 is accepted; 1000000001 is 400 MAX_PARAM_VALUE", async () => {
     const res = (await handleValidator(
-      { index: "1" },
-      { fetchImpl: makeStubFetch(bothAgree(1, "32000000000", "active_ongoing")) },
+      { validator_index: "1000000000" },
+      { fetchImpl: makeStubFetch(bothAgree(1_000_000_000, "0", "withdrawal_done")) },
     )) as Record<string, unknown>;
-    expect(res.validator_index).toBe(1);
-    expect(res.effective_balance).toBe(32000000000);
+    expect(res.validator_index).toBe(1_000_000_000);
+    await expectApiError(
+      handleValidator({ validator_index: "1000000001" }),
+      400,
+      "MAX_PARAM_VALUE",
+    );
   });
 });
 
@@ -664,6 +677,12 @@ describe("GET /v1/validator routing", () => {
       expect((res.json() as Record<string, unknown>).code).toBe("INVALID_VALIDATOR_INDEX");
       const bad = await app.inject({ method: "GET", url: "/v1/validator?validator_index=abc" });
       expect(bad.statusCode).toBe(400);
+      const alias = await app.inject({ method: "GET", url: "/v1/validator?index=1" });
+      expect(alias.statusCode).toBe(400);
+      expect((alias.json() as Record<string, unknown>).code).toBe("UNKNOWN_PARAM");
+      const overMax = await app.inject({ method: "GET", url: "/v1/validator?validator_index=1000000001" });
+      expect(overMax.statusCode).toBe(400);
+      expect((overMax.json() as Record<string, unknown>).code).toBe("MAX_PARAM_VALUE");
     } finally {
       await app.close();
     }

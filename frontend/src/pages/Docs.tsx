@@ -4,20 +4,20 @@
 // error code below comes from miner.yaml + the handler source
 // (src/core/errors.ts, src/handlers/*). Every example is a REAL callable
 // request against the live base URL, and each one links to its live try-it
-// form on /receipts. No invented endpoints: only the six routes the server
-// actually serves (GET /health + five GET /v1/*) are listed — there is no
+// form on /receipts. No invented endpoints: only the routes the server
+// actually serves (GET /health + six GET /v1/*) are listed — there is no
 // /api/mcp route in this build, so none is documented.
 //
 // Registration snippet uses the real repo and the real commit SHA:
 // github.com/mohamedwael201193/verireceipt @
-// e35fb0ac303ee2c2477030c22329bf2b0195d299 (base commit carrying miner.yaml).
+// 910e741eb5525c61ad39c29527ddfaf62adfb1c2 (origin/main when this A8 r3 tree was built; bump again when this YAML is committed).
 
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
 const API_BASE_URL = 'https://verireceipt.onrender.com';
 const REPO_URL = 'https://github.com/mohamedwael201193/verireceipt';
-const MINER_YAML_COMMIT = 'e35fb0ac303ee2c2477030c22329bf2b0195d299';
+const MINER_YAML_COMMIT = '910e741eb5525c61ad39c29527ddfaf62adfb1c2';
 const MINER_YAML_URL = `https://raw.githubusercontent.com/mohamedwael201193/verireceipt/${MINER_YAML_COMMIT}/miner.yaml`;
 
 interface EndpointDoc {
@@ -40,7 +40,7 @@ const ENDPOINTS: EndpointDoc[] = [
     path: '/v1/tx',
     intent: 'ONCHAIN_TX_LOOKUP_GENERAL',
     description:
-      'Looks up an EVM transaction hash on a specified chain using a 2-of-3 archive-RPC quorum (including OP-stack L1 data fee) and returns exact tx_hash, status, from, to, block_number, value_eth, and a SHA-256 receipt.',
+      'Looks up one EVM transaction by hash on a named chain with a 2-of-N archive-RPC quorum and returns tx_hash, status (confirmed, reverted, pending, not_found), from, to, block_number, value_eth and a SHA-256 receipt.',
     params: [
       {
         name: 'tx_hash',
@@ -50,7 +50,7 @@ const ENDPOINTS: EndpointDoc[] = [
       {
         name: 'chain',
         type: 'string',
-        description: 'EVM chain name (ethereum, base, arbitrum, optimism, polygon, sepolia).',
+        description: 'EVM chain name, lower case: ethereum, base, arbitrum, optimism, polygon, sepolia or base-sepolia. Ethereum mainnet may also be written eth or mainnet.',
       },
     ],
     outputs: [
@@ -71,17 +71,22 @@ const ENDPOINTS: EndpointDoc[] = [
     path: '/v1/filings',
     intent: 'REGULATORY_FILING_MONITOR_GENERAL',
     description:
-      'Counts a company\'s filings on SEC EDGAR (data.sec.gov submissions, by filing date) in a period, optionally of one exact EDGAR form type, and returns entity, form_type, filing_count, the filings, their URLs and a SHA-256 receipt. SEC EDGAR only: an unknown or ambiguous company or form is refused (422).',
+      'Counts a company\'s filings on SEC EDGAR (data.sec.gov submissions, by filing date) in a period, optionally of one exact EDGAR form type, and returns entity, form_type, filing_count, the filing titles newest first, their URLs and a SHA-256 receipt. SEC EDGAR only: an unknown or ambiguous company or form is refused (422), never answered from another source or with an unfiltered count.',
     params: [
       {
         name: 'entity',
         type: 'string',
-        description: 'Company name, ticker symbol, CIK, or federal agency.',
+        description: 'The subject of the question verbatim, including any SEC form type and CIK, e.g. "Form 10-Q filings by Tesla, Inc. (CIK 1318605)", "Tesla, Inc.", "TSLA", "1318605".',
       },
       {
         name: 'period',
         type: 'string',
-        description: 'Search period such as last 12 months, 2026, or YYYY-MM-DD..YYYY-MM-DD.',
+        description: 'Search period such as last 12 months, 2026, calendar 2023, or YYYY-MM-DD..YYYY-MM-DD. Calendar years only; fiscal-year periods are rejected.',
+      },
+      {
+        name: 'form_type (optional)',
+        type: 'string',
+        description: 'One SEC EDGAR form type exactly as asked, e.g. 10-K, 10-Q, 8-K, 144/A, 4/A. Exact match (10-K counts originals only; 10-K/A counts amendments only). Omit to count all forms.',
       },
     ],
     outputs: [
@@ -100,12 +105,12 @@ const ENDPOINTS: EndpointDoc[] = [
     path: '/v1/tvl',
     intent: 'TVL_LOOKUP_GENERAL',
     description:
-      'Queries DeFiLlama keyless APIs with protocol normalization and returns protocol_or_chain, tvl_usd, chain_tvl_usd, as_of timestamp, and a SHA-256 receipt.',
+      'Returns the current total value locked of a DeFi protocol or chain from DeFiLlama\'s keyless API: protocol_or_chain, tvl_usd, chain_tvl_usd, as_of and a SHA-256 receipt.',
     params: [
       {
         name: 'protocol',
         type: 'string',
-        description: 'DeFi protocol slug/name or blockchain name (e.g., aave-v3, uniswap, ethereum).',
+        description: 'DeFi protocol name or DeFiLlama slug, keeping the version when one is named (Aave V3 or aave-v3, Uniswap V3 or uniswap-v3, Lido), or a chain name (ethereum). At most 512 characters.',
       },
     ],
     outputs: [
@@ -124,12 +129,12 @@ const ENDPOINTS: EndpointDoc[] = [
     path: '/v1/route',
     intent: 'OPTIMAL_EXECUTION_ROUTE_GENERAL',
     description:
-      'Returns block-pinned Ethereum mainnet execution quote (amount_out in 6-decimal USDC base units) for selling exactly 1 ETH for USDC across Uniswap V2/V3 and SushiSwap V2 pools with a SHA-256 receipt.',
+      'Returns a block-pinned Ethereum mainnet execution quote for selling exactly 1 ETH for USDC, the best quote across Uniswap V2/V3, SushiSwap V2, as amount_out in USDC base units (6 decimals) with a SHA-256 receipt.',
     params: [
       {
         name: 'pair',
         type: 'string',
-        description: 'Must be ETH/USDC (sell exactly 1 ETH for USDC on Ethereum mainnet).',
+        description: 'The swap to route. Only ETH/USDC (sell exactly 1 ETH for USDC on Ethereum mainnet).',
       },
     ],
     outputs: [{ name: 'amount_out', unit: 'USDC base units (6 decimals)' }],
@@ -143,17 +148,17 @@ const ENDPOINTS: EndpointDoc[] = [
     path: '/v1/grid-price',
     intent: 'GRID_POWER_PRICE_GENERAL',
     description:
-      'Returns wholesale electricity locational marginal price (lmp_usd_per_mwh) from official public ISO feeds (CAISO, NYISO, ENTSO-E/Elering) for a node_or_zone and interval_start datetime with a SHA-256 receipt.',
+      'Returns the wholesale electricity price lmp_usd_per_mwh for one pricing node or zone and one finished settlement interval, from official public feeds: CAISO OASIS day-ahead hourly LMP, NYISO real-time 5-minute zonal LBMP, and the Elering dashboard API 15-minute prices (EUR/MWh converted to USD with the open.er-api.com EUR rate). Returns node_or_zone, market, interval_start, currency and a SHA-256 receipt. Any other node or zone is refused (422).',
     params: [
       {
         name: 'node_or_zone',
         type: 'string',
-        description: 'Pricing node or bidding zone (e.g., TH_NP15_GEN-APND, ZONE_J, EE).',
+        description: 'Exactly one of: CAISO hubs TH_NP15_GEN-APND, TH_SP15_GEN-APND, TH_ZP26_GEN-APND, or CAISO when no CAISO node is named (median of the three hubs); NYISO zones ZONE_A to ZONE_K (NYISO names such as N.Y.C. also accepted); Elering zones EE, FI, LV, LT.',
       },
       {
         name: 'interval_start',
         type: 'string',
-        description: 'ISO-8601 UTC start datetime of the settlement interval.',
+        description: 'Start of the settlement interval, ISO-8601 UTC, e.g. 2026-09-13T14:00:00Z.',
       },
     ],
     outputs: [
@@ -167,21 +172,43 @@ const ENDPOINTS: EndpointDoc[] = [
     exampleUrl: `${API_BASE_URL}/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2026-11-20T06%3A00%3A00Z`,
     exampleCurl: `curl "${API_BASE_URL}/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2026-11-20T06%3A00%3A00Z"`,
   },
+  {
+    key: 'validator',
+    method: 'GET',
+    path: '/v1/validator',
+    intent: 'VALIDATOR_PERFORMANCE_VERIFY_GENERAL',
+    description:
+      'Returns the effective balance in gwei of one Ethereum beacon-chain validator at the head state, read from three independently operated public beacon APIs (2-of-3 quorum): answered only when at least two sources agree on effective_balance and status; fewer than two agreeing sources, or a third source that disagrees, fails closed (502, no answer). Returns validator_index, effective_balance, status and a SHA-256 receipt.',
+    params: [
+      {
+        name: 'validator_index',
+        type: 'string',
+        description: 'Ethereum beacon-chain validator index as a canonical decimal digit string (0, or a non-negative integer with no sign and no leading zeros), e.g. 1, at most 1000000000 (the official intent max).',
+      },
+    ],
+    outputs: [{ name: 'effective_balance', unit: 'gwei' }],
+    exampleLabel: 'Validator index 1 (served by builds that include /v1/validator)',
+    exampleUrl: `${API_BASE_URL}/v1/validator?validator_index=1`,
+    exampleCurl: `curl "${API_BASE_URL}/v1/validator?validator_index=1"`,
+  },
 ];
 
 const ERROR_ROWS: { status: number; code: string; meaning: string }[] = [
   { status: 400, code: 'MISSING_PARAM', meaning: 'tx_hash and chain are required query parameters.' },
   { status: 400, code: 'INVALID_TX_HASH', meaning: 'tx_hash is not a well-formed 0x-prefixed 64-hex hash.' },
-  { status: 400, code: 'UNSUPPORTED_CHAIN', meaning: 'chain is not one of ethereum, base, arbitrum, optimism, polygon, sepolia.' },
+  { status: 400, code: 'UNSUPPORTED_CHAIN', meaning: 'chain is not one of ethereum, base, arbitrum, optimism, polygon, sepolia, base-sepolia.' },
   { status: 400, code: 'MISSING_ENTITY', meaning: 'Query parameter "entity" is required.' },
   { status: 400, code: 'MISSING_PERIOD', meaning: 'Query parameter "period" is required.' },
-  { status: 400, code: 'ENTITY_TOO_LONG', meaning: 'Query parameter "entity" must not exceed 512 characters (miner.yaml MAX_PARAM_SIZE).' },
+  { status: 400, code: 'MAX_PARAM_SIZE', meaning: 'Query parameter "entity" or "protocol" must not exceed 512 characters (miner.yaml MAX_PARAM_SIZE, machine-enforced).' },
   { status: 400, code: 'INVALID_PERIOD', meaning: 'Unparseable period value.' },
   { status: 400, code: 'MISSING_PROTOCOL', meaning: 'Query parameter "protocol" is required.' },
-  { status: 400, code: 'PROTOCOL_TOO_LONG', meaning: 'Query parameter "protocol" must not exceed 512 characters.' },
+  { status: 400, code: 'UNKNOWN_PARAM', meaning: 'A query parameter is not declared for that endpoint (for example index= on /v1/validator).' },
   { status: 400, code: 'INVALID_NODE', meaning: 'node_or_zone is required.' },
   { status: 400, code: 'INVALID_INTERVAL', meaning: 'interval_start is required or is not a valid datetime.' },
+  { status: 400, code: 'INVALID_VALIDATOR_INDEX', meaning: 'validator_index is required and must be a canonical non-negative decimal digit string (no sign, no leading zeros except 0 itself).' },
+  { status: 400, code: 'MAX_PARAM_VALUE', meaning: 'validator_index is greater than 1000000000, the official intent maximum (miner.yaml MAX_PARAM_VALUE, machine-enforced).' },
   { status: 422, code: 'INVALID_PAIR', meaning: 'pair must be ETH/USDC.' },
+  { status: 422, code: 'VALIDATOR_NOT_FOUND', meaning: 'At least two beacon sources return 404 and none returns the validator.' },
   { status: 422, code: 'ENTITY_NOT_FOUND', meaning: 'No SEC EDGAR filer matches the query (there is no Federal Register fallback).' },
   { status: 422, code: 'UNKNOWN_FORM', meaning: 'The form type is not one SEC EDGAR has ever recorded (closed vocabulary from the EDGAR full index).' },
   { status: 422, code: 'AMBIGUOUS_ENTITY', meaning: 'The entity matches more than one candidate; refine it.' },
@@ -200,7 +227,8 @@ const ERROR_ROWS: { status: number; code: string; meaning: string }[] = [
   { status: 502, code: 'DEFILLAMA_BAD_RESPONSE', meaning: 'DeFiLlama response has no usable TVL data.' },
   { status: 502, code: 'RPC_CONFIG', meaning: 'Archive-RPC configuration unavailable.' },
   { status: 502, code: 'ALL_QUOTERS_FAILED', meaning: 'All DEX quoters failed for the pinned block.' },
-  { status: 502, code: 'QUORUM_UNREACHABLE', meaning: 'Fewer than 2 of 3 archive-RPC sources succeeded, or the successes did not agree — tx lookup quorum failed.' },
+  { status: 502, code: 'QUORUM_UNREACHABLE', meaning: 'Fewer than 2 sources answered in agreement (tx: archive RPCs; validator: beacon APIs); fails closed, no answer.' },
+  { status: 502, code: 'QUORUM_CONFLICT', meaning: 'Validator: a third beacon source answered differently from the agreeing pair; a 2-vs-1 split is not certified.' },
   { status: 502, code: 'INTERNAL', meaning: 'Fallback for any other failure; never leaks a stack trace.' },
 ];
 
@@ -349,7 +377,7 @@ export default function Docs() {
 
       {/* ---- Endpoints ---- */}
       <div className="vr-kicker" style={{ marginTop: 8 }}>
-        // endpoints · five intents + liveness
+        // endpoints · six intents + liveness
       </div>
       <section className="vr-card" aria-label="Health endpoint">
         <div className="vr-kicker">// liveness · no receipt block</div>

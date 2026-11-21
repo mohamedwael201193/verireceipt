@@ -10,7 +10,7 @@
 //   /v1/grid-power-price are both wrong).
 // - Grid copy drops ERCOT and MISO (de-advertised in miner e35fb0a;
 //   ERCOT has no keyless feed). Supported grid markets: CAISO, NYISO,
-//   ENTSO-E/Elering.
+//   Elering (EE, FI, LV, LT).
 // - Miner identity: id 774921, slug verireceipt (see ../config).
 // - Bond is $1.40 Test USDC (verified). No sponsored-balance figure.
 // - M12 curtailment numbers (ERCOT $118.40 vs $65) were fabricated and
@@ -19,7 +19,7 @@
 // - AAPL filing count is never hardcoded here — the live call decides.
 // - No fabricated signal hashes, latencies, costs, or receipt ids.
 
-export type IntentKey = "tx" | "sec" | "tvl" | "route" | "grid";
+export type IntentKey = "tx" | "sec" | "tvl" | "route" | "grid" | "validator";
 
 export interface IntentMeta {
   key: IntentKey;
@@ -57,7 +57,7 @@ export const INTENTS: IntentMeta[] = [
     desc: "Resolves tickers to 10-digit CIKs in RAM, streams official submissions JSON with compliant User-Agent, and hashes the raw response.",
     kind: "deterministic",
     upstreams: "data.sec.gov",
-    schema: "entity, filing_count, filings[], urls[]",
+    schema: "entity, filing_count, filings[] (titles), urls[]",
     url: "GET /v1/filings · data.sec.gov",
   },
   {
@@ -78,9 +78,9 @@ export const INTENTS: IntentMeta[] = [
     ext: ".ts",
     name: "OPTIMAL_EXECUTION_ROUTE_GENERAL",
     sub: "# OPTIMAL_EXECUTION_ROUTE_GENERAL · Block-Pinned DEX Math",
-    desc: "Reads Uniswap V3, SushiSwap V2, and Curve pools at one pinned Ethereum block, outputting exact 6-decimal USDC base units.",
+    desc: "Reads Uniswap V3, Uniswap V2, and SushiSwap V2 pools at one pinned Ethereum block, outputting exact 6-decimal USDC base units.",
     kind: "judgment (deterministic math)",
-    upstreams: "Uniswap V3 QuoterV2 · V2 · Sushi · Curve",
+    upstreams: "Uniswap V3 QuoterV2 · Uniswap V2 · SushiSwap V2",
     schema: "amount_out (6-dec USDC) + provenance answer",
     url: "GET /v1/route · ethereum mainnet",
   },
@@ -90,11 +90,23 @@ export const INTENTS: IntentMeta[] = [
     ext: ".ts",
     name: "GRID_POWER_PRICE_GENERAL",
     sub: "# GRID_POWER_PRICE_GENERAL · Wholesale LMP Cache",
-    desc: "Background Render cron ingests CAISO OASIS, NYISO, and ENTSO-E/Elering settlement data into SQLite for instant responses.",
+    desc: "Background Render cron ingests CAISO OASIS, NYISO, and Elering settlement data into SQLite for instant responses.",
     kind: "deterministic",
-    upstreams: "CAISO OASIS · NYISO · ENTSO-E/Elering",
+    upstreams: "CAISO OASIS · NYISO · Elering",
     schema: "lmp_usd_per_mwh, node_or_zone, market, currency",
     url: "GET /v1/grid-price · oasis.caiso.com",
+  },
+  {
+    key: "validator",
+    file: "validator-balance",
+    ext: ".ts",
+    name: "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
+    sub: "# VALIDATOR_PERFORMANCE_VERIFY_GENERAL · Beacon Effective Balance",
+    desc: "Reads a validator's effective balance from a 2-of-N Ethereum beacon-node quorum (Lodestar, PublicNode, Stakely). The index is a canonical non-negative integer written as a decimal string.",
+    kind: "deterministic",
+    upstreams: "Lodestar ChainSafe · PublicNode Beacon · Stakely Beacon",
+    schema: "validator_index, effective_balance (gwei), status",
+    url: "GET /v1/validator · beacon quorum",
   },
 ];
 
@@ -119,6 +131,7 @@ export const PRESETS: Record<
     node_or_zone: "TH_NP15_GEN-APND",
     interval_start: "2026-11-20T05:00:00Z",
   },
+  validator: { validator_index: "1" },
 };
 
 /** Inputs that genuinely 422 on the live API (verified against Render). */
@@ -138,6 +151,9 @@ export const TRAP_PRESETS: Record<IntentKey, Record<string, string>> = {
     node_or_zone: "TH_NP15_GEN-APND",
     interval_start: "2026-11-25T12:00:00Z",
   },
+  // Canonical-form rejection: the handler only accepts a digit string
+  // (0|[1-9][0-9]*). Live response is 400 INVALID_VALIDATOR_INDEX, not 422.
+  validator: { validator_index: "-1" },
 };
 
 /** Upstream marquee: design list minus ERCOT (no keyless feed). */
@@ -148,7 +164,8 @@ export const UPSTREAMS: { n: string; ic: string }[] = [
   { n: "LlamaRPC", ic: "M4 8a4 4 0 1 0 8 0 4 4 0 1 0-8 0M8 2v2M8 12v2" },
   { n: "Uniswap V3", ic: "M3 11c2.5 0 3.5-6 5-6s2.5 6 5 6" },
   { n: "CAISO OASIS", ic: "M9 2L4 9h4l-1 5 5-7H8l1-5Z" },
-  { n: "ENTSO-E", ic: "M8 2.5v11M3.5 5.5l9 5M12.5 5.5l-9 5" },
+  { n: "Beacon quorum", ic: "M8 2.5l5 2.8v5.4L8 13.5 3 10.7V5.3Z" },
+  { n: "Elering", ic: "M8 2.5v11M3.5 5.5l9 5M12.5 5.5l-9 5" },
   { n: "SushiSwap V2", ic: "M3 5.5h10M3 10.5h10M6 3v10M10 3v10" },
 ];
 

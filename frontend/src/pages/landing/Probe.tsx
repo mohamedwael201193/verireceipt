@@ -23,6 +23,7 @@ const CHIP_PRESETS: { id: string; label: string; key: IntentKey; trap: boolean }
   { id: "tvl", label: "TVL: aave-v3", key: "tvl", trap: false },
   { id: "route", label: "Route: 1 ETH → USDC", key: "route", trap: false },
   { id: "grid", label: "Grid: CAISO NP15", key: "grid", trap: false },
+  { id: "validator", label: "Validator: index 1", key: "validator", trap: false },
   { id: "trap", label: "422 Trap: Future Grid", key: "grid", trap: true },
 ];
 

@@ -77,6 +77,8 @@ export function mockFetch(url: string) {
     body = envelope({ protocol_or_chain: "aave-v3", tvl_usd: 100, chain_tvl_usd: 90, as_of: "2026-11-20T07:00:00.000Z" });
   } else if (u.pathname.endsWith("/v1/route")) {
     body = envelope({ amount_out: 1700000000 });
+  } else if (u.pathname.endsWith("/v1/validator")) {
+    body = envelope({ validator_index: p.get("validator_index") ?? "1", effective_balance: 32000000000, status: "active_ongoing" });
   } else if (u.pathname.endsWith("/v1/grid-price")) {
     const interval = p.get("interval_start") ?? "";
     if (p.get("node_or_zone") === "UNKNOWN_ZONE_99") {
@@ -424,7 +426,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     // "not probed yet" — never "/health: ok".
     expect(screen.queryByText(/\/health: ok/)).toBeNull();
     // Status view: ping /health (refused 200) → (4) telemetry still not
-    // ok, (5) Endpoints Answered 0/5, (6) no "Last grid receipt".
+    // ok, (5) Endpoints Answered 0/6, (6) no "Last grid receipt".
     const statusTab = screen.getAllByRole("button", { name: "04 Status & Docs" })[0];
     fireEvent.click(statusTab);
     pingHealthRow();
@@ -436,7 +438,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     expect(rowBadge?.textContent).not.toBe("UP");
     expect(rowBadge?.classList.contains("b-ok")).toBe(false);
     const answeredCard = screen.getByText("Endpoints Answered (this session)").closest(".card");
-    expect(answeredCard?.textContent).toContain("0 / 5");
+    expect(answeredCard?.textContent).toContain("0 / 6");
     expect(screen.getByText("No grid probe yet")).toBeTruthy();
     expect(screen.queryByText(/Last grid receipt/)).toBeNull();
     // (8) Benchmarks: the suite scores 0/12 and F01 FAILs with http 200
@@ -543,7 +545,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "02 Receipts" })[0]);
     const kpiCell = screen.getByText("200 OK Verified").closest(".kpi-cell");
     expect(kpiCell?.querySelector(".kpi-val")?.textContent).toBe("4");
-    // Status: ping /health → telemetry reads "/health: ok"; 4/5 answered
+    // Status: ping /health → telemetry reads "/health: ok"; 4/6 answered
     // (desk ran tx/tvl/filings/route; grid never probed).
     fireEvent.click(screen.getAllByRole("button", { name: "04 Status & Docs" })[0]);
     pingHealthRow();
@@ -556,7 +558,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     expect(rowBadge?.classList.contains("b-ok")).toBe(true);
     expect(screen.getByText(/\/health ok · uptime 123s/)).toBeTruthy();
     const answeredCard = screen.getByText("Endpoints Answered (this session)").closest(".card");
-    expect(answeredCard?.textContent).toContain("4 / 5");
+    expect(answeredCard?.textContent).toContain("4 / 6");
     // Benchmarks: a PASS with http 200 keeps its green badge (T11).
     fireEvent.click(screen.getAllByRole("button", { name: "03 Benchmarks" })[0]);
     fireEvent.click(screen.getByRole("button", { name: /Run 24-Case Adversarial Suite/ }));

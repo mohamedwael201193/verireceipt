@@ -1,4 +1,4 @@
-// Sticky scroll-driven IDE — "Five intents."
+// Sticky scroll-driven IDE — "Six intents."
 //
 // The design's IDE showed canned payloads and a self-referential SHA-256
 // "verification". This port runs the LIVE API on every tab/mode change:
@@ -14,6 +14,7 @@ import type {
   RouteResponse,
   TvlResponse,
   TxResponse,
+  ValidatorResponse,
 } from "../../lib/types";
 import { ReceiptCard } from "../../components/ReceiptCard";
 import { INTENTS, PRESETS, TRAP_PRESETS, type IntentKey } from "./data";
@@ -62,6 +63,12 @@ function metricFor(key: IntentKey, data: AnyResponse | null, period?: string): s
       const d = data as GridPriceResponse;
       return `${formatLmp(d.lmp_usd_per_mwh)} · ${d.market}`;
     }
+    case "validator": {
+      const d = data as ValidatorResponse;
+      const gwei = Number(d.effective_balance);
+      const eth = Number.isFinite(gwei) ? (gwei / 1e9).toFixed(4) : "—";
+      return `validator ${String(d.validator_index)} · ${eth} ETH effective`;
+    }
   }
 }
 
@@ -96,7 +103,7 @@ function TxVisual({ data }: { data: TxResponse }) {
 }
 
 function SecVisual({ data, period }: { data: FilingsResponse; period: string }) {
-  const top = data.filings.slice(0, 3);
+  const top = (Array.isArray(data.filings_detail) ? data.filings_detail : []).slice(0, 3);
   return (
     <div style={{ padding: 18, flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ width: "100%", background: "#F1EFE9", color: "#141414", borderRadius: 8, padding: "18px 20px", boxShadow: "0 16px 36px rgba(0,0,0,0.45)" }}>
@@ -210,6 +217,24 @@ function GridVisual({ data }: { data: GridPriceResponse }) {
       <div style={{ fontSize: 11, color: "#8F8E8A", lineHeight: 1.6 }}>
         Currency: {data.currency}. One live tile — the endpoint returns a
         single node/interval, so no other zone tiles are shown.
+      </div>
+    </div>
+  );
+}
+
+function ValidatorVisual({ data }: { data: ValidatorResponse }) {
+  const gwei = Number(data.effective_balance);
+  const eth = Number.isFinite(gwei) ? (gwei / 1e9).toFixed(4) : "—";
+  return (
+    <div className="mono" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12, flex: 1, justifyContent: "center" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8F8E8A" }}>
+        <span>BEACON EFFECTIVE BALANCE · 2-OF-N QUORUM</span>
+        <span style={{ color: "#22C55E" }}>{data.status ?? "live"}</span>
+      </div>
+      <div style={{ padding: 13, borderRadius: 8, border: "1px solid #FF5722", background: "rgba(255,87,34,0.12)" }}>
+        <div style={{ fontSize: 10, color: "#8F8E8A" }}>validator_index {String(data.validator_index)}</div>
+        <div style={{ fontSize: 21, marginTop: 4, color: "#FF5722" }}>{eth} ETH</div>
+        <div style={{ fontSize: 10, color: "#8F8E8A" }}>{Number.isFinite(gwei) ? `${gwei.toLocaleString("en-US")} gwei` : "—"}</div>
       </div>
     </div>
   );
@@ -354,7 +379,7 @@ export function IntentIde() {
           <div>
             <div className="kicker">// live intents</div>
             <h2 className="sec-h2">
-              Five <span className="it">intents.</span>
+              Six <span className="it">intents.</span>
             </h2>
           </div>
           <div className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>// one file per intent</div>
@@ -513,6 +538,7 @@ export function IntentIde() {
                     {meta.key === "tvl" && dataForTab && <TvlVisual data={dataForTab as TvlResponse} scattered={scattered} />}
                     {meta.key === "route" && dataForTab && <RouteVisual data={dataForTab as RouteResponse} />}
                     {meta.key === "grid" && dataForTab && <GridVisual data={dataForTab as GridPriceResponse} />}
+                    {meta.key === "validator" && dataForTab && <ValidatorVisual data={dataForTab as ValidatorResponse} />}
                   </div>
                 )}
               </div>

@@ -2,7 +2,7 @@
 //
 // The design's six cards were canned (fake receipt ids, canned hashes,
 // POST curls). Each card here is a REAL ReceiptCard fed by a live API
-// call (five intents + the future-interval 422 trap), with a live
+// call (curated intents + the future-interval 422 trap), with a live
 // summary line and a real GET curl. A failed call shows its real error
 // state instead of a fabricated card.
 import { useRef, useState } from "react";

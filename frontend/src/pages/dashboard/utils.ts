@@ -225,6 +225,7 @@ const INTENT_TO_LEDGER_ENDPOINT: Record<string, SessionReceiptEndpoint> = {
   TVL_LOOKUP_GENERAL: "tvl",
   OPTIMAL_EXECUTION_ROUTE_GENERAL: "route",
   GRID_POWER_PRICE_GENERAL: "grid",
+  VALIDATOR_PERFORMANCE_VERIFY_GENERAL: "validator",
 };
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -301,6 +302,8 @@ function summaryFor(endpoint: SessionReceiptEndpoint, body: unknown, query?: str
     return `LMP $${String(b.lmp_usd_per_mwh)}/MWh`;
   if (endpoint === "tx")
     return `status ${String(b.status ?? "—")}, block ${String(b.block_number ?? "—")}`;
+  if (endpoint === "validator" && b.effective_balance !== undefined)
+    return `effective_balance ${String(b.effective_balance)} gwei`;
   return `${endpoint} — live call`;
 }
 

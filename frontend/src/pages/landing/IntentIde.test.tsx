@@ -28,7 +28,8 @@ const TX_BODY = {
 const SEC_BODY = {
   entity: "AAPL",
   filing_count: 3,
-  filings: [
+  filings: ["Form 10-K filed 2024-11-01"],
+  filings_detail: [
     {
       form: "10-K",
       accession: "0000320193-24-000123",

@@ -16,6 +16,7 @@ import {
   hasVisibleContent,
   tickerEntryCik,
   buildFilingsFromSubmissions,
+  filingTitle,
   filterFilingsByPeriod,
   __clearTickersCacheForTests,
   __seedTickersCacheForTests,
@@ -489,7 +490,8 @@ describe('handleFilings — envelope shape (stubbed upstream)', () => {
 
     expect(result.entity).toBe('AAPL');
     expect(result.filing_count).toBe(1);
-    expect(result.filings).toEqual([
+    expect(result.filings).toEqual(['Form 8-K filed 2026-01-05']);
+    expect(result.filings_detail).toEqual([
       {
         form: '8-K',
         accession: '0000320193-26-000001',
@@ -514,6 +516,20 @@ describe('handleFilings — envelope shape (stubbed upstream)', () => {
     expect(receipt.quorum_votes).toBe('1/1 primary source');
     expect(receipt.raw_response_sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(receipt.raw_response_sha256).toBe(sha256Hex(JSON.stringify(SUBMISSIONS_FIXTURE)));
+  });
+
+  it('official filings field is a list of title strings; rich objects are in filings_detail', async () => {
+    const fetchImpl = stubFetchFactory({ submissions: SUBMISSIONS_FIXTURE });
+    const result = await handleFilings({ entity: 'AAPL', period: '2026' }, { fetchImpl });
+    const titles = result.filings as string[];
+    const detail = result.filings_detail as Array<{ form: string; accession: string; filing_date: string; url: string }>;
+    const urls = result.urls as string[];
+    expect(titles.every((s) => typeof s === 'string')).toBe(true);
+    expect(titles).toEqual(detail.map(filingTitle));
+    expect(urls).toEqual(detail.map((f) => f.url));
+    expect(titles).toHaveLength(detail.length);
+    expect(typeof titles[0]).toBe('string');
+    expect(titles[0]).not.toContain('[object');
   });
 
   it('name-substring match gives confidence 0.9', async () => {
@@ -912,6 +928,7 @@ describe('handleFilings — upstream hardening (stubbed upstream)', () => {
     expect(result.verdict).toBe('verified');
     expect(result.filing_count).toBe(0);
     expect(result.filings).toEqual([]);
+    expect(result.filings_detail).toEqual([]);
   });
 
   it('EDGAR 200 payload CIK mismatch (Microsoft CIK for an AAPL request) -> 502 SEC_UNAVAILABLE', async () => {
@@ -1086,7 +1103,7 @@ describe('handleFilings — live SEC EDGAR', () => {
       const result = await handleFilings({ entity: 'AAPL', period: 'last 12 months' });
       expect(typeof result.filing_count).toBe('number');
       expect(result.filing_count as number).toBeGreaterThan(0);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings.length).toBeGreaterThan(0);
       expect(filings[0].accession).toMatch(/^\d{10}-\d{2}-\d{6}$/);
       expect(filings[0].url).toMatch(
@@ -1877,17 +1894,22 @@ describe('handleFilings — adversarial inputs + refusal matrix (stubbed upstrea
     }
   });
 
-  it('oversized entity: 513 chars -> 400 ENTITY_TOO_LONG; exactly 512 chars -> not a length 400', async () => {
-    await expectApiError(
-      handleFilings({ entity: 'x'.repeat(513), period: '2026' }),
-      400,
-      'ENTITY_TOO_LONG',
-    );
+  it('entity length 511/512 accepted (not 400); 513 -> 400 MAX_PARAM_SIZE', async () => {
     const fetchImpl = stubFetchFactory({ fedreg: { count: 0, results: [] } });
+    await expectApiError(
+      handleFilings({ entity: 'x'.repeat(511), period: '2026' }, { fetchImpl }),
+      422,
+      'ENTITY_NOT_FOUND',
+    );
     await expectApiError(
       handleFilings({ entity: 'x'.repeat(512), period: '2026' }, { fetchImpl }),
       422,
       'ENTITY_NOT_FOUND',
+    );
+    await expectApiError(
+      handleFilings({ entity: 'x'.repeat(513), period: '2026' }),
+      400,
+      'MAX_PARAM_SIZE',
     );
   });
 
@@ -1953,7 +1975,7 @@ describe('handleFilings — live legal names B7 (real SEC EDGAR)', () => {
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.confidence).toBe(0.9);
       expect(result.filing_count as number).toBeGreaterThan(0);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings[0].url).toContain('/789019/');
       expect(filings[0].accession).toMatch(/^\d{10}-\d{2}-\d{6}$/);
       console.log(
@@ -1969,7 +1991,7 @@ describe('handleFilings — live legal names B7 (real SEC EDGAR)', () => {
       const result = await handleFilings({ entity: 'Bank of America Corporation', period: '2026' });
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.filing_count as number).toBeGreaterThan(0);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings[0].url).toContain('/70858/');
       console.log(
         `LIVE Bank of America Corporation 2026: source=${result.source} filing_count=${result.filing_count} first_accession=${filings[0].accession}`,
@@ -1985,7 +2007,7 @@ describe('handleFilings — live legal names B7 (real SEC EDGAR)', () => {
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.confidence).toBe(0.9);
       expect(result.filing_count as number).toBeGreaterThan(0);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings[0].url).toContain('/789019/');
       console.log(
         `LIVE microsoft last 12 months: filing_count=${result.filing_count} first_accession=${filings[0].accession}`,
@@ -2445,7 +2467,7 @@ describe('handleFilings — ROUND 6 SAP: empty-string primaryDocument (stubbed u
     // A1: both 2026 entries count; the empty-doc 2026-03-02 entry gets
     // the filing-index URL (never a fabricated document URL).
     expect(result.filing_count).toBe(2);
-    const filings = result.filings as Array<{ accession: string; url: string }>;
+    const filings = result.filings_detail as Array<{ accession: string; url: string }>;
     expect(filings[0].accession).toBe('0000320193-26-000001');
     expect(filings[1].accession).toBe('0000320193-26-000099');
     expectIndexUrls([filings[1]]);
@@ -2458,7 +2480,7 @@ describe('handleFilings — ROUND 6 SAP: empty-string primaryDocument (stubbed u
     );
     expect(result1999.verdict).toBe('verified');
     expect(result1999.filing_count).toBe(1);
-    expectIndexUrls(result1999.filings as Array<{ accession: string; url: string }>);
+    expectIndexUrls(result1999.filings_detail as Array<{ accession: string; url: string }>);
   });
 
   it('SAP stub (A1): an all-empty-doc recent block is a verified 200/2 with index URLs', async () => {
@@ -2478,7 +2500,7 @@ describe('handleFilings — ROUND 6 SAP: empty-string primaryDocument (stubbed u
     const result = await handleFilings({ entity: 'AAPL', period: '1999' }, { fetchImpl });
     expect(result.verdict).toBe('verified');
     expect(result.filing_count).toBe(2);
-    expectIndexUrls(result.filings as Array<{ accession: string; url: string }>);
+    expectIndexUrls(result.filings_detail as Array<{ accession: string; url: string }>);
   });
 
   it('SAP stub: non-string primaryDocument still 502s (the allowance is empty-string-only)', async () => {
@@ -2829,7 +2851,7 @@ describe('handleFilings — ROUND 5 live: foreign suffixes F1 (real SEC EDGAR)',
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.confidence).toBe(0.9);
       expect(result.filing_count).toBe(10);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings[0].accession).toBe('0001104659-26-118617');
       expect(filings[0].url).toContain('/1000184/');
       console.log(
@@ -2898,7 +2920,7 @@ describe('handleFilings — ROUND 5 live: Exxon drift F3 (real SEC EDGAR)', () =
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.confidence).toBe(1.0);
       expect(result.filing_count as number).toBeGreaterThan(0);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings[0].url).toContain('/2115436/');
       console.log(
         `LIVE XOM 2026: source=${result.source} filing_count=${result.filing_count} first_accession=${filings[0].accession}`,
@@ -2913,7 +2935,7 @@ describe('handleFilings — ROUND 5 live: Exxon drift F3 (real SEC EDGAR)', () =
       const result = await handleFilings({ entity: 'ExxonMobil', period: '2026' });
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.filing_count as number).toBeGreaterThan(0);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings[0].url).toContain('/2115436/');
       console.log(
         `LIVE ExxonMobil 2026: source=${result.source} filing_count=${result.filing_count} first_accession=${filings[0].accession}`,
@@ -2958,7 +2980,7 @@ describe('handleFilings — ROUND 6 live: invisible-char tickers/names + SAP fix
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.confidence).toBe(1.0);
       expect(result.filing_count as number).toBeGreaterThan(0);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings[0].url).toContain('/320193/');
       expect(filings[0].accession).toMatch(/^\d{10}-\d{2}-\d{6}$/);
       console.log(
@@ -2985,7 +3007,7 @@ describe('handleFilings — ROUND 6 live: invisible-char tickers/names + SAP fix
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.confidence).toBe(0.9);
       expect(result.filing_count as number).toBeGreaterThan(0);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings[0].url).toContain('/789019/');
       console.log(
         `LIVE Microsoft\\u200b 2026: source=${result.source} filing_count=${result.filing_count} first_accession=${filings[0].accession}`,
@@ -3007,7 +3029,7 @@ describe('handleFilings — ROUND 6 live: invisible-char tickers/names + SAP fix
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.confidence).toBe(0.9);
       expect(result.filing_count as number).toBeGreaterThan(0);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings[0].url).toContain('/789019/');
       console.log(
         `LIVE Microsoft Corporation\\u200b 2026: source=${result.source} filing_count=${result.filing_count} first_accession=${filings[0].accession}`,
@@ -3371,7 +3393,7 @@ describe('handleFilings — ROUND 7 F3: whitespace-only primaryDocument (stubbed
     // Only the one non-empty 2026 entry (2026-01-05 8-K); the " "
     // 2026-03-02 entry contributes no filing and no URL.
     expect(result.filing_count).toBe(2);
-    const filings = result.filings as Array<Record<string, string>>;
+    const filings = result.filings_detail as Array<Record<string, string>>;
     expectIndexUrls([filings[1] as unknown as { accession: string; url: string }]);
     expect(filings[0].accession).toBe('0000320193-26-000001');
     expect(filings[0].url.endsWith(' ')).toBe(false);
@@ -3384,7 +3406,7 @@ describe('handleFilings — ROUND 7 F3: whitespace-only primaryDocument (stubbed
     );
     expect(result1999.verdict).toBe('verified');
     expect(result1999.filing_count).toBe(1);
-    expectIndexUrls(result1999.filings as Array<{ accession: string; url: string }>);
+    expectIndexUrls(result1999.filings_detail as Array<{ accession: string; url: string }>);
   });
 
   it('F3 stub (A1): an all-whitespace-doc recent block is a verified 200/2 with index URLs', async () => {
@@ -3404,7 +3426,7 @@ describe('handleFilings — ROUND 7 F3: whitespace-only primaryDocument (stubbed
     const result = await handleFilings({ entity: 'AAPL', period: '1999' }, { fetchImpl });
     expect(result.verdict).toBe('verified');
     expect(result.filing_count).toBe(2);
-    expectIndexUrls(result.filings as Array<{ accession: string; url: string }>);
+    expectIndexUrls(result.filings_detail as Array<{ accession: string; url: string }>);
   });
 });
 
@@ -3457,7 +3479,7 @@ describe('handleFilings — ROUND 7 live: intra-token suffixes + Cf marks (real 
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.confidence).toBe(1.0);
       expect(result.filing_count).toBe(100);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings[0].accession).toBe('0000320193-24-000132');
       expect(filings[0].url).toContain('/320193/');
       console.log(
@@ -3478,7 +3500,7 @@ describe('handleFilings — ROUND 7 live: intra-token suffixes + Cf marks (real 
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.confidence).toBe(0.9);
       expect(result.filing_count as number).toBeGreaterThanOrEqual(157);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings[0].url).toContain('/789019/');
       console.log(
         `LIVE Microsoft Corporation\\u200e 2026: source=${result.source} filing_count=${result.filing_count} first_accession=${filings[0].accession}`,
@@ -3504,7 +3526,7 @@ describe('handleFilings — ROUND 7 live: intra-token suffixes + Cf marks (real 
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.confidence).toBe(1.0);
       expect(result.filing_count as number).toBeGreaterThanOrEqual(95);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings[0].url).toContain('/320193/');
       console.log(
         `LIVE ' AAPL ' last 12 months: source=${result.source} filing_count=${result.filing_count} first_accession=${filings[0].accession}`,
@@ -3670,7 +3692,7 @@ describe('handleFilings — ROUND 8 F3: invisible-only primaryDocument (stubbed 
     const result = await handleFilings({ entity: 'AAPL', period: '2026' }, { fetchImpl });
     expect(result.verdict).toBe('verified');
     expect(result.filing_count).toBe(2);
-    expectIndexUrls(result.filings as Array<{ accession: string; url: string }>);
+    expectIndexUrls(result.filings_detail as Array<{ accession: string; url: string }>);
   });
 
   it('R8 F3 stub (A1): invisible-only doc beside a real doc counts with the index URL, no fabricated URL', async () => {
@@ -3691,8 +3713,8 @@ describe('handleFilings — ROUND 8 F3: invisible-only primaryDocument (stubbed 
     expect(result.verdict).toBe('verified');
     expect(result.source).toBe('SEC EDGAR Submissions API');
     expect(result.filing_count).toBe(2);
-    expectIndexUrls([(result.filings as Array<{ accession: string; url: string }>)[1]]);
-    const filings = result.filings as Array<Record<string, string>>;
+    expectIndexUrls([(result.filings_detail as Array<{ accession: string; url: string }>)[1]]);
+    const filings = result.filings_detail as Array<Record<string, string>>;
     expect(filings[0].accession).toBe('0000320193-26-000001');
     expect(filings[0].url).toBe(
       'https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/aapl-20260105.htm',
@@ -3855,7 +3877,7 @@ describe('handleFilings — ROUND 8 live: NBSP variants (real SEC EDGAR)', () =>
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.confidence).toBe(1.0);
       expect(result.filing_count).toBe(100);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings[0].accession).toBe('0000320193-24-000132');
       expect(filings[0].url).toContain('/320193/');
       console.log(
@@ -4162,7 +4184,7 @@ describe('handleFilings — ROUND 9 F2: invisible-only primaryDocument, closed c
     expect(result.verdict).toBe('verified');
     expect(result.source).toBe('SEC EDGAR Submissions API');
     expect(result.filing_count).toBe(31);
-    expectIndexUrls(result.filings as Array<{ accession: string; url: string }>);
+    expectIndexUrls(result.filings_detail as Array<{ accession: string; url: string }>);
   });
 
   it('R9 F2 stub (A1): invisible-only docs beside a real doc count with index URLs, no fabricated URL', async () => {
@@ -4173,8 +4195,8 @@ describe('handleFilings — ROUND 9 F2: invisible-only primaryDocument, closed c
     expect(result.verdict).toBe('verified');
     expect(result.source).toBe('SEC EDGAR Submissions API');
     expect(result.filing_count).toBe(4);
-    expectIndexUrls((result.filings as Array<{ accession: string; url: string }>).slice(1));
-    const filings = result.filings as Array<Record<string, string>>;
+    expectIndexUrls((result.filings_detail as Array<{ accession: string; url: string }>).slice(1));
+    const filings = result.filings_detail as Array<Record<string, string>>;
     expect(filings[0].accession).toBe('0000320193-26-000001');
     expect(filings[0].url).toBe(
       'https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/aapl-20260105.htm',
@@ -4301,7 +4323,7 @@ describe('handleFilings — ROUND 9 F3: primaryDocument whitelist + URL encoding
     });
     const mixedResult = await handleFilings({ entity: 'AAPL', period: '2026' }, { fetchImpl: mixedFetch });
     expect(mixedResult.filing_count).toBe(1);
-    const filings = mixedResult.filings as Array<Record<string, string>>;
+    const filings = mixedResult.filings_detail as Array<Record<string, string>>;
     expect(filings[0].url).toBe(
       'https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/aapl-20260105.htm',
     );
@@ -4351,7 +4373,7 @@ describe('handleFilings — ROUND 11 F-J2-R10-1: 2+-slash primaryDocument is cap
     });
     const mixedResult = await handleFilings({ entity: 'AAPL', period: '2026' }, { fetchImpl: mixedFetch });
     expect(mixedResult.filing_count).toBe(1);
-    const filings = mixedResult.filings as Array<Record<string, string>>;
+    const filings = mixedResult.filings_detail as Array<Record<string, string>>;
     expect(filings[0].url).toBe(
       'https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/xslF345X06/form4.xml',
     );
@@ -4440,7 +4462,7 @@ describe('handleFilings — ROUND 9 live: U+2800 variants + controls (real SEC E
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.confidence).toBe(1.0);
       expect(result.filing_count).toBe(100);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       expect(filings[0].accession).toBe('0000320193-24-000132');
       console.log(
         `LIVE AA U+2800 PL 2024: source=${result.source} filing_count=${result.filing_count} first_accession=${filings[0].accession}`,
@@ -4472,7 +4494,7 @@ describe('handleFilings — ROUND 9 live: U+2800 variants + controls (real SEC E
       const result = await handleFilings({ entity: ' AAPL ', period: 'last 12 months' });
       expect(result.source).toBe('SEC EDGAR Submissions API');
       expect(result.filing_count as number).toBeGreaterThanOrEqual(95);
-      const filings = result.filings as Array<Record<string, string>>;
+      const filings = result.filings_detail as Array<Record<string, string>>;
       console.log(
         `LIVE ' AAPL ' L12M: source=${result.source} filing_count=${result.filing_count} first_accession=${filings[0]?.accession}`,
       );
@@ -4494,11 +4516,11 @@ describe('handleFilings — ROUND 9 live: U+2800 variants + controls (real SEC E
       const msft = await handleFilings({ entity: 'Microsoft Corp', period: '2026' });
       expect(msft.source).toBe('SEC EDGAR Submissions API');
       expect(msft.filing_count).toBe(157);
-      expect((msft.filings as Array<Record<string, string>>)[0].accession).toBe('0000789019-26-000236');
+      expect((msft.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0000789019-26-000236');
       const sap = await handleFilings({ entity: 'SAP SE', period: '2026' });
       expect(sap.source).toBe('SEC EDGAR Submissions API');
       expect(sap.filing_count).toBe(10);
-      expect((sap.filings as Array<Record<string, string>>)[0].accession).toBe('0001104659-26-118617');
+      expect((sap.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0001104659-26-118617');
       const ms = await handleFilings({ entity: 'Microsoft', period: '2026' });
       expect(ms.source).toBe('SEC EDGAR Submissions API');
       expect(ms.filing_count).toBe(157);
@@ -4675,7 +4697,7 @@ describe('handleFilings — ROUND 10 F-R9-1: the five missed blank chars (stubbe
     const result = await handleFilings({ entity: 'AAPL', period: '2026' }, { fetchImpl });
     expect(result.verdict).toBe('verified');
     expect(result.filing_count).toBe(5);
-    expectIndexUrls(result.filings as Array<{ accession: string; url: string }>);
+    expectIndexUrls(result.filings_detail as Array<{ accession: string; url: string }>);
   });
 });
 
@@ -4843,7 +4865,7 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
         expect(result.source).toBe('SEC EDGAR Submissions API');
         expect(result.confidence).toBe(1.0);
         expect(result.filing_count).toBe(100);
-        const filings = result.filings as Array<Record<string, string>>;
+        const filings = result.filings_detail as Array<Record<string, string>>;
         expect(filings[0].accession).toBe('0000320193-24-000132');
         console.log(
           `LIVE AA U+${ch.codePointAt(0)!.toString(16).toUpperCase()} PL 2024: source=${result.source} filing_count=${result.filing_count} first_accession=${filings[0].accession}`,
@@ -4860,7 +4882,7 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
         const result = await handleFilings({ entity: `AA${ch}PL`, period: '2024' });
         expect(result.source).toBe('SEC EDGAR Submissions API');
         expect(result.filing_count).toBe(100);
-        expect((result.filings as Array<Record<string, string>>)[0].accession).toBe('0000320193-24-000132');
+        expect((result.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0000320193-24-000132');
       }
       for (const entity of ['Airbus S\u{1DA7F}E', 'Airbus S\u{13441}E']) {
         await expectApiError(handleFilings({ entity, period: '2026' }), 422, 'ENTITY_NOT_FOUND');
@@ -4896,7 +4918,7 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
       const aapl = await handleFilings({ entity: 'AAP\u0301L', period: '2024' });
       expect(aapl.source).toBe('SEC EDGAR Submissions API');
       expect(aapl.filing_count).toBe(100);
-      expect((aapl.filings as Array<Record<string, string>>)[0].accession).toBe('0000320193-24-000132');
+      expect((aapl.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0000320193-24-000132');
     },
     120_000,
   );
@@ -4907,21 +4929,21 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
       const padded = await handleFilings({ entity: ' AAPL ', period: 'last 12 months' });
       expect(padded.source).toBe('SEC EDGAR Submissions API');
       expect(padded.filing_count).toBe(95);
-      expect((padded.filings as Array<Record<string, string>>)[0].accession).toBe('0001140361-26-044952');
+      expect((padded.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0001140361-26-044952');
       // ROUND 8: no Federal Register fallback — plain "Airbus S E" is 422.
       await expectApiError(handleFilings({ entity: 'Airbus S E', period: '2026' }), 422, 'ENTITY_NOT_FOUND');
       const msft = await handleFilings({ entity: 'Microsoft Corp', period: '2026' });
       expect(msft.source).toBe('SEC EDGAR Submissions API');
       expect(msft.filing_count).toBe(157);
-      expect((msft.filings as Array<Record<string, string>>)[0].accession).toBe('0000789019-26-000236');
+      expect((msft.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0000789019-26-000236');
       const sap = await handleFilings({ entity: 'SAP SE', period: '2026' });
       expect(sap.source).toBe('SEC EDGAR Submissions API');
       expect(sap.filing_count).toBe(10);
-      expect((sap.filings as Array<Record<string, string>>)[0].accession).toBe('0001104659-26-118617');
+      expect((sap.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0001104659-26-118617');
       const nbsp = await handleFilings({ entity: 'AA\u00A0PL', period: '2024' });
       expect(nbsp.source).toBe('SEC EDGAR Submissions API');
       expect(nbsp.filing_count).toBe(100);
-      expect((nbsp.filings as Array<Record<string, string>>)[0].accession).toBe('0000320193-24-000132');
+      expect((nbsp.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0000320193-24-000132');
       // French/NBSP live boundary: NBSP-as-separator behaves exactly
       // like the plain form on both sides of the boundary.
       const appleNbsp = await handleFilings({ entity: 'Apple\u00A0Inc.', period: '2024' });
@@ -5385,7 +5407,7 @@ describe('A1 handler (stubbed upstream): form filter, amendments, residue guard,
     const r = await handleFilings({ entity: 'AAPL', period: '1999', form_type: '10-K' }, { fetchImpl: a1Fetch({ calls }) });
     expect(r.filing_count).toBe(1);
     expect(calls.pages).toBe(1);
-    expect((r.filings as Array<{ url: string }>)[0].url).toBe(indexUrl('0000320193-99-000017'));
+    expect((r.filings_detail as Array<{ url: string }>)[0].url).toBe(indexUrl('0000320193-99-000017'));
     const pages = r.upstream_pages as Array<{ url: string; raw_response_sha256: string }>;
     expect(pages[0].url).toBe(`https://data.sec.gov/submissions/${A1_PAGE_NAME}`);
     expect(pages[0].raw_response_sha256).toBe(createHash('sha256').update(JSON.stringify(a1Page())).digest('hex'));

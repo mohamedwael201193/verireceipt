@@ -59,7 +59,7 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, ApiError } from '../lib/api';
+import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, getValidator, ApiError } from '../lib/api';
 import { useHealth } from '../lib/hooks';
 import {
   SESSION_RECEIPTS_CAP as LEDGER_CAP,
@@ -527,6 +527,11 @@ const ENDPOINT_META: Record<EndpointKey, { title: string; intent: string; path: 
     path: '/v1/route',
   },
   grid: { title: 'Grid power price', intent: 'GRID_POWER_PRICE_GENERAL', path: '/v1/grid-price' },
+  validator: {
+    title: 'Validator effective balance',
+    intent: 'VALIDATOR_PERFORMANCE_VERIFY_GENERAL',
+    path: '/v1/validator',
+  },
 };
 
 /** Merge persisted entries with memory-only ones for display, newest
@@ -719,6 +724,7 @@ export default function Receipts() {
     pair: 'ETH/USDC',
     node_or_zone: 'TH_NP15_GEN-APND',
     interval_start: defaultGridInterval(),
+    validator_index: '1',
   }));
   // Running state is tracked PER ENDPOINT (B2): a single shared slot let a
   // finishing call re-enable another endpoint's button mid-flight. Each
@@ -902,6 +908,12 @@ export default function Receipts() {
           params = `pair=${values.pair.trim()}`;
           const d = asEnvelope(raw);
           summary = d.answer ?? `amount_out ${String(d.amount_out ?? '—')}`;
+        } else if (endpoint === 'validator') {
+          raw = await getValidator({ validator_index: values.validator_index.trim() });
+          label = `validator ${values.validator_index.trim()}`;
+          params = `validator_index=${values.validator_index.trim()}`;
+          const d = asEnvelope(raw);
+          summary = d.answer ?? `effective_balance ${String(d.effective_balance ?? '—')} gwei`;
         } else {
           raw = await getGridPrice({
             node_or_zone: values.node_or_zone.trim(),
@@ -1063,6 +1075,9 @@ export default function Receipts() {
     grid: [
       { name: 'node_or_zone', label: 'node_or_zone — pricing node or bidding zone', placeholder: 'TH_NP15_GEN-APND' },
       { name: 'interval_start', label: 'interval_start — ISO-8601 UTC, past interval on a settlement boundary', placeholder: '2026-11-20T06:00:00Z' },
+    ],
+    validator: [
+      { name: 'validator_index', label: 'validator_index — canonical non-negative integer as a decimal string', placeholder: '1' },
     ],
   };
 

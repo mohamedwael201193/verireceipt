@@ -71,6 +71,14 @@ export interface Filing {
   url: string;
 }
 
+/** Official REGULATORY_FILING_MONITOR_GENERAL field `filings` is
+ *  "Titles of the matching filings, newest first" (`type: list`).
+ *  The title is a stable string from the form and filing date already
+ *  on the record; rich objects are returned separately as filings_detail. */
+export function filingTitle(f: Filing): string {
+  return `Form ${f.form} filed ${f.filing_date}`;
+}
+
 export interface Period {
   /** Inclusive start, YYYY-MM-DD. */
   start: string;
@@ -1941,7 +1949,7 @@ export async function handleFilings(
   // comment above INVISIBLE_CHARS_RE).
   const entityNfc = entityRaw.trim().normalize('NFC');
   if (entityNfc.length > 512) {
-    throw badRequest('ENTITY_TOO_LONG', 'Query parameter "entity" must not exceed 512 characters');
+    throw badRequest('MAX_PARAM_SIZE', 'Query parameter "entity" must not exceed 512 characters');
   }
 
   // --- A1 (2026-11-21, round 8): form type, CIK claims, longest-match ---
@@ -2275,7 +2283,8 @@ export async function handleFilings(
     entity,
     form_type: formLabel,
     filing_count: filings.length,
-    filings: listed,
+    filings: listed.map(filingTitle),
+    filings_detail: listed,
     urls: listed.map((f) => f.url),
   };
   if (formLabel) {

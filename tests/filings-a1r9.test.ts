@@ -179,7 +179,7 @@ describe('A1 r9 stubbed: J2-r8 findings', () => {
     const r24 = await ask({ entity: 'Apple Inc.', period: '2024', form_type: 'SCHEDULE 13G/A' });
     expect(r24.filing_count).toBe(2);
     expect(r24.form_counts).toEqual({ 'SC 13G/A': 1, 'SCHEDULE 13G/A': 1 });
-    expect((r24.filings as Array<{ form: string }>).map((f) => f.form).sort()).toEqual(['SC 13G/A', 'SCHEDULE 13G/A']);
+    expect((r24.filings_detail as Array<{ form: string }>).map((f) => f.form).sort()).toEqual(['SC 13G/A', 'SCHEDULE 13G/A']);
   });
 
   it('M1: originals and amendments stay distinct; 13D and 13G stay distinct; agreement across fields is family-aware', async () => {
