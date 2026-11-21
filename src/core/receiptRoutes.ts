@@ -3,8 +3,8 @@
 //   GET /receipts/:id          receipt metadata (JSON)
 //   GET /receipts/:id/raw      the EXACT stored evidence bytes that
 //                              raw_response_sha256 hashes
-//   GET /receipts/:id/evidence alias of /raw (the name used in handler
-//                              comments and JUDGE.md §4)
+//   GET /receipts/:id/evidence alias of /raw (the name used in older
+//                              handler comments), also under /api
 //   GET /receipts/:id/pages/:n/raw
 //                              the EXACT bytes of extra upstream page n
 //                              (0-based, = upstream_pages[n]) that the
@@ -30,6 +30,14 @@
 //   - no listing route exists: GET /receipts and /receipts/ are 404.
 //   - stored bytes that no longer hash to their recorded digest are DB
 //     corruption -> 500 EVIDENCE_CORRUPT; wrong bytes are never served.
+//     Metadata agrees with /raw (G10 r2): the blob is verified for the
+//     metadata too, so a corrupt blob shows evidence_available:false,
+//     evidence_status "corrupt"; a missing one "missing"; else "ok". A
+//     stored digest that is not a SHA-256 (main or any page) answers 500
+//     RECEIPT_CORRUPT on metadata, /raw and page /raw alike.
+//   - /raw responses carry ETag "<hex>"; If-None-Match matching it -> 304
+//     (checked only after the bytes pass their hash check). OPTIONS on
+//     every receipt route answers a CORS preflight (204).
 //
 // Hash format (README "Receipts"): raw_response_sha256 is 64 lowercase hex
 // characters, no "0x" prefix (what `sha256sum` prints). Rows stored by
@@ -38,7 +46,7 @@
 // Repr-Digest (RFC 9530, sha-256 as base64), so a verifier can recompute
 // sha256(body) and compare without a second request.
 
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ApiError, badRequest, errorBody } from "./errors";
 import { getReceiptEvidence, getReceiptMeta, getReceiptPageEvidence, getReceiptPages, type ReceiptEvidence } from "./db";
 import { RECEIPT_ID_RE, normalizeSha256Hex, publicBaseUrl, sha256Hex } from "./receipt";
@@ -95,6 +103,66 @@ function sendError(reply: FastifyReply, err: ApiError): FastifyReply {
     .send(errorBody(err));
 }
 
+/**
+ * Does If-None-Match match this representation's strong ETag `"<hex>"`?
+ * RFC 9110 §13.1.2: "*" matches any; a list of entity-tags is compared
+ * with the weak comparison (W/ prefix ignored).
+ */
+export function ifNoneMatchHits(header: unknown, etag: string): boolean {
+  if (typeof header !== "string") return false;
+  const value = header.trim();
+  if (value === "*") return true;
+  return value
+    .split(",")
+    .map((t) => t.trim().replace(/^W\//, ""))
+    .some((t) => t === etag);
+}
+
+/** Evidence state as served by BOTH metadata and /raw (G10 r2, J2 m3). */
+type EvidenceStatus = "ok" | "missing" | "corrupt";
+
+/** Verify a blob through the integrity-checking getter: never trust a flag. */
+function evidenceStatus(read: () => ReceiptEvidence): { status: EvidenceStatus; bytes: number } {
+  try {
+    const ev = read();
+    if (!ev.found || ev.evidence === null) return { status: "missing", bytes: 0 };
+    return { status: "ok", bytes: ev.evidence.length };
+  } catch {
+    return { status: "corrupt", bytes: 0 };
+  }
+}
+
+/**
+ * G10 r2 (J2 m3): one digest check shared by metadata, /raw and every
+ * page /raw, so a receipt whose stored main OR page digest is not a
+ * SHA-256 answers 500 RECEIPT_CORRUPT on all of them (previously meta
+ * 500 but /raw 404).
+ */
+function digestCorruption(id: string): ApiError | null {
+  const row = getReceiptMeta(id);
+  if (!row) return null;
+  if (normalizeSha256Hex(row.raw_response_sha256) === null) {
+    return new ApiError(500, "RECEIPT_CORRUPT", `stored digest for ${id} is not a SHA-256`);
+  }
+  for (const p of getReceiptPages(id)) {
+    if (normalizeSha256Hex(p.raw_response_sha256) === null) {
+      return new ApiError(500, "RECEIPT_CORRUPT", `stored digest for ${id} page ${p.page_index} is not a SHA-256`);
+    }
+  }
+  return null;
+}
+
+/** CORS preflight for the receipt routes (lets a browser send If-None-Match). */
+function preflight(_request: FastifyRequest, reply: FastifyReply): FastifyReply {
+  return reply
+    .status(204)
+    .header("access-control-allow-origin", "*")
+    .header("access-control-allow-methods", "GET, HEAD, OPTIONS")
+    .header("access-control-allow-headers", "If-None-Match")
+    .header("access-control-max-age", "86400")
+    .send();
+}
+
 export function registerReceiptRoutes(app: FastifyInstance): void {
   const meta = async (request: { params: unknown }, reply: FastifyReply) => {
     let id: string;
@@ -107,24 +175,32 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
     if (!row) return sendError(reply, notFound("RECEIPT_NOT_FOUND", `no receipt ${id}`));
     const base = publicBaseUrl();
     // A stored digest that is not a SHA-256 is corruption, not a format.
-    const digest = normalizeSha256Hex(row.raw_response_sha256);
-    if (digest === null) {
-      return sendError(reply, new ApiError(500, "RECEIPT_CORRUPT", `stored digest for ${id} is not a SHA-256`));
-    }
+    const corrupt = digestCorruption(id);
+    if (corrupt) return sendError(reply, corrupt);
+    const digest = normalizeSha256Hex(row.raw_response_sha256) as string;
+    // G10 r2 (J2 m3): evidence_available reflects what /raw would
+    // actually do — the blob is verified (gunzip + length + sha256), not
+    // just checked for presence. A corrupt blob is evidence_available:
+    // false with evidence_status "corrupt" (and /raw answers 500
+    // EVIDENCE_CORRUPT); a legacy/pruned row is "missing" (/raw 404).
+    const mainEv = row.evidence_available
+      ? evidenceStatus(() => getReceiptEvidence(id))
+      : { status: "missing" as EvidenceStatus, bytes: 0 };
     const pages = getReceiptPages(id);
     const upstreamPages: Array<Record<string, unknown>> = [];
     for (const p of pages) {
-      const pageDigest = normalizeSha256Hex(p.raw_response_sha256);
-      if (pageDigest === null) {
-        return sendError(reply, new ApiError(500, "RECEIPT_CORRUPT", `stored digest for ${id} page ${p.page_index} is not a SHA-256`));
-      }
+      const pageDigest = normalizeSha256Hex(p.raw_response_sha256) as string;
+      const pageEv = p.evidence_available
+        ? evidenceStatus(() => getReceiptPageEvidence(id, p.page_index))
+        : { status: "missing" as EvidenceStatus, bytes: 0 };
       upstreamPages.push({
         page_index: p.page_index,
         url: p.url,
         raw_response_sha256: pageDigest,
         raw_url: `${base}/receipts/${row.receipt_id}/pages/${p.page_index}/raw`,
-        evidence_available: p.evidence_available,
-        evidence_bytes: p.evidence_bytes,
+        evidence_available: pageEv.status === "ok",
+        evidence_status: pageEv.status,
+        evidence_bytes: pageEv.bytes,
       });
     }
     return reply
@@ -141,15 +217,16 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
         fetched_at: row.fetched_at,
         audit_url: `${base}/receipts/${row.receipt_id}`,
         raw_url: `${base}/receipts/${row.receipt_id}/raw`,
-        evidence_available: row.evidence_available,
-        evidence_bytes: row.evidence_bytes,
+        evidence_available: mainEv.status === "ok",
+        evidence_status: mainEv.status,
+        evidence_bytes: mainEv.bytes,
         // Extra upstream pages (empty for single-document receipts).
         upstream_pages: upstreamPages,
       });
   };
 
   /** Shared /raw sender: re-checks the digest, then sends the exact bytes. */
-  const sendBytes = (reply: FastifyReply, ev: ReceiptEvidence, what: string) => {
+  const sendBytes = (request: FastifyRequest, reply: FastifyReply, ev: ReceiptEvidence, what: string) => {
     if (ev.evidence === null) {
       return sendError(reply, notFound("EVIDENCE_NOT_FOUND", `${what} exists but its raw bytes are not stored (legacy or pruned)`));
     }
@@ -159,11 +236,24 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
       return sendError(reply, new ApiError(500, "EVIDENCE_CORRUPT", `stored evidence for ${what} failed its hash check`));
     }
     const b64 = Buffer.from(digest, "hex").toString("base64");
+    const etag = `"${digest}"`;
+    // G10 r2 (J2 m2): conditional GET. Evaluated only AFTER the stored
+    // bytes passed their hash check, so a corrupt row never answers 304.
+    if (ifNoneMatchHits(request.headers["if-none-match"], etag)) {
+      return reply
+        .status(304)
+        .header("etag", etag)
+        .header("x-raw-sha256", digest)
+        .header("cache-control", "public, max-age=31536000, immutable")
+        .header("access-control-allow-origin", "*")
+        .header("access-control-expose-headers", "x-raw-sha256, repr-digest, etag")
+        .send();
+    }
     return reply
       .header("content-type", evidenceContentType(ev.evidence))
       .header("x-raw-sha256", digest)
       .header("repr-digest", `sha-256=:${b64}:`)
-      .header("etag", `"${digest}"`)
+      .header("etag", etag)
       .header("cache-control", "public, max-age=31536000, immutable")
       .header("x-content-type-options", "nosniff")
       .header("content-security-policy", "default-src 'none'; sandbox")
@@ -172,7 +262,7 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
       .send(ev.evidence);
   };
 
-  const pageRaw = async (request: { params: unknown }, reply: FastifyReply) => {
+  const pageRaw = async (request: FastifyRequest, reply: FastifyReply) => {
     let id: string;
     let n: number;
     try {
@@ -182,6 +272,8 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
       return sendError(reply, err as ApiError);
     }
     if (!getReceiptMeta(id)) return sendError(reply, notFound("RECEIPT_NOT_FOUND", `no receipt ${id}`));
+    const corrupt = digestCorruption(id);
+    if (corrupt) return sendError(reply, corrupt);
     let ev: ReceiptEvidence;
     try {
       ev = getReceiptPageEvidence(id, n);
@@ -189,16 +281,18 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
       return sendError(reply, new ApiError(500, "EVIDENCE_CORRUPT", `stored evidence for ${id} page ${n} failed its hash check`));
     }
     if (!ev.found) return sendError(reply, notFound("PAGE_NOT_FOUND", `receipt ${id} has no upstream page ${n}`));
-    return sendBytes(reply, ev, `receipt ${id} page ${n}`);
+    return sendBytes(request, reply, ev, `receipt ${id} page ${n}`);
   };
 
-  const raw = async (request: { params: unknown }, reply: FastifyReply) => {
+  const raw = async (request: FastifyRequest, reply: FastifyReply) => {
     let id: string;
     try {
       id = validateId((request.params as { id?: unknown }).id);
     } catch (err) {
       return sendError(reply, err as ApiError);
     }
+    const corrupt = digestCorruption(id);
+    if (corrupt) return sendError(reply, corrupt);
     let ev;
     try {
       ev = getReceiptEvidence(id);
@@ -208,13 +302,18 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
       return sendError(reply, new ApiError(500, "EVIDENCE_CORRUPT", `stored evidence for ${id} failed its hash check`));
     }
     if (!ev.found) return sendError(reply, notFound("RECEIPT_NOT_FOUND", `no receipt ${id}`));
-    return sendBytes(reply, ev, `receipt ${id}`);
+    return sendBytes(request, reply, ev, `receipt ${id}`);
   };
 
   for (const prefix of ["", "/api"]) {
     app.get(`${prefix}/receipts/:id`, meta);
     app.get(`${prefix}/receipts/:id/raw`, raw);
+    // G10 r2 (J2 m4): the /evidence alias is mirrored under /api too.
+    app.get(`${prefix}/receipts/:id/evidence`, raw);
     app.get(`${prefix}/receipts/:id/pages/:n/raw`, pageRaw);
+    // G10 r2 (J2 m5): CORS preflight, so a browser may send If-None-Match.
+    for (const path of ["", "/raw", "/evidence", "/pages/:n/raw"]) {
+      app.options(`${prefix}/receipts/:id${path}`, preflight);
+    }
   }
-  app.get("/receipts/:id/evidence", raw);
 }

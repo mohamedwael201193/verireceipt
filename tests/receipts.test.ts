@@ -12,24 +12,26 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createHash } from "crypto";
 import { gzipSync } from "zlib";
-import { mkdirSync, mkdtempSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import type { FastifyInstance } from "fastify";
 
 const SCRATCH = resolve(process.cwd(), "..", "g10-test-scratch");
 mkdirSync(SCRATCH, { recursive: true });
-process.env.SQLITE_PATH = join(mkdtempSync(join(SCRATCH, "db-")), "verireceipt.sqlite");
+const DB_DIR = mkdtempSync(join(SCRATCH, "db-"));
+process.env.SQLITE_PATH = join(DB_DIR, "verireceipt.sqlite");
 process.env.PUBLIC_BASE_URL = "https://verireceipt.example";
 
 import { buildServer } from "../src/server";
-import { getDb, saveReceipt, getReceiptMeta, getReceiptPages } from "../src/core/db";
+import { getDb, saveReceipt, getReceiptMeta, getReceiptPages, MAX_EVIDENCE_TOTAL_BYTES } from "../src/core/db";
+import { randomBytes } from "crypto";
 import {
   makeReceipt,
   normalizeSha256Hex,
   RECEIPT_ID_RE,
   sha256Hex,
 } from "../src/core/receipt";
-import { evidenceContentType } from "../src/core/receiptRoutes";
+import { evidenceContentType, ifNoneMatchHits } from "../src/core/receiptRoutes";
 import { stopTvlListsRefreshTimer } from "../src/handlers/tvl";
 
 const sha = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
@@ -42,6 +44,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await app.close();
   stopTvlListsRefreshTimer();
+  // the r2 budget tests write ~100 MB of random evidence: never leave it behind
+  rmSync(DB_DIR, { recursive: true, force: true });
 });
 
 function insertLegacyRow(id: string, digest: string, evidenceGzip: Buffer | null, evidenceBytes: number) {
@@ -151,6 +155,7 @@ describe("stored receipts", () => {
         audit_url: r.audit_url,
         raw_url: `${r.audit_url}/raw`,
         evidence_available: true,
+        evidence_status: "ok",
         evidence_bytes: body.length,
         upstream_pages: [],
       });
@@ -191,7 +196,7 @@ describe("stored receipts", () => {
     insertLegacyRow(id, "0x" + d, null, 0);
     const m = await app.inject({ method: "GET", url: `/receipts/${id}` });
     expect(m.statusCode).toBe(200);
-    expect(m.json()).toMatchObject({ raw_response_sha256: d, evidence_available: false, evidence_bytes: 0, quorum_votes: null });
+    expect(m.json()).toMatchObject({ raw_response_sha256: d, evidence_available: false, evidence_status: "missing", evidence_bytes: 0, quorum_votes: null });
     const raw = await app.inject({ method: "GET", url: `/receipts/${id}/raw` });
     expect(raw.statusCode).toBe(404);
     expect(raw.json().code).toBe("EVIDENCE_NOT_FOUND");
@@ -269,6 +274,7 @@ describe("receipts from every intent, incl. FILINGS with upstream_pages", () => 
           raw_response_sha256: p.raw_response_sha256,
           raw_url: `https://verireceipt.example/receipts/${r.receipt_id}/pages/${i}/raw`,
           evidence_available: true,
+          evidence_status: "ok",
           evidence_bytes: Buffer.byteLength(pageBodies[i]),
         })),
       );
@@ -405,4 +411,224 @@ describe("end-to-end LIVE (real upstreams, no stubs)", () => {
     expect(raw.statusCode).toBe(200);
     expect(sha(raw.rawPayload)).toBe(receipt.raw_response_sha256);
   }, 60_000);
+});
+
+// ---------------- G10 r2 (J2 round 1 minors) ----------------
+function totalEvidenceGzip(): number {
+  return (getDb()
+    .prepare(
+      `SELECT (SELECT COALESCE(SUM(LENGTH(evidence_gzip)), 0) FROM miner_receipts)
+            + (SELECT COALESCE(SUM(LENGTH(evidence_gzip)), 0) FROM miner_receipt_pages) AS t`,
+    )
+    .get() as { t: number }).t;
+}
+function hasMain(id: string): boolean {
+  return getReceiptMeta(id)?.evidence_available === true;
+}
+/** Remove all stored evidence so each budget test starts from an empty budget. */
+function clearAllEvidence(): void {
+  getDb().exec("UPDATE miner_receipts SET evidence_gzip = NULL, evidence_bytes = 0");
+  getDb().exec("UPDATE miner_receipt_pages SET evidence_gzip = NULL, evidence_bytes = 0");
+}
+const MB = 1024 * 1024;
+
+describe("G10 r2 m1: evidence budget with page-only receipts", () => {
+  it("J2 repro: page-only receipt larger than the whole budget is stored without blobs and prunes nobody", async () => {
+    clearAllEvidence();
+    const small = Array.from({ length: 5 }, (_, i) => {
+      const r = makeReceipt("TVL_LOOKUP_GENERAL", "https://u.example/" + i, "small-" + i, "1/1");
+      saveReceipt(r, "small-" + i);
+      return r;
+    });
+    const big = makeReceipt("REGULATORY_FILING_MONITOR_GENERAL", "https://data.sec.gov/big.json", "main-not-stored", "1/1");
+    const p0 = randomBytes(26 * MB);
+    const p1 = randomBytes(26 * MB);
+    saveReceipt(big, undefined, [
+      { url: "https://data.sec.gov/p0.json", body: p0 },
+      { url: "https://data.sec.gov/p1.json", body: p1 },
+    ]);
+    for (const r of small) expect(hasMain(r.receipt_id)).toBe(true);
+    const pages = getReceiptPages(big.receipt_id);
+    expect(pages.map((p) => [p.raw_response_sha256, p.evidence_available])).toEqual([
+      [sha(p0), false],
+      [sha(p1), false],
+    ]);
+    const next = makeReceipt("TVL_LOOKUP_GENERAL", "https://u.example/next", "next", "1/1");
+    saveReceipt(next, "next");
+    expect(hasMain(next.receipt_id)).toBe(true);
+    for (const r of small) expect(hasMain(r.receipt_id)).toBe(true);
+    expect(totalEvidenceGzip()).toBeLessThanOrEqual(MAX_EVIDENCE_TOTAL_BYTES);
+    // served honestly: digests listed, raw 404 like a pruned receipt
+    const m = await app.inject({ method: "GET", url: `/receipts/${big.receipt_id}` });
+    expect(m.json().upstream_pages[0]).toMatchObject({ evidence_available: false, evidence_status: "missing", raw_response_sha256: sha(p0) });
+    const pr = await app.inject({ method: "GET", url: `/receipts/${big.receipt_id}/pages/0/raw` });
+    expect(pr.statusCode).toBe(404);
+    expect(pr.json().code).toBe("EVIDENCE_NOT_FOUND");
+  }, 60000);
+
+  it("a page-only receipt within budget is a normal prune victim (oldest first), others keep their evidence", async () => {
+    clearAllEvidence();
+    const pageOnly = makeReceipt("REGULATORY_FILING_MONITOR_GENERAL", "https://data.sec.gov/old.json", "x", "1/1");
+    pageOnly.fetched_at = "2026-11-21T00:00:00.000Z"; // oldest
+    saveReceipt(pageOnly, undefined, [{ url: "https://data.sec.gov/old-p0.json", body: randomBytes(18 * MB) }]);
+    expect(getReceiptPages(pageOnly.receipt_id)[0].evidence_available).toBe(true);
+    const later = [1, 2].map((i) => {
+      const body = randomBytes(18 * MB);
+      const r = makeReceipt("TVL_LOOKUP_GENERAL", "https://u.example/l" + i, body, "1/1");
+      r.fetched_at = `2026-11-21T00:00:0${i}.000Z`;
+      saveReceipt(r, body);
+      return r;
+    });
+    // 3 x 18 MB > 50 MB -> the OLDEST (the page-only receipt) is pruned
+    expect(getReceiptPages(pageOnly.receipt_id)[0].evidence_available).toBe(false);
+    for (const r of later) expect(hasMain(r.receipt_id)).toBe(true);
+    expect(totalEvidenceGzip()).toBeLessThanOrEqual(MAX_EVIDENCE_TOTAL_BYTES);
+    // digests survive pruning
+    expect(getReceiptPages(pageOnly.receipt_id)[0].raw_response_sha256).toMatch(/^[0-9a-f]{64}$/);
+  }, 60000);
+
+  it("a single main evidence larger than the budget is stored without bytes and prunes nobody", async () => {
+    clearAllEvidence();
+    const keep = makeReceipt("TVL_LOOKUP_GENERAL", "https://u.example/keep", "keep", "1/1");
+    saveReceipt(keep, "keep");
+    const body = randomBytes(MAX_EVIDENCE_TOTAL_BYTES + MB);
+    const huge = makeReceipt("TVL_LOOKUP_GENERAL", "https://u.example/huge", body, "1/1");
+    saveReceipt(huge, body);
+    expect(hasMain(keep.receipt_id)).toBe(true);
+    expect(hasMain(huge.receipt_id)).toBe(false);
+    expect(getReceiptMeta(huge.receipt_id)?.raw_response_sha256).toBe(sha(body));
+    expect(totalEvidenceGzip()).toBeLessThanOrEqual(MAX_EVIDENCE_TOTAL_BYTES);
+    clearAllEvidence();
+  }, 60000);
+});
+
+describe("G10 r2 m3: metadata agrees with /raw on broken rows", () => {
+  it("corrupt main blob: meta evidence_available false / status corrupt, raw 500 EVIDENCE_CORRUPT", async () => {
+    const id = "rcpt_R2CORRUPT" + "0".repeat(17);
+    const good = Buffer.from("original");
+    insertLegacyRow(id, sha(good), gzipSync(Buffer.from("tampered")), good.length);
+    const m = await app.inject({ method: "GET", url: `/receipts/${id}` });
+    expect(m.statusCode).toBe(200);
+    expect(m.json()).toMatchObject({ evidence_available: false, evidence_status: "corrupt", evidence_bytes: 0 });
+    const raw = await app.inject({ method: "GET", url: `/receipts/${id}/raw` });
+    expect(raw.statusCode).toBe(500);
+    expect(raw.json().code).toBe("EVIDENCE_CORRUPT");
+  });
+
+  it("garbage (non-gzip) blob is reported the same way", async () => {
+    const id = "rcpt_R2GARBAGE" + "0".repeat(17);
+    insertLegacyRow(id, sha("x"), Buffer.from("not gzip at all"), 1);
+    const m = await app.inject({ method: "GET", url: `/receipts/${id}` });
+    expect(m.json()).toMatchObject({ evidence_available: false, evidence_status: "corrupt" });
+    expect((await app.inject({ method: "GET", url: `/receipts/${id}/raw` })).statusCode).toBe(500);
+  });
+
+  it("corrupt page blob: that page shows status corrupt in meta, page raw 500", async () => {
+    const r = makeReceipt("REGULATORY_FILING_MONITOR_GENERAL", "https://data.sec.gov/c.json", "main", "1/1");
+    saveReceipt(r, "main", [{ url: "https://data.sec.gov/c0.json", body: "p0" }, { url: "https://data.sec.gov/c1.json", body: "p1" }]);
+    getDb()
+      .prepare("UPDATE miner_receipt_pages SET evidence_gzip = ? WHERE receipt_id = ? AND page_index = 1")
+      .run(gzipSync(Buffer.from("tampered")), r.receipt_id);
+    const meta = (await app.inject({ method: "GET", url: `/receipts/${r.receipt_id}` })).json();
+    expect(meta.evidence_status).toBe("ok");
+    expect(meta.upstream_pages.map((p: Record<string, unknown>) => [p.evidence_available, p.evidence_status])).toEqual([
+      [true, "ok"],
+      [false, "corrupt"],
+    ]);
+    expect((await app.inject({ method: "GET", url: `/receipts/${r.receipt_id}/pages/1/raw` })).statusCode).toBe(500);
+    expect((await app.inject({ method: "GET", url: `/receipts/${r.receipt_id}/pages/0/raw` })).statusCode).toBe(200);
+  });
+
+  it("non-SHA-256 stored digest: 500 RECEIPT_CORRUPT on meta, /raw, /api/raw, /evidence alike", async () => {
+    const id = "rcpt_R2BADDIG" + "0".repeat(18);
+    insertLegacyRow(id, "not-a-digest", null, 0);
+    for (const url of [`/receipts/${id}`, `/receipts/${id}/raw`, `/api/receipts/${id}/raw`, `/receipts/${id}/evidence`, `/api/receipts/${id}/evidence`]) {
+      const res = await app.inject({ method: "GET", url });
+      expect([url, res.statusCode, res.json().code]).toEqual([url, 500, "RECEIPT_CORRUPT"]);
+    }
+  });
+
+  it("non-SHA-256 page digest: same 500 RECEIPT_CORRUPT on meta, main raw and page raw", async () => {
+    const r = makeReceipt("REGULATORY_FILING_MONITOR_GENERAL", "https://data.sec.gov/d.json", "main-d", "1/1");
+    saveReceipt(r, "main-d", [{ url: "https://data.sec.gov/d0.json", body: "pd" }]);
+    getDb().prepare("UPDATE miner_receipt_pages SET raw_response_sha256 = 'zz' WHERE receipt_id = ?").run(r.receipt_id);
+    for (const url of [`/receipts/${r.receipt_id}`, `/receipts/${r.receipt_id}/raw`, `/receipts/${r.receipt_id}/pages/0/raw`]) {
+      const res = await app.inject({ method: "GET", url });
+      expect([url, res.statusCode, res.json().code]).toEqual([url, 500, "RECEIPT_CORRUPT"]);
+    }
+  });
+});
+
+describe("G10 r2 m4/m2/m5: /api evidence alias, ETag 304, CORS preflight", () => {
+  it("/api/receipts/:id/evidence serves the same exact bytes as /raw", async () => {
+    const body = '{"alias":true}';
+    const r = makeReceipt("TVL_LOOKUP_GENERAL", "https://u.example/alias", body, "1/1");
+    saveReceipt(r, body);
+    const res = await app.inject({ method: "GET", url: `/api/receipts/${r.receipt_id}/evidence` });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe(body);
+    expect(res.headers["x-raw-sha256"]).toBe(r.raw_response_sha256);
+    const unknown = await app.inject({ method: "GET", url: `/api/receipts/rcpt_${"Q".repeat(26)}/evidence` });
+    expect(unknown.statusCode).toBe(404);
+    const bad = await app.inject({ method: "GET", url: `/api/receipts/rcpt_q/evidence` });
+    expect(bad.statusCode).toBe(400);
+  });
+
+  it("ifNoneMatchHits: exact, list, weak, star; no match otherwise", () => {
+    const e = `"${"a".repeat(64)}"`;
+    expect(ifNoneMatchHits(e, e)).toBe(true);
+    expect(ifNoneMatchHits(`"x", ${e}`, e)).toBe(true);
+    expect(ifNoneMatchHits(`W/${e}`, e)).toBe(true);
+    expect(ifNoneMatchHits("*", e)).toBe(true);
+    expect(ifNoneMatchHits(`"${"b".repeat(64)}"`, e)).toBe(false);
+    expect(ifNoneMatchHits("a".repeat(64), e)).toBe(false); // unquoted is not an entity-tag
+    expect(ifNoneMatchHits(undefined, e)).toBe(false);
+  });
+
+  it("If-None-Match with the ETag -> 304 (no body) on /raw, /api/raw, /evidence and page raw; mismatch -> 200", async () => {
+    const body = '{"etag":1}';
+    const r = makeReceipt("REGULATORY_FILING_MONITOR_GENERAL", "https://data.sec.gov/e.json", body, "1/1");
+    saveReceipt(r, body, [{ url: "https://data.sec.gov/e0.json", body: "page-e" }]);
+    const etag = `"${r.raw_response_sha256}"`;
+    for (const path of ["/raw", "/evidence"]) {
+      for (const prefix of ["", "/api"]) {
+        const url = `${prefix}/receipts/${r.receipt_id}${path}`;
+        const hit = await app.inject({ method: "GET", url, headers: { "if-none-match": etag } });
+        expect([url, hit.statusCode]).toEqual([url, 304]);
+        expect(hit.body).toBe("");
+        expect(hit.headers["etag"]).toBe(etag);
+        expect(hit.headers["cache-control"]).toContain("immutable");
+        const miss = await app.inject({ method: "GET", url, headers: { "if-none-match": `"${"0".repeat(64)}"` } });
+        expect(miss.statusCode).toBe(200);
+        expect(miss.body).toBe(body);
+      }
+    }
+    const pageEtag = `"${sha("page-e")}"`;
+    const p304 = await app.inject({ method: "GET", url: `/receipts/${r.receipt_id}/pages/0/raw`, headers: { "if-none-match": pageEtag } });
+    expect(p304.statusCode).toBe(304);
+    // the main ETag does not validate the page (different representation)
+    const p200 = await app.inject({ method: "GET", url: `/receipts/${r.receipt_id}/pages/0/raw`, headers: { "if-none-match": etag } });
+    expect(p200.statusCode).toBe(200);
+  });
+
+  it("a corrupt row never answers 304, even with a matching If-None-Match", async () => {
+    const id = "rcpt_R2ETAGBAD" + "0".repeat(17);
+    const good = Buffer.from("orig");
+    insertLegacyRow(id, sha(good), gzipSync(Buffer.from("evil")), good.length);
+    const res = await app.inject({ method: "GET", url: `/receipts/${id}/raw`, headers: { "if-none-match": `"${sha(good)}"` } });
+    expect(res.statusCode).toBe(500);
+  });
+
+  it("OPTIONS preflight -> 204 with CORS allow headers on every receipt route", async () => {
+    const id = "rcpt_" + "P".repeat(26);
+    for (const prefix of ["", "/api"]) {
+      for (const path of ["", "/raw", "/evidence", "/pages/0/raw"]) {
+        const res = await app.inject({ method: "OPTIONS", url: `${prefix}/receipts/${id}${path}` });
+        expect(res.statusCode).toBe(204);
+        expect(res.headers["access-control-allow-origin"]).toBe("*");
+        expect(String(res.headers["access-control-allow-headers"]).toLowerCase()).toContain("if-none-match");
+        expect(res.headers["access-control-allow-methods"]).toContain("GET");
+      }
+    }
+  });
 });

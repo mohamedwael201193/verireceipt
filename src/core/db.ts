@@ -1005,6 +1005,8 @@ export function isValidFetchedAt(value: string): boolean {
  * the receipt stays listed and its hash stays checkable against a
  * caller-held copy; only the served re-hash is lost for those rows).
  * The just-saved receipt is never pruned by its own save. See JUDGE.md §4.
+ * G10 r2: a single receipt whose own evidence (main + pages, gzipped)
+ * exceeds the whole budget is stored without blobs and prunes nothing.
  */
 export const MAX_EVIDENCE_TOTAL_BYTES = 50 * 1024 * 1024;
 
@@ -1021,9 +1023,15 @@ export const MAX_EVIDENCE_TOTAL_BYTES = 50 * 1024 * 1024;
  * (there is no second copy of the ORDER BY in src/).
  */
 export const PRUNE_OLDEST_EVIDENCE_SQL =
-  `SELECT receipt_id FROM miner_receipts
-   WHERE evidence_gzip IS NOT NULL AND receipt_id != ?
+  `SELECT receipt_id FROM miner_receipts AS r
+   WHERE r.receipt_id != ?
+     AND (r.evidence_gzip IS NOT NULL
+          OR EXISTS (SELECT 1 FROM miner_receipt_pages AS p
+                     WHERE p.receipt_id = r.receipt_id AND p.evidence_gzip IS NOT NULL))
    ORDER BY fetched_at ASC, rowid ASC LIMIT 1`;
+// G10 r2 (J2 m1): a receipt holding only PAGE evidence (no main blob) is
+// a prune candidate too — otherwise its pages could never be dropped
+// and every later save would prune everyone else's evidence instead.
 
 /** Drop oldest stored evidence until the total fits the budget. */
 function pruneEvidence(database: Database.Database, exceptReceiptId: string): void {
@@ -1127,8 +1135,28 @@ export function saveReceipt(
     if (typeof page.url !== "string" || page.url.length === 0) {
       throw new Error(`verireceipt: refusing to save receipt ${r.receipt_id}: upstream page ${i} has no url`);
     }
-    return { index: i, url: page.url, digest, gzip: gzipSync(buf), bytes: buf.length };
+    return { index: i, url: page.url, digest, gzip: gzipSync(buf) as Buffer | null, bytes: buf.length };
   });
+  // G10 r2 (J2 m1): one receipt's evidence (main + pages, gzipped) larger
+  // than the WHOLE budget can never fit; storing it would force every
+  // other receipt's evidence out and still leave the total over budget.
+  // Such a receipt keeps its row, digests and page metadata, but no
+  // blobs (served as evidence_available:false / 404 EVIDENCE_NOT_FOUND,
+  // exactly like a pruned receipt), and nothing else is pruned for it.
+  const ownGzipTotal =
+    (evidenceGzip?.length ?? 0) + pageRows.reduce((sum, p) => sum + (p.gzip?.length ?? 0), 0);
+  if (ownGzipTotal > MAX_EVIDENCE_TOTAL_BYTES) {
+    console.warn(
+      `verireceipt: receipt ${r.receipt_id} evidence (${ownGzipTotal} gzipped bytes) exceeds the ` +
+        `${MAX_EVIDENCE_TOTAL_BYTES}-byte evidence budget on its own; storing digests without raw bytes`,
+    );
+    evidenceGzip = null;
+    evidenceBytes = 0;
+    for (const p of pageRows) {
+      p.gzip = null;
+      p.bytes = 0;
+    }
+  }
   const database = getDb();
   // INSERT OR IGNORE: receipts are immutable audit records — a colliding
   // receipt_id must never silently rewrite an existing row. (OR REPLACE
@@ -1163,7 +1191,7 @@ export function saveReceipt(
       }
     }
   })();
-  if (evidenceGzip !== null || pageRows.length > 0) {
+  if (evidenceGzip !== null || pageRows.some((p) => p.gzip !== null)) {
     try {
       pruneEvidence(database, r.receipt_id);
     } catch (err) {
