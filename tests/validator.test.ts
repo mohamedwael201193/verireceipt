@@ -16,11 +16,14 @@
 // module top (before any handler call) is sufficient.
 
 import { afterAll, describe, expect, it } from "vitest";
-import { mkdirSync, rmSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join, resolve } from "path";
 
-const SCRATCH_DIR = resolve(process.cwd(), "..", "tmp", "validator-test");
-mkdirSync(SCRATCH_DIR, { recursive: true });
+// m7 (J1 round 2): a unique scratch dir per test run (mkdtemp), so
+// sibling worktrees / concurrent suites never share one DB.
+const SCRATCH_PARENT = resolve(process.cwd(), "..", "tmp");
+mkdirSync(SCRATCH_PARENT, { recursive: true });
+const SCRATCH_DIR = mkdtempSync(join(SCRATCH_PARENT, "validator-test-"));
 process.env.SQLITE_PATH = join(SCRATCH_DIR, "verireceipt.sqlite");
 
 afterAll(() => {
@@ -109,16 +112,19 @@ function beaconBodyOptimistic(
 type StubLeg = { status: number; body: string } | Error;
 
 /**
- * Stub fetch dispatching on the request URL's source base. Each of the
- * two BEACON_SOURCES gets its own canned leg, so agreement /
- * disagreement / down can be staged per source.
+ * Stub fetch dispatching on the request URL's source base. Each staged
+ * leg maps to the BEACON_SOURCES entry at the same index, so agreement /
+ * disagreement / down can be staged per source. VR: a source with no
+ * staged leg (e.g. the third source when only two are given) is DOWN
+ * (network error), so these 2-leg fixtures keep their 2-source meaning.
  */
-function makeStubFetch(legs: [StubLeg, StubLeg]): typeof fetch {
+function makeStubFetch(legs: StubLeg[]): typeof fetch {
   const impl = async (url: string | URL | Request): Promise<Response> => {
     const urlStr = String(url);
     const idx = BEACON_SOURCES.findIndex((base) => urlStr.startsWith(base));
     if (idx < 0) throw new Error("stub fetch got unexpected URL: " + urlStr);
     const leg = legs[idx];
+    if (leg === undefined) throw new Error("stub: source " + idx + " not staged (down)");
     if (leg instanceof Error) throw leg;
     return {
       ok: leg.status >= 200 && leg.status < 300,
@@ -147,13 +153,23 @@ describe("handleValidator validation", () => {
   });
 
   it("non-integer validator_index -> 400 INVALID_VALIDATOR_INDEX", async () => {
-    for (const bad of ["abc", "-1", "1.5", "0x10", "", "1e3", "+1", " 1", "1 ", "99999999999999999999999"]) {
+    // "01" / "007" / "00": leading zeros are not an integer literal in
+    // the intent schema (validator_index: integer) -> 400 (J1 m3 / J2).
+    for (const bad of ["abc", "-1", "1.5", "0x10", "", "1e3", "+1", " 1", "1 ", "99999999999999999999999", "01", "007", "00"]) {
       await expectApiError(
         handleValidator({ validator_index: bad }),
         400,
         "INVALID_VALIDATOR_INDEX",
       );
     }
+  });
+
+  it("accepts index 0 (the only valid value starting with 0)", async () => {
+    const res = (await handleValidator(
+      { validator_index: "0" },
+      { fetchImpl: makeStubFetch(bothAgree(0, "32000000000", "active_ongoing")) },
+    )) as Record<string, unknown>;
+    expect(res.validator_index).toBe(0);
   });
 
   it("accepts the `index` alias", async () => {
@@ -181,7 +197,9 @@ describe("handleValidator agreement (stub fetch)", () => {
     expect(res.confidence).toBe(1.0);
     const receipt = res.receipt as Receipt;
     expect(receipt.intent).toBe(INTENT);
-    expect(receipt.quorum_votes).toBe("2/2 sources agreed");
+    // VR: three sources, two staged + agreeing, the third down.
+    expect(receipt.quorum_votes).toBe("2/3 sources agreed");
+    expect(res.source).toBe(BEACON_SOURCES[0] + " + " + BEACON_SOURCES[1]);
     expect(receipt.raw_response_sha256).toBe(sha256Hex(body));
     expect(receipt.receipt_id).toMatch(/^rcpt_[A-Z0-9]{26}$/);
     const ev = getReceiptEvidence(receipt.receipt_id);
@@ -667,7 +685,11 @@ describe("handleValidator LIVE (real beacon sources, no stub)", () => {
     expect(res.effective_balance).toBe(32000000000);
     expect(typeof res.effective_balance).toBe("number");
     expect(res.status).toBe("active_ongoing");
-    expect((res.receipt as Receipt).quorum_votes).toBe("2/2 sources agreed");
+    // VR: 2-of-3 quorum over three live sources.
+    // 2 or 3 of the three live sources (the third may be rate-limited
+    // or optimistic and then does not vote).
+    expect((res.receipt as Receipt).quorum_votes).toMatch(/^[23]\/3 sources agreed$/);
+    expect(res.verdict).toBe("verified");
   }, 30000);
 
   it("live index 100000 -> 0", async () => {
