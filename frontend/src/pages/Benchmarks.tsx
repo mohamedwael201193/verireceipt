@@ -1,7 +1,7 @@
 // /benchmarks — live latency benchmarks.
 //
 // REAL MEASUREMENTS ONLY. "Run benchmark" measures the actual round-trip
-// latency of all six endpoints + /health against the live API (3 runs each,
+// latency of all six intent endpoints + /health against the live API (3 runs each,
 // sequential), then shows min / median / max per endpoint with timestamps.
 // Nothing is pre-filled: before the first run the table is an honest empty
 // state. No Math.random() latencies, no fixed cadence, no simulated suite.
@@ -11,7 +11,7 @@
 // that is real latency and is shown as measured, not hidden.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, ApiError } from '../lib/api';
+import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, getValidator, ApiError } from '../lib/api';
 import { useLiveQuery } from '../lib/hooks';
 
 const API_BASE_URL = 'https://verireceipt.onrender.com';
@@ -119,6 +119,13 @@ export default function Benchmarks() {
       methodPath: '/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=…',
       run: (signal) =>
         getGridPrice({ node_or_zone: 'TH_NP15_GEN-APND', interval_start: defaultGridInterval() }, signal),
+    },
+    // QA-07: the sixth intent is measured too.
+    {
+      key: 'validator',
+      label: 'GET /v1/validator',
+      methodPath: '/v1/validator?validator_index=1',
+      run: (signal) => getValidator({ validator_index: '1' }, signal),
     },
   ];
 
@@ -231,8 +238,9 @@ export default function Benchmarks() {
           </div>
         )}
         <p className="vr-muted vr-small" style={{ margin: '12px 0 0' }}>
-          Sample calls are the verified-live ones (Ethereum tx, Apple filings, aave-v3, ETH/USDC,
-          CAISO TH_NP15_GEN-APND at a recent past hour). A first run after the service idles can
+          Measured population: /health plus all six intent endpoints. Sample calls are the
+          verified-live ones (Ethereum tx, Apple filings, aave-v3, ETH/USDC, CAISO TH_NP15_GEN-APND
+          at a recent past hour, beacon validator 1). A first run after the service idles can
           include a Render cold start — that is real latency and is shown as measured.
         </p>
       </section>
@@ -242,7 +250,7 @@ export default function Benchmarks() {
           <div className="vr-empty">
             <p className="vr-empty-title">No benchmark has been run yet.</p>
             <p className="vr-muted">
-              Press “Run benchmark” to measure all six endpoints live. No timings are shown until
+              Press “Run benchmark” to measure /health and all six intent endpoints live. No timings are shown until
               they are measured — this page never ships pre-filled numbers.
             </p>
           </div>
@@ -321,7 +329,7 @@ export default function Benchmarks() {
                 );
               })}
               <p className="vr-muted vr-small">
-                Overall median across {okRuns.length} successful run
+                Overall median (/health + 6 intent endpoints) across {okRuns.length} successful run
                 {okRuns.length === 1 ? '' : 's'}: {overallMedian} ms · slowest successful run:{' '}
                 {overallMax} ms{runStartedAt ? ` · run started ${fmtTime(runStartedAt)}` : ''}.
               </p>

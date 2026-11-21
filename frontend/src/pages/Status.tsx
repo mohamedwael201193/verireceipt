@@ -16,7 +16,7 @@
 // balance (no such figure exists), no canned p50 latencies.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, ApiError } from '../lib/api';
+import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, getValidator, ApiError } from '../lib/api';
 import { useHealth } from '../lib/hooks';
 import { describeNodeListing, useMinerRegistration } from '../lib/minerRegistration';
 import { useLiveQuery } from '../lib/hooks';
@@ -117,6 +117,15 @@ const PROBES: ProbeDef[] = [
     run: () =>
       getGridPrice({ node_or_zone: 'TH_NP15_GEN-APND', interval_start: defaultGridInterval() }),
   },
+  // QA-07: the sixth intent. Without it "all systems up" said nothing
+  // about the validator endpoint.
+  {
+    key: 'validator',
+    label: 'GET /v1/validator',
+    methodPath: '/v1/validator?validator_index=1',
+    intent: 'VALIDATOR_PERFORMANCE_VERIFY_GENERAL',
+    run: () => getValidator({ validator_index: '1' }),
+  },
 ];
 
 function probeDetail(key: string, data: unknown, methodPath?: string): string | null {
@@ -138,6 +147,7 @@ function probeDetail(key: string, data: unknown, methodPath?: string): string | 
   if (key === 'tvl') return `TVL $${Number(d.tvl_usd ?? 0).toLocaleString('en-US')}`;
   if (key === 'route') return `amount_out ${String(d.amount_out ?? '—')}`;
   if (key === 'grid-price') return `LMP $${String(d.lmp_usd_per_mwh ?? '—')}/MWh`;
+  if (key === 'validator') return `validator ${String(d.validator_index ?? '—')} · ${String(d.status ?? '—')}`;
   return null;
 }
 
@@ -312,7 +322,7 @@ export default function Status() {
           <div>
             <div className="vr-kicker">// live endpoint probes · valid sample call per endpoint</div>
             <h2 className="vr-h2">
-              {upCount} of {PROBES.length} endpoints up
+              {upCount} of {PROBES.length} checks up · /health + all 6 intent endpoints
             </h2>
           </div>
           <button type="button" className="vr-btn-ghost" onClick={() => void runProbes()} disabled={probing}>
