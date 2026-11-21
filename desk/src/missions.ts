@@ -1,0 +1,113 @@
+// The Desk's purchase plan. Each task is one direct canonical ask to the
+// VeriReceipt miner, paid from escrow. Params follow the intents' live
+// input schemas (telegraph_intent: GRID_POWER_PRICE_GENERAL takes
+// node_or_zone + interval_start; TVL_LOOKUP_GENERAL takes protocol).
+// No thresholds and no curtailment advice: a gate is VERIFIED only when
+// the purchase verifies end to end (see verify.ts).
+//
+// Title, mission, intent and valueField are pinned per task_id in
+// TASK_CATALOG (params are time-dynamic at plan time and are not used to
+// re-derive historical ledger rows).
+
+export interface DeskTask {
+  id: string;
+  mission: "M12" | "M13";
+  title: string;
+  intent: string;
+  params: Record<string, string>;
+  /** The intent answer field the Desk records and cross-checks. */
+  valueField: string;
+}
+
+/** Official scored / decision numeric field for each intent (GET /engine/v1/intents/{id}). */
+export const VALUE_FIELD_BY_INTENT: Record<string, string> = {
+  GRID_POWER_PRICE_GENERAL: "lmp_usd_per_mwh",
+  TVL_LOOKUP_GENERAL: "tvl_usd",
+  ONCHAIN_TX_LOOKUP_GENERAL: "block_number",
+  REGULATORY_FILING_MONITOR_GENERAL: "filing_count",
+  OPTIMAL_EXECUTION_ROUTE_GENERAL: "amount_out",
+  VALIDATOR_PERFORMANCE_VERIFY_GENERAL: "effective_balance",
+};
+
+export interface TaskCatalogEntry {
+  mission: "M12" | "M13";
+  title: string;
+  intent: string;
+  valueField: string;
+}
+
+/** Pinned static identity of each Desk task. Must stay in sync with frontend/src/lib/taskCatalog.ts. */
+export const TASK_CATALOG: Record<string, TaskCatalogEntry> = {
+  "m12-caiso-np15": {
+    mission: "M12",
+    title: "Mission 12 · CAISO NP15 dispatch gate",
+    intent: "GRID_POWER_PRICE_GENERAL",
+    valueField: "lmp_usd_per_mwh",
+  },
+  "m12-nyiso-zone-j": {
+    mission: "M12",
+    title: "Mission 12 · NYISO Zone J dispatch gate",
+    intent: "GRID_POWER_PRICE_GENERAL",
+    valueField: "lmp_usd_per_mwh",
+  },
+  "m13-tvl-aave-v3": {
+    mission: "M13",
+    title: "Mission 13 · Aave V3 TVL check",
+    intent: "TVL_LOOKUP_GENERAL",
+    valueField: "tvl_usd",
+  },
+};
+
+export function catalogAgrees(r: { task_id: string; mission: string; title: string; intent: string; value_field: string }): boolean {
+  const c = Object.hasOwn(TASK_CATALOG, r.task_id) ? TASK_CATALOG[r.task_id] : undefined;
+  return !!c && c.mission === r.mission && c.title === r.title && c.intent === r.intent && c.valueField === r.value_field;
+}
+
+export function valueFieldPinned(intent: string, valueField: string): boolean {
+  return Object.hasOwn(VALUE_FIELD_BY_INTENT, intent) && VALUE_FIELD_BY_INTENT[intent] === valueField;
+}
+
+const HOUR = 3_600_000;
+const FIVE_MIN = 300_000;
+
+/** The CAISO day-ahead hour that started two hours before `now` (a finished interval). */
+export function caisoHour(now: Date): string {
+  return new Date(Math.floor(now.getTime() / HOUR) * HOUR - 2 * HOUR).toISOString().replace(".000Z", "Z");
+}
+
+/** The NYISO 5-minute interval that started 30 minutes before `now` (finished, already ingested). */
+export function nyisoInterval(now: Date): string {
+  return new Date(Math.floor(now.getTime() / FIVE_MIN) * FIVE_MIN - 6 * FIVE_MIN).toISOString().replace(".000Z", "Z");
+}
+
+export function planTasks(now: Date): DeskTask[] {
+  const caiso = TASK_CATALOG["m12-caiso-np15"];
+  const nyiso = TASK_CATALOG["m12-nyiso-zone-j"];
+  const tvl = TASK_CATALOG["m13-tvl-aave-v3"];
+  return [
+    {
+      id: "m12-caiso-np15",
+      mission: caiso.mission,
+      title: caiso.title,
+      intent: caiso.intent,
+      params: { node_or_zone: "TH_NP15_GEN-APND", interval_start: caisoHour(now) },
+      valueField: caiso.valueField,
+    },
+    {
+      id: "m12-nyiso-zone-j",
+      mission: nyiso.mission,
+      title: nyiso.title,
+      intent: nyiso.intent,
+      params: { node_or_zone: "ZONE_J", interval_start: nyisoInterval(now) },
+      valueField: nyiso.valueField,
+    },
+    {
+      id: "m13-tvl-aave-v3",
+      mission: tvl.mission,
+      title: tvl.title,
+      intent: tvl.intent,
+      params: { protocol: "aave-v3" },
+      valueField: tvl.valueField,
+    },
+  ];
+}

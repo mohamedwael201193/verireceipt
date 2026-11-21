@@ -192,7 +192,7 @@ export const PLATES: Plate[] = [
   { id: "format", fig: "fig. 06 · format", num: "06", cat: "verification", tag: "// verbatim root keys", title: "Declared Schemas →", desc: "Responses use the field names declared in miner.yaml; a conformance suite checks them against the live service." },
   { id: "riffle", fig: "fig. 07 · riffle", num: "07", cat: "verification", tag: "// sha256sum check", title: "Recomputable Audits →", desc: "Fetch /receipts/{id}/raw, run sha256sum, and compare it with raw_response_sha256." },
   { id: "sieve", fig: "fig. 08 · sieve", num: "08", cat: "reliability", tag: "// per-intent abort timers", title: "Bounded Upstream Calls →", desc: "Every upstream call has its own abort timer, set per intent: route 4 s per RPC call (8 s total), TVL 4.5 s per fetch (9 s total), validator 4.5 s for the whole request, filings 10 s per SEC request (30 s total), tx 12 s per RPC call. Grid answers come from the stored ingest (20 s per ingester fetch); a missing CAISO hour, or a NYISO post-close re-check, is fetched live, capped at 120 s. The miner itself runs no circuit breaker; the breaker settings in miner.yaml are applied by the Telegraph node." },
-  { id: "settle", fig: "fig. 09 · settle", num: "09", cat: "consumption", tag: "// desk · direct probes", title: "Mission 13 & 12 Desk →", desc: "Several specialist checks combine into one deterministic verdict. Today the Desk calls the miner directly (unbilled); escrow-paid runs are UNVERIFIED (not shipped yet)." },
+  { id: "settle", fig: "fig. 09 · settle", num: "09", cat: "consumption", tag: "// desk · direct + escrow", title: "Mission 13 & 12 Desk →", desc: "Several specialist checks combine into one deterministic verdict. Browser Desk runs call the miner directly (unbilled); the Desk agent's escrow-paid Telegraph engine purchases are listed with their receipts in the Receipts ledger." },
 ];
 
 export interface SprintStep {
@@ -211,7 +211,7 @@ export const SPRINT_STEPS: SprintStep[] = [
   { label: "01 Star & Setup", cols: [0], g1: "// day 01 · Nov 20 — star bounties + Render deploy", g2: "// gate: /health 200 OK · SQLite WAL active · intent handlers live (six served today)" },
   { label: "02 Freeze Cutoff", cols: [1], g1: "// day 02 · Nov 21 EOD — registerMiner on Diamond 0x72a7…", g2: `// gate: ${MINER_BOND_USD_TEXT} Test USDC bond · activation_status: active` },
   { label: "03 Harden & Traps", cols: [2], g1: "// days 03–04 · Nov 22–23 — 24-case adversarial trap suite", g2: "// gate: 24/24 pass · 0% 503 · public Update #1 posted" },
-  { label: "04 Mission Desk", cols: [3], g1: "// days 05–06 · Nov 24–25 — 100+ ranked EIP-191 escrow calls", g2: "// gate: 100+ signal_hash rows committed to receipts/ledger.jsonl" },
+  { label: "04 Mission Desk", cols: [3], g1: "// days 05–06 · Nov 24–25 — 100+ ranked EIP-191 escrow calls", g2: "// gate: 100+ signal_hash rows committed to desk/ledger/purchases.jsonl" },
   { label: "05 Growth & Grace Exit", cols: [4, 5], g1: "// days 07–09 · Nov 26–28 — grace exits Nov 28 · external dev reruns", g2: "// gate: ranked epoch standings + tutorial + Updates #2 & #3" },
   { label: "06 Submit Pack", cols: [6, 7], g1: "// days 10–11 · Nov 29–Dec 1 — 3-min demo video + 6 filings", g2: "// gate: 5 Track 1 per-Intent + 1 Track 3 Desk submission" },
 ];

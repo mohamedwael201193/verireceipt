@@ -1,0 +1,26 @@
+{
+  "name": "verireceipt-desk",
+  "private": true,
+  "version": "0.1.0",
+  "description": "VeriReceipt Desk Phase D: autonomous escrow-paid purchases through the Telegraph engine (Ethereum Sepolia testnet only).",
+  "type": "module",
+  "engines": {
+    "node": ">=20.18.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "purchase": "tsx scripts/run-purchase.ts",
+    "verify": "tsx scripts/verify-ledger.ts",
+    "export": "tsx scripts/export-frontend.ts"
+  },
+  "dependencies": {
+    "viem": "2.58.4"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.0",
+    "tsx": "4.23.15",
+    "typescript": "5.7.3",
+    "vitest": "2.1.9"
+  }
+}

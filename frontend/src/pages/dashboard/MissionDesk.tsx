@@ -276,8 +276,8 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
             Desk runs on this page call the miner&apos;s own GET <code style={{ color: "var(--text)" }}>/v1/*</code> endpoints directly
             via the same-origin <code style={{ color: "var(--text)" }}>/api</code> proxy. No wallet, no signing, and no escrow payment
             happens in this browser. Every call targets our own miner (verireceipt, id 774921) and is therefore related-party by
-            definition. Ranked Telegraph engine asks (<code style={{ color: "var(--text)" }}>POST /engine/v1/ask</code>, EIP-191
-            escrow) are a separate flow — see Status &amp; Docs.
+            definition. Escrow-paid Telegraph engine asks (<code style={{ color: "var(--text)" }}>POST /engine/v1/ask</code>, EIP-191
+            escrow) are made by the Desk agent, a separate flow — its purchases are under Receipts; the request format is in Status &amp; Docs.
           </div>
         </div>
 

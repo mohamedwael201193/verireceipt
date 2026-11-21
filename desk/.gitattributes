@@ -1,0 +1,2 @@
+tests/fixtures/*.bin binary
+ledger/*.jsonl text eol=lf

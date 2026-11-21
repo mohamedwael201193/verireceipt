@@ -6,6 +6,9 @@
 // It starts empty — that is the honest state, not a bug. KPIs are computed
 // from those rows; "Escrow Spend" is $0.00 because direct probes are
 // unbilled; the median is the median of measured latencies (or "—").
+// Desk Phase D: the Receipts view renders EscrowPurchases (the Desk
+// agent's escrow-paid engine purchases, from the committed ledger) below
+// this session ledger; see pages/Dashboard.tsx.
 
 import { useEffect, useMemo, useState } from "react";
 import type { LiveReceipt } from "./types";
@@ -141,7 +144,7 @@ export default function ReceiptsLedger({ receipts, onInspect, showToast }: Recei
         <div className="kpi-cell">
           <div className="kpi-lbl">Escrow Spend</div>
           <div className="kpi-val mono">$0.00</div>
-          <div className="kpi-sub">direct probes · unbilled</div>
+          <div className="kpi-sub">this session · direct probes · unbilled</div>
         </div>
         <div className="kpi-cell">
           <div className="kpi-lbl">Median p50</div>

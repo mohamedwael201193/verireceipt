@@ -115,9 +115,43 @@ Field names vary per endpoint; `confidence`, `verdict`, `source`, and
   which ISO feeds are reachable and fresh in a given epoch; availability of
   individual feeds can change between epochs.
 - **Timeline.** Season II closes Dec 1, 23:59 UTC; verification/judging Dec 2–8 (planned) — see the [rules page](https://hackathon.telegraphprotocol.com/rules).
-- **Free tier.** The public desk endpoint allows a small number of free
-  receipt checks per IP per day; paid calls go through the Telegraph escrow
-  flow.
+- **Desk access.** Browser Desk checks call the miner's keyless endpoints
+  directly and unbilled; no per-IP limit is enforced yet. Paid calls go
+  through the Telegraph engine's escrow rail (see the Desk section below);
+  escrow sponsorship of visitor checks is not shipped.
+
+## Desk (Track 3): escrow-paid purchases
+
+`desk/` is the VeriReceipt Desk agent (its own package; it touches no miner
+file). Run once, it buys answers on its own through the Telegraph engine,
+paid from the operator's escrow on the Sepolia Diamond (testnet only):
+
+1. reads the escrow balance (`GET /v1/ledger/account/{address}`);
+2. takes the node's 402 challenge for `POST /engine/v1/ask/774921` and
+   refuses to sign unless it pays the Sepolia Diamond for one flat call
+   (10000 μUSDC), within the Desk's daily cap and the escrow's `available`;
+3. signs the escrow template with EIP-191 and resends with `X-PAYMENT`;
+4. verifies the purchase end to end: the escrow receipt
+   (`X-PAYMENT-RESPONSE`) matches what was signed, `keccak256` of the node's
+   signal payload (`GET /engine/v1/signal/{signal_hash}`) re-derives the
+   signal hash, the engine's value equals the miner's answer, and
+   `sha256` of the miner's stored bytes (`/receipts/{id}/raw`) equals the
+   receipt's `raw_response_sha256`;
+5. appends the record to `desk/ledger/purchases.jsonl`, which the dashboard
+   shows under Receipts › Escrow Purchases.
+
+```bash
+cd desk && npm ci
+npm test                                             # unit tests
+DESK_SECRETS_FILE=/path/to/env.txt npm run purchase  # real escrow purchases (testnet)
+npm run verify                                       # re-verify the ledger from public data
+npm run export                                       # copy the ledger into the frontend
+```
+
+Escrow has no per-call transaction: each call is billed once in its epoch's
+ledger root. `npm run verify -- --write` records the epoch delivery proof
+(`GET /v1/blocks/{epoch}/deliveries/{receipt_hash}`) once the node has
+recorded that epoch's block. The official response also includes a Merkle `proof` and `deliveries_root`; we store and shape-check them. The leaf/node hash algorithm is not documented in the official docs, so we do not invent a proof walker.
 
 ## Running locally
 

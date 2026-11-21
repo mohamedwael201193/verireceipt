@@ -1,0 +1,37 @@
+{
+  "status": 200,
+  "x_payment_response": "eyJyZWNlaXB0X2hhc2giOiIweGM2OGU5NDA4MjI3ZjljNDNjZmIwYTQ0NTkwMTNmYWUwODUyNDIyNjhlZmI2NzRiOTYyOGMzZWQ1ZjgwN2IzOTQiLCJyYWlsIjoiZXNjcm93IiwicGF5ZXIiOiIweGY3NmU2YjA5MjBlOTMzMmZmNDQxMGY2ZGQ1M2YwMTcyMmFiYzcxYTMiLCJtaW5lciI6IjYxNTIiLCJpbnRlbnQiOiJHUklEX1BPV0VSX1BSSUNFX0dFTkVSQUwiLCJhbW91bnRfdXVzZGMiOiIxMDAwMCIsImVwb2NoX2lkIjozMSwic2V0dGxlbWVudCI6ImVwb2NoIiwiY2hhaW4iOiJ0ZWxlZ3JhcGgiLCJ0aW1lc3RhbXAiOjE3OTUyNjc2MDV9",
+  "body": {
+    "miner_id": "774921",
+    "miner_name": "VeriReceipt Deterministic Oracle",
+    "endpoint": "/v1/grid-price",
+    "result": {
+      "lmp_usd_per_mwh": 53.65098,
+      "node_or_zone": null,
+      "market": null,
+      "interval_start": null,
+      "currency": null
+    },
+    "result_shape": "intent",
+    "format_version": 1,
+    "field_status": {
+      "lmp_usd_per_mwh": "ok",
+      "node_or_zone": "unavailable",
+      "market": "unavailable",
+      "interval_start": "unavailable",
+      "currency": "unavailable"
+    },
+    "input": {
+      "node_or_zone": "TH_NP15_GEN-APND",
+      "interval_start": "2026-11-21T11:00:00Z"
+    },
+    "input_schema_version": 1,
+    "cost_usd": 0.01,
+    "duration_ms": 241,
+    "timestamp": "2026-11-21T13:26:44.912184213Z",
+    "reasoning": "Intent: miner verireceipt given by the caller\nMiner: The user is asking for the grid power price, and the intent GRID_POWER_PRICE_GENERAL has been confirmed. The VeriReceipt Deterministic Oracle miner has an endpoint /v1/grid-price that serves this intent. The provided parameters node_or_zone and interval_start directly map to the required parameters for this endpoint.",
+    "intent": "GRID_POWER_PRICE_GENERAL",
+    "intent_version": 2,
+    "signal_hash": "0x9c0bcca04795f5212f2704b77863ea530e2dc6c61d38e396e8b922e0fba2e58b"
+  }
+}

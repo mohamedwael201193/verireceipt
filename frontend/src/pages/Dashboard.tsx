@@ -28,6 +28,7 @@ import AuthDrawer from "./dashboard/AuthDrawer";
 import Benchmarks from "./dashboard/Benchmarks";
 import MissionDesk from "./dashboard/MissionDesk";
 import ReceiptDrawer from "./dashboard/ReceiptDrawer";
+import EscrowPurchases from "./dashboard/EscrowPurchases";
 import ReceiptsLedger from "./dashboard/ReceiptsLedger";
 import StatusDocs from "./dashboard/StatusDocs";
 import "./dashboard/dashboard.css";
@@ -364,6 +365,9 @@ export default function Dashboard() {
       {view === "receipts" && (
         <section className="view active" aria-label="Receipts">
           <ReceiptsLedger receipts={receipts} onInspect={openReceipt} showToast={showToast} />
+          <div className="wrap">
+            <EscrowPurchases />
+          </div>
         </section>
       )}
       {view === "benchmarks" && (

@@ -43,11 +43,16 @@ const BANNED: Array<[RegExp, string]> = [
   // 2026-11-21; server.ts has no MCP route). A real one ships as its own piece.
   [/\/api\/mcp/, "no miner MCP endpoint exists (HTTP 404)"],
   [/Streamable HTTP MCP/i, "no miner MCP endpoint exists"],
-  // pc2-xtab-r9: sponsored escrow settlement is not shipped (plate 09,
-  // Desk Phase D); no copy may present it as live.
-  [/server-funded/i, "sponsored escrow settlement is not shipped (Desk Phase D)"],
-  [/settle[sd]? (from|via|on) (the )?[^.]*escrow/i, "sponsored escrow settlement is not shipped (Desk Phase D)"],
-  [/Sponsored Escrow Mode/i, "sponsored escrow settlement is not shipped (Desk Phase D)"],
+  // pc2-xtab-r9: sponsored escrow settlement is not shipped (plate 09);
+  // no copy may present it as live. Desk Phase D proves the Desk AGENT's
+  // own escrow-paid engine purchases (desk/ledger/purchases.jsonl), not
+  // escrow sponsorship of visitor checks, so these bans stay.
+  [/server-funded/i, "visitor checks are not escrow-sponsored"],
+  [/settle[sd]? (from|via|on) (the )?[^.]*escrow/i, "visitor checks are not escrow-sponsored"],
+  [/Sponsored Escrow Mode/i, "visitor checks are not escrow-sponsored"],
+  // Desk Phase D: the pre-Phase-D labels are stale where purchases are proven.
+  [/not shipped until Desk Phase D/i, "Desk Phase D purchases are proven; label the visitor-sponsorship gap instead"],
+  [/escrow-paid runs are UNVERIFIED/i, "Desk Phase D purchases are proven (desk/ledger/purchases.jsonl)"],
 ];
 
 describe("frontend copy makes no unverified claims", () => {
@@ -84,8 +89,84 @@ describe("repo docs recompute receipts from stored bytes", () => {
     const text = readFileSync(join(REPO, "JUDGE.md"), "utf8");
     expect(text).toContain('curl -s "$BASE/receipts/$RECEIPT_ID/raw" | sha256sum');
   });
-  it("the Sponsored card marks escrow settlement UNVERIFIED until Desk Phase D", () => {
+  it("the Sponsored card keeps visitor escrow sponsorship UNVERIFIED", () => {
     const text = readFileSync(join(ROOT, "pages", "dashboard", "AuthDrawer.tsx"), "utf8");
-    expect(text).toContain("UNVERIFIED — not shipped until Desk Phase D");
+    expect(text).toContain("UNVERIFIED — not shipped for visitor checks");
+  });
+});
+
+// Desk Phase D: every claim of escrow-paid Desk purchases must be backed
+// by the committed ledger, and the frontend copy of it must not drift.
+describe("escrow-purchase claims are backed by the committed ledger", () => {
+  const REPO = join(ROOT, "..", "..");
+  const ledger = readFileSync(join(REPO, "desk", "ledger", "purchases.jsonl"), "utf8")
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l));
+  const exported = JSON.parse(readFileSync(join(ROOT, "lib", "deskPurchases.json"), "utf8"));
+  it("lib/deskPurchases.json equals desk/ledger/purchases.jsonl record for record", () => {
+    expect(exported).toEqual(ledger);
+  });
+  it("copy that mentions escrow-paid purchases has at least one VERIFIED escrow record behind it", () => {
+    const claims = files(ROOT).filter((f) => /escrow-paid/i.test(readFileSync(f, "utf8")));
+    expect(claims.length).toBeGreaterThan(0);
+    const verified = ledger.filter(
+      (r: any) =>
+        r.verdict === "VERIFIED" &&
+        r.telegraph_receipt.rail === "escrow" &&
+        r.checks.every((c: any) => c.ok) &&
+        r.raw_sha256_recomputed === r.miner_receipt?.raw_response_sha256,
+    );
+    expect(verified.length).toBeGreaterThan(0);
+  });
+});
+
+
+describe("Desk r4 shared catalogs stay in sync", () => {
+  const REPO = join(ROOT, "..", "..");
+  const ledgerRows = readFileSync(join(REPO, "desk", "ledger", "purchases.jsonl"), "utf8")
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l));
+  function extractArray(src: string, name: string): string[] {
+    const m = src.match(new RegExp("export const " + name + " = \\[([\\s\\S]*?)\\] as const"));
+    if (!m) throw new Error("missing " + name);
+    return [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+  }
+  function extractObjectLiteral(src: string, name: string): string {
+    const start = src.indexOf("export const " + name);
+    if (start < 0) throw new Error("missing " + name);
+    const brace = src.indexOf("{", start);
+    let depth = 0;
+    for (let i = brace; i < src.length; i++) {
+      if (src[i] === "{") depth++;
+      else if (src[i] === "}") {
+        depth--;
+        if (depth === 0) return src.slice(brace, i + 1);
+      }
+    }
+    throw new Error("unclosed " + name);
+  }
+  it("EXPECTED_VERIFY_CHECKS is identical in desk/src/verify.ts and frontend deskPurchases.ts", () => {
+    const desk = readFileSync(join(REPO, "desk", "src", "verify.ts"), "utf8");
+    const fe = readFileSync(join(ROOT, "lib", "deskPurchases.ts"), "utf8");
+    expect(extractArray(fe, "EXPECTED_VERIFY_CHECKS")).toEqual(extractArray(desk, "EXPECTED_VERIFY_CHECKS"));
+    expect(extractArray(fe, "EXPECTED_VERIFY_CHECKS")).toHaveLength(8);
+  });
+  it("TASK_CATALOG and VALUE_FIELD_BY_INTENT match desk/src/missions.ts", () => {
+    const desk = readFileSync(join(REPO, "desk", "src", "missions.ts"), "utf8");
+    const fe = readFileSync(join(ROOT, "lib", "taskCatalog.ts"), "utf8");
+    expect(extractObjectLiteral(fe, "TASK_CATALOG")).toBe(extractObjectLiteral(desk, "TASK_CATALOG"));
+    expect(extractObjectLiteral(fe, "VALUE_FIELD_BY_INTENT")).toBe(extractObjectLiteral(desk, "VALUE_FIELD_BY_INTENT"));
+  });
+  it("the committed ledger has unique receipt_hash, signal_hash, nonce, and receipt_id", () => {
+    const hashes = ledgerRows.map((r: { telegraph_receipt: { receipt_hash: string } }) => r.telegraph_receipt.receipt_hash);
+    const signals = ledgerRows.map((r: { signal_hash: string }) => r.signal_hash);
+    const nonces = ledgerRows.map((r: { nonce: string }) => r.nonce);
+    const ids = ledgerRows.map((r: { miner_receipt?: { receipt_id?: string } }) => r.miner_receipt?.receipt_id);
+    expect(new Set(hashes).size).toBe(ledgerRows.length);
+    expect(new Set(signals).size).toBe(ledgerRows.length);
+    expect(new Set(nonces).size).toBe(ledgerRows.length);
+    expect(new Set(ids).size).toBe(ledgerRows.length);
   });
 });

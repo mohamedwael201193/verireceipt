@@ -5,10 +5,12 @@
 // sponsored card shows the on-chain registration bond instead ($1.50 =
 // minerBond(6152), see lib/minerBond.ts), and
 // the 5/day per-IP limit is labelled as Desk config (render.yaml:
-// DESK_FREE_CHECKS_PER_IP_DAY=5). r9: src/ reads no DESK_* variable and the
-// Desk makes no escrow-paid call yet, so the limit is labelled "not enforced
-// yet" and sponsored escrow settlement is UNVERIFIED until Desk Phase D
-// (consistent with landing plate 09).
+// DESK_FREE_CHECKS_PER_IP_DAY=5). r9: src/ reads no DESK_* variable, so the
+// limit is labelled "not enforced yet". Desk Phase D: the Desk AGENT's own
+// escrow-paid engine purchases are proven (desk/ledger/purchases.jsonl,
+// shown under Receipts), but visitor checks in this browser are still
+// direct and unbilled — sponsoring them from escrow is not shipped, so that
+// stays UNVERIFIED (consistent with landing plate 09).
 //
 // There is deliberately NO "Bring Your Own Key" tier: the miner API is
 // auth:none and there is no authenticated header path, so an API-key /
@@ -66,8 +68,9 @@ export default function AuthDrawer({ open, authMode, onSelectMode, onClose, show
             <p style={{ fontSize: 13, color: "var(--muted)" }}>
               Judges and reviewers run live Desk checks immediately without installing MetaMask or minting Sepolia Test USDC:
               today every check calls the miner&apos;s keyless GET endpoints directly — no wallet, no signing, unbilled ($0.00).
-              Sponsored escrow settlement on Diamond <code className="mono" style={{ color: "var(--text)" }}>{DIAMOND_SHORT}</code> is{" "}
-              <strong>UNVERIFIED — not shipped until Desk Phase D</strong> (same status as plate 09 on the landing page).
+              Sponsoring visitor checks from escrow on Diamond <code className="mono" style={{ color: "var(--text)" }}>{DIAMOND_SHORT}</code> is{" "}
+              <strong>UNVERIFIED — not shipped for visitor checks</strong>. The Desk agent&apos;s own escrow-paid engine purchases
+              are real and listed, with their receipts, under Receipts (same status as plate 09 on the landing page).
             </p>
             <div className="kpi-grid-4" style={{ gridTemplateColumns: "1fr 1fr", marginBottom: 0 }}>
               <div className="card" style={{ padding: 12 }}>
