@@ -106,9 +106,16 @@ export function recentGridInterval(now = new Date()): string {
   return d.toISOString();
 }
 
-/** A future grid interval (used by the 422 refusal probe / benchmark F01). */
-export function futureGridInterval(): string {
-  const d = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+/**
+ * A future grid interval (used by the 422 refusal probe / benchmark F01).
+ * QA-06: 3 hours ahead (floored to the hour, so 2–3 h ahead). The old
+ * +5 days made the server's honest retry_after_sec (~432,000 s) exceed
+ * the client's 24 h validation bound (lib/api.ts MAX_RETRY_AFTER_SEC),
+ * so the UI dropped it and F01 failed although the API was correct.
+ * Any interval this close keeps the server delay well inside the bound.
+ */
+export function futureGridInterval(now = new Date()): string {
+  const d = new Date(now.getTime() + 3 * 60 * 60 * 1000);
   d.setUTCMinutes(0, 0, 0);
   return d.toISOString();
 }

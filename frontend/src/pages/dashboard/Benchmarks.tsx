@@ -17,12 +17,16 @@ interface BenchmarksProps {
   showToast: (msg: string) => void;
 }
 
+// QA-12: filter labels carry counts DERIVED from the case list, never
+// hand-typed (the old labels said 4 regressions / 4 refusals while the
+// list held 2 and 6).
+const countOf = (cat: string) => BENCH_CASES.filter((c) => c.cat === cat).length;
 const FILTERS = [
-  { key: "all", label: "All 24" },
-  { key: "tx", label: "12 Frozen TX Traps" },
-  { key: "reg", label: "4 Cross-Bug Regressions" },
-  { key: "refusal", label: "4 Refusal 422 Matrix" },
-  { key: "burst", label: "4 Burst Concurrency" },
+  { key: "all", label: `All ${BENCH_CASES.length}` },
+  { key: "tx", label: `${countOf("tx")} Frozen TX Traps` },
+  { key: "reg", label: `${countOf("reg")} Cross-Bug Regressions` },
+  { key: "refusal", label: `${countOf("refusal")} Refusals (400 / 422)` },
+  { key: "burst", label: `${countOf("burst")} Burst Concurrency` },
 ];
 
 /** Bucket measured latencies into 7 histogram bins.
@@ -179,12 +183,12 @@ export default function Benchmarks({ onRecord, showToast }: BenchmarksProps) {
         <div>
           <div className="kicker">// adversarial verification · deterministic trap &amp; burst suite</div>
           <h1 className="h1-ed">
-            24-Case <span className="serif-i">Benchmarks.</span>
+            {BENCH_TOTAL_COUNT}-Case <span className="serif-i">Benchmarks.</span>
           </h1>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button type="button" className="btn-accent" onClick={runSuite} disabled={running}>
-            {running ? "Running… (live calls)" : "Run 24-Case Adversarial Suite ▶"}
+            {running ? "Running… (live calls)" : `Run ${BENCH_TOTAL_COUNT}-Case Adversarial Suite ▶`}
           </button>
           {running && (
             <button type="button" className="btn-ghost" onClick={cancelSuite}>
@@ -312,7 +316,7 @@ export default function Benchmarks({ onRecord, showToast }: BenchmarksProps) {
               <div>
                 <div style={{ color: "var(--muted)", fontSize: 10, marginBottom: 4 }}>CAPTURED ENVELOPE</div>
                 <div style={{ color: "var(--ok)", wordBreak: "break-all" }}>
-                  {runningId === c.id ? "RUNNING…" : r ? r.actual : "Not run yet — press “Run 24-Case Adversarial Suite”."}
+                  {runningId === c.id ? "RUNNING…" : r ? r.actual : `Not run yet — press “Run ${BENCH_TOTAL_COUNT}-Case Adversarial Suite”.`}
                 </div>
               </div>
             </div>

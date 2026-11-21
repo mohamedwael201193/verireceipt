@@ -364,7 +364,13 @@ export function IntentIde() {
   const statusColor = run.loading ? "var(--muted)" : run.error ? "var(--warn)" : "var(--ok)";
 
   const jsonBody: unknown = run.error
-    ? { error: run.error.message, code: run.error.code ?? null, status: run.error.status }
+    ? {
+        error: run.error.message,
+        code: run.error.code ?? null,
+        status: run.error.status,
+        // QA-06: show the server's validated retry delay, as the raw body does.
+        ...(run.error.retry_after_sec !== undefined ? { retry_after_sec: run.error.retry_after_sec } : {}),
+      }
     : dataForTab;
 
   // The badge verifies the DISPLAYED run: dataForTab is already tied

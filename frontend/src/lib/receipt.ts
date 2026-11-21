@@ -29,6 +29,27 @@ export async function sha256Hex(input: string | Uint8Array): Promise<string> {
     .join("");
 }
 
+/**
+ * The ONE digest contract (QA-04): `raw_response_sha256` is 64 hex
+ * characters (the live API emits lowercase, no prefix). An optional
+ * `0x`/`0X` prefix is tolerated; anything else — wrong length, non-hex,
+ * non-string — is null. Returns the canonical bare lowercase form.
+ */
+export function normalizeSha256Hex(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const bare = value.startsWith("0x") || value.startsWith("0X") ? value.slice(2) : value;
+  return /^[0-9a-fA-F]{64}$/.test(bare) ? bare.toLowerCase() : null;
+}
+
+/** Short shape description of a digest value for failure messages. */
+export function describeDigestShape(value: unknown): string {
+  if (typeof value !== "string") return `type ${value === null ? "null" : typeof value}`;
+  const prefixed = value.startsWith("0x") || value.startsWith("0X");
+  const bare = prefixed ? value.slice(2) : value;
+  const hex = /^[0-9a-fA-F]*$/.test(bare);
+  return `${prefixed ? "0x-prefixed, " : ""}${bare.length} chars${hex ? "" : ", non-hex"}`;
+}
+
 /** Returns true only when the SHA-256 of `rawBody` equals `expectedSha256`
  *  (with or without a `0x` prefix, case-insensitive). Non-string inputs
  *  return false instead of throwing — except when WebCrypto itself is
@@ -43,8 +64,8 @@ export async function verifyReceipt(
   if (typeof rawBody !== "string" || typeof expectedSha256 !== "string") {
     return false;
   }
-  const normalized = expectedSha256.toLowerCase().replace(/^0x/, "");
-  if (!/^[0-9a-f]{64}$/.test(normalized)) return false;
+  const normalized = normalizeSha256Hex(expectedSha256);
+  if (normalized === null) return false;
   const actual = await sha256Hex(rawBody);
   return actual === normalized;
 }

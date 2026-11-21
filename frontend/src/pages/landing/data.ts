@@ -149,10 +149,15 @@ export const TRAP_PRESETS: Record<IntentKey, Record<string, string>> = {
   sec: { entity: "AAPL", period: "" },
   tvl: { protocol: "not-a-real-protocol-xyz" },
   route: { pair: "BTC/USDC" },
-  // Settlement interval that has not closed yet (verified live: 422 FUTURE_INTERVAL).
-  grid: {
-    node_or_zone: "TH_NP15_GEN-APND",
-    interval_start: "2026-11-25T12:00:00Z",
+  // Settlement interval that has not closed yet (verified live: 422
+  // FUTURE_INTERVAL). QA-06: computed at use time, 2–3 h ahead — the old
+  // fixed 2026-11-25T12:00Z turned into a past (200) interval on 25 Nov,
+  // and until then its retry_after_sec exceeded the client's 24 h bound
+  // and was dropped from the rendered error.
+  get grid() {
+    const d = new Date(Date.now() + 3 * 60 * 60 * 1000);
+    d.setUTCMinutes(0, 0, 0);
+    return { node_or_zone: "TH_NP15_GEN-APND", interval_start: d.toISOString() };
   },
   // Canonical-form rejection: the handler only accepts a digit string
   // (0|[1-9][0-9]*). Live response is 400 INVALID_VALIDATOR_INDEX, not 422.

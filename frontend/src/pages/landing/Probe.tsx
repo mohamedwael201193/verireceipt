@@ -130,7 +130,13 @@ export function Probe() {
   }
 
   const jsonBody: unknown = error
-    ? { error: error.message, code: error.code ?? null, status: error.status }
+    ? {
+        error: error.message,
+        code: error.code ?? null,
+        status: error.status,
+        // QA-06: show the server's validated retry delay, as the raw body does.
+        ...(error.retry_after_sec !== undefined ? { retry_after_sec: error.retry_after_sec } : {}),
+      }
     : data;
 
   // The badge verifies the DISPLAYED run: the endpoint of the intent

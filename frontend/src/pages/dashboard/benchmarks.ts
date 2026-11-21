@@ -39,6 +39,7 @@
 
 import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx } from "../../lib/api";
 import type { FilingsResponse, GridPriceResponse, LiveReceipt, ProbeOutcome, TvlResponse, TxResponse } from "./types";
+import { describeDigestShape, normalizeSha256Hex } from "../../lib/receipt";
 import { directUrl, futureGridInterval, p95, probe, recentGridInterval, toLiveReceipt } from "./utils";
 
 export type BenchCategory = "tx" | "reg" | "refusal" | "burst";
@@ -76,17 +77,28 @@ export interface BenchCase {
 }
 
 function catLabel(c: BenchCategory): string {
-  return { tx: "Frozen TX", reg: "Regression", refusal: "422 Matrix", burst: "Burst Load" }[c];
+  return { tx: "Frozen TX", reg: "Regression", refusal: "Refusal 400/422", burst: "Burst Load" }[c];
 }
 
 export { catLabel };
 
-const SHA_RE = /^0x[0-9a-f]{64}$/;
-
+// QA-04: ONE digest contract (lib/receipt.ts normalizeSha256Hex): the
+// live API emits 64 lowercase hex with no 0x prefix; an optional 0x is
+// tolerated at this boundary, and anything that is not exactly 32 bytes
+// of hex still fails. The old /^0x[0-9a-f]{64}$/ failed every valid
+// live receipt (T11, T12, R01, R04).
 function hasValidReceipt(body: unknown): boolean {
   if (body === null || typeof body !== "object" || !("receipt" in body)) return false;
   const r = (body as { receipt?: { raw_response_sha256?: unknown } }).receipt;
-  return !!r && typeof r.raw_response_sha256 === "string" && SHA_RE.test(r.raw_response_sha256);
+  return !!r && normalizeSha256Hex(r.raw_response_sha256) !== null;
+}
+
+/** Failure text that shows the digest's actual shape (QA-04). */
+function digestFailure(body: unknown): string {
+  const r = (body as { receipt?: { raw_response_sha256?: unknown } } | null)?.receipt;
+  const d = r?.raw_response_sha256;
+  if (d === undefined) return "receipt.raw_response_sha256 missing";
+  return `receipt.raw_response_sha256 malformed (${describeDigestShape(d)}; expected 64 hex chars, optional 0x)`;
 }
 
 function failFrom(outcome: ProbeOutcome, what: string): BenchResult {
@@ -252,7 +264,7 @@ function trapCase(trap: Trap): BenchCase {
         if (wei === null) failures.push(`value: unparseable value_eth=${JSON.stringify(body.value_eth)}`);
         else if (wei !== "0") failures.push(`tx value must be 0 wei (event amount is not value_eth), got ${wei}`);
       }
-      if (!hasValidReceipt(body)) failures.push("receipt.raw_response_sha256 missing or malformed");
+      if (!hasValidReceipt(body)) failures.push(digestFailure(body));
       const actual = JSON.stringify({
         status: body.status,
         from: body.from,
@@ -315,7 +327,13 @@ function refusalCase(
       }
       const failures: string[] = [];
       if (!(outcome.status === 400 || outcome.status === 422)) failures.push(`expected HTTP 400/422, got ${outcome.status}`);
-      if (hasValidReceipt(outcome.body)) failures.push("refusal must not carry a receipt");
+      // Any receipt object on a refusal is a failure — not only a
+      // well-formed one (QA-04 made the digest check tolerant of a 0x
+      // prefix; a refusal must stay receipt-free regardless of shape).
+      const rb = outcome.body as { receipt?: unknown } | null;
+      if (rb !== null && typeof rb === "object" && rb.receipt !== undefined && rb.receipt !== null) {
+        failures.push("refusal must not carry a receipt");
+      }
       const extra = extraCheck ? extraCheck(outcome) : null;
       if (extra) failures.push(extra);
       return {
@@ -364,7 +382,7 @@ export const BENCH_CASES: BenchCase[] = [
       const failures: string[] = [];
       if (body.protocol_or_chain !== "aave-v3") failures.push(`protocol_or_chain: expected aave-v3, got ${JSON.stringify(body.protocol_or_chain)}`);
       if (!(typeof body.tvl_usd === "number" && body.tvl_usd > 0)) failures.push(`tvl_usd must be > 0, got ${JSON.stringify(body.tvl_usd)}`);
-      if (!hasValidReceipt(body)) failures.push("receipt.raw_response_sha256 missing or malformed");
+      if (!hasValidReceipt(body)) failures.push(digestFailure(body));
       return {
         verdict: failures.length === 0 ? "PASS" : "FAIL",
         http: 200,
@@ -417,7 +435,7 @@ export const BENCH_CASES: BenchCase[] = [
       if (typeof body.filing_count !== "number") failures.push("filing_count missing");
       if (!Array.isArray(body.filings)) failures.push("filings[] missing");
       if (!Array.isArray(body.urls)) failures.push("urls[] missing");
-      if (!hasValidReceipt(body)) failures.push("receipt.raw_response_sha256 missing or malformed");
+      if (!hasValidReceipt(body)) failures.push(digestFailure(body));
       return {
         verdict: failures.length === 0 ? "PASS" : "FAIL",
         http: 200,
@@ -427,7 +445,7 @@ export const BENCH_CASES: BenchCase[] = [
     },
   },
 
-  // 4 Refusal Matrix
+  // Refusal matrix (400 / 422)
   refusalCase(
     "F01",
     "Future Grid Settlement Window",
