@@ -9,19 +9,27 @@
 // are listed — the miner has no MCP route in this build, so none is
 // documented (r8: live 404 on GET and POST, 2026-11-21).
 //
-// Registration snippet uses the real repo and the real commit SHA:
-// github.com/mohamedwael201193/verireceipt @
-// 4f471e48296d7225a482ef70025352e954b9cf5d (A8 accepted_fields map-form commit on origin/main; this tree's miner.yaml,
-// registered on Sepolia as registrationId 6152).
+// Registration snippet uses the real repo and the real commit SHA of the
+// miner.yaml that is REGISTERED on Sepolia: pin, hash, registrationId and tx all
+// come from lib/minerRegistration.ts (single source; moved there after each
+// updateMiner lands).
 
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { REGISTRATION_CAST_SNIPPET } from './dashboard/docs';
 import { MINER_BOND_SOURCE, MINER_BOND_USD_TEXT } from '../lib/minerBond';
+import {
+  SEPOLIA_EXPLORER_TX,
+  SEPOLIA_PREVIOUS_REGISTRATION_ID,
+  SEPOLIA_REGISTER_TX,
+  SEPOLIA_REGISTRATION_ID,
+  SEPOLIA_YAML_HASH,
+  SEPOLIA_YAML_PIN,
+} from '../lib/minerRegistration';
 
 const API_BASE_URL = 'https://verireceipt.onrender.com';
 const REPO_URL = 'https://github.com/mohamedwael201193/verireceipt';
-const MINER_YAML_COMMIT = '4f471e48296d7225a482ef70025352e954b9cf5d';
+const MINER_YAML_COMMIT = SEPOLIA_YAML_PIN;
 const MINER_YAML_URL = `https://raw.githubusercontent.com/mohamedwael201193/verireceipt/${MINER_YAML_COMMIT}/miner.yaml`;
 
 interface EndpointDoc {
@@ -319,12 +327,12 @@ export default function Docs() {
           <dd>{MINER_BOND_USD_TEXT} Test USDC — {MINER_BOND_SOURCE}. Re-read live on the Status page.</dd>
           <dt>Sepolia registration</dt>
           <dd>
-            registrationId 6152 (updateMiner of 6150) · tx{" "}
-            <a href="https://sepolia.etherscan.io/tx/0x775fcc05adca9be05188554e0487b46e09f207bc5ea1de89a2fd86e2b79f07cb" target="_blank" rel="noopener noreferrer">
-              0x775fcc05adca9be05188554e0487b46e09f207bc5ea1de89a2fd86e2b79f07cb
+            registrationId {SEPOLIA_REGISTRATION_ID} (updateMiner of {SEPOLIA_PREVIOUS_REGISTRATION_ID}) · tx{" "}
+            <a href={SEPOLIA_EXPLORER_TX} target="_blank" rel="noopener noreferrer">
+              {SEPOLIA_REGISTER_TX}
             </a>
-            {" "}· yamlHash 0x1653f3c00f8ee983bc2d2b36579c665c94ce2215ab1bb0d526564a9aec183e9f
-            (pin 4f471e48). Node activation is read live on the Status page and is not claimed here.
+            {" "}· yamlHash {SEPOLIA_YAML_HASH}
+            {" "}(pin {SEPOLIA_YAML_PIN.slice(0, 8)}). Node activation is read live on the Status page and is not claimed here.
           </dd>
         </dl>
       </section>

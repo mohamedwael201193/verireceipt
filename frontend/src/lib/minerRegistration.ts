@@ -27,6 +27,15 @@ export const SEPOLIA_REGISTER_BLOCK = 12181672;
 export const SEPOLIA_YAML_HASH =
   "0x1653f3c00f8ee983bc2d2b36579c665c94ce2215ab1bb0d526564a9aec183e9f";
 export const SEPOLIA_YAML_PIN = "4f471e48296d7225a482ef70025352e954b9cf5d";
+/**
+ * Every registration id that has answered paid calls for slug "verireceipt".
+ * Telegraph receipts name the registration that served the call, so committed
+ * purchases keep their old id after an updateMiner; ids are appended, never
+ * rewritten. The current registration is always included.
+ */
+export const SEPOLIA_SERVING_REGISTRATION_IDS: readonly number[] = Array.from(
+  new Set([6152, SEPOLIA_REGISTRATION_ID]), // pin:keep (historical ids)
+);
 export const SEPOLIA_EXPLORER_TX = `https://sepolia.etherscan.io/tx/${SEPOLIA_REGISTER_TX}`;
 export const TELEGRAPH_NODE_BASE = "https://devnode.telegraphprotocol.com";
 

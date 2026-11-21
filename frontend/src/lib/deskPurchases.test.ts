@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { assertPurchases, auditLinks, deliveryStatus, DESK_PURCHASES, epochChargeSubtext, EXPECTED_VERIFY_CHECKS, formatRecoveredValue, isEndToEndVerified, loadPurchases, purchaseVerdict, recoveredFromRaw, rehashStoredRaw, summarize, uusdcToUsd, type DeskPurchase } from "./deskPurchases";
 import { sha256Hex } from "./receipt";
+import { SEPOLIA_REGISTRATION_ID, SEPOLIA_SERVING_REGISTRATION_IDS } from "./minerRegistration";
 
 describe("desk purchases (committed ledger)", () => {
   it("loads the committed escrow purchases", () => {
@@ -273,5 +274,14 @@ describe("desk-d-followup tampers (J2 M1, J1/J2 minors)", () => {
     const a = DESK_PURCHASES[0];
     const b = DESK_PURCHASES[1];
     expect(() => assertPurchases([a, { ...b, nonce: a.nonce.toUpperCase() }])).toThrow(/duplicate nonce/);
+  });
+});
+
+describe("yaml-np15: committed purchases survive an updateMiner", () => {
+  it("the committed rows were served by registration 6152, which stays an accepted serving id", () => {
+    expect(SEPOLIA_SERVING_REGISTRATION_IDS).toContain(6152);
+    expect(SEPOLIA_SERVING_REGISTRATION_IDS).toContain(SEPOLIA_REGISTRATION_ID);
+    expect(DESK_PURCHASES.length).toBeGreaterThan(0);
+    for (const p of DESK_PURCHASES) expect(p.telegraph_receipt.miner).toBe("6152");
   });
 });

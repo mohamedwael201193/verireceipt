@@ -7,7 +7,7 @@
 import data from "./deskPurchases.json";
 import { sha256Hex } from "./receipt";
 import { BOUGHT_AT_SLACK_MS, catalogAgrees, valueFieldPinned } from "./taskCatalog";
-import { SEPOLIA_REGISTRATION_ID } from "./minerRegistration";
+import { SEPOLIA_SERVING_REGISTRATION_IDS } from "./minerRegistration";
 
 export interface DeskPurchase {
   version: 1;
@@ -159,8 +159,8 @@ export function assertPurchases(rows: unknown): DeskPurchase[] {
     if (typeof r.bought_at !== "string" || !Number.isFinite(bought) || !Number.isFinite(receiptMs) || Math.abs(bought - receiptMs) > BOUGHT_AT_SLACK_MS) {
       throw new Error("deskPurchases.json has a bought_at that is inconsistent with the receipt timestamp");
     }
-    if (typeof r.telegraph_receipt?.miner !== "string" || r.telegraph_receipt.miner !== String(SEPOLIA_REGISTRATION_ID)) {
-      throw new Error("deskPurchases.json has a row whose telegraph_receipt.miner is not the on-chain registration id");
+    if (typeof r.telegraph_receipt?.miner !== "string" || !SEPOLIA_SERVING_REGISTRATION_IDS.map(String).includes(r.telegraph_receipt.miner)) {
+      throw new Error("deskPurchases.json has a row whose telegraph_receipt.miner is not one of our on-chain registration ids");
     }
     if (typeof r.title !== "string" || typeof r.mission !== "string" || typeof r.task_id !== "string") {
       throw new Error("deskPurchases.json has a row that does not match the pinned task catalog");
