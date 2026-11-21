@@ -15,7 +15,7 @@
 // getDb() reads SQLITE_PATH lazily at first open, so setting it at
 // module top (before any handler call) is sufficient.
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join, resolve } from "path";
 
@@ -36,9 +36,40 @@ import { getDb, getReceiptEvidence } from "../src/core/db";
 import {
   BEACON_SOURCES,
   INTENT,
-  handleValidator,
+  handleValidator as handleValidatorImpl,
   parseValidatorResponse,
+  resetValidatorCachesForTests,
 } from "../src/handlers/validator";
+
+/** Shared fixture root so stub /root calls agree without consuming validator legs. */
+export const TEST_FINALIZED_ROOT = "0x" + "ab".repeat(32);
+
+function isStateRootUrl(url: string): boolean {
+  return /\/eth\/v1\/beacon\/states\/[^/]+\/root\/?$/.test(url);
+}
+
+function finalizedRootBody(root: string = TEST_FINALIZED_ROOT, optimistic = false): string {
+  return JSON.stringify({
+    data: { root },
+    execution_optimistic: optimistic,
+    finalized: true,
+  });
+}
+
+beforeEach(() => {
+  resetValidatorCachesForTests();
+});
+afterEach(() => {
+  resetValidatorCachesForTests();
+});
+
+/** Independent request: reset process-level cache / bucket first. */
+function handleValidator(
+  ...args: Parameters<typeof handleValidatorImpl>
+): ReturnType<typeof handleValidatorImpl> {
+  resetValidatorCachesForTests();
+  return handleValidatorImpl(...args);
+}
 import { buildServer } from "../src/server";
 
 async function expectApiError(
@@ -87,7 +118,7 @@ function beaconBody(
       },
     },
     execution_optimistic: optimistic,
-    finalized: false,
+    finalized: true,
   });
 }
 
@@ -123,6 +154,13 @@ function makeStubFetch(legs: StubLeg[]): typeof fetch {
     const urlStr = String(url);
     const idx = BEACON_SOURCES.findIndex((base) => urlStr.startsWith(base));
     if (idx < 0) throw new Error("stub fetch got unexpected URL: " + urlStr);
+    if (isStateRootUrl(urlStr)) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => finalizedRootBody(),
+      } as unknown as Response;
+    }
     const leg = legs[idx];
     if (leg === undefined) throw new Error("stub: source " + idx + " not staged (down)");
     if (leg instanceof Error) throw leg;
@@ -211,7 +249,7 @@ describe("handleValidator agreement (stub fetch)", () => {
     const receipt = res.receipt as Receipt;
     expect(receipt.intent).toBe(INTENT);
     // VR: three sources, two staged + agreeing, the third down.
-    expect(receipt.quorum_votes).toBe("2/3 sources agreed");
+    expect(receipt.quorum_votes).toBe("2/4 sources agreed");
     expect(res.source).toBe(BEACON_SOURCES[0] + " + " + BEACON_SOURCES[1]);
     expect(receipt.raw_response_sha256).toBe(sha256Hex(body));
     expect(receipt.receipt_id).toMatch(/^rcpt_[A-Z0-9]{26}$/);
@@ -565,11 +603,24 @@ describe("parseValidatorResponse", () => {
   it("parses a valid body", () => {
     const leg = parseValidatorResponse(
       beaconBody(1, "32000000000", "active_ongoing"),
-      "https://example.invalid/eth/v1/beacon/states/head/validators/1",
+      "https://example.invalid/eth/v1/beacon/states/finalized/validators/1",
       1,
     );
     expect(leg.effectiveBalance).toBe(32000000000);
     expect(leg.status).toBe("active_ongoing");
+  });
+
+  it("rejects finalized missing / false (A9: only finalized state is accepted)", () => {
+    const url = "https://example.invalid/eth/v1/beacon/states/finalized/validators/1";
+    const base = JSON.parse(beaconBody(1, "32000000000", "active_ongoing")) as Record<string, unknown>;
+    delete base.finalized;
+    expect(() => parseValidatorResponse(JSON.stringify(base), url, 1)).toThrow(/finalized/);
+    expect(() =>
+      parseValidatorResponse(JSON.stringify({ ...base, finalized: false }), url, 1),
+    ).toThrow(/finalized/);
+    expect(() =>
+      parseValidatorResponse(JSON.stringify({ ...base, finalized: "true" }), url, 1),
+    ).toThrow(/finalized/);
   });
 
   it("rejects non-JSON, missing data, non-digit balance, empty status", () => {
@@ -582,6 +633,7 @@ describe("parseValidatorResponse", () => {
       parseValidatorResponse(
         JSON.stringify({
           execution_optimistic: false,
+          finalized: true,
           data: { index: "1", status: "active_ongoing", validator: { effective_balance: "12x" } },
         }),
         url,
@@ -592,6 +644,7 @@ describe("parseValidatorResponse", () => {
       parseValidatorResponse(
         JSON.stringify({
           execution_optimistic: false,
+          finalized: true,
           data: { index: "1", status: "", validator: { effective_balance: "0" } },
         }),
         url,
@@ -611,6 +664,7 @@ describe("parseValidatorResponse", () => {
       parseValidatorResponse(
         JSON.stringify({
           execution_optimistic: false,
+          finalized: true,
           data: { status: "active_ongoing", validator: { effective_balance: "32000000000" } },
         }),
         url,
@@ -707,7 +761,7 @@ describe("handleValidator LIVE (real beacon sources, no stub)", () => {
     // VR: 2-of-3 quorum over three live sources.
     // 2 or 3 of the three live sources (the third may be rate-limited
     // or optimistic and then does not vote).
-    expect((res.receipt as Receipt).quorum_votes).toMatch(/^[23]\/3 sources agreed$/);
+    expect((res.receipt as Receipt).quorum_votes).toMatch(/^[2-4]\/4 sources agreed$/);
     expect(res.verdict).toBe("verified");
   }, 30000);
 

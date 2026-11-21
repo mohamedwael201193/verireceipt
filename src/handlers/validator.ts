@@ -1,16 +1,48 @@
 // GET /v1/validator — effective_balance (gwei) of an Ethereum validator.
 //
-// Zero-LLM. Calls the standard beacon API path
-// /eth/v1/beacon/states/head/validators/{index} on THREE independently
-// operated keyless public beacon sources and answers only when at least
-// TWO agree on effective_balance AND status (VR, 2026-11-21: was 2-of-2
-// on two sources, so one rate-limited source — a 429 — failed the whole
-// request). A single-source answer is NEVER served as verified: fewer
-// than two agreeing sources fails closed with 502 QUORUM_UNREACHABLE (no
-// answer, no receipt), and any source that answered with a DIFFERENT
-// value than the agreeing pair — or returned 404 while the pair found
-// the validator — fails closed with 502 QUORUM_CONFLICT (a 2-vs-1 split
-// is not certified).
+// Zero-LLM. Calls the standard beacon API on FOUR independently operated
+// keyless public beacon sources (A9 r2: was three) and answers only
+// when at least TWO agree on effective_balance AND status (2-of-N,
+// N = BEACON_SOURCES.length). A single-source answer is NEVER served
+// as verified: fewer than two agreeing sources fails closed with 502
+// QUORUM_UNREACHABLE (no answer, no receipt), and any source that
+// answered with a DIFFERENT value than the agreeing pair — or returned
+// 404 while the pair found the validator — fails closed with 502
+// QUORUM_CONFLICT (a 2-vs-1, or any dissent, is not certified). The
+// first agreeing pair wins once every started source has settled or
+// can no longer answer inside the budget; conflict rules are unchanged
+// from r1. MIN_AGREEING is never lowered to absorb a 429.
+//
+// A9 r2 finalized-state binding: an agreed finalized state root is
+// resolved from >= 2 non-optimistic sources (PublicNode, blockreq,
+// Stakely; ChainSafe is not used for root resolution so its rate
+// budget is reserved for a validator leg). Validator legs then query
+// states/{root}/validators/{index} when the host supports root-pin
+// (PublicNode, ChainSafe, Stakely). blockreq returns 501 for
+// states/{root}/*; its vote is taken from states/finalized/validators
+// only after states/finalized/root equals the agreed root.
+//
+// Stakely exception (root-pin only): Stakely may flag
+// execution_optimistic=true even on a finalized root. If — and only if
+// — GET states/{root}/root returns data.root equal to the agreed root
+// and finalized===true, the validator body for that exact root is
+// accepted even when execution_optimistic is true. Head or
+// finalized-label optimistic data is still rejected. A mismatched
+// bind fails the leg; it is not counted as a value vote.
+//
+// Verified-result cache: once 2-of-N agree on a finalized state, the
+// envelope (including the original receipt) is cached under
+// (validator_index, finalized state root) and served unchanged until
+// the agreed root advances, at which point the index is re-verified.
+// A cached answer is NEVER used as a cross-check vote for a different
+// (or unknown) root, and is never served as a 1-of-N substitute.
+//
+// Rate-aware pacing: a 429 on any host puts that host in a cooldown
+// (Retry-After, capped). ChainSafe additionally has a 1-token bucket
+// (refill 2 s, emptied on 429) sized from observed nginx 429s. A
+// cooled-down / empty-bucket source is not started (failure
+// "skipped (rate-limited)"); already-started sources still wait under
+// the conflict rules. Prefer PublicNode, blockreq and Stakely.
 //
 // Order independence (V-M1, J2 round 2; J1 R1, round 3): when a pair
 // first agrees, the verdict is NOT taken while the third source can
@@ -26,19 +58,21 @@
 // source that never answers inside the budget does not count and does
 // not block the pair beyond the budget.
 //
-// VR transient-error policy: HTTP 429/500/502/503/504 get ONE bounded
-// retry per source, inside the same request budget. The wait honours
-// the source's Retry-After (delta-seconds or HTTP-date), else
-// RETRY_BASE_DELAY_MS for 5xx / RETRY_429_DEFAULT_DELAY_MS for 429. If
-// Retry-After exceeds RETRY_AFTER_CAP_MS, or the
-// wait would leave less than MIN_RETRY_WINDOW_MS of the budget, the
-// source is NOT retried (never called sooner than it asked). 404,
+// VR + A9 transient-error policy: HTTP 429/500/502/503/504 get ONE
+// bounded retry per source, inside the same request budget. The wait
+// honours the source's Retry-After (delta-seconds or HTTP-date), else
+// RETRY_BASE_DELAY_MS for 5xx / RETRY_429_DEFAULT_DELAY_MS for 429,
+// capped at RETRY_AFTER_CAP_MS so a 5–10 s nginx Retry-After still
+// gets one short retry inside the 4.5 s budget instead of being
+// skipped. If the (capped) wait would leave less than
+// MIN_RETRY_WINDOW_MS of the budget, the source is NOT retried. 404,
 // other malformed bodies and timeouts are not retried; an
 // execution_optimistic=true answer is retried once after
 // RETRY_BASE_DELAY_MS (and still never accepted). Each leg is additionally
 // bound to the requested validator (data.index must equal the requested
-// index), rejected if the node flags it execution_optimistic, and
-// rejected if its status is outside the nine-value beacon status enum.
+// index), rejected if the node flags it execution_optimistic (except
+// the Stakely root-pin bind described above), and rejected if its
+// status is outside the nine-value beacon status enum.
 // At least two sources 404 and none returning the validator means the
 // validator does not exist: 422
 // VALIDATOR_NOT_FOUND (repo precedent: filings 404 -> 422
@@ -70,50 +104,102 @@ import { TIMEOUT_MS } from "../config/limits";
 export const INTENT = "VALIDATOR_PERFORMANCE_VERIFY_GENERAL";
 
 /**
- * The three keyless beacon API bases (three independent operators). Verified live 2026-11-20 (see
- * RUN-LOG): each answers the standard path for indices 1, 100000 and
- * 500000 with no API key and no signup.
+ * Per-source capabilities for the four keyless mainnet beacon REST bases
+ * (four independent operators). BEACON_SOURCES is derived from this
+ * list and keeps the r1 order so existing fixtures that stage
+ * [ChainSafe, PublicNode, Stakely] keep their meaning; the fourth
+ * entry is blockreq.
  *
- * 1. ChainSafe Lodestar public mainnet node.
- * 2. PublicNode public Ethereum Beacon API endpoint.
+ * 1. ChainSafe Lodestar public mainnet node
+ *    (https://lodestar-mainnet.chainsafe.io). Verified 2026-11-20
+ *    ~18:32–18:58 UTC and again 2026-11-21: answers
+ *    states/finalized/validators/{id} and states/{root}/validators/{id}
+ *    with finalized=true, execution_optimistic=false, no API key.
+ *    nginx 429s under modest load (Retry-After typically 5–10 s);
+ *    paced with a 1-token bucket (A9 r2). peer_id
+ *    16Uiu2HAmPCHN6LsNv7RUoc2iFBbWWDSkxBq5Bo7…, egress 65.108.66.225.
  *
- * Both verified live 2026-11-20 ~18:32–18:58 UTC: each answers the
- * standard path for indices 1, 100000 and 500000 with no API key and
- * no signup, and both agree (1 -> 32000000000 active_ongoing;
- * 100000/500000 -> 0 withdrawal_done). PublicNode was additionally
- * verified by the independent verification run the same day
- * (verification-2026-11-20.md rows 25-27: same values, including
- * balance 32083979186 and 0x02 credentials for index 1).
+ * 2. PublicNode public Ethereum Beacon API
+ *    (https://ethereum-beacon-api.publicnode.com). Same indices, same
+ *    values; fast (~30–60 ms). Root-pin supported. peer_id
+ *    16Uiu2HAkvQVKG6XjhN2G7wTJBw3R1dM9qspfK8J… . Independent
+ *    verification-2026-11-20.md rows 25-27.
  *
- * 3. Stakely public Ethereum Beacon API endpoint (VR, wired in
- *    2026-11-21; previously the verified alternate): same three indices,
- *    same values, verified live 2026-11-20 ~18:46-18:51 UTC and again
- *    2026-11-21 01:37 UTC from the build box (all three sources returned
- *    1 -> 32000000000 active_ongoing, 100000/500000 -> 0 withdrawal_done).
+ * 3. Stakely public Ethereum Beacon API
+ *    (https://ethereum-beacon-api.stakely.io). Same values. Root-pin
+ *    supported. states/finalized and states/{root}/validators can
+ *    return finalized=true AND execution_optimistic=true; states/{root}/root
+ *    is used to bind the body to the agreed root (A9 r2). peer_id
+ *    16Uiu2HAm3rY69UsNs8qxHhzq7saH51Zys8n22d2…, egress 185.181.229.82.
  *
- * Rejected candidates (verified live, same session): BlastAPI public
- * beacon (fetcher could not resolve it; VM egress probe aborted at
- * 20 s and 60 s — sandbox proxy, not proof the host is down, but
- * unverifiable from here); SigP checkpoint and beaconcha.in
- * checkpoint-sync (HTTP 404 on the validators path); dRPC beacon
- * (400 "chain is not available on free plan" — paid only); other
- * PublicNode beacon hosts (404 on the validators path).
+ * 4. blockreq public Ethereum Beacon RPC
+ *    (https://ethereum-beacon-rpc.blockreq.com). Verified live from
+ *    this build box on 2026-11-21: no API key; Lighthouse/v8.3.3-57c2abc;
+ *    genesis_time 1606824023 (mainnet); states/finalized/root matched
+ *    PublicNode; validators 1, 2, 1000, 100000, 500000, 700000 matched
+ *    PublicNode exactly (finalized=true, execution_optimistic=false).
+ *    states/{root}/* and /eth/v1/node/identity return 501 ("not
+ *    available on the public endpoint") — votes are finalized-label
+ *    + finalized/root bind, never root-pinned.
  *
- * VM-egress caveat (2026-11-20): direct egress from this VM is dead
- * (curl --noproxy times out even for example.com) and the egress
- * proxy aborts node-fetch/curl to BOTH wired sources even at a 60 s
- * timeout, while the runtime page fetcher reaches them fine. So the
- * live vitest tests and a local-server curl check 502 from this VM
- * for an environmental reason, not a code reason. The production
- * path (Render, direct egress) is where the live curl check must
- * pass; the fixture tests + fetcher verification above are the
- * evidence available from here.
+ * Rejected candidates (verified live, A9 r2 hunt 2026-11-21 and
+ * earlier): BlastAPI (unverifiable / proxy abort); SigP checkpoint,
+ * beaconcha.in checkpoint-sync, Checkpointz, EthStaker checkpoint
+ * (HTTP 404 on the validators path); dRPC (400 paid-only); Nimbus
+ * official HTTP test endpoints (HTTP 500); Tatum public beacon
+ * (works, different peer_id 16Uiu2HAmUgXB9yRH3eaJ3Ro2zuWAa2Q9qp1Wo5q…
+ * from PublicNode/Stakely/ChainSafe, but documented 5 req/min — not a
+ * production quorum leg); other PublicNode beacon hosts (404 on
+ * validators).
  */
-export const BEACON_SOURCES: readonly string[] = [
-  "https://lodestar-mainnet.chainsafe.io",
-  "https://ethereum-beacon-api.publicnode.com",
-  "https://ethereum-beacon-api.stakely.io",
+export interface BeaconSourceCap {
+  /** Short stable id (logs / tests). */
+  id: string;
+  /** Keyless base URL, no trailing slash. */
+  base: string;
+  /** Host implements GET /eth/v1/beacon/states/{state_root}/… */
+  rootPin: boolean;
+  /** Apply the ChainSafe token bucket in addition to generic 429 cooldown. */
+  paced: boolean;
+  /**
+   * Accept execution_optimistic=true only after states/{root}/root
+   * equals the agreed finalized root (Stakely).
+   */
+  allowOptimisticIfRootBound: boolean;
+}
+
+export const BEACON_SOURCE_CAPS: readonly BeaconSourceCap[] = [
+  {
+    id: "chainsafe",
+    base: "https://lodestar-mainnet.chainsafe.io",
+    rootPin: true,
+    paced: true,
+    allowOptimisticIfRootBound: false,
+  },
+  {
+    id: "publicnode",
+    base: "https://ethereum-beacon-api.publicnode.com",
+    rootPin: true,
+    paced: false,
+    allowOptimisticIfRootBound: false,
+  },
+  {
+    id: "stakely",
+    base: "https://ethereum-beacon-api.stakely.io",
+    rootPin: true,
+    paced: false,
+    allowOptimisticIfRootBound: true,
+  },
+  {
+    id: "blockreq",
+    base: "https://ethereum-beacon-rpc.blockreq.com",
+    rootPin: false,
+    paced: false,
+    allowOptimisticIfRootBound: false,
+  },
 ];
+
+export const BEACON_SOURCES: readonly string[] = BEACON_SOURCE_CAPS.map((s) => s.base);
 
 
 /** Minimum number of agreeing sources for a verified answer (and for "does not exist"). */
@@ -138,6 +224,24 @@ export const RETRY_429_DEFAULT_DELAY_MS = 1500;
 export const RETRY_AFTER_CAP_MS = 2000;
 /** A retry is only attempted if at least this much request budget remains after the wait. */
 export const MIN_RETRY_WINDOW_MS = 1000;
+
+/** Max time spent resolving the finalized root, leaving budget for validator legs. */
+export const ROOT_RESOLVE_BUDGET_MS = 800;
+/** Agreed finalized-root cache TTL (finality advances every ~12 min; 12 s is conservative). */
+export const FINALIZED_ROOT_CACHE_TTL_MS = 12_000;
+/**
+ * If a fresh root quorum cannot be formed, reuse the last agreed root
+ * only if it is younger than this (well under one epoch). This is a
+ * last-observed current-root identifier, never a stale value used as
+ * a cross-check vote.
+ */
+export const LAST_KNOWN_ROOT_MAX_AGE_MS = 60_000;
+/** ChainSafe token-bucket capacity. Observed 2026-11-21: 1–2 successes then nginx 429. */
+export const CHAINSAFE_BUCKET_CAPACITY = 1;
+/** ChainSafe token refill interval (ms). */
+export const CHAINSAFE_BUCKET_REFILL_MS = 2_000;
+/** 32-byte state root: 0x + 64 hex chars. */
+export const FINALIZED_STATE_ROOT_RE = /^0x[0-9a-fA-F]{64}$/;
 
 /**
  * Parse an HTTP Retry-After value (RFC 9110 section 10.2.3): delta-seconds
@@ -193,12 +297,168 @@ export interface ValidatorDeps {
    * raise it; production must not.
    */
   timeoutMs?: number;
+  /** Clock override (test only) for cache / bucket TTL. */
+  nowMs?: () => number;
 }
 
 // Canonical decimal integer: no sign, no leading zeros ("01" is not an
 // integer literal in the intent's JSON schema, `validator_index:
 // integer`; J1/J2 round 2). "0" itself is valid.
 const VALIDATOR_INDEX_RE = /^(0|[1-9][0-9]*)$/;
+
+// ---------------------------------------------------------------------------
+// A9 r2: verified-result cache, finalized-root cache, per-host pacing.
+// ---------------------------------------------------------------------------
+
+interface VerifiedCacheEntry {
+  envelope: Record<string, unknown>;
+  root: string;
+  index: number;
+}
+
+interface FinalizedRootCacheEntry {
+  root: string;
+  atMs: number;
+}
+
+const verifiedCache = new Map<string, VerifiedCacheEntry>();
+let finalizedRootCache: FinalizedRootCacheEntry | undefined;
+
+interface TokenBucket {
+  tokens: number;
+  lastRefillMs: number;
+  cooldownUntilMs: number;
+}
+
+let chainsafeBucket: TokenBucket = {
+  tokens: CHAINSAFE_BUCKET_CAPACITY,
+  lastRefillMs: 0,
+  cooldownUntilMs: 0,
+};
+
+/** Per-host 429 cooldown (all sources). */
+const hostCooldownUntilMs = new Map<string, number>();
+
+function verifiedCacheKey(index: number, root: string): string {
+  return `${index}:${root.toLowerCase()}`;
+}
+
+function refillChainSafeBucket(now: number): void {
+  if (now < chainsafeBucket.cooldownUntilMs) {
+    chainsafeBucket.tokens = 0;
+    return;
+  }
+  if (chainsafeBucket.lastRefillMs === 0) {
+    chainsafeBucket.lastRefillMs = now;
+    return;
+  }
+  const elapsed = now - chainsafeBucket.lastRefillMs;
+  if (elapsed >= CHAINSAFE_BUCKET_REFILL_MS) {
+    const add = Math.floor(elapsed / CHAINSAFE_BUCKET_REFILL_MS);
+    chainsafeBucket.tokens = Math.min(CHAINSAFE_BUCKET_CAPACITY, chainsafeBucket.tokens + add);
+    chainsafeBucket.lastRefillMs += add * CHAINSAFE_BUCKET_REFILL_MS;
+  }
+}
+
+/** Test-only: empty caches, refill the ChainSafe bucket, clear cooldowns. */
+export function resetValidatorCachesForTests(nowMs: number = Date.now()): void {
+  verifiedCache.clear();
+  finalizedRootCache = undefined;
+  hostCooldownUntilMs.clear();
+  chainsafeBucket = {
+    tokens: CHAINSAFE_BUCKET_CAPACITY,
+    lastRefillMs: nowMs,
+    cooldownUntilMs: 0,
+  };
+}
+
+/** Test-only: inspect the verified cache size. */
+export function verifiedCacheSizeForTests(): number {
+  return verifiedCache.size;
+}
+
+export function isChainSafeBase(base: string): boolean {
+  return new URL(base).hostname === "lodestar-mainnet.chainsafe.io";
+}
+
+export function chainsafeCanStart(nowMs: number = Date.now()): boolean {
+  refillChainSafeBucket(nowMs);
+  return chainsafeBucket.tokens >= 1 && nowMs >= chainsafeBucket.cooldownUntilMs;
+}
+
+export function chainsafeTakeToken(nowMs: number = Date.now()): boolean {
+  refillChainSafeBucket(nowMs);
+  if (chainsafeBucket.tokens < 1 || nowMs < chainsafeBucket.cooldownUntilMs) return false;
+  chainsafeBucket.tokens -= 1;
+  return true;
+}
+
+export function chainsafeOn429(retryAfterMs: number | undefined, nowMs: number = Date.now()): void {
+  chainsafeBucket.tokens = 0;
+  chainsafeBucket.lastRefillMs = nowMs;
+  const cool =
+    retryAfterMs !== undefined
+      ? Math.min(Math.max(retryAfterMs, CHAINSAFE_BUCKET_REFILL_MS), 10_000)
+      : CHAINSAFE_BUCKET_REFILL_MS;
+  chainsafeBucket.cooldownUntilMs = nowMs + cool;
+}
+
+export function noteSource429(base: string, retryAfterMs: number | undefined, nowMs: number = Date.now()): void {
+  const wait = Math.min(Math.max(retryAfterMs ?? CHAINSAFE_BUCKET_REFILL_MS, 500), 10_000);
+  hostCooldownUntilMs.set(base, nowMs + wait);
+  if (isChainSafeBase(base)) chainsafeOn429(retryAfterMs, nowMs);
+}
+
+export function canStartSource(cap: BeaconSourceCap, nowMs: number = Date.now()): boolean {
+  const until = hostCooldownUntilMs.get(cap.base) ?? 0;
+  if (nowMs < until) return false;
+  if (cap.paced) return chainsafeCanStart(nowMs);
+  return true;
+}
+
+function normalizeStateRoot(root: string): string {
+  return root.toLowerCase();
+}
+
+export function parseStateRootResponse(rawBody: string, sourceUrl: string): {
+  root: string;
+  finalized: boolean;
+  executionOptimistic: boolean;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawBody) as unknown;
+  } catch {
+    throw new Error(`malformed beacon root response from ${sourceUrl}: not JSON`);
+  }
+  if (parsed === null || typeof parsed !== "object") {
+    throw new Error(`malformed beacon root response from ${sourceUrl}: top level is not an object`);
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (typeof obj.execution_optimistic !== "boolean") {
+    throw new Error(
+      `malformed beacon root response from ${sourceUrl}: execution_optimistic is missing or not a boolean`,
+    );
+  }
+  if (obj.finalized !== true) {
+    throw new Error(
+      `malformed beacon root response from ${sourceUrl}: finalized is missing or not true`,
+    );
+  }
+  const data = obj.data;
+  if (data === null || typeof data !== "object") {
+    throw new Error(`malformed beacon root response from ${sourceUrl}: missing data object`);
+  }
+  const root = (data as Record<string, unknown>).root;
+  if (typeof root !== "string" || !FINALIZED_STATE_ROOT_RE.test(root)) {
+    throw new Error(`malformed beacon root response from ${sourceUrl}: data.root is not a 32-byte hex root`);
+  }
+  return {
+    root: normalizeStateRoot(root),
+    finalized: true,
+    executionOptimistic: obj.execution_optimistic,
+  };
+}
 
 interface ValidatorLeg {
   /** Effective balance in gwei, as a number (0 is a real 0). */
@@ -229,10 +489,21 @@ interface ValidatorLeg {
  *   ("true", 1, null, ...) also fails the leg; only `false` vouches.)
  * - F3 status allowlist: `data.status` must be one of VALIDATOR_STATUSES.
  */
+export interface ParseValidatorOptions {
+  /**
+   * When true (only after states/{root}/root matched the agreed
+   * finalized root), execution_optimistic=true is accepted. finalized
+   * must still be boolean true. Default false — head / finalized-label
+   * optimistic data is still rejected.
+   */
+  allowOptimisticIfRootBound?: boolean;
+}
+
 export function parseValidatorResponse(
   rawBody: string,
   sourceUrl: string,
   expectedIndex: number,
+  opts: ParseValidatorOptions = {},
 ): ValidatorLeg {
   let parsed: unknown;
   try {
@@ -253,17 +524,32 @@ export function parseValidatorResponse(
       `malformed beacon response from ${sourceUrl}: execution_optimistic is missing or not a boolean`,
     );
   }
-  // F2: optimistic-head data is explicitly unverified by the beacon node.
+  // A9: we query states/finalized, so the body must explicitly vouch
+  // that this is finalized state. Only boolean `true` is accepted —
+  // missing / non-boolean / false (a head payload) fails the leg and
+  // is never served as verified. Measured 2026-11-21: Stakely's
+  // states/head was execution_optimistic=true and finalized=false;
+  // the same host's states/finalized was finalized=true and
+  // execution_optimistic=false.
+  if (parsedObj.finalized !== true) {
+    throw new Error(
+      `malformed beacon response from ${sourceUrl}: finalized is missing or not true (refusing non-finalized state)`,
+    );
+  }
+  // F2: optimistic-head / unverified-EL data is rejected, except the
+  // A9 r2 root-pin path: after states/{root}/root equals the agreed
+  // finalized root, Stakely's optimistic flag on that exact root is
+  // allowed (the bind, not the flag, is the voucher).
   if (parsedObj.execution_optimistic === true) {
-    // VR: tagged so the fetch leg can retry it once — a load-balanced
-    // public endpoint can route to a backend whose execution client is
-    // briefly optimistic (seen live from the build box on 2026-11-21,
-    // intermittently, on one source). The data is still NEVER accepted.
-    const err = new Error(
-      `malformed beacon response from ${sourceUrl}: execution_optimistic is true (data not verified by the node)`,
-    ) as Error & { optimistic: true };
-    err.optimistic = true;
-    throw err;
+    if (opts.allowOptimisticIfRootBound === true) {
+      // accepted: caller already verified states/{root}/root.
+    } else {
+      const err = new Error(
+        `malformed beacon response from ${sourceUrl}: execution_optimistic is true (data not verified by the node)`,
+      ) as Error & { optimistic: true };
+      err.optimistic = true;
+      throw err;
+    }
   }
   const data = parsedObj.data;
   if (data === null || typeof data !== "object") {
@@ -346,11 +632,148 @@ function retryAfterHeader(res: Response): string | null {
  * One source leg: up to VALIDATOR_MAX_ATTEMPTS attempts, all inside the
  * request budget that ends at deadlineAt. Each attempt has its own abort
  * timer of min(timeoutMs, time left). Only RETRYABLE_STATUSES are
- * retried, after the Retry-After wait (or RETRY_BASE_DELAY_MS), and only
- * when that wait is <= RETRY_AFTER_CAP_MS and still leaves
- * >= MIN_RETRY_WINDOW_MS of the budget, and never once the request has
- * already settled (requestDone). Network errors / timeouts are not
- * retried (they already consumed the budget).
+ * retried, after the Retry-After wait (or RETRY_BASE_DELAY_MS),
+ * capped at RETRY_AFTER_CAP_MS (a longer Retry-After still retries
+ * once after the cap, inside the budget). The wait must leave
+ * >= MIN_RETRY_WINDOW_MS of the budget, and is never started once the
+ * request has already settled (requestDone). Network errors / timeouts
+ * are not retried (they already consumed the budget).
+ */
+async function fetchStateRoot(
+  base: string,
+  stateId: string,
+  fetchImpl: typeof fetch,
+  timeoutMs: number,
+  deadlineAt: number,
+): Promise<{ root: string; executionOptimistic: boolean; httpStatus: number; retryAfterMs?: number }> {
+  const sourceUrl = `${base}/eth/v1/beacon/states/${stateId}/root`;
+  const attemptMs = Math.max(1, Math.min(timeoutMs, deadlineAt - Date.now()));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), attemptMs);
+  let res: Response;
+  try {
+    res = await fetchImpl(sourceUrl, {
+      headers: { accept: "application/json" },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) {
+    const err = new Error(`beacon source ${base} returned HTTP ${res.status} for state root ${stateId}`) as Error & {
+      httpStatus: number;
+    };
+    err.httpStatus = res.status;
+    if (res.status === 429) {
+      noteSource429(base, parseRetryAfterMs(retryAfterHeader(res)));
+    }
+    throw err;
+  }
+  const rawBody = await res.text();
+  const parsed = parseStateRootResponse(rawBody, sourceUrl);
+  return { root: parsed.root, executionOptimistic: parsed.executionOptimistic, httpStatus: res.status };
+}
+
+/**
+ * Resolve the current finalized state root from >= 2 non-optimistic
+ * sources. ChainSafe is not queried here (rate budget reserved for a
+ * validator leg). Optimistic roots that match the majority are ignored,
+ * not counted and not treated as dissent; a different root from any
+ * source (optimistic or not) is a conflict. On failure, a last-known
+ * root younger than LAST_KNOWN_ROOT_MAX_AGE_MS may be reused.
+ *
+ * Each probe is hard-capped at the root budget (and the request
+ * deadline) so a source that ignores AbortSignal cannot hang the
+ * request. The budget is at most ROOT_RESOLVE_BUDGET_MS and always
+ * leaves time for validator legs.
+ */
+async function resolveFinalizedRoot(
+  fetchImpl: typeof fetch,
+  timeoutMs: number,
+  deadlineAt: number,
+  nowMs: number,
+): Promise<string | undefined> {
+  if (finalizedRootCache && nowMs - finalizedRootCache.atMs < FINALIZED_ROOT_CACHE_TTL_MS) {
+    return finalizedRootCache.root;
+  }
+  const reservedForLegs = Math.min(1_000, Math.max(200, Math.floor(timeoutMs / 2)));
+  const rootBudget = Math.min(ROOT_RESOLVE_BUDGET_MS, Math.max(50, timeoutMs - reservedForLegs));
+  const rootDeadlineAt = Math.min(deadlineAt, Date.now() + rootBudget);
+
+  const rootSources = BEACON_SOURCE_CAPS.filter((cap) => !cap.paced);
+  type RootVote =
+    | { base: string; root: string; optimistic: boolean }
+    | { base: string; error: unknown };
+  const votes: RootVote[] = await Promise.all(
+    rootSources.map(async (cap) => {
+      const left = Math.max(1, rootDeadlineAt - Date.now());
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const got = await Promise.race([
+          fetchStateRoot(cap.base, "finalized", fetchImpl, timeoutMs, rootDeadlineAt),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              const err = new Error(`beacon source ${cap.base} state root timed out`);
+              err.name = "AbortError";
+              reject(err);
+            }, left);
+          }),
+        ]);
+        return { base: cap.base, root: got.root, optimistic: got.executionOptimistic };
+      } catch (error) {
+        return { base: cap.base, error };
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    }),
+  );
+
+  const ok = votes.filter((v): v is { base: string; root: string; optimistic: boolean } => "root" in v);
+  if (ok.length >= 1) {
+    const roots = [...new Set(ok.map((v) => v.root))];
+    if (roots.length > 1) {
+      throw new ApiError(
+        502,
+        "QUORUM_CONFLICT",
+        `beacon sources disagree on finalized state root: ${ok
+          .map((v) => `${new URL(v.base).hostname}=${v.root.slice(0, 10)}…(opt=${v.optimistic})`)
+          .join(", ")}`,
+      );
+    }
+    const agreed = roots[0];
+    const nonOptimistic = ok.filter((v) => v.root === agreed && v.optimistic === false).length;
+    if (nonOptimistic >= VALIDATOR_MIN_AGREEING) {
+      finalizedRootCache = { root: agreed, atMs: nowMs };
+      return agreed;
+    }
+  }
+  if (finalizedRootCache && nowMs - finalizedRootCache.atMs < LAST_KNOWN_ROOT_MAX_AGE_MS) {
+    return finalizedRootCache.root;
+  }
+  return undefined;
+}
+
+interface FetchSourceOpts {
+  expectedRoot?: string;
+  cap: BeaconSourceCap;
+}
+
+/**
+ * One source leg: up to VALIDATOR_MAX_ATTEMPTS attempts, all inside the
+ * request budget that ends at deadlineAt. Each attempt has its own abort
+ * timer of min(timeoutMs, time left). Only RETRYABLE_STATUSES are
+ * retried, after the Retry-After wait (or RETRY_BASE_DELAY_MS),
+ * capped at RETRY_AFTER_CAP_MS (a longer Retry-After still retries
+ * once after the cap, inside the budget). The wait must leave
+ * >= MIN_RETRY_WINDOW_MS of the budget, and is never started once the
+ * request has already settled (requestDone). Network errors / timeouts
+ * are not retried (they already consumed the budget).
+ *
+ * A9 r2: when expectedRoot is set, root-pin sources are queried at
+ * states/{root}/validators/{index}. blockreq (no root-pin) is queried
+ * at states/finalized/validators/{index} only after states/finalized/root
+ * equals expectedRoot. Stakely may be accepted optimistic iff the
+ * states/{root}/root bind succeeds.
  */
 async function fetchValidatorFromSource(
   base: string,
@@ -360,9 +783,60 @@ async function fetchValidatorFromSource(
   deadlineAt: number,
   requestDone: () => boolean = () => false,
   onRetry: (reason: string, retryAt: number) => void = () => {},
+  opts?: FetchSourceOpts,
 ): Promise<ValidatorLeg> {
-  const sourceUrl = `${base}/eth/v1/beacon/states/head/validators/${index}`;
+  const cap = opts?.cap ?? BEACON_SOURCE_CAPS.find((c) => c.base === base);
+  const expectedRoot = opts?.expectedRoot !== undefined ? normalizeStateRoot(opts.expectedRoot) : undefined;
+  const useRootPin = Boolean(expectedRoot && cap?.rootPin);
+  const stateId = useRootPin ? (expectedRoot as string) : "finalized";
+  const sourceUrl = `${base}/eth/v1/beacon/states/${stateId}/validators/${index}`;
   for (let attempt = 1; ; attempt++) {
+    // Bind first when required: root-pin+optimistic-allow (Stakely), or
+    // finalized-label sources (blockreq) whose vote is only valid for
+    // the agreed root.
+    let rootBound = false;
+    const needsBind = Boolean(expectedRoot && cap && (cap.allowOptimisticIfRootBound || !cap.rootPin));
+    if (needsBind && cap && expectedRoot) {
+      const bindId = cap.rootPin ? expectedRoot : "finalized";
+      try {
+        const got = await fetchStateRoot(cap.base, bindId, fetchImpl, timeoutMs, deadlineAt);
+        if (got.root !== expectedRoot) {
+          throw new Error(
+            `beacon source ${base} state root bind failed: got ${got.root} expected ${expectedRoot}`,
+          );
+        }
+        rootBound = true;
+      } catch (bindErr) {
+        const status = httpStatusOf(bindErr);
+        if (status === 501 && cap.rootPin) {
+          // Host advertised root-pin but rejected this public path;
+          // fall through to finalized-label bind.
+          try {
+            const got = await fetchStateRoot(cap.base, "finalized", fetchImpl, timeoutMs, deadlineAt);
+            if (got.root !== expectedRoot) {
+              throw new Error(
+                `beacon source ${base} finalized-root bind failed: got ${got.root} expected ${expectedRoot}`,
+              );
+            }
+            rootBound = true;
+          } catch (fallbackErr) {
+            throw fallbackErr;
+          }
+        } else if (status !== undefined && RETRYABLE_STATUSES.has(status) && attempt < VALIDATOR_MAX_ATTEMPTS) {
+          const rawWaitMs =
+            status === 429 ? RETRY_429_DEFAULT_DELAY_MS : RETRY_BASE_DELAY_MS;
+          const waitMs = Math.min(rawWaitMs, RETRY_AFTER_CAP_MS);
+          if (deadlineAt - Date.now() - waitMs < MIN_RETRY_WINDOW_MS || requestDone()) throw bindErr;
+          onRetry(`HTTP ${status}, retry pending`, Date.now() + waitMs);
+          await sleep(waitMs);
+          if (requestDone()) throw bindErr;
+          continue;
+        } else {
+          throw bindErr;
+        }
+      }
+    }
+
     const attemptMs = Math.max(1, Math.min(timeoutMs, deadlineAt - Date.now()));
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), attemptMs);
@@ -375,11 +849,15 @@ async function fetchValidatorFromSource(
       if (res.ok) {
         const rawBody = await res.text();
         try {
-          return parseValidatorResponse(rawBody, sourceUrl, index);
+          const allowOptimistic = Boolean(cap?.allowOptimisticIfRootBound && rootBound);
+          return parseValidatorResponse(rawBody, sourceUrl, index, {
+            allowOptimisticIfRootBound: allowOptimistic,
+          });
         } catch (parseErr) {
           // VR: an optimistic-head answer is transient (the node's EL is
           // catching up); retry once under the same budget rules. Every
-          // other malformed body fails the leg at once.
+          // other malformed body fails the leg at once. Root-bound
+          // Stakely optimistic is accepted above and never reaches here.
           const optimistic =
             parseErr !== null &&
             typeof parseErr === "object" &&
@@ -413,11 +891,19 @@ async function fetchValidatorFromSource(
         (attempt > 1 ? ` (attempt ${attempt} of ${VALIDATOR_MAX_ATTEMPTS})` : ""),
     ) as Error & { httpStatus: number };
     err.httpStatus = res.status;
+    if (res.status === 429) {
+      noteSource429(base, parseRetryAfterMs(retryAfterHeader(res)));
+    }
     if (attempt >= VALIDATOR_MAX_ATTEMPTS || !RETRYABLE_STATUSES.has(res.status)) throw err;
-    const waitMs =
+    const rawWaitMs =
       parseRetryAfterMs(retryAfterHeader(res)) ??
       (res.status === 429 ? RETRY_429_DEFAULT_DELAY_MS : RETRY_BASE_DELAY_MS);
-    if (waitMs > RETRY_AFTER_CAP_MS) throw err;
+    // A9: cap a long Retry-After (e.g. nginx 5–10 s) at
+    // RETRY_AFTER_CAP_MS so one short retry still fits the 4.5 s
+    // budget, instead of skipping the retry entirely. Do NOT shrink
+    // the wait further just to force a retry — if the (capped) wait
+    // would leave < MIN_RETRY_WINDOW_MS, the source is not retried.
+    const waitMs = Math.min(rawWaitMs, RETRY_AFTER_CAP_MS);
     if (deadlineAt - Date.now() - waitMs < MIN_RETRY_WINDOW_MS) throw err;
     // Never start a retry for a request that has already been answered
     // (or failed): no wasted calls to a source that is rate-limiting us.
@@ -471,11 +957,21 @@ export async function handleValidator(
 
   const fetchImpl = deps.fetchImpl ?? fetch;
   const timeoutMs = deps.timeoutMs ?? VALIDATOR_TIMEOUT_MS;
+  const nowFn = deps.nowMs ?? Date.now;
   // One request budget shared by all legs (F6 round 2 + VR): every
   // attempt, retry and wait below ends by deadlineAt, so the whole
   // request ends within ~timeoutMs even when a leg never settles.
+  // Budget timers always use wall-clock Date.now(); nowFn is only for
+  // the result / root caches and the rate-limit bucket.
   const startedAt = Date.now();
   const deadlineAt = startedAt + timeoutMs;
+  const agreedRoot = await resolveFinalizedRoot(fetchImpl, timeoutMs, deadlineAt, nowFn());
+  if (agreedRoot !== undefined) {
+    const hit = verifiedCache.get(verifiedCacheKey(index, agreedRoot));
+    if (hit !== undefined) {
+      return hit.envelope;
+    }
+  }
   const n = BEACON_SOURCES.length;
   // Per-source outcome, filled in as each leg settles.
   //   legResults[i]    the parsed answer (leg returned a validator)
@@ -554,12 +1050,26 @@ export async function handleValidator(
       const notFoundPossible = arrival.length === 0 && n404 + pending >= VALIDATOR_MIN_AGREEING;
       if (!pairPossible && !notFoundPossible) finish();
     };
-    BEACON_SOURCES.forEach((base, i) => {
+    BEACON_SOURCE_CAPS.forEach((cap, i) => {
+      const base = cap.base;
+      const now = nowFn();
+      if (!canStartSource(cap, now)) {
+        legFailure[i] = "skipped (rate-limited)";
+        legSettled[i] = true;
+        check();
+        return;
+      }
+      if (cap.paced && !chainsafeTakeToken(now)) {
+        legFailure[i] = "skipped (rate-limited, token bucket empty)";
+        legSettled[i] = true;
+        check();
+        return;
+      }
       fetchValidatorFromSource(base, index, fetchImpl, timeoutMs, deadlineAt, requestDone, (reason, retryAt) => {
         legFailure[i] = reason;
         legRetryAt[i] = retryAt;
         check();
-      }).then(
+      }, { expectedRoot: agreedRoot, cap }).then(
         (leg) => {
           if (finished) return; // arrived after the decision: not counted
           legResults[i] = leg;
@@ -645,7 +1155,7 @@ export async function handleValidator(
   const answer =
     `Validator ${index} has an effective balance of ${leg.effectiveBalance} gwei ` +
     `(status ${leg.status}), verified by ${votes}.`;
-  return envelope(
+  const result = envelope(
     INTENT,
     {
       validator_index: index,
@@ -655,4 +1165,12 @@ export async function handleValidator(
     receipt,
     { answer, verdict: "verified", confidence: 1.0, source: agreeingSources.join(" + ") },
   );
+  if (agreedRoot !== undefined) {
+    verifiedCache.set(verifiedCacheKey(index, agreedRoot), {
+      envelope: result,
+      root: agreedRoot,
+      index,
+    });
+  }
+  return result;
 }

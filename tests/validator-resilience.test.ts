@@ -10,7 +10,7 @@
 // Hermetic DB: SQLITE_PATH points at a scratch dir next to the repo
 // (same pattern as tests/validator.test.ts), never the production DB.
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join, resolve } from "path";
 
@@ -35,9 +35,31 @@ import {
   RETRY_429_DEFAULT_DELAY_MS,
   RETRYABLE_STATUSES,
   VALIDATOR_MAX_ATTEMPTS,
-  handleValidator,
+  handleValidator as handleValidatorImpl,
   parseRetryAfterMs,
+  resetValidatorCachesForTests,
 } from "../src/handlers/validator";
+
+const TEST_FINALIZED_ROOT = "0x" + "ab".repeat(32);
+
+function isStateRootUrl(url: string): boolean {
+  return /\/eth\/v1\/beacon\/states\/[^/]+\/root\/?$/.test(url);
+}
+
+beforeEach(() => {
+  resetValidatorCachesForTests();
+});
+afterEach(() => {
+  resetValidatorCachesForTests();
+});
+
+/** Independent request: reset process-level cache / bucket first. */
+function handleValidator(
+  ...args: Parameters<typeof handleValidatorImpl>
+): ReturnType<typeof handleValidatorImpl> {
+  resetValidatorCachesForTests();
+  return handleValidatorImpl(...args);
+}
 
 async function expectApiError(promise: Promise<unknown>, status: number, code: string): Promise<ApiError> {
   try {
@@ -66,7 +88,7 @@ function beaconBody(index: number, effectiveBalance: string, status: string, opt
       validator: { effective_balance: effectiveBalance, slashed: false },
     },
     execution_optimistic: optimistic,
-    finalized: false,
+    finalized: true,
   });
 }
 
@@ -86,6 +108,22 @@ function scripted(script: Array<Step[] | undefined>): {
     const u = String(url);
     const src = BEACON_SOURCES.findIndex((b) => u.startsWith(b));
     if (src < 0) throw new Error("unexpected URL " + u);
+    // Root probes do not consume scripted validator steps and are not
+    // recorded in count(), so existing 429/retry call-count tests keep
+    // their meaning.
+    if (isStateRootUrl(u)) {
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: async () =>
+          JSON.stringify({
+            data: { root: TEST_FINALIZED_ROOT },
+            execution_optimistic: false,
+            finalized: true,
+          }),
+      } as unknown as Response;
+    }
     calls.push({ src, at: Date.now() });
     const steps = script[src];
     if (!steps || steps.length === 0) throw new Error("stub: source " + src + " down");
@@ -133,8 +171,8 @@ describe("parseRetryAfterMs (RFC 9110 Retry-After)", () => {
 
 describe("policy constants", () => {
   it("bounded: one retry, transient statuses only, capped wait", () => {
-    expect(BEACON_SOURCES.length).toBe(3);
-    expect(new Set(BEACON_SOURCES.map((b) => new URL(b).hostname)).size).toBe(3);
+    expect(BEACON_SOURCES.length).toBe(4);
+    expect(new Set(BEACON_SOURCES.map((b) => new URL(b).hostname)).size).toBe(4);
     expect(VALIDATOR_MAX_ATTEMPTS).toBe(2);
     expect([...RETRYABLE_STATUSES].sort()).toEqual([429, 500, 502, 503, 504]);
     expect(RETRY_AFTER_CAP_MS).toBeLessThan(4500);
@@ -156,7 +194,7 @@ describe("VR: retry on transient errors (stub fetch)", () => {
     const c0 = s.calls.filter((c) => c.src === 0);
     expect(c0[1].at - c0[0].at).toBeGreaterThanOrEqual(RETRY_429_DEFAULT_DELAY_MS - 20);
     const receipt = res.receipt as Receipt;
-    expect(receipt.quorum_votes).toBe("2/3 sources agreed");
+    expect(receipt.quorum_votes).toBe("2/4 sources agreed");
     expect(getReceiptEvidence(receipt.receipt_id).evidence?.toString("utf8")).toBe(OK1.body);
     expect(receipt.raw_response_sha256).toBe(sha256Hex(OK1.body));
   });
@@ -190,15 +228,19 @@ describe("VR: retry on transient errors (stub fetch)", () => {
     }
   }, 10000);
 
-  it("Retry-After above the cap is honoured by NOT retrying -> fails closed", async () => {
-    const before = receiptCount();
+  it("Retry-After above the cap is capped, then retried once inside the budget (A9)", async () => {
     const s = scripted([[{ status: 429, retryAfter: "5" }, OK1], [OK1], undefined]);
     const t0 = Date.now();
-    await expectApiError(handleValidator({ validator_index: "1" }, { fetchImpl: s.fetchImpl }), 502, "QUORUM_UNREACHABLE");
-    expect(s.count(0)).toBe(1);
-    expect(Date.now() - t0).toBeLessThan(1000);
-    expect(receiptCount()).toBe(before);
-  });
+    const res = (await handleValidator({ validator_index: "1" }, { fetchImpl: s.fetchImpl })) as Record<string, unknown>;
+    expect(res.verdict).toBe("verified");
+    expect(s.count(0)).toBe(2);
+    const c0 = s.calls.filter((c) => c.src === 0);
+    // Capped at RETRY_AFTER_CAP_MS (2 s), not the requested 5 s, and
+    // not skipped. Leave slack for timer jitter.
+    expect(c0[1].at - c0[0].at).toBeGreaterThanOrEqual(RETRY_AFTER_CAP_MS - 50);
+    expect(c0[1].at - c0[0].at).toBeLessThan(3500);
+    expect(Date.now() - t0).toBeLessThan(4500);
+  }, 8000);
 
   it("no retry when the wait would leave < MIN_RETRY_WINDOW_MS of budget", async () => {
     const before = receiptCount();
@@ -294,7 +336,7 @@ describe("VR: third source fallback (stub fetch)", () => {
     expect(res.confidence).toBe(1.0);
     expect(res.source).toBe(BEACON_SOURCES[1] + " + " + BEACON_SOURCES[2]);
     expect(String(res.source)).not.toContain(new URL(BEACON_SOURCES[0]).hostname);
-    expect((res.receipt as Receipt).quorum_votes).toBe("2/3 sources agreed");
+    expect((res.receipt as Receipt).quorum_votes).toBe("2/4 sources agreed");
     expect((res.receipt as Receipt).upstream_url.startsWith(BEACON_SOURCES[0])).toBe(false);
   });
 
@@ -348,6 +390,7 @@ describe("VR: third source fallback (stub fetch)", () => {
 
   it("not-found needs two 404s and no answer", async () => {
     const before = receiptCount();
+    resetValidatorCachesForTests();
     await expectApiError(
       handleValidator({ validator_index: "99999999" }, { fetchImpl: scripted([[NF], [NF], undefined]).fetchImpl }),
       422,
@@ -406,6 +449,7 @@ describe("V-M1: order-independent verdicts (wait while the third can still answe
     for (let dissent = 0; dissent < 3; dissent++) {
       for (const delays of delayOrders) {
         const script = [0, 1, 2].map((i) => at(i === dissent ? Y : X, delays[i]));
+        resetValidatorCachesForTests();
         await expectApiError(
           handleValidator({ validator_index: "1" }, { fetchImpl: scripted(script).fetchImpl }),
           502,
@@ -444,7 +488,7 @@ describe("V-M1: order-independent verdicts (wait while the third can still answe
     const wall = Date.now() - t0;
     expect(res.verdict).toBe("verified");
     expect(res.effective_balance).toBe(32000000000);
-    expect((res.receipt as Receipt).quorum_votes).toBe("2/3 sources agreed");
+    expect((res.receipt as Receipt).quorum_votes).toBe("2/4 sources agreed");
     expect(res.source).toBe(BEACON_SOURCES[0] + " + " + BEACON_SOURCES[1]);
     expect(wall).toBeGreaterThanOrEqual(4500 - 30);
     expect(wall).toBeLessThan(4500 + 300);
@@ -502,7 +546,7 @@ describe("V-M1: order-independent verdicts (wait while the third can still answe
     expect(receiptCount()).toBe(before);
   }, 8000);
 
-  it("429 with Retry-After: 1, dissent on the retry -> 502; agreement on the retry -> verified 3/3", async () => {
+  it("429 with Retry-After: 1, dissent on the retry -> 502; agreement on the retry -> verified 3/4", async () => {
     await expectApiError(
       handleValidator(
         { validator_index: "1" },
@@ -515,7 +559,7 @@ describe("V-M1: order-independent verdicts (wait while the third can still answe
       { validator_index: "1" },
       { fetchImpl: scripted([at(X, 50), at(X, 60), [{ status: 429, retryAfter: "1" }, { status: 200, body: X }]]).fetchImpl },
     )) as Record<string, unknown>;
-    expect((ok.receipt as Receipt).quorum_votes).toBe("3/3 sources agreed");
+    expect((ok.receipt as Receipt).quorum_votes).toBe("3/4 sources agreed");
   }, 8000);
 
   it("definitively failed third -> verified immediately, no fixed wait", async () => {
@@ -525,7 +569,7 @@ describe("V-M1: order-independent verdicts (wait while the third can still answe
       { label: "network error", third: [new Error("ECONNRESET")], maxMs: 300 },
       { label: "wrong validator index", third: [{ status: 200, body: beaconBody(999, "32000000000", "active_ongoing") }], maxMs: 300 },
       { label: "optimistic twice (after its one retry)", third: [{ status: 200, body: OPT }], maxMs: RETRY_BASE_DELAY_MS + 300 },
-      { label: "429 asking > cap (Retry-After 5)", third: [{ status: 429, retryAfter: "5" }], maxMs: 300 },
+      { label: "429 asking > cap then still 429 (Retry-After 5, capped retry)", third: [{ status: 429, retryAfter: "5" }], maxMs: RETRY_AFTER_CAP_MS + 400 },
       { label: "429 with no budget left for a retry", third: [{ status: 429 }], timeoutMs: 1500, maxMs: 300 },
       { label: "503 retried once then 503", third: [{ status: 503 }], maxMs: RETRY_BASE_DELAY_MS + 300 },
     ];
@@ -552,13 +596,13 @@ describe("V-M1: order-independent verdicts (wait while the third can still answe
     expect(wall).toBeLessThan(1200 + 300);
   }, 8000);
 
-  it("all three agree -> 3/3, all three named; a failed third does not block", async () => {
+  it("all three staged sources agree -> 3/4, all three named; a failed third does not block", async () => {
     const all = (await handleValidator(
       { validator_index: "1" },
       { fetchImpl: scripted([at(X, 10), at(X, 30), at(X, 60)]).fetchImpl },
     )) as Record<string, unknown>;
-    expect((all.receipt as Receipt).quorum_votes).toBe("3/3 sources agreed");
-    expect(all.source).toBe(BEACON_SOURCES.join(" + "));
+    expect((all.receipt as Receipt).quorum_votes).toBe("3/4 sources agreed");
+    expect(all.source).toBe(BEACON_SOURCES.slice(0, 3).join(" + "));
     const t0 = Date.now();
     const failed = (await handleValidator(
       { validator_index: "1" },
