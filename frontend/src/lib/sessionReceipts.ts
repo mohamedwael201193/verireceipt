@@ -193,7 +193,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function isValidReceipt(v: unknown): v is Receipt {
+export function isValidReceipt(v: unknown): v is Receipt {
   if (!isRecord(v)) return false;
   return (
     isNonEmptyString(v.receipt_id) &&

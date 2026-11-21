@@ -106,10 +106,14 @@ export default function ReceiptsLedger({ receipts, onInspect, showToast }: Recei
     <div className="wrap">
       <div className="view-head">
         <div>
-          <div className="kicker">// session ledger · only calls this browser made</div>
+          <div className="kicker">// session ledger · only calls this browser tab made</div>
           <h1 className="h1-ed">
             Receipts <span className="serif-i">Ledger.</span>
           </h1>
+          <div className="note-line" style={{ marginTop: 6 }}>
+            Rows survive leaving this page and reloading (this tab only). Receipted rows are also saved to the
+            /receipts page ledger; refusals and /health pings have no receipt and stay here.
+          </div>
         </div>
         <button type="button" className="btn-ghost" onClick={exportJsonl} disabled={receipts.length === 0}>
           Export ledger.jsonl ↓

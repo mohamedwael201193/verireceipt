@@ -33,7 +33,26 @@ import ReceiptsLedger from "./dashboard/ReceiptsLedger";
 import StatusDocs from "./dashboard/StatusDocs";
 import "./dashboard/dashboard.css";
 import type { AuthMode, DashboardView, LiveReceipt, ScopeSamples, ScopeSeriesKey } from "./dashboard/types";
-import { DIAMOND_SHORT, LEDGER_CAP, appendToLedger, isHealthOk, utcClock } from "./dashboard/utils";
+import { DIAMOND_SHORT, LEDGER_CAP, appendToLedger, isHealthOk, persistLiveReceiptToSessionLedger, utcClock } from "./dashboard/utils";
+import { readDashboardRows, writeDashboardRows } from "./dashboard/dashboardRows";
+import { SESSION_RECEIPTS_GEN_KEY, SESSION_RECEIPTS_KEY } from "../lib/sessionReceipts";
+
+/** Persist outcome of one recorded row (QA-01): "persisted" = written to
+ *  the shared /receipts ledger; "skipped" = nothing to write (refusal,
+ *  /health, or the ledger was cleared mid-call); "failed" = browser
+ *  storage refused the write. */
+export type RecordOutcome = "persisted" | "skipped" | "failed";
+
+/** Rebuild the oscilloscope samples from restored rows (oldest first). */
+function samplesFromRows(rows: LiveReceipt[]): ScopeSamples {
+  const out: ScopeSamples = { tx: [], grid: [], tvl: [], route: [] };
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const series = seriesForIntent(rows[i].intent);
+    if (series) out[series].push(rows[i].latencyMs);
+  }
+  for (const k of Object.keys(out) as ScopeSeriesKey[]) out[k] = out[k].slice(-SCOPE_CAP);
+  return out;
+}
 
 const SCOPE_CAP = 48;
 
@@ -54,8 +73,11 @@ function seriesForIntent(intent: string): ScopeSeriesKey | null {
 
 export default function Dashboard() {
   const [view, setView] = useState<DashboardView>("desk");
-  const [receipts, setReceipts] = useState<LiveReceipt[]>([]);
-  const [samples, setSamples] = useState<ScopeSamples>({ tx: [], grid: [], tvl: [], route: [] });
+  // QA-01: restore this tab's rows (sessionStorage, tied to the shared
+  // ledger's clear generation) so leaving /dashboard or reloading no
+  // longer resets the table to zero.
+  const [receipts, setReceipts] = useState<LiveReceipt[]>(() => readDashboardRows());
+  const [samples, setSamples] = useState<ScopeSamples>(() => samplesFromRows(receipts));
   const [inspected, setInspected] = useState<LiveReceipt | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("sponsored");
@@ -84,7 +106,12 @@ export default function Dashboard() {
 
   // Record a live receipt in the session ledger (+ oscilloscope sample).
   // The ledger is capped at the latest LEDGER_CAP receipts.
-  const onRecord = useCallback((receipt: LiveReceipt) => {
+  // QA-01: every receipted row is ALSO written to the shared /receipts
+  // ledger (the helper existed but was never called from here, so
+  // Dashboard receipts never reached /receipts). The outcome is returned
+  // so callers only claim "saved to the ledger" when the write happened.
+  const onRecord = useCallback((receipt: LiveReceipt): RecordOutcome => {
+    const outcome = persistLiveReceiptToSessionLedger(receipt);
     setReceipts((prev) => appendToLedger(prev, receipt));
     const series = seriesForIntent(receipt.intent);
     if (series) {
@@ -93,6 +120,25 @@ export default function Dashboard() {
         [series]: [...prev[series], receipt.latencyMs].slice(-SCOPE_CAP),
       }));
     }
+    return outcome;
+  }, []);
+
+  // QA-01: keep this tab's rows across route changes and reloads.
+  useEffect(() => {
+    writeDashboardRows(receipts);
+  }, [receipts]);
+
+  // A Clear on /receipts in ANOTHER tab bumps the shared clear
+  // generation (or removes the ledger): drop this page's rows too, so a
+  // cleared ledger is never shown here as still populated.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== SESSION_RECEIPTS_GEN_KEY && !(e.key === SESSION_RECEIPTS_KEY && e.newValue === null)) return;
+      setReceipts([]);
+      setSamples({ tx: [], grid: [], tvl: [], route: [] });
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   // Live UTC clock.
@@ -345,7 +391,10 @@ export default function Dashboard() {
             <span style={{ color: "var(--text)" }}>{utcNow} UTC</span>
             <span className="sep">|</span>
             <span>
-              Session receipts: <strong style={{ color: "var(--accent)" }}>{receipts.length}</strong>
+              Receipts (this tab): <strong style={{ color: "var(--accent)" }}>{receipts.filter((r) => r.receipt !== null).length}</strong>
+              {receipts.some((r) => r.receipt === null) && (
+                <> · refusals/pings: {receipts.filter((r) => r.receipt === null).length}</>
+              )}
             </span>
             {receipts.length >= LEDGER_CAP && (
               <>

@@ -21,7 +21,9 @@ interface StreamLine {
 }
 
 interface MissionDeskProps {
-  onRecord: (receipt: LiveReceipt) => void;
+  /** Returns the shared-ledger write outcome (QA-01) so the run toast
+   *  only claims rows that were actually saved. */
+  onRecord: (receipt: LiveReceipt) => "persisted" | "skipped" | "failed" | void;
   onInspect: (receipt: LiveReceipt) => void;
   showToast: (msg: string) => void;
 }
@@ -116,6 +118,8 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
     const startedAt = performance.now();
     const checks = preset.buildChecks(inputs);
     const settled: LiveReceipt[] = [];
+    let persisted = 0;
+    let saveFailed = 0;
 
     // try/finally: a throwing check must never wedge the UI with the Run
     // button permanently disabled and the stream stuck on RUNNING.
@@ -133,7 +137,9 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
         if (runToken.current !== token) return;
         const receipt = toLiveReceipt(check.intent, check.query, check.requestUrl, outcome);
         settled.push(receipt);
-        onRecord(receipt);
+        const saved = onRecord(receipt);
+        if (saved === "persisted") persisted += 1;
+        else if (saved === "failed") saveFailed += 1;
         setRunReceipts([...settled]);
         appendLine({
           time: new Date().toISOString().slice(11, 19),
@@ -158,8 +164,16 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
       const totalMs = performance.now() - startedAt;
       setRunTotalMs(totalMs);
       setEvaluation(preset.evaluate(settled.map((receipt, i) => ({ check: checks[i], receipt }))));
-      setStreamState("COMPLETE · APPENDED TO LEDGER");
-      showToast(`Desk run settled — ${settled.length} receipt(s) added to ledger`);
+      // QA-01: count only what really happened. A refusal has no receipt
+      // and is never written to the shared ledger; a storage-refused
+      // write is reported, not hidden behind a success message.
+      const noReceipt = settled.filter((r) => r.receipt === null).length;
+      setStreamState(persisted > 0 ? "COMPLETE · RECEIPTS SAVED TO LEDGER" : "COMPLETE");
+      showToast(
+        `Desk run settled — ${persisted} receipt(s) saved to the Receipts ledger` +
+          (noReceipt > 0 ? ` · ${noReceipt} refusal(s) without a receipt (shown on this page only)` : "") +
+          (saveFailed > 0 ? ` · ${saveFailed} NOT saved: browser storage refused the write` : ""),
+      );
     } finally {
       // Always reset the running state — including on Cancel, on unmount
       // (a no-op then), and if any check throws. A new run cannot have

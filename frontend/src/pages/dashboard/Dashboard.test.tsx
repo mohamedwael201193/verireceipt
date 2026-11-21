@@ -125,6 +125,14 @@ function makeReceipt(overrides: Partial<LiveReceipt> & { intent: string }): Live
   return toLiveReceipt(overrides.intent, overrides.query ?? "q", "https://example.com", outcome);
 }
 
+
+// QA-01: the Dashboard now restores its rows from sessionStorage, so each
+// test starts from an empty tab session (rows from an earlier test must
+// not leak into the next one's KPIs).
+beforeEach(() => {
+  sessionStorage.clear();
+});
+
 describe("Dashboard page", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", (url: string) => mockFetch(url));
@@ -149,7 +157,7 @@ describe("Dashboard page", () => {
     expect(screen.getByText("$1.50 Test USDC")).toBeTruthy();
     expect(screen.queryByText(/\$1\.40/)).toBeNull();
     // The session ledger chrome renders (starts empty — 0 receipts).
-    expect(await screen.findByText(/Session receipts:/)).toBeTruthy();
+    expect(await screen.findByText(/Receipts \(this tab\):/)).toBeTruthy();
   });
 
   it("shows the honest empty ledger state when no calls have been made", () => {
@@ -162,7 +170,7 @@ describe("Dashboard page", () => {
   it("a Mission Desk run actually appends live receipts to the ledger", async () => {
     render(<Dashboard />);
     fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
-    expect(await screen.findByText(/COMPLETE · APPENDED TO LEDGER/, {}, { timeout: 15000 })).toBeTruthy();
+    expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
     // The verdict is derived from the live (mocked) responses, not canned.
     expect(screen.getByText(/Score 100 \/ 100/)).toBeTruthy();
     // Switch to the Receipts view: the run's receipts are really there.
@@ -180,7 +188,7 @@ describe("Dashboard page", () => {
     const entityInput = screen.getByLabelText(/Entity \/ Protocol/) as HTMLInputElement;
     fireEvent.change(entityInput, { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
-    expect(await screen.findByText(/COMPLETE · APPENDED TO LEDGER/, {}, { timeout: 15000 })).toBeTruthy();
+    expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
     // The TVL check ran with the empty value and was refused (400) —
     // the stream shows the real refusal, not a verdict on aave-v3.
     expect(screen.getByText(/Invalid parameter "protocol"/)).toBeTruthy();
@@ -284,7 +292,7 @@ describe("Dashboard page", () => {
     render(<Dashboard />);
     // Open the receipt drawer via a desk run row.
     fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
-    expect(await screen.findByText(/COMPLETE · APPENDED TO LEDGER/, {}, { timeout: 15000 })).toBeTruthy();
+    expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
     fireEvent.click(screen.getByText("ONCHAIN_TX_LOOKUP"));
     const receiptAside = screen.getByRole("dialog", { name: "Receipt Inspector" });
     expect(receiptAside.getAttribute("inert")).toBeNull();
@@ -385,7 +393,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     vi.stubGlobal("fetch", (url: string) => oversize200Fetch(url));
     const { container } = render(<Dashboard />);
     fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
-    expect(await screen.findByText(/COMPLETE · APPENDED TO LEDGER/, {}, { timeout: 15000 })).toBeTruthy();
+    expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
     // Verdict logic (presets.ts, untouched) reads the probe error body:
     // all four refusals score 0.
     expect(screen.getByText(/Score 0 \/ 100/)).toBeTruthy();
@@ -460,7 +468,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     // --- m13-sec: SEC 10-K Compliance Audit (filings + route refused).
     fireEvent.click(screen.getByRole("button", { name: /SEC 10-K Compliance Audit/ }));
     fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
-    expect(await screen.findByText(/COMPLETE · APPENDED TO LEDGER/, {}, { timeout: 15000 })).toBeTruthy();
+    expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
     expect(screen.getByText(/Score 0 \/ 100/)).toBeTruthy();
     // (J2 R5 B2) The filings refusal body {error, message} is truthy,
     // so the old `filingsBody ? ...` rendered "undefined filings for
@@ -480,7 +488,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     // --- m12: Grid LMP Dispatch Check (grid + route refused).
     fireEvent.click(screen.getByRole("button", { name: /Mission 12 · Mining/ }));
     fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
-    expect(await screen.findByText(/COMPLETE · APPENDED TO LEDGER/, {}, { timeout: 15000 })).toBeTruthy();
+    expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
     expect(screen.getByText(/Score 0 \/ 100/)).toBeTruthy();
     // (J2 R5 B2) The grid refusal body rendered "— / MWh ·  ·
     // undefined" — the card must fall back to the honest text.
@@ -507,7 +515,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     // Select the Reverted Counterparty Trap preset (m13-reverted).
     fireEvent.click(screen.getByRole("button", { name: /Reverted Counterparty Trap/ }));
     fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
-    expect(await screen.findByText(/COMPLETE · APPENDED TO LEDGER/, {}, { timeout: 15000 })).toBeTruthy();
+    expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
     expect(screen.getByText(/Score 0 \/ 100/)).toBeTruthy();
     // (B1a) Receipt Status must NOT claim an archive-quorum
     // confirmation that never happened.
@@ -531,7 +539,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
   it("positive control: a genuine 200 WITH a receipt still shows verified/OK everywhere", async () => {
     const { container } = render(<Dashboard />);
     fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
-    expect(await screen.findByText(/COMPLETE · APPENDED TO LEDGER/, {}, { timeout: 15000 })).toBeTruthy();
+    expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
     expect(screen.getByText(/Score 100 \/ 100/)).toBeTruthy();
     // Desk run table: 4 green 200 badges.
     expect(green200Badges(container)).toHaveLength(4);
