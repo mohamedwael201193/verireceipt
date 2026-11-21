@@ -53,8 +53,18 @@ describe("SprintMatrix — tooltip renders on hover", () => {
   it("shows the column label tooltip for the last column", () => {
     render(<MemoryRouter><SprintMatrix /></MemoryRouter>);
     fireEvent.mouseOver(
-      screen.getByRole("button", { name: "d11 · Dec 1 · 6 final submissions · gate 1/6" }),
+      screen.getByRole("button", { name: "d11 · Dec 1 · final evidence pack · gate 1/6" }),
     );
-    expect(screen.getByText("d11 · Dec 1 · 6 final submissions · gate 1/6")).toBeInTheDocument();
+    expect(screen.getByText("d11 · Dec 1 · final evidence pack · gate 1/6")).toBeInTheDocument();
+  });
+});
+
+
+describe("SprintMatrix — internal targets versus official requirements", () => {
+  it("labels the roadmap as internal and states the official UTC deadline without a registration freeze", () => {
+    render(<MemoryRouter><SprintMatrix /></MemoryRouter>);
+    expect(screen.getByText(/Our internal build milestones, not contest requirements or live progress/)).toBeInTheDocument();
+    expect(screen.getByText(/December 1, 2026 at 23:59 UTC/)).toBeInTheDocument();
+    expect(screen.queryByText(/Nov 21 freeze|6 verified submissions|6 final submissions/)).toBeNull();
   });
 });

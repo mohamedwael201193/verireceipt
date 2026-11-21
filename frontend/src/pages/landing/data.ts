@@ -210,26 +210,26 @@ export interface SprintStep {
 /**
  * Sprint roadmap — a dated plan (Nov 20 → Dec 1), kept as static plan copy
  * (DESIGN-SPEC §8 A17: no live progress source exists for these gates).
- * Default step is day 01 (Nov 20, the current day).
+ * Default step is the first milestone, not a live progress claim.
  */
 export const SPRINT_STEPS: SprintStep[] = [
   { label: "01 Star & Setup", cols: [0], g1: "// day 01 · Nov 20 — star bounties + Render deploy", g2: "// gate: /health 200 OK · persistent storage active · intent handlers live (six served today)" },
-  { label: "02 Freeze Cutoff", cols: [1], g1: "// day 02 · Nov 21 EOD — registerMiner on Diamond 0x72a7…", g2: `// gate: ${MINER_BOND_USD_TEXT} Test USDC bond · activation_status: active` },
+  { label: "02 Registration Check", cols: [1], g1: "// internal target · Nov 21 — verify registration and activation", g2: `// gate: ${MINER_BOND_USD_TEXT} Test USDC bond · activation_status: active` },
   { label: "03 Harden & Traps", cols: [2], g1: "// days 03–04 · Nov 22–23 — 24-case adversarial trap suite", g2: "// gate: 24/24 pass · 0% 503 · public Update #1 posted" },
-  { label: "04 Mission Desk", cols: [3], g1: "// days 05–06 · Nov 24–25 — 100+ ranked EIP-191 escrow calls", g2: "// gate: 100+ signal_hash rows committed to desk/ledger/purchases.jsonl" },
-  { label: "05 Growth & Grace Exit", cols: [4, 5], g1: "// days 07–09 · Nov 26–28 — grace exits Nov 28 · external dev reruns", g2: "// gate: ranked epoch standings + tutorial + Updates #2 & #3" },
-  { label: "06 Submit Pack", cols: [6, 7], g1: "// days 10–11 · Nov 29–Dec 1 — 3-min demo video + 6 filings", g2: "// gate: 5 Track 1 per-Intent + 1 Track 3 Desk submission" },
+  { label: "04 Mission Desk", cols: [3], g1: "// days 05–06 · Nov 24–25 — purposeful paid mission runs", g2: "// gate: different inputs, useful outputs and matched receipts in the Desk ledger" },
+  { label: "05 Growth & Evaluation", cols: [4, 5], g1: "// internal target · Nov 26–28 — inspect evaluator state + external dev reruns", g2: "// gate: ranked epoch standings + tutorial + Updates #2 & #3" },
+  { label: "06 Submit Pack", cols: [6, 7], g1: "// internal target · Nov 29–Dec 1 — execution demo + track evidence", g2: "// official deadline: Dec 1, 2026 · 23:59 UTC · submit through the H2 website" },
 ];
 
 export const SPRINT_COLUMN_LABELS = [
   "d1 · Nov 20 · star + Render deploy",
-  "d2 · Nov 21 · registerMiner freeze",
+  "d2 · Nov 21 · registration check",
   "d3–4 · Nov 22–23 · 24-trap audit",
-  "d5–6 · Nov 24–25 · 100+ Desk calls",
+  "d5–6 · Nov 24–25 · paid mission runs",
   "d7–8 · Nov 26–27 · tutorial + devs",
-  "d9 · Nov 28 · grace exits ranked",
+  "d9 · Nov 28 · evaluation review",
   "d10 · Nov 29–30 · 3-min demo video",
-  "d11 · Dec 1 · 6 final submissions",
+  "d11 · Dec 1 · final evidence pack",
 ];
 
 /**

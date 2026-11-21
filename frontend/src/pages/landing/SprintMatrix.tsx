@@ -2,7 +2,7 @@
 //
 // A dated plan (Nov 20 → Dec 1), kept as static plan copy (DESIGN-SPEC
 // §8 A17: no live progress source exists for these gates). Default step
-// is day 01 (Nov 20, the current day).
+// is the first planning milestone; this is not live progress.
 import { Link } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { SPRINT_COLUMN_LABELS, SPRINT_STEPS } from "./data";
@@ -64,8 +64,8 @@ export function SprintMatrix() {
             <span className="it">Ranked in days.</span>
           </h2>
           <p style={{ fontSize: 14.5, color: "var(--muted)", maxWidth: 390, marginBottom: 28 }}>
-            Six milestones across the final 11 days of Telegraph Season II. Register before the Nov 21 freeze, exit
-            grace Nov 28, and ship 6 verified submissions by Dec 1.
+            Our internal build milestones, not contest requirements or live progress. Six served intents do not mean six
+            submissions. The official Season II deadline is December 1, 2026 at 23:59 UTC.
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14 }}>
             <Link to="/#probe" className="btn-solid-accent" style={{ padding: "11px 22px", fontSize: 13 }}>
@@ -78,7 +78,7 @@ export function SprintMatrix() {
         <div>
           <div className="sprint-cols mono" style={{ fontSize: 10.5, color: "var(--muted)", textAlign: "center", marginBottom: 10 }}>
             <span>prep</span>
-            <span>freeze</span>
+            <span>register</span>
             <span>harden</span>
             <span>desk</span>
             <span>growth</span>
