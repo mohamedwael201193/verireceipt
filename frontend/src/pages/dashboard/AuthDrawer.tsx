@@ -3,7 +3,7 @@
 // Replaces the auth drawer values (DESIGN-SPEC §6 D-14, §8 A3): the
 // fabricated "$1.84 / 184 checks" sponsored balance is NOT displayed. The
 // sponsored card shows the on-chain registration bond instead ($1.50 =
-// minerBond(6152), see lib/minerBond.ts), and
+// minerBond(6160), see lib/minerBond.ts), and
 // the 5/day per-IP limit is labelled as Desk config (render.yaml:
 // DESK_FREE_CHECKS_PER_IP_DAY=5). r9: src/ reads no DESK_* variable, so the
 // limit is labelled "not enforced yet". Desk Phase D: the Desk AGENT's own
@@ -76,7 +76,7 @@ export default function AuthDrawer({ open, authMode, onSelectMode, onClose, show
               <div className="card" style={{ padding: 12 }}>
                 <div className="kpi-lbl">Miner Bond</div>
                 <div className="mono" style={{ fontSize: 18, color: "var(--accent)" }}>{MINER_BOND_USDC}</div>
-                <div className="kpi-sub">on-chain minerBond(6152) · 6 intents</div>
+                <div className="kpi-sub">on-chain minerBond(6160) · 6 intents</div>
               </div>
               <div className="card" style={{ padding: 12 }}>
                 <div className="kpi-lbl">Per-IP Limit</div>
@@ -86,7 +86,7 @@ export default function AuthDrawer({ open, authMode, onSelectMode, onClose, show
             </div>
             <div className="note-line">
               No live escrow balance is exposed by the miner API, so no runway figure is shown here. The {MINER_BOND_USDC} figure above is
-              the bond of registration 6152 as read on-chain on 2026-11-21 (minerBond(6152) = quoteMinerBond(6) =
+              the bond of registration 6160 as read on-chain on 2026-11-21 (minerBond(6160) = quoteMinerBond(6) =
               1,500,000 base units); the Status page re-reads it live. Sepolia registration status is on the Status page and
               is not called active unless the live Telegraph node says so.
             </div>

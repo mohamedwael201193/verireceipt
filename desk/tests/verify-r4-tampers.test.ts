@@ -9,7 +9,7 @@ import {
 } from "../src/verify";
 import type { FieldStatus } from "../../src/core/shapedFields";
 import { TASK_CATALOG, VALUE_FIELD_BY_INTENT } from "../src/missions";
-import { VERIRECEIPT_ONCHAIN_MINER_ID } from "../src/constants";
+import { VERIRECEIPT_ONCHAIN_MINER_ID, VERIRECEIPT_ONCHAIN_MINER_IDS } from "../src/constants";
 
 const fx = (n: string) => join(__dirname, "fixtures", n);
 const signal = JSON.parse(readFileSync(fx("signal-m12-caiso.json"), "utf8"));
@@ -40,7 +40,7 @@ function includedDelivery(over: Record<string, unknown> = {}): DeliveryProof {
     delivery: {
       receipt_hash: honest.telegraph_receipt.receipt_hash,
       payer: PAYER,
-      miner_id: VERIRECEIPT_ONCHAIN_MINER_ID,
+      miner_id: honest.telegraph_receipt.miner, // the registration that served this committed purchase (6152)
       intent: honest.intent,
       usdc: 10000,
       ...over,
@@ -112,7 +112,7 @@ describe("J2 r3 / J1 r3 tampers (desk-d r4)", () => {
       payer: PAYER,
       usdc: 10000,
       intent: honest.intent,
-      miner_id: VERIRECEIPT_ONCHAIN_MINER_ID,
+      miner_id: honest.telegraph_receipt.miner, // the registration that served this committed purchase (6152)
     };
     const a = storedDeliveryAgrees(stored, liveD, honest);
     expect(a.ok).toBe(false);
@@ -251,5 +251,19 @@ describe("J2 r3 / J1 r3 tampers (desk-d r4)", () => {
       expect(c.intent).toBe(r.intent);
       expect(c.valueField).toBe(r.value_field);
     }
+  });
+});
+
+describe("pin-6160: registration ids after updateMiner(6152) -> 6160", () => {
+  it("accepts the current id and keeps 6152 for committed purchases, nothing else", () => {
+    expect(VERIRECEIPT_ONCHAIN_MINER_ID).toBe("6160");
+    expect([...VERIRECEIPT_ONCHAIN_MINER_IDS].sort()).toEqual(["6152", "6160"]);
+    expect(honest.telegraph_receipt.miner).toBe("6152");
+  });
+  it("a delivery row naming a different registration than the receipt fails", () => {
+    expect(deliveryIsOk(includedDelivery({ miner_id: "6160" }), honest.telegraph_receipt, honest.payer, honest.intent)).toBe(false);
+  });
+  it("an unknown registration id fails", () => {
+    expect(deliveryIsOk(includedDelivery({ miner_id: "6153" }), { ...honest.telegraph_receipt, miner: undefined }, honest.payer, honest.intent)).toBe(false);
   });
 });

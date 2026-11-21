@@ -4,7 +4,7 @@
  * On-chain facts (Ethereum Sepolia, Diamond 0x72a70e…a08b, read 2026-11-21):
  *   minerBondParams() -> [1000000, 100000, 70000, 9, 172800]
  *   quoteMinerBond(6) -> [1500000, 1500000]   (6 intents)
- *   minerBond(6152)   -> 1500000              (our live registration)
+ *   minerBond(6160)   -> 1500000              (our live registration)
  *   registerMiner tx 0x918ef2e6…20e2 moved 1500000 Test USDC operator -> Diamond.
  * Bonds on this Diamond are paid in Sepolia Test USDC (6 decimals), per
  * telegraph-docs protocol/addresses-and-params.md. Pricing per
@@ -13,16 +13,16 @@
  * $1.00 + 5 x $0.10 = $1.50.
  *
  * Static displays use the labelled constant below. The Status page also
- * re-reads minerBond(6152) and quoteMinerBond(6) live and shows any
+ * re-reads minerBond(6160) and quoteMinerBond(6) live and shows any
  * disagreement instead of hiding it.
  */
 
-export const BOND_REGISTRATION_ID = 6152;
+export const BOND_REGISTRATION_ID = 6160;
 export const BOND_INTENT_COUNT = 6;
-/** 6-decimal Test USDC base units: on-chain minerBond(6152) == quoteMinerBond(6). */
+/** 6-decimal Test USDC base units: on-chain minerBond(6160) == quoteMinerBond(6). */
 export const MINER_BOND_BASE_UNITS = 1_500_000;
 export const MINER_BOND_SOURCE =
-  "on-chain minerBond(6152) = quoteMinerBond(6) = 1,500,000 Test USDC base units (Sepolia, read 2026-11-21)";
+  "on-chain minerBond(6160) = quoteMinerBond(6) = 1,500,000 Test USDC base units (Sepolia, read 2026-11-21)";
 
 /** minerBondParams() as read on 2026-11-21 (USD, 6 decimals). */
 export const MINER_BOND_PARAMS = {
@@ -99,7 +99,7 @@ function firstWord(hex: string): bigint {
 }
 
 export interface LiveMinerBond {
-  /** minerBond(6152), Test USDC base units. */
+  /** minerBond(6160), Test USDC base units. */
   registrationBond: bigint;
   /** quoteMinerBond(6) first return value, base units. */
   quoteForIntents: bigint;

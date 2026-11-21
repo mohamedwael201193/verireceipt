@@ -80,17 +80,17 @@ Field names vary per endpoint; `confidence`, `verdict`, `source`, and
 
 ## Registration facts
 
-- **registrationId:** `6152` on Ethereum Sepolia (chainId 11155111). Node status `active` at
-  `GET https://devnode.telegraphprotocol.com/api/miners/6152` (checked 2026-11-21 14:08 Africa/Cairo).
-  Created by `updateMiner(6150, …)` in tx
-  [`0x775fcc05adca9be05188554e0487b46e09f207bc5ea1de89a2fd86e2b79f07cb`](https://sepolia.etherscan.io/tx/0x775fcc05adca9be05188554e0487b46e09f207bc5ea1de89a2fd86e2b79f07cb)
-  (block 12181672). The earlier registration 6150 is superseded and shows `deregistered` on the node.
-- **Registered YAML:** [`miner.yaml` @ `4f471e4`](https://raw.githubusercontent.com/mohamedwael201193/verireceipt/4f471e48296d7225a482ef70025352e954b9cf5d/miner.yaml),
-  SHA-256 `0x1653f3c00f8ee983bc2d2b36579c665c94ce2215ab1bb0d526564a9aec183e9f`
+- **registrationId:** `6160` on Ethereum Sepolia (chainId 11155111). Node status `active` at
+  `GET https://devnode.telegraphprotocol.com/api/miners/6160` (checked 2026-11-21 17:38 UTC).
+  Created by `updateMiner(6152, …)` in tx
+  [`0x93a5f833726da803d39396e208c5404889e0b64dbeb78519914fe1d18e3c1a8e`](https://sepolia.etherscan.io/tx/0x93a5f833726da803d39396e208c5404889e0b64dbeb78519914fe1d18e3c1a8e)
+  (block 12183278). The earlier registration 6152 is superseded and shows `deregistered` on the node.
+- **Registered YAML:** [`miner.yaml` @ `70d7a15`](https://raw.githubusercontent.com/mohamedwael201193/verireceipt/70d7a15ec1fa61569e4a003fd21b8af46a97cfa9/miner.yaml),
+  SHA-256 `0xa97b1cb87dbaaba87cf4b15e284352407a4a72c06cc568c47bfe3980e5cba06a`
 - **Diamond (Telegraph):** `0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b`
-- **Floor price (on-chain):** `minPriceUsdc = 10000` = $0.01, the protocol minimum (getMiner(6152)).
+- **Floor price (on-chain):** `minPriceUsdc = 10000` = $0.01, the protocol minimum (getMiner(6160)).
   Telegraph docs (using/api-keys.md): a request costs "usually about $0.01" per miner call.
-- **Bond (on-chain):** $1.50 Test USDC = `minerBond(6152)` = `quoteMinerBond(6)` = 1,500,000 base units
+- **Bond (on-chain):** $1.50 Test USDC = `minerBond(6160)` = `quoteMinerBond(6)` = 1,500,000 base units
   ($1.00 first intent + 5 × $0.10, per `minerBondParams()`), read 2026-11-21.
 - **Miner id / slug:** `774921` / `verireceipt`
 

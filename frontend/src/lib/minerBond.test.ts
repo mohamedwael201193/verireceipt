@@ -21,7 +21,7 @@ import { SPRINT_STEPS } from "../pages/landing/data";
 const word = (n: number) => "0x" + n.toString(16).padStart(64, "0");
 
 describe("miner bond (single source)", () => {
-  it("is the on-chain 6152 bond for six intents: 1,500,000 = $1.50", () => {
+  it("is the on-chain 6160 bond for six intents: 1,500,000 = $1.50", () => {
     expect(BOND_REGISTRATION_ID).toBe(SEPOLIA_REGISTRATION_ID);
     expect(BOND_INTENT_COUNT).toBe(6);
     expect(MINER_BOND_BASE_UNITS).toBe(1_500_000);
@@ -65,7 +65,7 @@ describe("miner bond (single source)", () => {
 describe("fetchLiveMinerBond", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("reads minerBond(6152) and quoteMinerBond(6) and reports a match", async () => {
+  it("reads minerBond(6160) and quoteMinerBond(6) and reports a match", async () => {
     const calls: string[] = [];
     vi.stubGlobal(
       "fetch",
@@ -83,7 +83,7 @@ describe("fetchLiveMinerBond", () => {
     expect(r.quoteForIntents).toBe(BigInt(1_500_000));
     expect(r.matchesConstant).toBe(true);
     expect(calls.sort()).toEqual(
-      [SEL_MINER_BOND + (6152).toString(16).padStart(64, "0"), SEL_QUOTE_MINER_BOND + (6).toString(16).padStart(64, "0")].sort(),
+      [SEL_MINER_BOND + (6160).toString(16).padStart(64, "0"), SEL_QUOTE_MINER_BOND + (6).toString(16).padStart(64, "0")].sort(),
     );
   });
 

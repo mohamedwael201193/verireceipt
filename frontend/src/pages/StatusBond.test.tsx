@@ -1,4 +1,4 @@
-// pc2-xtab-r4: /status shows the on-chain bond ($1.50 = minerBond(6152) =
+// pc2-xtab-r4: /status shows the on-chain bond ($1.50 = minerBond(6160) =
 // quoteMinerBond(6)) and its live re-read, and surfaces a mismatch.
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -30,7 +30,7 @@ describe("/status bond row", () => {
     render(<MemoryRouter><Status /></MemoryRouter>);
     expect(await screen.findByText("live re-read matches")).toBeTruthy();
     expect(screen.getAllByText(/\$1\.50 Test USDC/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/minerBond\(6152\) = quoteMinerBond\(6\) = 1,500,000/)).toBeTruthy();
+    expect(screen.getByText(/minerBond\(6160\) = quoteMinerBond\(6\) = 1,500,000/)).toBeTruthy();
     expect(screen.queryByText(/\$1\.40/)).toBeNull();
   });
 

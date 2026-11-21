@@ -13,7 +13,7 @@ import type { LiveReceipt, ProbeOutcome, Receipt } from "./types";
 
 /** Live miner origin (the /api proxy rewrites to this in dev and production). */
 export const MINER_ORIGIN = "https://verireceipt.onrender.com";
-/** On-chain registration bond: minerBond(6152) = quoteMinerBond(6) (lib/minerBond.ts). */
+/** On-chain registration bond: minerBond(6160) = quoteMinerBond(6) (lib/minerBond.ts). */
 export const MINER_BOND_USDC = `${MINER_BOND_USD_TEXT} Test USDC`;
 export const DIAMOND_ADDRESS = "0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b";
 export const DIAMOND_SHORT = "0x72a70e…a08b";

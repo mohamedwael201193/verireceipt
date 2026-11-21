@@ -1,32 +1,33 @@
 /**
  * Live miner registration status (P-C2 leftover (c)).
  *
- * Current Sepolia registration: registrationId 6152, created by
- * updateMiner(6150, ...) in tx 0x775fcc05…07cb (block 12181672), yamlHash
- * 0x1653f3c0…3e9f at miner.yaml pin 4f471e48. The earlier registration 6150
- * (registerMiner tx 0x918ef2e6…20e2) was rejected by the node and is now
- * superseded/deregistered. This module reads the live node for 6152 only and
+ * Current Sepolia registration: registrationId 6160, created by
+ * updateMiner(6152, ...) in tx 0x93a5f833…1a8e (block 12183278), yamlHash
+ * 0xa97b1cb8…a06a at miner.yaml pin 70d7a15e. Earlier registrations:
+ * 6150 (registerMiner tx 0x918ef2e6…20e2, rejected by the node) and
+ * 6152 (updateMiner of 6150, tx 0x775fcc05…07cb); both are now
+ * superseded/deregistered. This module reads the live node for 6160 only and
  * never reports "active" unless that live read says so. Hardcoded
  * identifiers are the confirmed transaction facts; the activation flag is
  * never hardcoded.
  *
  * Node shape (GET /api/miners/{registrationId}, 2026-11-21):
- *   200 {"miner":{"registration_id":6152,"activation_status":"active",
- *        "yaml_hash":"1653…","rejection_reason":null,...}}
+ *   200 {"miner":{"registration_id":6160,"activation_status":"active",
+ *        "yaml_hash":"a97b…","rejection_reason":null,...}}
  *   404 {"error":"miner registration not found"} while the node has not
  *        seen the event yet (it trails Sepolia by ~10-15 minutes).
  * The path takes a registrationId, not the miner.yaml routing id (774921).
  */
 import { useLiveQuery, type LiveQueryResult } from "./hooks";
 
-export const SEPOLIA_REGISTRATION_ID = 6152;
-export const SEPOLIA_PREVIOUS_REGISTRATION_ID = 6150;
+export const SEPOLIA_REGISTRATION_ID = 6160;
+export const SEPOLIA_PREVIOUS_REGISTRATION_ID = 6152;
 export const SEPOLIA_REGISTER_TX =
-  "0x775fcc05adca9be05188554e0487b46e09f207bc5ea1de89a2fd86e2b79f07cb";
-export const SEPOLIA_REGISTER_BLOCK = 12181672;
+  "0x93a5f833726da803d39396e208c5404889e0b64dbeb78519914fe1d18e3c1a8e";
+export const SEPOLIA_REGISTER_BLOCK = 12183278;
 export const SEPOLIA_YAML_HASH =
-  "0x1653f3c00f8ee983bc2d2b36579c665c94ce2215ab1bb0d526564a9aec183e9f";
-export const SEPOLIA_YAML_PIN = "4f471e48296d7225a482ef70025352e954b9cf5d";
+  "0xa97b1cb87dbaaba87cf4b15e284352407a4a72c06cc568c47bfe3980e5cba06a";
+export const SEPOLIA_YAML_PIN = "70d7a15ec1fa61569e4a003fd21b8af46a97cfa9";
 /**
  * Every registration id that has answered paid calls for slug "verireceipt".
  * Telegraph receipts name the registration that served the call, so committed
@@ -60,11 +61,11 @@ export interface MinerRegistrationStatus {
   yamlHash: string;
   yamlPin: string;
   explorerTx: string;
-  /** Live Telegraph node read for /api/miners/6152. */
+  /** Live Telegraph node read for /api/miners/6160. */
   nodeByRegistrationId: NodeListing;
   /**
-   * True only when the live node body for 6152 says activation_status
-   * "active" AND carries registration_id 6152 AND the pinned yaml_hash
+   * True only when the live node body for 6160 says activation_status
+   * "active" AND carries registration_id 6160 AND the pinned yaml_hash
    * (all three required; no boolean fallbacks). Pending ingestion (404)
    * is not active.
    */
@@ -99,7 +100,7 @@ interface ActiveRead {
  *   - activation_status is the string "active" (no boolean `active` /
  *     `is_active` fallback — the node's documented field is the string);
  *   - registration_id is present and equals the id that was asked for;
- *   - for 6152, yaml_hash is present and equals the pinned miner.yaml
+ *   - for 6160, yaml_hash is present and equals the pinned miner.yaml
  *     hash (a missing hash is NOT a pass).
  * Anything else is reported as listed-but-not-active with the reason.
  */

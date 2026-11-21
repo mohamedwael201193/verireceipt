@@ -18,7 +18,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const ledgerFile = join(here, "..", "ledger", "purchases.jsonl");
 const secrets = process.env.DESK_SECRETS_FILE;
 const expected = (process.env.DESK_PAYER_ADDRESS ?? "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3").toLowerCase();
-const minerIds = (process.env.DESK_MINER_IDS ?? "774921,6152").split(",").map((s) => s.trim()).filter(Boolean);
+const minerIds = (process.env.DESK_MINER_IDS ?? "774921,6160,6152").split(",").map((s) => s.trim()).filter(Boolean);
 const evidenceDir = process.env.DESK_EVIDENCE_DIR;
 if (!secrets) throw new Error("set DESK_SECRETS_FILE");
 

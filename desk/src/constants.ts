@@ -39,7 +39,7 @@ export const DESK_DAILY_CAP_UUSDC = 2_000_000n;
 /** VeriReceipt's routing id in the node's miner catalogue (GET /api/miners, slug "verireceipt"). */
 export const VERIRECEIPT_MINER_ID = "774921";
 /** On-chain registration id (receipts and delivery rows use this, not the catalogue id). */
-export const VERIRECEIPT_ONCHAIN_MINER_ID = "6152";
+export const VERIRECEIPT_ONCHAIN_MINER_ID = "6160";
 /**
  * Every on-chain registration id that has served paid calls for slug
  * "verireceipt". A receipt names the registration that served it, so rows
