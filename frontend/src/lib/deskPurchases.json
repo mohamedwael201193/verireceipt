@@ -101,7 +101,7 @@
     "verdict": "VERIFIED",
     "delivery_proof": {
       "status": "included",
-      "checked_at": "2026-11-21T16:11:41.911Z",
+      "checked_at": "2026-11-21T19:06:13.204Z",
       "deliveries_root": "0x8a2c6d8ca02026c9cf055c8a2c40f5d4bc87ecbdcb7f674f24fc786ebf4a5005",
       "epoch_id": 31,
       "receipt_hash": "0xc68e9408227f9c43cfb0a4459013fae085242268efb674b9628c3ed5f807b394",
@@ -241,7 +241,7 @@
     "verdict": "VERIFIED",
     "delivery_proof": {
       "status": "included",
-      "checked_at": "2026-11-21T16:11:42.906Z",
+      "checked_at": "2026-11-21T19:06:14.175Z",
       "deliveries_root": "0x8a2c6d8ca02026c9cf055c8a2c40f5d4bc87ecbdcb7f674f24fc786ebf4a5005",
       "epoch_id": 31,
       "receipt_hash": "0xab7bea5812c35e9821b8926972104cd05a6d61c33435b7381350c2045ab93b68",
@@ -378,7 +378,7 @@
     "verdict": "VERIFIED",
     "delivery_proof": {
       "status": "included",
-      "checked_at": "2026-11-21T16:11:43.723Z",
+      "checked_at": "2026-11-21T19:06:15.007Z",
       "deliveries_root": "0x8a2c6d8ca02026c9cf055c8a2c40f5d4bc87ecbdcb7f674f24fc786ebf4a5005",
       "epoch_id": 31,
       "receipt_hash": "0x74c0f2d8cd8692e28db5c0addbb5894462c1123a6ab7b1ba68d6261b1355425a",
@@ -511,7 +511,18 @@
       }
     ],
     "verdict": "VERIFIED",
-    "delivery_proof": null,
+    "delivery_proof": {
+      "status": "included",
+      "checked_at": "2026-11-21T19:06:15.838Z",
+      "deliveries_root": "0xe7437456b847fc4e65acfcb001f189bed9ba6c3deca4b1f56b3f8056531ec63c",
+      "epoch_id": 32,
+      "receipt_hash": "0x1184cf63601c8766196e8de0ba9514f2243fb6f9b72739ac4008b6cfa29a4f6a",
+      "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+      "usdc": 10000,
+      "intent": "GRID_POWER_PRICE_GENERAL",
+      "miner_id": "6152",
+      "proof_nodes": 10
+    },
     "recovered_fields": {
       "lmp_usd_per_mwh": {
         "value": 62.90907,
@@ -640,7 +651,18 @@
       }
     ],
     "verdict": "VERIFIED",
-    "delivery_proof": null,
+    "delivery_proof": {
+      "status": "included",
+      "checked_at": "2026-11-21T19:06:16.765Z",
+      "deliveries_root": "0xe7437456b847fc4e65acfcb001f189bed9ba6c3deca4b1f56b3f8056531ec63c",
+      "epoch_id": 32,
+      "receipt_hash": "0xab4f90df983606c2d3b998d266715a7187e58f6f997cbd0866d44cecfe7454d6",
+      "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+      "usdc": 10000,
+      "intent": "GRID_POWER_PRICE_GENERAL",
+      "miner_id": "6152",
+      "proof_nodes": 10
+    },
     "recovered_fields": {
       "lmp_usd_per_mwh": {
         "value": 30.07,
@@ -766,7 +788,18 @@
       }
     ],
     "verdict": "VERIFIED",
-    "delivery_proof": null,
+    "delivery_proof": {
+      "status": "included",
+      "checked_at": "2026-11-21T19:06:17.599Z",
+      "deliveries_root": "0xe7437456b847fc4e65acfcb001f189bed9ba6c3deca4b1f56b3f8056531ec63c",
+      "epoch_id": 32,
+      "receipt_hash": "0x89aa4abd16d410a6ce3f5025da5d2f3fda8fcd043cb3ed13f9947b81aeddf506",
+      "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+      "usdc": 10000,
+      "intent": "TVL_LOOKUP_GENERAL",
+      "miner_id": "6152",
+      "proof_nodes": 10
+    },
     "recovered_fields": {
       "protocol_or_chain": {
         "value": "aave-v3",
@@ -892,7 +925,18 @@
       }
     ],
     "verdict": "VERIFIED",
-    "delivery_proof": null,
+    "delivery_proof": {
+      "status": "included",
+      "checked_at": "2026-11-21T19:06:18.425Z",
+      "deliveries_root": "0xe7437456b847fc4e65acfcb001f189bed9ba6c3deca4b1f56b3f8056531ec63c",
+      "epoch_id": 32,
+      "receipt_hash": "0x6625eba0a74e8b52ecdb8e49147b9f206fc3f0aec8d1bc614fb8d7ba3b2f587b",
+      "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+      "usdc": 10000,
+      "intent": "ONCHAIN_TX_LOOKUP_GENERAL",
+      "miner_id": "6152",
+      "proof_nodes": 10
+    },
     "recovered_fields": {
       "tx_hash": {
         "value": "0xe8696cc29652173b1fdce601cfbd5d61649583bf811163d778d412739b78d2d3",
@@ -1024,7 +1068,18 @@
       }
     ],
     "verdict": "VERIFIED",
-    "delivery_proof": null,
+    "delivery_proof": {
+      "status": "included",
+      "checked_at": "2026-11-21T19:06:19.243Z",
+      "deliveries_root": "0xe7437456b847fc4e65acfcb001f189bed9ba6c3deca4b1f56b3f8056531ec63c",
+      "epoch_id": 32,
+      "receipt_hash": "0x62791b7391743b7e2c92cc37595b0d829d7b879f2d33b36f3a214b6fbd48a338",
+      "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+      "usdc": 10000,
+      "intent": "REGULATORY_FILING_MONITOR_GENERAL",
+      "miner_id": "6152",
+      "proof_nodes": 10
+    },
     "recovered_fields": {
       "entity": {
         "value": "Apple Inc.",
@@ -1147,7 +1202,18 @@
       }
     ],
     "verdict": "VERIFIED",
-    "delivery_proof": null,
+    "delivery_proof": {
+      "status": "included",
+      "checked_at": "2026-11-21T19:06:19.920Z",
+      "deliveries_root": "0xe7437456b847fc4e65acfcb001f189bed9ba6c3deca4b1f56b3f8056531ec63c",
+      "epoch_id": 32,
+      "receipt_hash": "0x196ae4fa72718a30bd327f9f88af5297c19040bea2bc55e40dd68e92a0e3f37f",
+      "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+      "usdc": 10000,
+      "intent": "OPTIMAL_EXECUTION_ROUTE_GENERAL",
+      "miner_id": "6152",
+      "proof_nodes": 10
+    },
     "recovered_fields": {
       "amount_out": {
         "value": 1678840828,
@@ -1247,7 +1313,18 @@
       }
     ],
     "verdict": "VERIFIED",
-    "delivery_proof": null,
+    "delivery_proof": {
+      "status": "included",
+      "checked_at": "2026-11-21T19:06:20.594Z",
+      "deliveries_root": "0xe7437456b847fc4e65acfcb001f189bed9ba6c3deca4b1f56b3f8056531ec63c",
+      "epoch_id": 32,
+      "receipt_hash": "0x6ac6f5b63e38c423744f6df68d1606f1bd5d44618f18765cb54a727ef040da58",
+      "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+      "usdc": 10000,
+      "intent": "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
+      "miner_id": "6152",
+      "proof_nodes": 10
+    },
     "recovered_fields": {
       "effective_balance": {
         "value": 32000000000,
