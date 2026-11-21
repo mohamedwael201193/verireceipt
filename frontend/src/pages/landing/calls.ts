@@ -25,7 +25,12 @@ export async function callLive(key: IntentKey, p: Record<string, string>): Promi
     case "tx":
       return getTx({ tx_hash: p.tx_hash, chain: p.chain });
     case "sec":
-      return getFilings({ entity: p.entity, period: p.period });
+      // QA-02: form_type is forwarded when the payload names one.
+      return getFilings(
+        p.form_type !== undefined
+          ? { entity: p.entity, period: p.period, form_type: p.form_type }
+          : { entity: p.entity, period: p.period },
+      );
     case "tvl":
       return getTvl({ protocol: p.protocol });
     case "route":

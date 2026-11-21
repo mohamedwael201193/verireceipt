@@ -35,15 +35,28 @@ const BUDGETS = [
 ];
 
 function verdictClass(v: string): string {
-  if (v === "APPROVE") return "v-approve";
-  if (v === "REJECT") return "v-reject";
+  if (v === "APPROVE" || v === "RUN") return "v-approve";
+  if (v === "REJECT" || v === "CURTAIL") return "v-reject";
   return "v-hold";
 }
 
 function verdictBadge(v: string): string {
-  if (v === "APPROVE") return "b-ok";
-  if (v === "REJECT") return "b-err";
+  if (v === "APPROVE" || v === "RUN") return "b-ok";
+  if (v === "REJECT" || v === "CURTAIL") return "b-err";
   return "b-dim";
+}
+
+/** QA-03: VERIFIED is a data status, not a decision — say so. */
+function verdictLabel(v: string): string {
+  return v === "VERIFIED" ? "DATA VERIFIED · NO DECISION" : v;
+}
+
+/** Checks that passed / checks that apply (N/A cards excluded). Replaces
+ *  the old "Score 100 / 100", which read as a grade on REJECT/HOLD. */
+function checksLine(ev: DeskEvaluation): string {
+  const applicable = ev.why.filter((c) => c.ok !== "na");
+  const passed = applicable.filter((c) => c.ok === true).length;
+  return `Checks passed ${passed} / ${applicable.length}`;
 }
 
 export default function MissionDesk({ onRecord, onInspect, showToast }: MissionDeskProps) {
@@ -116,7 +129,9 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
     setRunTotalMs(null);
     setStreamState("RUNNING — LIVE CALLS…");
     const startedAt = performance.now();
-    const checks = preset.buildChecks(inputs);
+    // The inputs of THIS run (a later edit must not change its verdict).
+    const runInputs = { ...inputs };
+    const checks = preset.buildChecks(runInputs);
     const settled: LiveReceipt[] = [];
     let persisted = 0;
     let saveFailed = 0;
@@ -163,7 +178,7 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
       if (runToken.current !== token) return;
       const totalMs = performance.now() - startedAt;
       setRunTotalMs(totalMs);
-      setEvaluation(preset.evaluate(settled.map((receipt, i) => ({ check: checks[i], receipt }))));
+      setEvaluation(preset.evaluate(settled.map((receipt, i) => ({ check: checks[i], receipt })), runInputs));
       // QA-01: count only what really happened. A refusal has no receipt
       // and is never written to the shared ledger; a storage-refused
       // write is reported, not hidden behind a success message.
@@ -242,11 +257,11 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
               <input id="in-entity" type="text" className="field-input" value={inputs.entity} disabled={running} onChange={(e) => setInputs({ ...inputs, entity: e.target.value })} />
             </div>
             <div>
-              <label htmlFor="in-ref" className="mono" style={{ display: "block", fontSize: 10.5, color: "var(--muted)", marginBottom: 4 }}>Tx Hash / ISO Pricing Zone</label>
+              <label htmlFor="in-ref" className="mono" style={{ display: "block", fontSize: 10.5, color: "var(--muted)", marginBottom: 4 }}>Tx Hash / Pricing Zone / SEC Form</label>
               <input id="in-ref" type="text" className="field-input" value={inputs.ref} disabled={running} onChange={(e) => setInputs({ ...inputs, ref: e.target.value })} />
             </div>
             <div>
-              <label htmlFor="in-scope" className="mono" style={{ display: "block", fontSize: 10.5, color: "var(--muted)", marginBottom: 4 }}>Chain / Period / Interval</label>
+              <label htmlFor="in-scope" className="mono" style={{ display: "block", fontSize: 10.5, color: "var(--muted)", marginBottom: 4 }}>Chain / Period / Interval · Threshold</label>
               <input id="in-scope" type="text" className="field-input" value={inputs.scope} disabled={running} onChange={(e) => setInputs({ ...inputs, scope: e.target.value })} />
             </div>
           </div>
@@ -324,10 +339,10 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
                 <span className={`badge ${evaluation ? verdictBadge(evaluation.verdict) : "b-dim"}`} style={{ fontSize: 11.5, padding: "3px 10px" }}>
-                  {evaluation ? evaluation.verdict : "NO RUN YET"}
+                  {evaluation ? verdictLabel(evaluation.verdict) : "NO RUN YET"}
                 </span>
                 <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>
-                  {evaluation ? `Score ${evaluation.score} / 100` : "Score — / 100"}
+                  {evaluation ? checksLine(evaluation) : "Checks — / —"}
                 </span>
               </div>
               <div style={{ fontSize: 15, fontWeight: 500 }}>

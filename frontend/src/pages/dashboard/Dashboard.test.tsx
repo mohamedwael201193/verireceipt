@@ -172,7 +172,7 @@ describe("Dashboard page", () => {
     fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
     expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
     // The verdict is derived from the live (mocked) responses, not canned.
-    expect(screen.getByText(/Score 100 \/ 100/)).toBeTruthy();
+    expect(screen.getByText(/Checks passed 4 \/ 4/)).toBeTruthy();
     // Switch to the Receipts view: the run's receipts are really there.
     const receiptsTab = screen.getAllByRole("button", { name: "02 Receipts" })[0];
     fireEvent.click(receiptsTab);
@@ -396,7 +396,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
     // Verdict logic (presets.ts, untouched) reads the probe error body:
     // all four refusals score 0.
-    expect(screen.getByText(/Score 0 \/ 100/)).toBeTruthy();
+    expect(screen.getByText(/Checks passed 0 \/ \d/)).toBeTruthy();
     // (J2 R4 B1c) why-cards never render success text for a refused
     // call: Archive Quorum must NOT claim "status ? · block ?".
     const quorumCard = screen.getByText("Archive Quorum").closest(".panel");
@@ -405,7 +405,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     expect(quorumCard?.textContent).toContain("GATE");
     // The other three cards fall back to their honest "no live …" text.
     expect(screen.getByText("TVL (live)").closest(".panel")?.textContent).toContain("no live TVL returned");
-    expect(screen.getByText("SEC Compliance").closest(".panel")?.textContent).toContain("no live filings returned");
+    expect(screen.getByText("SEC Filings (live)").closest(".panel")?.textContent).toContain("no live filings returned");
     expect(screen.getByText("Route Execution").closest(".panel")?.textContent).toContain("no live route returned");
     // All four why-cards are GATE, none PASS.
     expect(screen.getAllByText("GATE")).toHaveLength(4);
@@ -465,11 +465,12 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
   it("B2 repro: m13-sec + m12 refusal paths never render 'undefined' why-card text", async () => {
     vi.stubGlobal("fetch", (url: string) => oversize200Fetch(url));
     render(<Dashboard />);
-    // --- m13-sec: SEC 10-K Compliance Audit (filings + route refused).
-    fireEvent.click(screen.getByRole("button", { name: /SEC 10-K Compliance Audit/ }));
+    // --- m13-sec: SEC 10-K Annual Report Check (filings refused; QA-02
+    // dropped the unrelated route cross-check from this scenario).
+    fireEvent.click(screen.getByRole("button", { name: /SEC 10-K Annual Report Check/ }));
     fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
     expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
-    expect(screen.getByText(/Score 0 \/ 100/)).toBeTruthy();
+    expect(screen.getByText(/Checks passed 0 \/ \d/)).toBeTruthy();
     // (J2 R5 B2) The filings refusal body {error, message} is truthy,
     // so the old `filingsBody ? ...` rendered "undefined filings for
     // undefined" — the card must fall back to the honest text.
@@ -477,19 +478,18 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     expect(edgarCard?.textContent).toContain("no live filings returned");
     expect(edgarCard?.textContent).not.toContain("undefined");
     expect(screen.getByText("URL Provenance").closest(".panel")?.textContent).toContain("no archive URLs returned");
-    expect(screen.getByText("Route Execution").closest(".panel")?.textContent).toContain("no live route returned");
-    // No "undefined" anywhere in the why-cards; all three GATE, none PASS.
+    // No "undefined" anywhere in the why-cards; all four GATE, none PASS.
     const whySection = screen.getByText("// why · deterministic policy evaluation").closest(".card");
     expect(whySection?.textContent).not.toContain("undefined");
-    expect(screen.getAllByText("GATE")).toHaveLength(3);
+    expect(screen.getAllByText("GATE")).toHaveLength(4);
     expect(screen.queryByText("PASS")).toBeNull();
-    // The run table honestly records two refused rows.
-    expect(screen.getAllByText(/no receipt · 200 refusal/)).toHaveLength(2);
+    // The run table honestly records the refused row.
+    expect(screen.getAllByText(/no receipt · 200 refusal/)).toHaveLength(1);
     // --- m12: Grid LMP Dispatch Check (grid + route refused).
     fireEvent.click(screen.getByRole("button", { name: /Mission 12 · Mining/ }));
     fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
     expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
-    expect(screen.getByText(/Score 0 \/ 100/)).toBeTruthy();
+    expect(screen.getByText(/Checks passed 0 \/ \d/)).toBeTruthy();
     // (J2 R5 B2) The grid refusal body rendered "— / MWh ·  ·
     // undefined" — the card must fall back to the honest text.
     const lmpCard = screen.getByText("LMP (live)").closest(".panel");
@@ -499,7 +499,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     // never PASS or GATE.
     const curtailCard = screen.getByText("Curtailment Threshold").closest(".panel");
     expect(curtailCard?.textContent).toContain("N/A");
-    expect(curtailCard?.textContent).toContain("No threshold configured");
+    expect(curtailCard?.textContent).toContain("No threshold set");
     expect(curtailCard?.textContent).not.toContain("undefined");
     expect(screen.getByText("ETH Hedge Check").closest(".panel")?.textContent).toContain("no live route returned");
     const whySection2 = screen.getByText("// why · deterministic policy evaluation").closest(".card");
@@ -516,7 +516,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     fireEvent.click(screen.getByRole("button", { name: /Reverted Counterparty Trap/ }));
     fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
     expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
-    expect(screen.getByText(/Score 0 \/ 100/)).toBeTruthy();
+    expect(screen.getByText(/Checks passed 0 \/ \d/)).toBeTruthy();
     // (B1a) Receipt Status must NOT claim an archive-quorum
     // confirmation that never happened.
     const receiptCard = screen.getByText("Receipt Status").closest(".panel");
@@ -540,7 +540,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     const { container } = render(<Dashboard />);
     fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
     expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
-    expect(screen.getByText(/Score 100 \/ 100/)).toBeTruthy();
+    expect(screen.getByText(/Checks passed 4 \/ 4/)).toBeTruthy();
     // Desk run table: 4 green 200 badges.
     expect(green200Badges(container)).toHaveLength(4);
     // Drawer header: green "200 OK".
@@ -720,11 +720,12 @@ describe("J2 R6 — latent minors (verified receipt, missing field)", () => {
     const grid = deskResult("m12-curtail", 0, verifiedLiveReceipt("GRID_POWER_PRICE_GENERAL", { lmp_usd_per_mwh: 42 }));
     const route = deskResult("m12-curtail", 1, verifiedLiveReceipt("OPTIMAL_EXECUTION_ROUTE_GENERAL", { amount_out: 1700000000 }));
     const ev = preset.evaluate([grid, route]);
-    // The price is genuinely verified (receipt + finite LMP), so the
-    // verdict stays APPROVE — only the zone clause is omitted.
-    expect(ev.verdict).toBe("APPROVE");
+    // The price is genuinely verified (receipt + finite LMP). QA-03: with
+    // no threshold the outcome is DATA VERIFIED, never APPROVE; only the
+    // zone clause is omitted.
+    expect(ev.verdict).toBe("VERIFIED");
     expect(ev.score).toBe(100);
-    expect(ev.headline).toBe("Wholesale LMP $42.00 / MWh verified live.");
+    expect(ev.headline).toBe("Data verified: wholesale LMP $42.00 / MWh. No threshold set — no run/curtail decision.");
     expect(ev.headline).not.toContain("undefined");
     // Positive control: a typed zone restores the "at …" clause.
     const gridZoned = deskResult(
@@ -732,7 +733,9 @@ describe("J2 R6 — latent minors (verified receipt, missing field)", () => {
       0,
       verifiedLiveReceipt("GRID_POWER_PRICE_GENERAL", { lmp_usd_per_mwh: 42, node_or_zone: "TH_NP15_GEN-APND", market: "CAISO" }),
     );
-    expect(preset.evaluate([gridZoned, route]).headline).toBe("Wholesale LMP $42.00 / MWh verified live at TH_NP15_GEN-APND.");
+    expect(preset.evaluate([gridZoned, route]).headline).toBe(
+      "Data verified: wholesale LMP $42.00 / MWh at TH_NP15_GEN-APND. No threshold set — no run/curtail decision.",
+    );
   });
 
   it("M1b: m12 LMP row renders the verified price when node_or_zone is absent", () => {
@@ -751,7 +754,7 @@ describe("J2 R6 — latent minors (verified receipt, missing field)", () => {
     expect(lmpNoZone.v).toBe("$42.00 / MWh · CAISO");
     expect(lmpNoZone.v).not.toContain("no live LMP returned");
     expect(lmpNoZone.ok).toBe(true);
-    expect(evNoZone.headline).toBe("Wholesale LMP $42.00 / MWh verified live.");
+    expect(evNoZone.headline).toBe("Data verified: wholesale LMP $42.00 / MWh. No threshold set — no run/curtail decision.");
     expect(evNoZone.headline).not.toContain("undefined");
     expect(evNoZone.headline).not.toContain("at undefined");
     // (b) Empty-string zone: no trailing separator, no double separator.

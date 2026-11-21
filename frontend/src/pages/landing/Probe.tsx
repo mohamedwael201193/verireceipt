@@ -17,9 +17,16 @@ import { endpointForIntent } from "../../lib/verifyReceipt";
 import { copyText } from "./toast";
 import { VerifyBadge } from "./VerifyBadge";
 
-const CHIP_PRESETS: { id: string; label: string; key: IntentKey; trap: boolean }[] = [
+const CHIP_PRESETS: { id: string; label: string; key: IntentKey; trap: boolean; params?: Record<string, string> }[] = [
   { id: "tx", label: "TX: Block 26454869", key: "tx", trap: false },
-  { id: "sec", label: "SEC: AAPL 10-K", key: "sec", trap: false },
+  // QA-02: the chip named "10-K" really asks for Form 10-K only.
+  {
+    id: "sec",
+    label: "SEC: AAPL 10-K, last 12 months",
+    key: "sec",
+    trap: false,
+    params: { entity: "AAPL", period: "last 12 months", form_type: "10-K" },
+  },
   { id: "tvl", label: "TVL: aave-v3", key: "tvl", trap: false },
   { id: "route", label: "Route: 1 ETH → USDC", key: "route", trap: false },
   { id: "grid", label: "Grid: CAISO NP15", key: "grid", trap: false },
@@ -94,10 +101,10 @@ export function Probe() {
     }
   }
 
-  function applyPreset(key: IntentKey, trap: boolean) {
+  function applyPreset(key: IntentKey, trap: boolean, override?: Record<string, string>) {
     setIntent(key);
     setForce422(trap);
-    const p = trap ? TRAP_PRESETS[key] : PRESETS[key];
+    const p = override ?? (trap ? TRAP_PRESETS[key] : PRESETS[key]);
     setPayload(JSON.stringify(p));
     void run(key, JSON.stringify(p));
   }
@@ -157,7 +164,7 @@ export function Probe() {
                   fontSize: 11,
                   ...(c.trap ? { borderColor: "rgba(245,158,11,0.5)", color: "var(--warn)" } : {}),
                 }}
-                onClick={() => applyPreset(c.key, c.trap)}
+                onClick={() => applyPreset(c.key, c.trap, c.params)}
               >
                 {c.label}
               </button>

@@ -24,7 +24,15 @@ import type { FilingsResponse, GridPriceResponse, LiveReceipt, ProbeOutcome, Rou
 import { formatUsd, formatUsdPrecise, isVerified, probe, recentGridInterval } from "./utils";
 
 export type MissionId = "m13" | "m12";
-export type DeskVerdict = "APPROVE" | "REJECT" | "HOLD";
+/**
+ * APPROVE / REJECT / HOLD: a decision against a rule the scenario states.
+ * VERIFIED: the data was retrieved and receipted, but no decision rule
+ * applies (QA-02/QA-03: a historical lookup, or a power price with no
+ * threshold, must never read as an operational approval).
+ * RUN / CURTAIL: the power scenario's outcome against a user-set
+ * $/MWh threshold.
+ */
+export type DeskVerdict = "APPROVE" | "REJECT" | "HOLD" | "VERIFIED" | "RUN" | "CURTAIL";
 
 export interface DeskInputs {
   entity: string;
@@ -52,8 +60,9 @@ export interface DeskPreset {
   inputs: DeskInputs;
   /** Build the live checks from the (possibly user-edited) inputs. */
   buildChecks: (inputs: DeskInputs) => DeskCheckDef[];
-  /** Derive the verdict from the settled live results. */
-  evaluate: (results: DeskCheckResult[]) => DeskEvaluation;
+  /** Derive the verdict from the settled live results (and, for rules
+   *  the user sets — the m12 $/MWh threshold — the inputs of that run). */
+  evaluate: (results: DeskCheckResult[], inputs?: DeskInputs) => DeskEvaluation;
 }
 
 export interface DeskCheckResult {
@@ -108,6 +117,29 @@ function filingsPeriodOf(result: DeskCheckResult | undefined): string {
   if (typeof url !== "string" || !url) return "";
   try {
     return new URL(url).searchParams.get("period") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * QA-03: the user's curtailment threshold in $/MWh, typed into the
+ * interval field as "threshold 60" (or "threshold $60.5"). null when
+ * absent or not a sane number — then no run/curtail decision is made.
+ */
+export function parseThreshold(scope: string): number | null {
+  const m = /\bthreshold\s*\$?\s*(\d{1,6}(?:\.\d{1,4})?)(?![\d.])/i.exec(scope);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** form_type actually sent, parsed from the request URL ("" if none). */
+function filingsFormOf(result: DeskCheckResult | undefined): string {
+  const url = result?.receipt?.requestUrl;
+  if (typeof url !== "string" || !url) return "";
+  try {
+    return new URL(url).searchParams.get("form_type") ?? "";
   } catch {
     return "";
   }
@@ -206,7 +238,9 @@ export const DESK_PRESETS: DeskPreset[] = [
           ok: tvlOk,
         },
         {
-          k: "SEC Compliance",
+          // QA-02: an all-forms filing count is a retrieval, not a
+          // compliance check — the card is labelled as what it is.
+          k: "SEC Filings (live)",
           // (J2 R5 B2) Never interpolate a refusal body: probe()
           // synthesizes {error, message} on refusal, so a bare
           // `filingsBody ?` is truthy on ANY refusal and rendered
@@ -326,82 +360,120 @@ export const DESK_PRESETS: DeskPreset[] = [
     id: "m13-sec",
     mission: "m13",
     tag: "M13 · COMPLIANCE",
-    title: "SEC 10-K Compliance Audit",
-    sub: "AAPL official EDGAR submissions + execution cross-check — live",
+    title: "SEC 10-K Annual Report Check",
+    sub: "Is a Form 10-K on official EDGAR within the last 12 months? — live",
     inputs: {
       entity: "AAPL",
-      ref: "CIK 0000320193",
+      ref: "10-K",
       scope: "last 12 months · SEC EDGAR",
     },
     buildChecks: (inputs) => {
-      // No silent defaults (see m13-defi): a cleared period runs empty.
+      // No silent defaults (see m13-defi): a cleared period or form runs
+      // empty and the lib refuses it. QA-02: the form field IS the
+      // request's form_type — it is sent, never decorative.
       const period = splitSegments(inputs.scope)[0] ?? "";
+      const form = inputs.ref.trim();
       return [
         {
           label: "SEC filing",
           intent: "REGULATORY_FILING_MONITOR_GENERAL",
-          query: `${inputs.entity} · ${period}`,
-          requestUrl: direct("/v1/filings", { entity: inputs.entity, period }),
-          run: (signal) => probe((s) => getFilings({ entity: inputs.entity, period }, s), signal),
-        },
-        {
-          label: "ETH/USDC route",
-          intent: "OPTIMAL_EXECUTION_ROUTE_GENERAL",
-          query: "pair=ETH/USDC",
-          requestUrl: direct("/v1/route", { pair: "ETH/USDC" }),
-          run: (signal) => probe((s) => getRoute({ pair: "ETH/USDC" }, s), signal),
+          query: `${inputs.entity} · ${form} · ${period}`,
+          requestUrl: direct("/v1/filings", { entity: inputs.entity, period, form_type: form }),
+          run: (signal) => probe((s) => getFilings({ entity: inputs.entity, period, form_type: form }, s), signal),
         },
       ];
     },
     evaluate: (results) => {
-      const [filings, route] = results;
+      const [filings] = results;
+      const evaluatedOn = new Date().toISOString().slice(0, 10);
       const filingsBody = filings ? bodyOf<FilingsResponse>(filings) : null;
-      const filingsOk =
-        !!filings && isVerified(filings.receipt) && typeof filingsBody?.filing_count === "number" && filingsBody.filing_count > 0;
-      const filingsPeriod = filingsPeriodOf(filings);
-      const routeBody = route ? bodyOf<RouteResponse>(route) : null;
-      const routeOk = !!route && isVerified(route.receipt) && typeof routeBody?.amount_out === "number" && routeBody.amount_out > 0;
+      const verified = !!filings && isVerified(filings.receipt) && typeof filingsBody?.filing_count === "number";
+      const asked = filingsFormOf(filings);
+      const period = filingsPeriodOf(filings);
+      const detail = Array.isArray(filingsBody?.filings_detail) ? filingsBody.filings_detail : [];
+      // The miner echoes the filter it applied; every returned filing
+      // must be that form. Anything else is a mismatch, not a pass.
+      const formMatches =
+        verified &&
+        asked !== "" &&
+        filingsBody?.form_type === asked &&
+        detail.length === filingsBody.filing_count &&
+        detail.every((f) => f && f.form === asked);
+      const dates = detail
+        .map((f) => (typeof f?.filing_date === "string" ? f.filing_date : ""))
+        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+        .sort();
+      const latest = dates.length > 0 ? dates[dates.length - 1] : null;
+      // The ONE currentness rule this scenario implements: an annual
+      // report (Form 10-K) filed within the last 12 months. Any other
+      // window or form is a historical / data retrieval — VERIFIED, never
+      // a present-day compliance verdict.
+      const rollingWindow = /^last 12 months$/i.test(period.trim());
+      const ruleApplies = asked === "10-K" && rollingWindow;
+      const count = verified ? filingsBody!.filing_count : null;
       const why: WhyCard[] = [
         {
           k: "Official EDGAR",
-          // (J2 R5 B2) Same refusal-body trap as m13-defi "SEC
-          // Compliance": gate on a verified receipt + typed fields.
-          // The count carries its window (J2 R3 B3): an earlier
-          // version rendered a literal unfinished placeholder here.
-          v:
-            filings && isVerified(filings.receipt) && typeof filingsBody?.filing_count === "number" && typeof filingsBody?.entity === "string"
-              ? `${filingsBody.filing_count} filings for ${filingsBody.entity}${filingsPeriod ? ` in ${filingsPeriod}` : ""}`
-              : "no live filings returned",
-          ok: filingsOk,
+          v: verified && typeof filingsBody?.entity === "string"
+            ? `${count} Form ${asked || "?"} filing(s) for ${filingsBody.entity}${period ? ` in ${period}` : ""}${latest ? ` · latest filed ${latest}` : ""}`
+            : "no live filings returned",
+          ok: verified,
+        },
+        {
+          k: "Form Filter",
+          v: !verified
+            ? "not verified"
+            : formMatches
+              ? `request and answer both form_type=${asked}`
+              : `answer does not match the requested form_type=${asked || "(empty)"}`,
+          ok: verified && formMatches,
         },
         {
           k: "URL Provenance",
-          // (J2 R6 M4) Same isVerified gate as its siblings (Official
-          // EDGAR, Route Execution): an unverified body must never
-          // render success text or PASS, even though expectReceipt
-          // makes this unreachable-bad today.
+          // (J2 R6 M4) Same isVerified gate as Official EDGAR.
           v:
-            filings && isVerified(filings.receipt) && filingsBody !== null && Array.isArray(filingsBody.urls) && filingsBody.urls.length > 0
+            verified && Array.isArray(filingsBody?.urls) && filingsBody.urls.length > 0
               ? `${filingsBody.urls.length} archive URL(s) on sec.gov`
               : "no archive URLs returned",
-          ok: !!filings && isVerified(filings.receipt) && filingsBody !== null && Array.isArray(filingsBody.urls) && filingsBody.urls.length > 0,
+          ok: verified && Array.isArray(filingsBody?.urls) && filingsBody.urls.length > 0,
         },
         {
-          k: "Route Execution",
-          v: routeBody && typeof routeBody.amount_out === "number" ? `${(routeBody.amount_out / 1e6).toFixed(2)} USDC / 1 ETH` : "no live route returned",
-          ok: routeOk,
+          k: "Currentness Rule",
+          v: ruleApplies
+            ? `at least one Form 10-K filed in the last 12 months (evaluated ${evaluatedOn} UTC). Filing-deadline lateness is not checked.`
+            : `not applied — the rule covers form 10-K over "last 12 months" only; this run is a data retrieval for ${period || "the given period"}.`,
+          ok: ruleApplies ? verified && formMatches && (count ?? 0) > 0 : "na",
         },
       ];
-      const passes = [filingsOk, routeOk].filter(Boolean).length;
-      return {
-        verdict: passes === 2 ? "APPROVE" : "HOLD",
-        score: scoreOf(passes, 2),
-        headline:
-          passes === 2
-            ? "Issuer filings current and verified verbatim against data.sec.gov."
-            : "Filings or route check did not verify — review the rows before acting.",
-        why,
-      };
+      if (!verified || !formMatches) {
+        return {
+          verdict: "HOLD",
+          score: scoreOf(verified ? 1 : 0, 2),
+          headline: "Filing data did not verify for the requested form — review the rows before acting.",
+          why,
+        };
+      }
+      if (!ruleApplies) {
+        return {
+          verdict: "VERIFIED",
+          score: 100,
+          headline: `Data verified: ${count} Form ${asked} filing(s) in ${period}. No current-compliance verdict is derived for this window.`,
+          why,
+        };
+      }
+      return (count ?? 0) > 0
+        ? {
+            verdict: "APPROVE",
+            score: 100,
+            headline: `Form 10-K on file: latest filed ${latest ?? "?"}, within the last 12 months (evaluated ${evaluatedOn} UTC).`,
+            why,
+          }
+        : {
+            verdict: "HOLD",
+            score: scoreOf(2, 3),
+            headline: `NEEDS REVIEW: no Form 10-K filed in the last 12 months (evaluated ${evaluatedOn} UTC).`,
+            why,
+          };
     },
   },
   {
@@ -409,11 +481,14 @@ export const DESK_PRESETS: DeskPreset[] = [
     mission: "m12",
     tag: "M12 · MINING POWER",
     title: "Grid LMP Dispatch Check",
-    sub: "Live CAISO wholesale LMP + ETH/USDC execution cross-check",
+    sub: "Live CAISO wholesale LMP; set a $/MWh threshold for a run/curtail outcome",
     inputs: {
       entity: "CAISO OASIS · Mining Fleet",
       ref: "TH_NP15_GEN-APND",
-      scope: `${recentGridInterval()} · no curtailment threshold configured`,
+      // QA-03: no threshold by default — the outcome is DATA VERIFIED,
+      // never an operational approval. Type e.g. "threshold 60" here to
+      // evaluate a run/curtail rule against the live LMP.
+      scope: `${recentGridInterval()} · no threshold`,
     },
     buildChecks: (inputs) => {
       // No silent defaults (see m13-defi): an unparseable/missing
@@ -437,7 +512,8 @@ export const DESK_PRESETS: DeskPreset[] = [
         },
       ];
     },
-    evaluate: (results) => {
+    evaluate: (results, inputs) => {
+      const threshold = parseThreshold(inputs?.scope ?? "");
       const [grid, route] = results;
       const gridBody = grid ? bodyOf<GridPriceResponse>(grid) : null;
       const gridOk = !!grid && isVerified(grid.receipt) && typeof gridBody?.lmp_usd_per_mwh === "number" && Number.isFinite(gridBody.lmp_usd_per_mwh);
@@ -469,11 +545,14 @@ export const DESK_PRESETS: DeskPreset[] = [
         },
         {
           k: "Curtailment Threshold",
-          v: "No threshold configured in this build — the design's $85/MWh ceiling has no source (DESIGN-SPEC §8 A4). LMP is reported live, no curtail decision is derived.",
-          // (J2 R5) Not a check: there is no threshold to pass or
-          // fail, so neither PASS nor GATE is honest. "na" renders an
-          // N/A badge (MissionDesk) and is excluded from the pass
-          // count (passes counts gridOk + routeOk only).
+          // QA-03: the threshold is the user's own input (scope field,
+          // e.g. "threshold 60"); none is shipped as a default — the
+          // design's $85/MWh ceiling has no source (DESIGN-SPEC §8 A4).
+          v:
+            threshold === null
+              ? "No threshold set — LMP is reported live; no run/curtail decision is derived. Add e.g. \"threshold 60\" ($/MWh) to the interval field."
+              : `Your threshold ${formatUsdPrecise(threshold)} / MWh: curtail when the live LMP is above it, run when at or below it.`,
+          // (J2 R5) Not a check without a threshold: "na" renders N/A.
           ok: "na",
         },
         {
@@ -491,23 +570,48 @@ export const DESK_PRESETS: DeskPreset[] = [
       // the headline instead — never "verified live at undefined".
       const zoneSuffix =
         typeof gridBody?.node_or_zone === "string" && gridBody.node_or_zone ? ` at ${gridBody.node_or_zone}` : "";
-      return {
-        verdict: passes === 2 ? "APPROVE" : "HOLD",
-        score: scoreOf(passes, 2),
-        headline:
-          passes === 2
-            ? `Wholesale LMP ${formatUsdPrecise(gridBody?.lmp_usd_per_mwh ?? null)} / MWh verified live${zoneSuffix}.`
-            : "Grid or route check did not verify — review the rows before acting.",
-        why,
-      };
+      // QA-03: the verdict depends on the grid price and the user's
+      // threshold only. The ETH/USDC quote is a cross-check row; it can
+      // never turn a price lookup into a power-dispatch approval.
+      if (!gridOk) {
+        return {
+          verdict: "HOLD",
+          score: scoreOf(passes, 2),
+          headline: "Grid price did not verify — review the rows before acting.",
+          why,
+        };
+      }
+      const lmp = gridBody!.lmp_usd_per_mwh;
+      const priceText = `${formatUsdPrecise(lmp)} / MWh`;
+      if (threshold === null) {
+        return {
+          verdict: "VERIFIED",
+          score: scoreOf(passes, 2),
+          headline: `Data verified: wholesale LMP ${priceText}${zoneSuffix}. No threshold set — no run/curtail decision.`,
+          why,
+        };
+      }
+      return lmp > threshold
+        ? {
+            verdict: "CURTAIL",
+            score: scoreOf(passes, 2),
+            headline: `CURTAIL: live LMP ${priceText}${zoneSuffix} is above your ${formatUsdPrecise(threshold)} / MWh threshold.`,
+            why,
+          }
+        : {
+            verdict: "RUN",
+            score: scoreOf(passes, 2),
+            headline: `RUN: live LMP ${priceText}${zoneSuffix} is at or below your ${formatUsdPrecise(threshold)} / MWh threshold.`,
+            why,
+          };
     },
   },
   {
     id: "m13-422",
     mission: "m13",
-    tag: "M13 · FAIL-CLOSED 422",
-    title: "Fail-Closed 422 Refusal Probe",
-    sub: "Malformed tx hash 0x1234 refused before any receipt — live",
+    tag: "M13 · FAIL-CLOSED 400",
+    title: "Fail-Closed Validation Refusal Probe (HTTP 400)",
+    sub: "Malformed tx hash 0x1234 refused with HTTP 400 before any receipt — live",
     inputs: {
       entity: "invalid-input-probe",
       ref: "0x1234",

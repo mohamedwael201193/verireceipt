@@ -37,7 +37,7 @@ const TVL_BODY = {
 
 const CHIP_LABELS = [
   "TX: Block 26454869",
-  "SEC: AAPL 10-K",
+  "SEC: AAPL 10-K, last 12 months",
   "TVL: aave-v3",
   "Route: 1 ETH → USDC",
   "Grid: CAISO NP15",

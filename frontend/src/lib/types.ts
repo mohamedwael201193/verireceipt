@@ -46,6 +46,8 @@ export interface TxResponse extends ReceiptedResponse {
 export interface FilingsResponse extends ReceiptedResponse {
   entity: string;
   filing_count: number;
+  /** The EDGAR form filter the miner applied (null = all forms). */
+  form_type?: string | null;
   /** Official output: titles of the matching filings, newest first. */
   filings: string[];
   /** Undeclared companion: the same records as objects, same order as filings/urls. */

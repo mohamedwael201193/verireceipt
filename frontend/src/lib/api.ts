@@ -571,16 +571,20 @@ export async function getTx(
 }
 
 export async function getFilings(
-  params: { entity: string; period: string },
+  params: { entity: string; period: string; form_type?: string },
   signal?: AbortSignal,
 ): Promise<FilingsResponse> {
   assertValidParamsObject(params, "getFilings");
   assertValidParam(params.entity, "entity");
   assertValidParam(params.period, "period");
-  return fetchJson<FilingsResponse>(
-    buildUrl("/v1/filings", { entity: params.entity, period: params.period }),
-    { expectReceipt: true, signal },
-  );
+  // QA-02: the optional EDGAR form filter is sent when the caller names
+  // one (the 10-K preset must actually ask for 10-Ks). Absent = all forms.
+  const query: Record<string, string> = { entity: params.entity, period: params.period };
+  if (params.form_type !== undefined) {
+    assertValidParam(params.form_type, "form_type");
+    query.form_type = params.form_type;
+  }
+  return fetchJson<FilingsResponse>(buildUrl("/v1/filings", query), { expectReceipt: true, signal });
 }
 
 export async function getTvl(
