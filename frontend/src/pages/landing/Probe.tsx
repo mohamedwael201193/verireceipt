@@ -34,6 +34,18 @@ const CHIP_PRESETS: { id: string; label: string; key: IntentKey; trap: boolean; 
   { id: "trap", label: "422 Trap: Future Grid", key: "grid", trap: true },
 ];
 
+/** Query parameters each endpoint accepts (miner.yaml). A payload key
+ *  outside this set is a form error — it is never silently dropped
+ *  (QA-08/QA-09: an ignored economic parameter must not look honoured). */
+const ACCEPTED_PARAMS: Record<IntentKey, string[]> = {
+  tx: ["tx_hash", "chain"],
+  sec: ["entity", "period", "form_type"],
+  tvl: ["protocol"],
+  route: ["pair"],
+  grid: ["node_or_zone", "interval_start"],
+  validator: ["validator_index"],
+};
+
 export function Probe() {
   const [intent, setIntent] = useState<IntentKey>("tx");
   const [payload, setPayload] = useState(() => JSON.stringify(PRESETS.tx));
@@ -53,17 +65,37 @@ export function Probe() {
   // receipt, or the VerifyBadge could verify the wrong run's receipt
   // against the displayed one.
   const reqRef = useRef(0);
+  // The payload text and time of the DISPLAYED run (QA-08): an edited
+  // payload must never look like it produced the result on screen.
+  const [runPayload, setRunPayload] = useState<string | null>(null);
+  const [runAt, setRunAt] = useState<string | null>(null);
+
+  /** QA-08: an invalid submission clears the previous result (and drops
+   *  any in-flight response) instead of leaving an old green 200 next to
+   *  the new error. */
+  function rejectSubmission(message: string) {
+    reqRef.current += 1;
+    setLoading(false);
+    setData(null);
+    setError(null);
+    setMs(null);
+    setParamsUsed(null);
+    setIntentUsed(null);
+    setRunPayload(null);
+    setRunAt(null);
+    setFormError(message);
+  }
 
   async function run(key: IntentKey, rawPayload: string) {
     let parsed: unknown;
     try {
       parsed = JSON.parse(rawPayload);
     } catch {
-      setFormError("Payload is not valid JSON — fix it and run again.");
+      rejectSubmission("Payload is not valid JSON — fix it and run again. Nothing was sent.");
       return;
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      setFormError("Payload must be a JSON object of query parameters.");
+      rejectSubmission("Payload must be a JSON object of query parameters. Nothing was sent.");
       return;
     }
     const params = parsed as Record<string, string>;
@@ -75,10 +107,20 @@ export function Probe() {
     try {
       for (const [name, value] of Object.entries(params)) assertValidParam(value, name);
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : errorMessage(err));
+      rejectSubmission(err instanceof ApiError ? err.message : errorMessage(err));
+      return;
+    }
+    const accepted = ACCEPTED_PARAMS[key];
+    const unknown = Object.keys(params).filter((k) => !accepted.includes(k));
+    if (unknown.length > 0) {
+      rejectSubmission(
+        `Parameter${unknown.length > 1 ? "s" : ""} ${unknown.map((k) => `"${k}"`).join(", ")} not accepted by this endpoint (it takes: ${accepted.join(", ")}). Nothing was sent.`,
+      );
       return;
     }
     setFormError(null);
+    setRunPayload(rawPayload);
+    setRunAt(new Date().toISOString());
     const id = ++reqRef.current;
     setLoading(true);
     setData(null);
@@ -296,6 +338,11 @@ export function Probe() {
                     {error ? (error.status === 422 ? "unbilled refusal" : "error") : "live response"}
                   </span>
                 </div>
+                {runPayload !== null && (payload !== runPayload || intent !== intentUsed) && (
+                  <span role="note" style={{ color: "var(--warn)" }}>
+                    previous run{runAt ? ` (${runAt.slice(11, 19)} UTC)` : ""} · inputs edited since — run again
+                  </span>
+                )}
               </div>
               <pre style={{ padding: 14, fontSize: 12, lineHeight: 1.65, color: "#F3F2EE" }} dangerouslySetInnerHTML={{ __html: hlJSON(jsonBody) }} />
               {data && (
