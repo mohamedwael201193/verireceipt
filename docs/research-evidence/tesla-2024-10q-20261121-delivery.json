@@ -1,0 +1,32 @@
+{
+  "checked_at": "2026-11-21T22:09:13.223Z",
+  "ok": true,
+  "delivery": {
+    "status": "included",
+    "detail": "delivery row returned by the node",
+    "deliveriesRoot": "0x155a6fd7e5f5f9233a6556ae6ec2f210a24b9d77e9f06b989f802175764690bf",
+    "delivery": {
+      "receipt_hash": "0x69fb3b0a9b4b48359d6925595388b75ad2735f0ac119deed1ef4e01e765dac67",
+      "payer": "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3",
+      "miner_id": "6160",
+      "intent": "REGULATORY_FILING_MONITOR_GENERAL",
+      "usdc": 10000,
+      "class": "paid_consumer",
+      "ranking_round": 33
+    },
+    "epochId": 33,
+    "proof": [
+      "0xde5e39ebc6876a7fb2eb3eda59a781d5855bb758caf134d0ab51a7202172a7e0",
+      "0xbcae44fa20d85502ceba912719879abfe84e73e7bb43ba32fe81ebedcf3a8de9",
+      "0x8623b922256ad5e7275e6c36389534b4543e6d249d3b671afc5fc3af0be9d6a5",
+      "0x05334ee64ccee8a67ca91d127e549c4b3fcf77e1e8ce8d1672095490432dfbbe",
+      "0xc6498c0eab6b0fc770c0a8cf00499797660cd77be54c8cbc6c8412e9b79dbc73",
+      "0x699d50a196e2c4d9a5d51482823e3cdada99f4abc0c45e1eb7bef6f110f39975",
+      "0x928ad25aca8338e0816a9a9e08c4766eaa94c7f1654f3a18cfef2d1aef3f3884",
+      "0xb3715d221ffd505c3ee5144780b52d410231e186e8ab4d4e15b7d04d17980eaa",
+      "0xe3f7a18f91d5fa26b3336d36e33fc78176a0c60ab2ee83e105417585e8f66ae1"
+    ]
+  },
+  "limit": "Identity, amount, epoch and proof shape checked. No local Merkle walk or finalized-settlement claim.",
+  "source_url": "https://devnode.telegraphprotocol.com/v1/blocks/33/deliveries/0x69fb3b0a9b4b48359d6925595388b75ad2735f0ac119deed1ef4e01e765dac67"
+}
