@@ -214,7 +214,7 @@ const ERROR_ROWS: { status: number; code: string; meaning: string }[] = [
   { status: 400, code: 'MAX_PARAM_SIZE', meaning: 'Query parameter "entity" or "protocol" must not exceed 512 characters (miner.yaml MAX_PARAM_SIZE, machine-enforced).' },
   { status: 400, code: 'INVALID_PERIOD', meaning: 'Unparseable period value.' },
   { status: 400, code: 'MISSING_PROTOCOL', meaning: 'Query parameter "protocol" is required.' },
-  { status: 400, code: 'UNKNOWN_PARAM', meaning: 'A query parameter is not declared for that endpoint (for example index= on /v1/validator). Enforced today on /v1/validator and /v1/filings; the other endpoints currently ignore undeclared parameters — /v1/route quotes exactly 1 ETH whatever else is sent (amount= is not honoured).' },
+  { status: 400, code: 'UNKNOWN_PARAM', meaning: 'A query parameter is not declared for that endpoint (for example index= on /v1/validator). Enforced on /v1/validator, /v1/filings and /v1/route (route takes only pair, so amount=, slippage= or recipient= is a 400, never a 1 ETH quote that looks like it honoured them); /v1/tx, /v1/tvl and /v1/grid-price currently ignore undeclared parameters.' },
   { status: 400, code: 'INVALID_NODE', meaning: 'node_or_zone is required.' },
   { status: 400, code: 'INVALID_INTERVAL', meaning: 'interval_start is required or is not a valid datetime.' },
   { status: 400, code: 'INVALID_VALIDATOR_INDEX', meaning: 'validator_index is required and must be a canonical non-negative decimal digit string (no sign, no leading zeros except 0 itself).' },

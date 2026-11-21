@@ -95,7 +95,8 @@ describe("QA-13 contract copy", () => {
   });
   it("route scope and UNKNOWN_PARAM row describe the real behaviour", () => {
     expect(docs).toContain("the quote size is always exactly 1 ETH");
-    expect(docs).toContain("amount= is not honoured");
+    expect(docs).toContain("Enforced on /v1/validator, /v1/filings and /v1/route");
+    expect(docs).not.toContain("amount= is not honoured");
   });
   it("hosting copy on the dashboard is qualified, not asserted", () => {
     const sd = readFileSync("src/pages/dashboard/StatusDocs.tsx", "utf8");
