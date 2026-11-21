@@ -12,14 +12,19 @@
 // the validator — fails closed with 502 QUORUM_CONFLICT (a 2-vs-1 split
 // is not certified).
 //
-// Order independence (V-M1, J2 round 2): when a pair first agrees, the
-// third source is still awaited for min(VALIDATOR_STRAGGLER_GRACE_MS =
-// 1000 ms, time left in the 4.5 s budget) (ROUTE's straggler-grace rule),
-// and the verdict is computed once over everything that arrived. So the
-// same three answers give the same verdict whatever order they arrive
-// in, as long as the third lands within the grace. A third source that
-// fails, times out, or answers after the grace / budget does not count
-// (it never answered in time) and does not block the pair.
+// Order independence (V-M1, J2 round 2; J1 R1, round 3): when a pair
+// first agrees, the verdict is NOT taken while the third source can
+// still answer inside the 4.5 s budget — an attempt still in flight
+// (its abort timer never outlives the budget) or a retry already
+// scheduled to land inside it (e.g. a 429 back-off). The verdict is
+// computed once over everything that arrived, so the same three answers
+// give the same verdict whatever order they arrive in, anywhere inside
+// the budget — including a dissent that only comes back on a 429 retry.
+// When the third source has DEFINITIVELY failed (non-retryable status,
+// optimistic again after its retry, no budget left for a retry, network
+// error, timeout), the pair is decided at once, with no fixed wait. A
+// source that never answers inside the budget does not count and does
+// not block the pair beyond the budget.
 //
 // VR transient-error policy: HTTP 429/500/502/503/504 get ONE bounded
 // retry per source, inside the same request budget. The wait honours
@@ -110,15 +115,6 @@ export const BEACON_SOURCES: readonly string[] = [
   "https://ethereum-beacon-api.stakely.io",
 ];
 
-/**
- * Straggler grace (V-M1, J2 round 2): after two sources agree, how long
- * the third source is still awaited before the verdict, capped by the
- * time left in the request budget. Same value and rule as ROUTE's
- * QUORUM_STRAGGLER_GRACE_MS. Live answer times from the build box
- * (2026-11-21): ~0.05 s, ~0.15-0.96 s and ~0.53-0.76 s per source, so a
- * healthy third source lands inside the grace.
- */
-export const VALIDATOR_STRAGGLER_GRACE_MS = 1000;
 
 /** Minimum number of agreeing sources for a verified answer (and for "does not exist"). */
 export const VALIDATOR_MIN_AGREEING = 2;
@@ -363,7 +359,7 @@ async function fetchValidatorFromSource(
   timeoutMs: number,
   deadlineAt: number,
   requestDone: () => boolean = () => false,
-  onRetry: (reason: string) => void = () => {},
+  onRetry: (reason: string, retryAt: number) => void = () => {},
 ): Promise<ValidatorLeg> {
   const sourceUrl = `${base}/eth/v1/beacon/states/head/validators/${index}`;
   for (let attempt = 1; ; attempt++) {
@@ -403,7 +399,7 @@ async function fetchValidatorFromSource(
     }
     if (res.ok) {
       // optimistic answer: wait the base delay, then retry.
-      onRetry("optimistic answer, retry pending");
+      onRetry("optimistic answer, retry pending", Date.now() + RETRY_BASE_DELAY_MS);
       await sleep(RETRY_BASE_DELAY_MS);
       if (requestDone()) {
         throw new Error(`beacon source ${base} answered optimistic for validator ${index}; request already settled`);
@@ -426,7 +422,7 @@ async function fetchValidatorFromSource(
     // Never start a retry for a request that has already been answered
     // (or failed): no wasted calls to a source that is rate-limiting us.
     if (requestDone()) throw err;
-    onRetry(`HTTP ${res.status}, retry pending`);
+    onRetry(`HTTP ${res.status}, retry pending`, Date.now() + waitMs);
     await sleep(waitMs);
     if (requestDone()) throw err;
   }
@@ -488,25 +484,33 @@ export async function handleValidator(
     return best;
   };
 
-  // V-M1 (J2 round 2): the verdict must not depend on arrival order.
-  // When a pair first agrees, the decision is NOT taken at once: the
-  // remaining source gets a bounded straggler grace —
-  // min(VALIDATOR_STRAGGLER_GRACE_MS, time left in the budget), the same
-  // rule as ROUTE's QUORUM_STRAGGLER_GRACE_MS — and the verdict is then
-  // computed from everything that arrived (see decide() below). A
-  // dissent that arrives inside the grace refuses the answer exactly as
-  // a dissent that arrived first. A leg that failed / timed out does not
-  // block. Early exits only where the verdict can no longer change:
-  // every leg settled, a dissent already seen next to a pair (conflict
-  // is final), or neither an answer nor a "does not exist" is reachable.
+  // V-M1 (J2 round 2) + J1 R1 (round 3): the verdict must not depend on
+  // arrival order anywhere inside the budget. After a pair agrees, the
+  // decision waits while an unsettled source can still answer inside
+  // the budget (canStillAnswer), then is computed from everything that
+  // arrived (see decide() below). Early exits only where the verdict can
+  // no longer change: every leg settled (incl. a third that definitively
+  // failed — decided at once), a dissent already seen next to a pair
+  // (conflict is final), no unsettled source can still answer in budget,
+  // or neither an answer nor a "does not exist" is reachable.
+  //   legRetryAt[i]  when source i's scheduled retry fires (undefined
+  //                  while its attempt is in flight)
+  const legRetryAt: Array<number | undefined> = BEACON_SOURCES.map(() => undefined);
+  const canStillAnswer = (i: number): boolean => {
+    if (legSettled[i]) return false;
+    const retryAt = legRetryAt[i];
+    // In flight: the attempt's abort timer is min(timeout, budget left),
+    // so it answers or fails inside the budget. Scheduled retry: only if
+    // it fires before the budget ends (fetchValidatorFromSource already
+    // refuses retries that would leave < MIN_RETRY_WINDOW_MS).
+    return retryAt === undefined || retryAt < deadlineAt;
+  };
   await new Promise<void>((resolve) => {
     let finished = false;
-    let graceTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (): void => {
       if (finished) return;
       finished = true;
       clearTimeout(deadlineTimer);
-      if (graceTimer !== undefined) clearTimeout(graceTimer);
       resolve();
     };
     const deadlineTimer = setTimeout(finish, Math.max(0, deadlineAt - Date.now()));
@@ -520,10 +524,9 @@ export async function handleValidator(
         // Conflict already certain: an answer outside the group, or a
         // 404 next to a pair that found the validator.
         if (arrival.length > group.length || n404 > 0) return finish();
-        if (graceTimer === undefined) {
-          const graceMs = Math.max(0, Math.min(VALIDATOR_STRAGGLER_GRACE_MS, deadlineAt - Date.now()));
-          graceTimer = setTimeout(finish, graceMs);
-        }
+        // Otherwise wait only while some unsettled source can still
+        // answer inside the budget; the deadline timer bounds the wait.
+        if (!BEACON_SOURCES.some((_, i) => canStillAnswer(i))) return finish();
         return;
       }
       // No pair yet. Can one still form? Can "does not exist" (>= 2
@@ -533,8 +536,10 @@ export async function handleValidator(
       if (!pairPossible && !notFoundPossible) finish();
     };
     BEACON_SOURCES.forEach((base, i) => {
-      fetchValidatorFromSource(base, index, fetchImpl, timeoutMs, deadlineAt, requestDone, (reason) => {
+      fetchValidatorFromSource(base, index, fetchImpl, timeoutMs, deadlineAt, requestDone, (reason, retryAt) => {
         legFailure[i] = reason;
+        legRetryAt[i] = retryAt;
+        check();
       }).then(
         (leg) => {
           if (finished) return; // arrived after the decision: not counted

@@ -35,7 +35,6 @@ import {
   RETRY_429_DEFAULT_DELAY_MS,
   RETRYABLE_STATUSES,
   VALIDATOR_MAX_ATTEMPTS,
-  VALIDATOR_STRAGGLER_GRACE_MS,
   handleValidator,
   parseRetryAfterMs,
 } from "../src/handlers/validator";
@@ -388,7 +387,7 @@ describe("VR: third source fallback (stub fetch)", () => {
 });
 
 // ---- V-M1 (J2 round 2): the verdict must not depend on arrival order ----
-describe("V-M1: order-independent verdicts (straggler grace)", () => {
+describe("V-M1: order-independent verdicts (wait while the third can still answer in budget)", () => {
   const X = beaconBody(1, "32000000000", "active_ongoing");
   const Y = beaconBody(1, "31000000000", "active_ongoing");
   const at = (body: string, delayMs: number): Step[] => [{ status: 200, body, delayMs }];
@@ -419,7 +418,7 @@ describe("V-M1: order-independent verdicts (straggler grace)", () => {
     expect(receiptCount()).toBe(before);
   }, 20000);
 
-  it("J2 S1: X@50, X@80, late dissent Y@600 (inside the grace) -> 502 QUORUM_CONFLICT, same as dissent-first", async () => {
+  it("J2 S1: X@50, X@80, late dissent Y@600 (inside the budget) -> 502 QUORUM_CONFLICT, same as dissent-first", async () => {
     const late = scripted([at(X, 50), at(X, 80), at(Y, 600)]);
     await expectApiError(handleValidator({ validator_index: "1" }, { fetchImpl: late.fetchImpl }), 502, "QUORUM_CONFLICT");
     const first = scripted([at(Y, 50), at(X, 300), at(X, 350)]);
@@ -433,12 +432,12 @@ describe("V-M1: order-independent verdicts (straggler grace)", () => {
     expect(receiptCount()).toBe(before);
   });
 
-  it("dissent at ~grace edge inside the budget: pair at 20/40, dissent at 900 ms -> conflict", async () => {
+  it("dissent inside the budget: pair at 20/40, dissent at 900 ms -> conflict", async () => {
     const s = scripted([at(X, 20), at(X, 40), at(Y, 900)]);
     await expectApiError(handleValidator({ validator_index: "1" }, { fetchImpl: s.fetchImpl }), 502, "QUORUM_CONFLICT");
   });
 
-  it("dissent after the budget (5 s > 4.5 s) does not count: pair verifies at ~grace, never waits for it", async () => {
+  it("dissent after the budget (5 s > 4.5 s) does not count: pair verifies at the budget end", async () => {
     const s = scripted([at(X, 20), at(X, 40), at(Y, 5000)]);
     const t0 = Date.now();
     const res = (await handleValidator({ validator_index: "1" }, { fetchImpl: s.fetchImpl })) as Record<string, unknown>;
@@ -447,11 +446,24 @@ describe("V-M1: order-independent verdicts (straggler grace)", () => {
     expect(res.effective_balance).toBe(32000000000);
     expect((res.receipt as Receipt).quorum_votes).toBe("2/3 sources agreed");
     expect(res.source).toBe(BEACON_SOURCES[0] + " + " + BEACON_SOURCES[1]);
-    expect(wall).toBeGreaterThanOrEqual(40 + VALIDATOR_STRAGGLER_GRACE_MS - 30);
-    expect(wall).toBeLessThan(40 + VALIDATOR_STRAGGLER_GRACE_MS + 400);
+    expect(wall).toBeGreaterThanOrEqual(4500 - 30);
+    expect(wall).toBeLessThan(4500 + 300);
   }, 10000);
 
-  it("grace is capped by the remaining budget (pair at 400 ms, budget 900 ms -> ends by ~900 ms)", async () => {
+  it("budget edge: dissent at 4.3 s (inside 4.5 s) -> 502; same dissent at 4.8 s (outside) -> verified", async () => {
+    await expectApiError(
+      handleValidator({ validator_index: "1" }, { fetchImpl: scripted([at(X, 20), at(X, 40), at(Y, 4300)]).fetchImpl }),
+      502,
+      "QUORUM_CONFLICT",
+    );
+    const res = (await handleValidator(
+      { validator_index: "1" },
+      { fetchImpl: scripted([at(X, 20), at(X, 40), at(Y, 4800)]).fetchImpl },
+    )) as Record<string, unknown>;
+    expect(res.verdict).toBe("verified");
+  }, 15000);
+
+  it("wait is capped by the budget (pair at 400 ms, budget 900 ms -> ends by ~900 ms)", async () => {
     const s = scripted([at(X, 380), at(X, 400), at(Y, 3000)]);
     const t0 = Date.now();
     const res = (await handleValidator({ validator_index: "1" }, { fetchImpl: s.fetchImpl, timeoutMs: 900 })) as Record<string, unknown>;
@@ -459,7 +471,88 @@ describe("V-M1: order-independent verdicts (straggler grace)", () => {
     expect(Date.now() - t0).toBeLessThan(900 + 300);
   }, 8000);
 
-  it("all three agree -> 3/3, all three named; a failed third does not block (no grace wait)", async () => {
+  // ---- J1 R1 (round 3) ----
+  it("J1 scenario A: pair 50/60 + dissent at 1.1 s -> 502 QUORUM_CONFLICT (was verified with a fixed 1 s grace)", async () => {
+    await expectApiError(
+      handleValidator({ validator_index: "1" }, { fetchImpl: scripted([at(X, 50), at(X, 60), at(Y, 1100)]).fetchImpl }),
+      502,
+      "QUORUM_CONFLICT",
+    );
+  });
+
+  it("J1 scenario B: WRONG pair Y 50/60 + correct X at 1.1 s -> 502, never a wrong verified value", async () => {
+    const before = receiptCount();
+    await expectApiError(
+      handleValidator({ validator_index: "1" }, { fetchImpl: scripted([at(Y, 50), at(Y, 60), at(X, 1100)]).fetchImpl }),
+      502,
+      "QUORUM_CONFLICT",
+    );
+    expect(receiptCount()).toBe(before);
+  });
+
+  it("J1 scenario C: pair + third 429 (default 1.5 s back-off) then dissent on the retry -> 502 at ~1.5 s, third asked twice", async () => {
+    const before = receiptCount();
+    const s = scripted([at(X, 50), at(X, 60), [{ status: 429 }, { status: 200, body: Y }]]);
+    const t0 = Date.now();
+    await expectApiError(handleValidator({ validator_index: "1" }, { fetchImpl: s.fetchImpl }), 502, "QUORUM_CONFLICT");
+    const wall = Date.now() - t0;
+    expect(s.count(2)).toBe(2);
+    expect(wall).toBeGreaterThanOrEqual(RETRY_429_DEFAULT_DELAY_MS - 30);
+    expect(wall).toBeLessThan(RETRY_429_DEFAULT_DELAY_MS + 500);
+    expect(receiptCount()).toBe(before);
+  }, 8000);
+
+  it("429 with Retry-After: 1, dissent on the retry -> 502; agreement on the retry -> verified 3/3", async () => {
+    await expectApiError(
+      handleValidator(
+        { validator_index: "1" },
+        { fetchImpl: scripted([at(X, 50), at(X, 60), [{ status: 429, retryAfter: "1" }, { status: 200, body: Y }]]).fetchImpl },
+      ),
+      502,
+      "QUORUM_CONFLICT",
+    );
+    const ok = (await handleValidator(
+      { validator_index: "1" },
+      { fetchImpl: scripted([at(X, 50), at(X, 60), [{ status: 429, retryAfter: "1" }, { status: 200, body: X }]]).fetchImpl },
+    )) as Record<string, unknown>;
+    expect((ok.receipt as Receipt).quorum_votes).toBe("3/3 sources agreed");
+  }, 8000);
+
+  it("definitively failed third -> verified immediately, no fixed wait", async () => {
+    const OPT = beaconBody(1, "32000000000", "active_ongoing", true);
+    const cases: Array<{ label: string; third: Step[]; timeoutMs?: number; maxMs: number }> = [
+      { label: "non-retryable 400", third: [{ status: 400 }], maxMs: 300 },
+      { label: "network error", third: [new Error("ECONNRESET")], maxMs: 300 },
+      { label: "wrong validator index", third: [{ status: 200, body: beaconBody(999, "32000000000", "active_ongoing") }], maxMs: 300 },
+      { label: "optimistic twice (after its one retry)", third: [{ status: 200, body: OPT }], maxMs: RETRY_BASE_DELAY_MS + 300 },
+      { label: "429 asking > cap (Retry-After 5)", third: [{ status: 429, retryAfter: "5" }], maxMs: 300 },
+      { label: "429 with no budget left for a retry", third: [{ status: 429 }], timeoutMs: 1500, maxMs: 300 },
+      { label: "503 retried once then 503", third: [{ status: 503 }], maxMs: RETRY_BASE_DELAY_MS + 300 },
+    ];
+    for (const c of cases) {
+      const s = scripted([at(X, 10), at(X, 30), c.third]);
+      const t0 = Date.now();
+      const res = (await handleValidator(
+        { validator_index: "1" },
+        { fetchImpl: s.fetchImpl, ...(c.timeoutMs ? { timeoutMs: c.timeoutMs } : {}) },
+      )) as Record<string, unknown>;
+      const wall = Date.now() - t0;
+      expect([c.label, res.verdict]).toEqual([c.label, "verified"]);
+      expect([c.label, wall < c.maxMs]).toEqual([c.label, true]);
+    }
+  }, 15000);
+
+  it("hung third (never answers): pair verifies at the budget end, never later", async () => {
+    const s = scripted([at(X, 10), at(X, 30), [{ status: 200, body: Y, delayMs: 60000 }]]);
+    const t0 = Date.now();
+    const res = (await handleValidator({ validator_index: "1" }, { fetchImpl: s.fetchImpl, timeoutMs: 1200 })) as Record<string, unknown>;
+    expect(res.verdict).toBe("verified");
+    const wall = Date.now() - t0;
+    expect(wall).toBeGreaterThanOrEqual(1200 - 30);
+    expect(wall).toBeLessThan(1200 + 300);
+  }, 8000);
+
+  it("all three agree -> 3/3, all three named; a failed third does not block", async () => {
     const all = (await handleValidator(
       { validator_index: "1" },
       { fetchImpl: scripted([at(X, 10), at(X, 30), at(X, 60)]).fetchImpl },
