@@ -25,6 +25,7 @@ import {
   storageBackend,
 } from "./core/storage";
 import { installGracefulShutdown } from "./core/shutdown";
+import { maybeMigrateOnBoot } from "./tools/bootMigrate";
 import { registerReceiptRoutes } from "./core/receiptRoutes";
 import { getJobsSnapshot, getLoopLagSnapshot, startLoopLagSampler } from "./core/loopLag";
 import {
@@ -334,6 +335,9 @@ export async function main(): Promise<FastifyInstance> {
   // this creates the schema and proves the connection; if it fails the
   // boot fails (exit 1) and, with zero-downtime deploys, Render keeps the
   // previous instance serving instead of routing to a broken one.
+  // PG-CUTOVER (2026-11-21): no-op unless DATABASE_URL + MIGRATE_ON_BOOT=1
+  // + the SQLite file exists; copies and verifies SQLite -> Postgres first.
+  await maybeMigrateOnBoot();
   await initStorage();
   startStoragePinger();
   // Without the disk the TVL lists cache (tvl.ts listsCacheDir) is cold on
