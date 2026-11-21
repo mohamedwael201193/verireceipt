@@ -429,6 +429,7 @@ import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { quorum2of3 } from "../core/quorum";
 import { MAINNET_RPCS } from "../config/chains";
+import { explainRouteQuote } from "../core/routeExplanation";
 
 export const INTENT = "OPTIMAL_EXECUTION_ROUTE_GENERAL";
 
@@ -1881,10 +1882,10 @@ async function handleRouteInner(
   }
   const degraded = degradedReasons.length > 0;
   const confidence = plausibleQuotes.length >= 2 && !degraded ? 1.0 : 0.9;
-  const usdc = (Number(best.amountOut) / 1e6).toFixed(2);
-  const answer =
-    `At Ethereum block ${blockNumber}, the best route for selling 1 ETH is ${best.venue}, ` +
-    `returning ${usdc} USDC (${best.amountOut.toString()} base units).`;
+  const answer = explainRouteQuote({
+    blockNumber, venue: best.venue, amountOut: best.amountOut,
+    survivingQuotes: plausibleQuotes.length, degradedReasons,
+  });
 
   // 4. Receipt over the exact winning quoter call, pinned to the block.
   const receiptEvidence = JSON.stringify({

@@ -448,30 +448,35 @@ describe("stubbed RPCs: failover provenance + block-hash quorum", () => {
     "all-healthy stubs: both RPCs serve full quotes -> confidence 1.0, upstream is the first (agreeing) RPC",
     async () => {
       const blockNumber = FRESH_BLOCK;
+      const v3AmountOut = 1739203982n;
       const blockHash = "0x" + "ab".repeat(32);
       const stubA = await startStubRpc({
         blockNumber,
         blockHash,
         failCalls: false,
-        v3AmountOut: 1739203982n,
+        v3AmountOut,
         v2AmountOut: 1730000000n,
       });
       const stubB = await startStubRpc({
         blockNumber,
         blockHash,
         failCalls: false,
-        v3AmountOut: 1739203982n,
+        v3AmountOut,
         v2AmountOut: 1730000000n,
       });
       try {
         const result = await handleRouteWithRpcs({ pair: "ETH/USDC" }, [stubA.url, stubB.url]);
-        expect(result.amount_out).toBe(1739203982);
+        expect(result.amount_out).toBe(Number(v3AmountOut));
         expect(result.winning_venue).toBe("Uniswap V3 (fee 500)");
         expect(result.block_number).toBe(blockNumber);
         expect(result.confidence).toBe(1.0);
         const receipt = result.receipt as Record<string, unknown>;
         expect(receipt.upstream_url).toBe(stubA.url);
         expect(result.source).not.toContain("degraded");
+        expect(result.answer).toContain(`${v3AmountOut / 1_000_000n}.${(v3AmountOut % 1_000_000n).toString().padStart(6, "0")} USDC (${v3AmountOut} base units, 6 decimals)`);
+        expect(result.answer).toContain("3 venue quotes that survived");
+        expect(result.answer).toContain("Gas costs are not deducted");
+        expect(result.answer).not.toContain("Coverage is degraded");
       } finally {
         await stubA.close();
         await stubB.close();
