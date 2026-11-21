@@ -100,7 +100,7 @@ export function SiteFooter() {
             </span>
           </div>
           <div className="mono" style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 4 }}>
-            Node.js 20 · Fastify · SQLite WAL
+            Node.js 20 · Fastify · persistent storage (see /health)
           </div>
           <div className="mono" style={{ fontSize: 11.5, color: "var(--muted)" }}>
             auth: none · {BOND_DISPLAY}

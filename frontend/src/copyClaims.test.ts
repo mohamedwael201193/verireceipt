@@ -32,7 +32,7 @@ const BANNED: Array<[RegExp, string]> = [
   [/times out at 4\.5 ?s/i, "single-timeout over-claim: timeouts are per intent (see plate08 test)"],
   [/4\.5 ?s abort cap/i, "single-timeout over-claim"],
   [/per-upstream breaker/i, "the miner never constructs CircuitBreaker"],
-  [/cron cache/i, "grid is an in-process 5-minute ingester into SQLite, not a cron cache"],
+  [/cron cache/i, "grid is an in-process 5-minute ingester into persistent storage, not a cron cache"],
   // J2 Minor 1: quorum size is per chain (polygon / base-sepolia are 2-of-2).
   [/2-of-3 on most chains/i, "state the per-chain quorum"],
   [/"2-of-3 Archive RPC Quorum"/i, "state the per-chain quorum"],

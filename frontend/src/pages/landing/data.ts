@@ -93,7 +93,7 @@ export const INTENTS: IntentMeta[] = [
     ext: ".ts",
     name: "GRID_POWER_PRICE_GENERAL",
     sub: "# GRID_POWER_PRICE_GENERAL · Wholesale LMP Cache",
-    desc: "An in-process background ingester (every 5 minutes) loads CAISO OASIS, NYISO, and Elering prices into SQLite; answers are served from that stored settlement data.",
+    desc: "An in-process background ingester (every 5 minutes) loads CAISO OASIS, NYISO, and Elering prices into the persistent store; answers are served from that stored settlement data.",
     kind: "deterministic",
     upstreams: "CAISO OASIS · NYISO · Elering",
     schema: "lmp_usd_per_mwh, node_or_zone, market, currency",
@@ -193,7 +193,7 @@ export const PLATES: Plate[] = [
   { id: "receipt", fig: "fig. 02 · receipt", num: "02", cat: "accuracy", tag: "// sha-256 envelope", title: "SHA-256 Receipts →", desc: "Every 200 answer carries receipt.raw_response_sha256 over the exact evidence bytes served at /receipts/{id}/raw." },
   { id: "vault", fig: "fig. 03 · vault", num: "03", cat: "accuracy", tag: "// fail-closed refusal", title: "Strict 400/422/502 →", desc: "Malformed input and future intervals are refused with 400/422 and no receipt; upstream failures return 502. No guessed values." },
   { id: "cabinet", fig: "fig. 04 · cabinet", num: "04", cat: "reliability", tag: "// live /health", title: "Live Status →", desc: "/health and every endpoint are probed live on /status. Uptime is only what /health reports; nothing more is claimed." },
-  { id: "terrain", fig: "fig. 05 · terrain", num: "05", cat: "reliability", tag: "// sqlite wal store", title: "Persistent Grid Store →", desc: "Grid prices live in SQLite (WAL) on a persistent disk. Latency is measured live on /benchmarks, not claimed here." },
+  { id: "terrain", fig: "fig. 05 · terrain", num: "05", cat: "reliability", tag: "// persistent grid store", title: "Persistent Grid Store →", desc: "Grid prices use the persistent storage backend reported by /health. Latency is measured live on /benchmarks, not claimed here." },
   { id: "format", fig: "fig. 06 · format", num: "06", cat: "verification", tag: "// verbatim root keys", title: "Declared Schemas →", desc: "Responses use the field names declared in miner.yaml; a conformance suite checks them against the live service." },
   { id: "riffle", fig: "fig. 07 · riffle", num: "07", cat: "verification", tag: "// sha256sum check", title: "Recomputable Audits →", desc: "Fetch /receipts/{id}/raw, run sha256sum, and compare it with raw_response_sha256." },
   { id: "sieve", fig: "fig. 08 · sieve", num: "08", cat: "reliability", tag: "// per-intent abort timers", title: "Bounded Upstream Calls →", desc: "Every upstream call has its own abort timer, set per intent: route 4 s per RPC call (8 s total), TVL 4.5 s per fetch (9 s total), validator 4.5 s for the whole request, filings 10 s per SEC request (30 s total), tx 12 s per RPC call. Grid answers come from the stored ingest (20 s per ingester fetch); a missing CAISO hour, or a NYISO post-close re-check, is fetched live, capped at 120 s. The miner itself runs no circuit breaker; the breaker settings in miner.yaml are applied by the Telegraph node." },
@@ -213,7 +213,7 @@ export interface SprintStep {
  * Default step is day 01 (Nov 20, the current day).
  */
 export const SPRINT_STEPS: SprintStep[] = [
-  { label: "01 Star & Setup", cols: [0], g1: "// day 01 · Nov 20 — star bounties + Render deploy", g2: "// gate: /health 200 OK · SQLite WAL active · intent handlers live (six served today)" },
+  { label: "01 Star & Setup", cols: [0], g1: "// day 01 · Nov 20 — star bounties + Render deploy", g2: "// gate: /health 200 OK · persistent storage active · intent handlers live (six served today)" },
   { label: "02 Freeze Cutoff", cols: [1], g1: "// day 02 · Nov 21 EOD — registerMiner on Diamond 0x72a7…", g2: `// gate: ${MINER_BOND_USD_TEXT} Test USDC bond · activation_status: active` },
   { label: "03 Harden & Traps", cols: [2], g1: "// days 03–04 · Nov 22–23 — 24-case adversarial trap suite", g2: "// gate: 24/24 pass · 0% 503 · public Update #1 posted" },
   { label: "04 Mission Desk", cols: [3], g1: "// days 05–06 · Nov 24–25 — 100+ ranked EIP-191 escrow calls", g2: "// gate: 100+ signal_hash rows committed to desk/ledger/purchases.jsonl" },

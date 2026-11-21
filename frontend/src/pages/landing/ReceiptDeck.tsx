@@ -53,7 +53,7 @@ function summaryFor(item: DeckItem, data: unknown): string {
       return `Block-pinned execution resolved 1 ETH to ${formatUsdcBaseUnits(d.amount_out as number)} in exact 6-decimal base units${d.winning_venue ? ` via ${String(d.winning_venue)}` : ""}.`;
     case "grid":
       if (item.trap) return "";
-      return `${String(d.node_or_zone)} wholesale settlement interval priced at ${formatLmp(d.lmp_usd_per_mwh as number)} (${String(d.market)}), served from the SQLite store the 5-minute ingester fills (a missing CAISO hour is fetched live from OASIS first).`;
+      return `${String(d.node_or_zone)} wholesale settlement interval priced at ${formatLmp(d.lmp_usd_per_mwh as number)} (${String(d.market)}), served from the persistent store the 5-minute ingester fills (a missing CAISO hour is fetched live from OASIS first).`;
     default:
       return "";
   }

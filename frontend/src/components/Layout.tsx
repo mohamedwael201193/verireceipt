@@ -363,7 +363,7 @@ export default function Layout() {
               <div className="kicker">// deployment</div>
               <div style={{ color: "var(--text)", marginBottom: 6 }}>Render web service</div>
               <div className="mono" style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 4 }}>
-                Node.js 20 · Fastify · SQLite WAL
+                Node.js 20 · Fastify · persistent storage (see /health)
               </div>
               <div className="mono" style={{ fontSize: 11.5, color: "var(--muted)" }}>
                 auth: none · {BOND_DISPLAY}

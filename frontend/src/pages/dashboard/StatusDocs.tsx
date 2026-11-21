@@ -5,7 +5,7 @@
 //   the measured latency + receipt (no Math.random()).
 // - The oscilloscope plots measured latencies only — no random walk.
 // - Telemetry cards show /health (live) + values sourced from render.yaml /
-//   src (region, Node version, SQLite path, abort cap, quorum). "5 / 5
+//   src (region, Node version, storage configuration, abort cap, quorum). "5 / 5
 //   CLOSED" and "Fresh 2m ago" were canned; the cards now show how many
 //   endpoints actually answered and the age of the last live grid receipt.
 // - ERCOT/MISO are not served by the live API (the handler refuses them,
@@ -103,7 +103,7 @@ function endpointDefs(): EndpointDef[] {
       key: "grid",
       path: "/v1/grid-price",
       role: "GRID_POWER_PRICE_GENERAL",
-      src: "CAISO OASIS SQLite cache",
+      src: "CAISO OASIS persistent cache",
       intent: "GRID_POWER_PRICE_GENERAL",
       query: `TH_NP15_GEN-APND · ${gridInterval}`,
       requestUrl: directUrl("/v1/grid-price", { node_or_zone: "TH_NP15_GEN-APND", interval_start: gridInterval }),
@@ -247,7 +247,7 @@ function HealthRow({
 
 const SCOPE_SERIES: Array<{ key: ScopeSeriesKey; col: string; label: string }> = [
   { key: "tx", col: "#FF5722", label: "TX Quorum" },
-  { key: "grid", col: "#22C55E", label: "Grid SQLite" },
+  { key: "grid", col: "#22C55E", label: "Grid Store" },
   { key: "tvl", col: "#38BDF8", label: "DeFiLlama TVL" },
   { key: "route", col: "#A78BFA", label: "ETH Route" },
 ];
@@ -391,9 +391,9 @@ export default function StatusDocs({
           <div className="kpi-sub">client timeout 45 s (route 60 s) · a probe aborted at that budget is not counted</div>
         </div>
         <div className="card" style={{ padding: "15px 17px" }}>
-          <div className="kpi-lbl">Persistent Disk SQLite</div>
-          <div className="mono" style={{ fontSize: 13.5, fontWeight: 500, marginBottom: 4 }}>/var/data/verireceipt.sqlite</div>
-          <div className="kpi-sub">declared in render.yaml (region virginia, persistent disk) — the API does not report plan, region or disk: UNVERIFIED live</div>
+          <div className="kpi-lbl">Persistent Storage</div>
+          <div className="mono" style={{ fontSize: 13.5, fontWeight: 500, marginBottom: 4 }}>Postgres / SQLite backend</div>
+          <div className="kpi-sub">Backend and connection health are reported by GET /health (storage key). Plan, region and disk attachment remain UNVERIFIED live; render.yaml is configuration, not proof of the active backend.</div>
         </div>
         <div className="card" style={{ padding: "15px 17px" }}>
           <div className="kpi-lbl">Grid Store (5-min ingester)</div>
@@ -403,7 +403,7 @@ export default function StatusDocs({
           <div className="kpi-sub">
             {lastGrid?.receipt
               ? `quorum: ${String((lastGrid.receipt as unknown as Record<string, unknown>).quorum_votes ?? "—")}`
-              : "CAISO · NYISO · Elering in SQLite, refreshed every 5 min"}
+              : "CAISO · NYISO · Elering in the persistent store, refreshed every 5 min"}
           </div>
         </div>
       </div>

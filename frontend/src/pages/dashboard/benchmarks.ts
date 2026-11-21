@@ -594,7 +594,7 @@ export const BENCH_CASES: BenchCase[] = [
   {
     id: "B04",
     cat: "burst",
-    name: "SQLite Grid Store Re-Read",
+    name: "Persistent Grid Store Re-Read",
     expect: "Two consecutive grid calls both 200 with receipts · 2nd latency reported live",
     probe: () => "GET /v1/grid-price (TH_NP15_GEN-APND) × 2",
     runnable: true,
