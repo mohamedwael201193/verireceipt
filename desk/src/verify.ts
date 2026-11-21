@@ -34,9 +34,28 @@ export function sortKeysDeep(v: unknown): unknown {
   return v;
 }
 
-/** Compact, key-sorted JSON with Go encoding/json's HTML escaping (& < > as \u00XX). */
+/** Serialize JSON values directly: JSON.stringify on a sorted object reorders integer-like keys. */
+function lexicalJson(v: unknown): string | undefined {
+  if (Array.isArray(v)) return `[${v.map((x) => lexicalJson(x) ?? "null").join(",")}]`;
+  if (v && typeof v === "object") {
+    const obj = v as Record<string, unknown>;
+    const entries = Object.keys(obj).sort().flatMap((key) => {
+      const value = lexicalJson(obj[key]);
+      return value === undefined ? [] : [`${JSON.stringify(key)}:${value}`];
+    });
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(v);
+}
+
+/** Compact, lexically key-sorted JSON with Go encoding/json's HTML escaping (& < > as \u00XX).
+ * Field keys in current signals are ASCII. JS sorts UTF-16 code units; Go sorts UTF-8 bytes,
+ * so this helper does not claim equivalence for object keys containing astral characters.
+ */
 export function canonicalPayloadJson(payload: unknown): string {
-  return JSON.stringify(sortKeysDeep(payload))
+  const json = lexicalJson(payload);
+  if (json === undefined) throw new TypeError("signal payload must be a JSON value");
+  return json
     .replace(/&/g, "\\u0026")
     .replace(/</g, "\\u003c")
     .replace(/>/g, "\\u003e");

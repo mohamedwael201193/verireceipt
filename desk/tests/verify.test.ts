@@ -33,6 +33,17 @@ describe("signal hash re-derivation", () => {
     expect(signalHashOf(signal.payload)).toBe(signal.signal_hash);
     expect(signal.signal_hash).toBe(paid.body.signal_hash);
   });
+  it("sorts integer-like object keys lexically, including nested maps and maps inside arrays", () => {
+    const payload = { response: { by_type: { "3": 1, "144": 2, "10-K": 3 }, nested: [{ "2": "b", "10": "a" }] } };
+    expect(canonicalPayloadJson(payload)).toBe('{"response":{"by_type":{"10-K":3,"144":2,"3":1},"nested":[{"10":"a","2":"b"}]}}');
+  });
+  it("retains array order and produces the same canonical bytes regardless of insertion order", () => {
+    const a = { "2": [3, 1, 2], "10": { "4": "<&>", "11": null } };
+    const b = { "10": { "11": null, "4": "<&>" }, "2": [3, 1, 2] };
+    expect(canonicalPayloadJson(a)).toBe('{"10":{"11":null,"4":"\\u003c\\u0026\\u003e"},"2":[3,1,2]}');
+    expect(signalHashOf(a)).toBe(signalHashOf(b));
+    expect(signalHashOf(a)).not.toBe(signalHashOf({ ...a, "2": [1, 2, 3] }));
+  });
   it("escapes & < > like Go encoding/json", () => {
     expect(canonicalPayloadJson({ b: "x&y<z>", a: 1 })).toBe('{"a":1,"b":"x\\u0026y\\u003cz\\u003e"}');
   });
