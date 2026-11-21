@@ -315,7 +315,11 @@
 //   Cross-venue agreement is the point: each venue quote still comes
 //   from a single RPC; the filter cross-checks venues against each
 //   other, it does not re-query a venue on a second RPC.
-// Query params: unknown query params are ignored; on repeated params the first value wins.
+// Query params: pair is the only declared parameter (miner.yaml). Any other
+// key (amount, slippage, recipient, token, …) is 400 UNKNOWN_PARAM — an
+// unsupported economic parameter must never be silently ignored under a
+// 200 that quotes exactly 1 ETH (external QA-09, 2026-11-21). On repeated
+// params the first value wins.
 // ROUND 11 (A7 ROUTE gate, 2026-11-20): hard 8 s TOTAL deadline
 // (ROUTE_TOTAL_DEADLINE_MS) around the whole computation — quorum + quotes
 // + filter abort at 8 s with 502 ROUTE_DEADLINE, never a slow 200. Per-RPC
@@ -1435,6 +1439,15 @@ async function handleRouteInner(
   rpcUrls: string[],
   ctx: RouteRequestContext = {},
 ): Promise<Record<string, unknown>> {
+  // QA-09: strict contract, checked before any RPC work.
+  for (const key of Object.keys(query)) {
+    if (key !== "pair") {
+      throw badRequest(
+        "UNKNOWN_PARAM",
+        `Query parameter "${key}" is not supported; /v1/route takes only pair and always quotes exactly 1 ETH`,
+      );
+    }
+  }
   const pair = query.pair;
   if (pair === undefined) {
     throw badRequest("MISSING_PARAM", "pair is required; only ETH/USDC is supported");
