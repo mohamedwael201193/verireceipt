@@ -80,7 +80,13 @@ Field names vary per endpoint; `confidence`, `verdict`, `source`, and
 
 ## Registration facts
 
-- **registrationId:** TBD — filled in after registration
+- **registrationId:** `6152` on Ethereum Sepolia (chainId 11155111). Node status `active` at
+  `GET https://devnode.telegraphprotocol.com/api/miners/6152` (checked 2026-11-21 14:08 Africa/Cairo).
+  Created by `updateMiner(6150, …)` in tx
+  [`0x775fcc05adca9be05188554e0487b46e09f207bc5ea1de89a2fd86e2b79f07cb`](https://sepolia.etherscan.io/tx/0x775fcc05adca9be05188554e0487b46e09f207bc5ea1de89a2fd86e2b79f07cb)
+  (block 12181672). The earlier registration 6150 is superseded and shows `deregistered` on the node.
+- **Registered YAML:** [`miner.yaml` @ `4f471e4`](https://raw.githubusercontent.com/mohamedwael201193/verireceipt/4f471e48296d7225a482ef70025352e954b9cf5d/miner.yaml),
+  SHA-256 `0x1653f3c00f8ee983bc2d2b36579c665c94ce2215ab1bb0d526564a9aec183e9f`
 - **Diamond (Telegraph):** `0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b`
 - **Typical ask price:** $0.01 per call (per Telegraph docs, "usually $0.01 in USDC")
 - **Miner id / slug:** `774921` / `verireceipt`

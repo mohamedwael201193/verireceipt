@@ -522,7 +522,7 @@ export default function StatusDocs({
       )}
       {activeDoc === "cast" && (
         <div className="note-line" style={{ marginTop: 10 }}>
-          Template — fill $YOUR_ADDRESS / $KEY and verify amounts against the live Diamond before broadcasting.
+          Template — set $PRIVATE_KEY (testnet key) yourself. The bond is read live with quoteMinerBond; run each cast call dry run before its cast send.
         </div>
       )}
     </div>

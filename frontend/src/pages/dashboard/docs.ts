@@ -29,6 +29,15 @@ export const DOC_TABS: Array<{ id: DocTabId; label: string }> = [
 const CONFIRMED_TX =
   "0x1b9e2b48eb3510ee1a8aae2fc402139784f32d43b76d5853387cacb484a9a9d3";
 
+/**
+ * Copy-paste registration commands, shared by the dashboard "cast" tab and
+ * /docs. Signatures match telegraph-docs miners/miner-registration.md;
+ * the bond is approved in Sepolia Test USDC for the live quoteMinerBond
+ * amount (addresses-and-params.md: bonds are paid in USDC on this Diamond).
+ */
+export const REGISTRATION_CAST_SNIPPET =
+  "# VeriReceipt on Ethereum Sepolia: the official Telegraph flow\n# (miners/miner-registration.md Step 4 + \"Updating your miner\";\n# protocol/addresses-and-params.md: on this Diamond bonds are paid in USDC).\n# Set $PRIVATE_KEY yourself (testnet key only). Nothing below contains a key.\nexport DIAMOND=\"0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b\"\nexport USDC=\"0xcc194e1a843B658526D0D5C431f670028582Ae17\"   # Sepolia Test USDC, 6 decimals\nexport RPC=\"https://ethereum-sepolia-rpc.publicnode.com\"\nexport YAML_URL=\"https://raw.githubusercontent.com/mohamedwael201193/verireceipt/4f471e48296d7225a482ef70025352e954b9cf5d/miner.yaml\"\nexport YAML_HASH=\"0x1653f3c00f8ee983bc2d2b36579c665c94ce2215ab1bb0d526564a9aec183e9f\"\nexport FEE_ADDRESS=\"$(cast wallet address --private-key \"$PRIVATE_KEY\")\"   # payout address = your wallet\nexport MIN_PRICE=10000   # 0.01 USDC in 6-decimal units (minimum allowed)\nexport INTENTS='[\"ONCHAIN_TX_LOOKUP_GENERAL\",\"REGULATORY_FILING_MONITOR_GENERAL\",\"TVL_LOOKUP_GENERAL\",\"OPTIMAL_EXECUTION_ROUTE_GENERAL\",\"GRID_POWER_PRICE_GENERAL\",\"VALIDATOR_PERFORMANCE_VERIFY_GENERAL\"]'\n\n# 0. The hash must be SHA-256 (not keccak256) of the raw bytes at YAML_URL.\n#    This must print exactly $YAML_HASH:\necho \"0x$(curl -s \"$YAML_URL\" | sha256sum | awk '{print $1}')\"\n\n# 1. Bond: quote it for the 6 intents and approve exactly that amount of Test USDC.\n#    (Read live; on 2026-11-21 quoteMinerBond(6) returned 1500000 = $1.50.)\nexport BOND=$(cast call \"$DIAMOND\" \"quoteMinerBond(uint256)(uint256,uint256)\" 6 --rpc-url \"$RPC\" | head -n1 | awk '{print $1}')\ncast send \"$USDC\" \"approve(address,uint256)\" \"$DIAMOND\" \"$BOND\" \\\n  --rpc-url \"$RPC\" --private-key \"$PRIVATE_KEY\"\n\n# 2. Dry run (free): returns the registrationId you would get, or the exact revert.\ncast call \"$DIAMOND\" \\\n  \"registerMiner(string,bytes32,address,uint256,string[])(uint256)\" \\\n  \"$YAML_URL\" \"$YAML_HASH\" \"$FEE_ADDRESS\" \"$MIN_PRICE\" \"$INTENTS\" \\\n  --from \"$(cast wallet address --private-key \"$PRIVATE_KEY\")\" --rpc-url \"$RPC\"\n\n# 3. Register.\ncast send \"$DIAMOND\" \\\n  \"registerMiner(string,bytes32,address,uint256,string[])\" \\\n  \"$YAML_URL\" \"$YAML_HASH\" \"$FEE_ADDRESS\" \"$MIN_PRICE\" \"$INTENTS\" \\\n  --rpc-url \"$RPC\" --private-key \"$PRIVATE_KEY\"\n\n# Update path: change the YAML / price / fee address / intents of an existing\n# registration. Never re-register. It creates a NEW registrationId; the old one ends.\n# VeriReceipt's current registrationId is 6152 (updateMiner of 6150).\nexport OLD_REGISTRATION_ID=6152\ncast call \"$DIAMOND\" \\\n  \"updateMiner(uint256,string,bytes32,address,uint256,string[])(uint256)\" \\\n  \"$OLD_REGISTRATION_ID\" \"$YAML_URL\" \"$YAML_HASH\" \"$FEE_ADDRESS\" \"$MIN_PRICE\" \"$INTENTS\" \\\n  --from \"$(cast wallet address --private-key \"$PRIVATE_KEY\")\" --rpc-url \"$RPC\"\ncast send \"$DIAMOND\" \\\n  \"updateMiner(uint256,string,bytes32,address,uint256,string[])\" \\\n  \"$OLD_REGISTRATION_ID\" \"$YAML_URL\" \"$YAML_HASH\" \"$FEE_ADDRESS\" \"$MIN_PRICE\" \"$INTENTS\" \\\n  --rpc-url \"$RPC\" --private-key \"$PRIVATE_KEY\"\n\n# Then read the node verdict ~10-15 min after the tx. Use the registrationId the\n# dry run printed (registerMiner or updateMiner):\nexport NEW_REGISTRATION_ID=\"REPLACE_WITH_ID_FROM_DRY_RUN\"\ncurl -s \"https://devnode.telegraphprotocol.com/api/miners/$NEW_REGISTRATION_ID\"\n";
+
 export const DOC_SNIPPETS: Record<DocTabId, string> = {
   curl:
     "# 1. Direct Miner Probe (Zero Auth — Verifiable SHA-256 Receipt)\n" +
@@ -432,24 +441,5 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '      effective_balance:\n' +
     '        path: effective_balance\n' +
     '        unit: "gwei"\n',
-  cast:
-    "# Sepolia Registration Commands (Active Diamond — Nov 17 Migration)\n" +
-    "# TEMPLATE: fill $YOUR_ADDRESS / $KEY. Verify amounts against the live\n" +
-    "# Diamond before broadcasting — do not run blind.\n" +
-    'export RPC="https://ethereum-sepolia-rpc.publicnode.com"\n' +
-    'export DIAMOND="0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b"\n' +
-    'export USDC="0xcc194e1a843B658526D0D5C431f670028582Ae17"\n\n' +
-    "# 1. Confirm live on-chain bond ($1.00 + 4 x $0.10 = $1.40 Test USDC)\n" +
-    'cast call $DIAMOND "minerBondParams()(uint256,uint256,uint256,uint256,uint256)" --rpc-url $RPC\n\n' +
-    "# 2. Mint 10 Test USDC & approve Diamond for $2.00 allowance\n" +
-    "cast send $USDC \"mint(address,uint256)\" $YOUR_ADDRESS 10000000 --rpc-url $RPC --private-key $KEY\n" +
-    "cast send $USDC \"approve(address,uint256)\" $DIAMOND 2000000 --rpc-url $RPC --private-key $KEY\n\n" +
-    "# 3. Compute exact SHA-256 (NOT keccak256) of commit-pinned miner.yaml\n" +
-    'export YAML_URL="https://raw.githubusercontent.com/mohamedwael201193/verireceipt/03a29014bce6f6d38055eb39449cf40611e06a4c/miner.yaml"\n' +
-    'export YAML_HASH="0x$(curl -s "$YAML_URL" | sha256sum | awk \'{print $1}\')"\n\n' +
-    "# 4. Dry-run registerMiner (free) then broadcast\n" +
-    'cast call $DIAMOND "registerMiner(string,bytes32,address,uint256,string[])(uint256)" \\\n' +
-    '  "$YAML_URL" "$YAML_HASH" "$YOUR_ADDRESS" 10000 \\\n' +
-    `  '["ONCHAIN_TX_LOOKUP_GENERAL","REGULATORY_FILING_MONITOR_GENERAL","TVL_LOOKUP_GENERAL","OPTIMAL_EXECUTION_ROUTE_GENERAL","GRID_POWER_PRICE_GENERAL","VALIDATOR_PERFORMANCE_VERIFY_GENERAL"]' \\\n` +
-    "  --rpc-url $RPC",
+  cast: REGISTRATION_CAST_SNIPPET,
 };

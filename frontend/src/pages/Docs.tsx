@@ -10,14 +10,16 @@
 //
 // Registration snippet uses the real repo and the real commit SHA:
 // github.com/mohamedwael201193/verireceipt @
-// 03a29014bce6f6d38055eb39449cf40611e06a4c (A9 validator-r3 commit on origin/main; this tree's miner.yaml).
+// 4f471e48296d7225a482ef70025352e954b9cf5d (A8 accepted_fields map-form commit on origin/main; this tree's miner.yaml,
+// registered on Sepolia as registrationId 6152).
 
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { REGISTRATION_CAST_SNIPPET } from './dashboard/docs';
 
 const API_BASE_URL = 'https://verireceipt.onrender.com';
 const REPO_URL = 'https://github.com/mohamedwael201193/verireceipt';
-const MINER_YAML_COMMIT = '03a29014bce6f6d38055eb39449cf40611e06a4c';
+const MINER_YAML_COMMIT = '4f471e48296d7225a482ef70025352e954b9cf5d';
 const MINER_YAML_URL = `https://raw.githubusercontent.com/mohamedwael201193/verireceipt/${MINER_YAML_COMMIT}/miner.yaml`;
 
 interface EndpointDoc {
@@ -243,18 +245,7 @@ rate_limit_per_sec: 20
 circuit_threshold: 5
 circuit_cooldown_seconds: 30`;
 
-const CAST_SNIPPET = `# Register VeriReceipt (Sepolia) — fill $YOUR_ADDRESS and $KEY first.
-# Bond: $1.00 + 4 x $0.10 = $1.40 Test USDC.
-# NOTE: the registerMiner amount unit below (10000) is NOT confirmed in
-# the source material — verify the units on the Telegraph rules page
-# before sending. Do not run this as-is without that check.
-DIAMOND=0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b
-YAML_URL=${MINER_YAML_URL}
-curl -s "$YAML_URL" -o miner.yaml
-sha256sum miner.yaml
-cast send $DIAMOND "registerMiner(uint256,address,string)" 10000 $YOUR_ADDRESS "$YAML_URL" \\
-  --rpc-url https://ethereum-sepolia-rpc.publicnode.com \\
-  --private-key $KEY`;
+const CAST_SNIPPET = REGISTRATION_CAST_SNIPPET;
 
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -567,10 +558,10 @@ curl "$BASE/v1/grid-price?node_or_zone=TH_NP15_GEN-APND&interval_start=2026-11-2
               <pre>{CAST_SNIPPET}</pre>
             </div>
             <p className="vr-muted vr-small" style={{ marginTop: 10 }}>
-              Template: <span className="vr-mono">$YOUR_ADDRESS</span> and{' '}
-              <span className="vr-mono">$KEY</span> are yours to fill, and the{' '}
-              <span className="vr-mono">registerMiner</span> amount unit must be confirmed on the
-              Telegraph rules page before sending. The repo and commit SHA above are real.
+              Template: only <span className="vr-mono">$PRIVATE_KEY</span> is yours to fill
+              (testnet key). Signatures follow the official Telegraph miner-registration
+              guide; the bond is read live with{' '}
+              <span className="vr-mono">quoteMinerBond</span> and approved in Sepolia Test USDC.{' '}The repo and commit SHA above are real.
             </p>
           </div>
         )}
