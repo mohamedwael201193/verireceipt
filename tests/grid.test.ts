@@ -2259,6 +2259,10 @@ describe("GRID-NP15: a CAISO request with no node is answered for the NP15 hub (
 
   it("NYISO aliases are unaffected: N.Y.C. still echoes its own spelling", async () => {
     const t = pastIso(30);
+    // The live ingester above seeds BOTH aliases at recent intervals. This
+    // fixture exercises fallback only, so remove the exact-key row first.
+    // Otherwise the correct exact-key preference returns a live price.
+    getDb().prepare("DELETE FROM grid_cache WHERE node_or_zone = ? AND interval_start = ?").run("N.Y.C.", t);
     saveGridPrice("ZONE_J", t, 44.4, "NYISO", new Date().toISOString());
     const res = await withNoNetwork(() => handleGridPrice({ node_or_zone: "N.Y.C.", interval_start: t }));
     expect(res.lmp_usd_per_mwh).toBe(44.4);
