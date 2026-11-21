@@ -1222,8 +1222,9 @@ export interface ReceiptEvidence {
 
 /**
  * Fetch a receipt's stored evidence (receipt-fix, 2026-11-20). Throws
- * when the stored blob is corrupt (gunzip failure, or the decompressed
- * bytes no longer hash to the stored digest / length) — a stored blob
+ * when the stored blob is corrupt (gunzip failure, output past
+ * evidence_bytes + 1, or the decompressed bytes no longer hash to the
+ * stored digest / length) — a stored blob
  * that fails its own hash is database corruption, not a missing
  * receipt, and must fail loudly instead of serving wrong bytes.
  */
@@ -1243,7 +1244,16 @@ export function getReceiptEvidence(receiptId: string): ReceiptEvidence {
   if (row.evidence_gzip === null || row.evidence_gzip === undefined) {
     return { found: true, evidence: null, sha256: row.raw_response_sha256, evidenceBytes: 0 };
   }
-  const evidence = gunzipSync(row.evidence_gzip);
+  let evidence: Buffer;
+  try {
+    // Fail closed if a tampered gzip expands past the recorded length (G10 r4, J2 m2).
+    evidence = gunzipSync(row.evidence_gzip, { maxOutputLength: row.evidence_bytes + 1 });
+  } catch {
+    throw new Error(
+      `verireceipt: stored evidence for receipt ${receiptId} does not match ` +
+        `raw_response_sha256 ${row.raw_response_sha256} (corrupt evidence blob)`,
+    );
+  }
   if (
     evidence.length !== row.evidence_bytes ||
     sha256Hex(evidence) !== row.raw_response_sha256
@@ -1315,8 +1325,8 @@ export function getReceiptPages(receiptId: string): StoredReceiptPage[] {
 
 /**
  * Fetch one extra page's exact bytes (G10). found=false when no such
- * page row exists. Throws on a corrupt blob (gunzip failure, or bytes
- * that no longer hash to the stored digest / length), like
+ * page row exists. Throws on a corrupt blob (gunzip failure, output past
+ * evidence_bytes + 1, or bytes that no longer hash to the stored digest / length), like
  * getReceiptEvidence — wrong bytes are never returned.
  */
 export function getReceiptPageEvidence(receiptId: string, pageIndex: number): ReceiptEvidence {
@@ -1332,7 +1342,16 @@ export function getReceiptPageEvidence(receiptId: string, pageIndex: number): Re
   if (row.evidence_gzip === null || row.evidence_gzip === undefined) {
     return { found: true, evidence: null, sha256: row.raw_response_sha256, evidenceBytes: 0 };
   }
-  const evidence = gunzipSync(row.evidence_gzip);
+  let evidence: Buffer;
+  try {
+    // Fail closed if a tampered gzip expands past the recorded length (G10 r4, J2 m2).
+    evidence = gunzipSync(row.evidence_gzip, { maxOutputLength: row.evidence_bytes + 1 });
+  } catch {
+    throw new Error(
+      `verireceipt: stored page ${pageIndex} for receipt ${receiptId} does not match ` +
+        `raw_response_sha256 ${row.raw_response_sha256} (corrupt evidence blob)`,
+    );
+  }
   if (evidence.length !== row.evidence_bytes || sha256Hex(evidence) !== row.raw_response_sha256) {
     throw new Error(
       `verireceipt: stored page ${pageIndex} for receipt ${receiptId} does not match ` +
@@ -1340,6 +1359,43 @@ export function getReceiptPageEvidence(receiptId: string, pageIndex: number): Re
     );
   }
   return { found: true, evidence, sha256: row.raw_response_sha256, evidenceBytes: row.evidence_bytes };
+}
+
+/** A stored evidence blob as-is (still gzipped), for async verification (G10 r3). */
+export interface StoredEvidenceBlob {
+  /** The gzipped bytes, or null when no evidence is stored (legacy / pruned). */
+  gzip: Buffer | null;
+  /** The stored raw_response_sha256 exactly as stored (no normalisation). */
+  sha256: string;
+  /** Recorded uncompressed length. */
+  evidenceBytes: number;
+}
+
+/**
+ * Read one receipt's main blob (pageIndex null) or one page's blob
+ * WITHOUT decompressing or hashing it (G10 r3, J1/J2 r2-m1): the
+ * metadata route verifies it asynchronously off the request's hot path
+ * (core/evidenceVerify.ts). Returns null when no such row exists.
+ */
+export function getEvidenceBlob(receiptId: string, pageIndex: number | null): StoredEvidenceBlob | null {
+  const row = (pageIndex === null
+    ? getDb()
+        .prepare(`SELECT raw_response_sha256, evidence_gzip, evidence_bytes FROM miner_receipts WHERE receipt_id = ?`)
+        .get(receiptId)
+    : getDb()
+        .prepare(
+          `SELECT raw_response_sha256, evidence_gzip, evidence_bytes FROM miner_receipt_pages
+           WHERE receipt_id = ? AND page_index = ?`,
+        )
+        .get(receiptId, pageIndex)) as
+    | { raw_response_sha256: string; evidence_gzip: Buffer | null; evidence_bytes: number }
+    | undefined;
+  if (!row) return null;
+  return {
+    gzip: row.evidence_gzip ?? null,
+    sha256: row.raw_response_sha256,
+    evidenceBytes: row.evidence_bytes,
+  };
 }
 
 export function getReceiptMeta(receiptId: string): StoredReceiptMeta | null {

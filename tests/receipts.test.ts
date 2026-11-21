@@ -9,7 +9,7 @@
 // End-to-end LIVE: the same against the real beacon APIs and the real
 // Ethereum RPCs (reference tx), no stubs.
 
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import { createHash } from "crypto";
 import { gzipSync } from "zlib";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
@@ -32,6 +32,14 @@ import {
   sha256Hex,
 } from "../src/core/receipt";
 import { evidenceContentType, ifNoneMatchHits } from "../src/core/receiptRoutes";
+import {
+  clearEvidenceVerifyCache,
+  evidenceVerifyCacheSize,
+  evidenceVerifyStats,
+  resetEvidenceVerifyStats,
+  setEvidenceVerifyPauseForTests,
+} from "../src/core/evidenceVerify";
+import { getReceiptEvidence } from "../src/core/db";
 import { stopTvlListsRefreshTimer } from "../src/handlers/tvl";
 
 const sha = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
@@ -559,7 +567,7 @@ describe("G10 r2 m3: metadata agrees with /raw on broken rows", () => {
   });
 });
 
-describe("G10 r2 m4/m2/m5: /api evidence alias, ETag 304, CORS preflight", () => {
+describe("G10 r2 m4/m2/m5: /api evidence alias, ETag 304, CORS OPTIONS request", () => {
   it("/api/receipts/:id/evidence serves the same exact bytes as /raw", async () => {
     const body = '{"alias":true}';
     const r = makeReceipt("TVL_LOOKUP_GENERAL", "https://u.example/alias", body, "1/1");
@@ -619,7 +627,7 @@ describe("G10 r2 m4/m2/m5: /api evidence alias, ETag 304, CORS preflight", () =>
     expect(res.statusCode).toBe(500);
   });
 
-  it("OPTIONS preflight -> 204 with CORS allow headers on every receipt route", async () => {
+  it("CORS OPTIONS request -> 204 with CORS allow headers on every receipt route", async () => {
     const id = "rcpt_" + "P".repeat(26);
     for (const prefix of ["", "/api"]) {
       for (const path of ["", "/raw", "/evidence", "/pages/0/raw"]) {
@@ -631,4 +639,211 @@ describe("G10 r2 m4/m2/m5: /api evidence alias, ETag 304, CORS preflight", () =>
       }
     }
   });
+});
+
+describe("G10 r3 (J1 n1 / J2 r2-m1): metadata verification is async and cached", () => {
+  const meta = async (id: string) => (await app.inject({ method: "GET", url: `/receipts/${id}` })).json();
+
+  it("verdict is cached per stored blob: a second metadata call does not re-verify", async () => {
+    // 256 KiB of random bytes; the tamper below flips one gzip byte and
+    // leaves the digest and length columns (the cache key) unchanged.
+    const body = randomBytes(256 * 1024);
+    const r = makeReceipt("GRID_POWER_PRICE_GENERAL", "https://grid.example/r3", body, "1/1");
+    saveReceipt(r, body);
+    clearEvidenceVerifyCache();
+    resetEvidenceVerifyStats();
+    expect(await meta(r.receipt_id)).toMatchObject({ evidence_available: true, evidence_status: "ok" });
+    expect(evidenceVerifyCacheSize()).toBe(1);
+    expect(evidenceVerifyStats.blobReads).toBeGreaterThan(0);
+    expect(evidenceVerifyStats.gunzips).toBeGreaterThan(0);
+    expect(evidenceVerifyStats.hashes).toBeGreaterThan(0);
+    // Alter the stored blob in place behind the server's back.
+    const gz = getDb().prepare("SELECT evidence_gzip FROM miner_receipts WHERE receipt_id = ?").get(r.receipt_id) as { evidence_gzip: Buffer };
+    const tampered = Buffer.from(gz.evidence_gzip);
+    const mid = Math.floor(tampered.length / 2);
+    tampered[mid] = tampered[mid] ^ 0xff;
+    getDb().prepare("UPDATE miner_receipts SET evidence_gzip = ? WHERE receipt_id = ?").run(tampered, r.receipt_id);
+    // Deterministic cache-hit proof (J1 M1): zero blob reads / unzip / hash.
+    resetEvidenceVerifyStats();
+    expect((await meta(r.receipt_id)).evidence_status).toBe("ok");
+    expect(evidenceVerifyCacheSize()).toBe(1);
+    expect(evidenceVerifyStats).toEqual({ blobReads: 0, gunzips: 0, hashes: 0 });
+    // ... but /raw re-verifies before every send and never serves the bytes,
+    const raw = await app.inject({ method: "GET", url: `/receipts/${r.receipt_id}/raw` });
+    expect(raw.statusCode).toBe(500);
+    expect(raw.json().code).toBe("EVIDENCE_CORRUPT");
+    // and feeds that back: metadata now agrees with /raw.
+    expect(await meta(r.receipt_id)).toMatchObject({ evidence_available: false, evidence_status: "corrupt", evidence_bytes: 0 });
+    // A fresh process (empty cache) reaches the same verdict on its own.
+    clearEvidenceVerifyCache();
+    expect((await meta(r.receipt_id)).evidence_status).toBe("corrupt");
+  });
+
+  it("the cache key is the stored row: a row whose digest column changes is re-verified", async () => {
+    const r = makeReceipt("GRID_POWER_PRICE_GENERAL", "https://grid.example/r3b", "good-bytes", "1/1");
+    saveReceipt(r, "good-bytes");
+    expect((await meta(r.receipt_id)).evidence_status).toBe("ok");
+    getDb().prepare("UPDATE miner_receipts SET raw_response_sha256 = ? WHERE receipt_id = ?").run(sha("other-bytes"), r.receipt_id);
+    expect((await meta(r.receipt_id))).toMatchObject({ evidence_available: false, evidence_status: "corrupt" });
+    expect((await app.inject({ method: "GET", url: `/receipts/${r.receipt_id}/raw` })).statusCode).toBe(500);
+  });
+
+  it("a pruned blob reads as missing even after a cached ok (cache never resurrects evidence)", async () => {
+    const r = makeReceipt("REGULATORY_FILING_MONITOR_GENERAL", "https://data.sec.gov/r3.json", "main", "1/1");
+    saveReceipt(r, "main", [{ url: "https://data.sec.gov/r3p0.json", body: "page0" }]);
+    const before = await meta(r.receipt_id);
+    expect(before.evidence_status).toBe("ok");
+    expect(before.upstream_pages[0].evidence_status).toBe("ok");
+    getDb().prepare("UPDATE miner_receipts SET evidence_gzip = NULL, evidence_bytes = 0 WHERE receipt_id = ?").run(r.receipt_id);
+    getDb().prepare("UPDATE miner_receipt_pages SET evidence_gzip = NULL, evidence_bytes = 0 WHERE receipt_id = ?").run(r.receipt_id);
+    const after = await meta(r.receipt_id);
+    expect(after).toMatchObject({ evidence_available: false, evidence_status: "missing" });
+    expect(after.upstream_pages[0]).toMatchObject({ evidence_available: false, evidence_status: "missing" });
+    expect((await app.inject({ method: "GET", url: `/receipts/${r.receipt_id}/raw` })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `/receipts/${r.receipt_id}/pages/0/raw` })).statusCode).toBe(404);
+  });
+
+  it("concurrent metadata calls share one verification and agree", async () => {
+    const body = randomBytes(2 * 1024 * 1024);
+    const r = makeReceipt("GRID_POWER_PRICE_GENERAL", "https://grid.example/r3c", body, "1/1");
+    saveReceipt(r, body);
+    clearEvidenceVerifyCache();
+    const results = await Promise.all(Array.from({ length: 8 }, () => meta(r.receipt_id)));
+    for (const m of results) expect(m).toMatchObject({ evidence_status: "ok", evidence_bytes: body.length });
+    expect(evidenceVerifyCacheSize()).toBe(1);
+  });
+
+  it("an uncached 40 MB blob yields to the event loop; a cached call does no blob work", async () => {
+    const body = randomBytes(40 * 1024 * 1024);
+    const r = makeReceipt("GRID_POWER_PRICE_GENERAL", "https://grid.example/r3big", body, "1/1");
+    saveReceipt(r, body);
+    expect(getReceiptMeta(r.receipt_id)?.evidence_available).toBe(true);
+    // Reference measurement only (r2 sync path); not used in assertions.
+    let t = performance.now();
+    getReceiptEvidence(r.receipt_id);
+    const syncMs = performance.now() - t;
+
+    clearEvidenceVerifyCache();
+    resetEvidenceVerifyStats();
+    let maxGap = 0;
+    let ticks = 0;
+    let last = performance.now();
+    const timer = setInterval(() => {
+      const now = performance.now();
+      maxGap = Math.max(maxGap, now - last);
+      last = now;
+      ticks++;
+    }, 2);
+    t = performance.now();
+    const m = await meta(r.receipt_id);
+    const asyncMs = performance.now() - t;
+    clearInterval(timer);
+    expect(m).toMatchObject({ evidence_status: "ok", evidence_bytes: body.length });
+    expect(evidenceVerifyStats.blobReads).toBeGreaterThan(0);
+    expect(evidenceVerifyStats.gunzips).toBeGreaterThan(0);
+    expect(evidenceVerifyStats.hashes).toBeGreaterThan(0);
+    const uncachedStats = { ...evidenceVerifyStats };
+
+    resetEvidenceVerifyStats();
+    t = performance.now();
+    const m2 = await meta(r.receipt_id);
+    const cachedMs = performance.now() - t;
+    expect(m2.evidence_status).toBe("ok");
+    // Deterministic cache-hit proof (J1 M1): zero blob reads / unzip / hash.
+    expect(evidenceVerifyStats).toEqual({ blobReads: 0, gunzips: 0, hashes: 0 });
+    console.log(
+      `[g10-r4] 40 MB blob: sync getter ${syncMs.toFixed(1)} ms blocking; async meta ${asyncMs.toFixed(1)} ms wall, ` +
+        `max event-loop gap ${maxGap.toFixed(1)} ms over ${ticks} ticks; cached meta ${cachedMs.toFixed(1)} ms ` +
+        `(uncached work blobReads=${uncachedStats.blobReads} gunzips=${uncachedStats.gunzips} hashes=${uncachedStats.hashes})`,
+    );
+    // The loop kept turning (async unzip+hash yields). Timing is logged
+    // for notes as a range including worst case; the only remaining
+    // timing checks are generous hang-guards, not ratios of two samples.
+    expect(ticks).toBeGreaterThan(5);
+    const GENEROUS_MS = 2000;
+    expect(maxGap).toBeLessThan(GENEROUS_MS);
+    expect(cachedMs).toBeLessThan(GENEROUS_MS);
+  }, 60_000);
+});
+
+describe("G10 r4: generation guard and bounded gunzip", () => {
+  const meta = async (id: string) => (await app.inject({ method: "GET", url: `/receipts/${id}` })).json();
+
+  afterEach(() => {
+    setEvidenceVerifyPauseForTests(null);
+  });
+
+  it("an in-flight ok verification does not overwrite a newer /raw corrupt verdict", async () => {
+    const body = randomBytes(256 * 1024);
+    const r = makeReceipt("GRID_POWER_PRICE_GENERAL", "https://grid.example/r4race", body, "1/1");
+    saveReceipt(r, body);
+    clearEvidenceVerifyCache();
+    resetEvidenceVerifyStats();
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered!: () => void;
+    const atPause = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    setEvidenceVerifyPauseForTests(async () => {
+      entered();
+      await gate;
+    });
+
+    const inFlight = meta(r.receipt_id);
+    await atPause;
+
+    // Tamper in place (digest and length columns, the cache key, stay the same).
+    const gz = getDb().prepare("SELECT evidence_gzip FROM miner_receipts WHERE receipt_id = ?").get(r.receipt_id) as { evidence_gzip: Buffer };
+    const tampered = Buffer.from(gz.evidence_gzip);
+    const mid = Math.floor(tampered.length / 2);
+    tampered[mid] = tampered[mid] ^ 0xff;
+    getDb().prepare("UPDATE miner_receipts SET evidence_gzip = ? WHERE receipt_id = ?").run(tampered, r.receipt_id);
+
+    try {
+      const raw = await app.inject({ method: "GET", url: `/receipts/${r.receipt_id}/raw` });
+      expect(raw.statusCode).toBe(500);
+      expect(raw.json().code).toBe("EVIDENCE_CORRUPT");
+    } finally {
+      release();
+    }
+    const inFlightBody = await inFlight;
+    // /raw already recorded corrupt; the in-flight result must not clobber it.
+    expect(inFlightBody.evidence_status).toBe("corrupt");
+    expect(inFlightBody.evidence_available).toBe(false);
+    expect((await meta(r.receipt_id)).evidence_status).toBe("corrupt");
+  });
+
+  it("a gzip that expands past evidence_bytes fails closed as corrupt without accepting the output", async () => {
+    const honest = Buffer.from("small-honest-body");
+    const r = makeReceipt("GRID_POWER_PRICE_GENERAL", "https://grid.example/r4bomb", honest, "1/1");
+    saveReceipt(r, honest);
+    expect((await meta(r.receipt_id)).evidence_status).toBe("ok");
+
+    // Replace the stored gzip with a much larger payload, leaving the
+    // recorded digest and length (the small honest body) unchanged.
+    const bomb = gzipSync(Buffer.alloc(16 * 1024 * 1024, 0));
+    getDb().prepare("UPDATE miner_receipts SET evidence_gzip = ? WHERE receipt_id = ?").run(bomb, r.receipt_id);
+    clearEvidenceVerifyCache();
+    resetEvidenceVerifyStats();
+
+    const after = await meta(r.receipt_id);
+    expect(after).toMatchObject({ evidence_available: false, evidence_status: "corrupt", evidence_bytes: 0 });
+    const raw = await app.inject({ method: "GET", url: `/receipts/${r.receipt_id}/raw` });
+    expect(raw.statusCode).toBe(500);
+    expect(raw.json().code).toBe("EVIDENCE_CORRUPT");
+    // Page path too: store the same bomb as page 0 of another receipt.
+    const r2 = makeReceipt("REGULATORY_FILING_MONITOR_GENERAL", "https://data.sec.gov/r4bomb.json", honest, "1/1");
+    saveReceipt(r2, honest, [{ url: "https://data.sec.gov/r4bomb-p0.json", body: honest }]);
+    getDb().prepare("UPDATE miner_receipt_pages SET evidence_gzip = ? WHERE receipt_id = ?").run(bomb, r2.receipt_id);
+    clearEvidenceVerifyCache();
+    const pageMeta = await meta(r2.receipt_id);
+    expect(pageMeta.upstream_pages[0]).toMatchObject({ evidence_available: false, evidence_status: "corrupt" });
+    const pageRaw = await app.inject({ method: "GET", url: `/receipts/${r2.receipt_id}/pages/0/raw` });
+    expect(pageRaw.statusCode).toBe(500);
+    expect(pageRaw.json().code).toBe("EVIDENCE_CORRUPT");
+  }, 30_000);
 });

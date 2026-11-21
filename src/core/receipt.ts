@@ -121,7 +121,7 @@ export function publicBaseUrl(): string {
 export const RECEIPT_ID_RE = /^rcpt_[A-Z0-9]{26}$/;
 
 /**
- * Canonical receipt hash format (G10, documented in README "Receipts"):
+ * Canonical receipt hash format (G10; this comment is the reference):
  * raw_response_sha256 is the SHA-256 of the exact evidence bytes as 64
  * LOWERCASE hex characters with NO "0x" prefix — the same string
  * `sha256sum` prints. Builds up to 66868d7 emitted "0x" + hex; rows

@@ -27,7 +27,8 @@
 //     was never stored (legacy row) or was pruned under the evidence
 //     budget -> /raw 404 EVIDENCE_NOT_FOUND (metadata still 200 with
 //     evidence_available:false).
-//   - no listing route exists: GET /receipts and /receipts/ are 404.
+//   - no listing route exists: GET /receipts is 404, and /receipts/
+//     (empty id) is 400 INVALID_RECEIPT_ID; neither returns any id.
 //   - stored bytes that no longer hash to their recorded digest are DB
 //     corruption -> 500 EVIDENCE_CORRUPT; wrong bytes are never served.
 //     Metadata agrees with /raw (G10 r2): the blob is verified for the
@@ -36,10 +37,14 @@
 //     stored digest that is not a SHA-256 (main or any page) answers 500
 //     RECEIPT_CORRUPT on metadata, /raw and page /raw alike.
 //   - /raw responses carry ETag "<hex>"; If-None-Match matching it -> 304
-//     (checked only after the bytes pass their hash check). OPTIONS on
-//     every receipt route answers a CORS preflight (204).
+//     (checked only after the bytes pass their hash check). A CORS
+//     OPTIONS request on any receipt route answers 204.
+//   - Metadata verifies blobs without blocking the event loop (G10 r3):
+//     async gunzip + sliced SHA-256, verdict cached per stored blob
+//     (core/evidenceVerify.ts); /raw still verifies before every send.
 //
-// Hash format (README "Receipts"): raw_response_sha256 is 64 lowercase hex
+// Hash format (canonical, see normalizeSha256Hex in core/receipt.ts):
+// raw_response_sha256 is 64 lowercase hex
 // characters, no "0x" prefix (what `sha256sum` prints). Rows stored by
 // builds that emitted "0x"+hex are served in the canonical form. The /raw
 // response repeats the digest in X-Raw-SHA256 (same format) and in
@@ -48,8 +53,9 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ApiError, badRequest, errorBody } from "./errors";
-import { getReceiptEvidence, getReceiptMeta, getReceiptPageEvidence, getReceiptPages, type ReceiptEvidence } from "./db";
+import { getReceiptEvidence, getReceiptMeta, getReceiptPageEvidence, getReceiptPages, type ReceiptEvidence, type StoredReceiptMeta } from "./db";
 import { RECEIPT_ID_RE, normalizeSha256Hex, publicBaseUrl, sha256Hex } from "./receipt";
+import { checkEvidence, recordVerified, type EvidenceStatus } from "./evidenceVerify";
 
 const notFound = (code: string, message: string): ApiError => new ApiError(404, code, message);
 
@@ -118,19 +124,6 @@ export function ifNoneMatchHits(header: unknown, etag: string): boolean {
     .some((t) => t === etag);
 }
 
-/** Evidence state as served by BOTH metadata and /raw (G10 r2, J2 m3). */
-type EvidenceStatus = "ok" | "missing" | "corrupt";
-
-/** Verify a blob through the integrity-checking getter: never trust a flag. */
-function evidenceStatus(read: () => ReceiptEvidence): { status: EvidenceStatus; bytes: number } {
-  try {
-    const ev = read();
-    if (!ev.found || ev.evidence === null) return { status: "missing", bytes: 0 };
-    return { status: "ok", bytes: ev.evidence.length };
-  } catch {
-    return { status: "corrupt", bytes: 0 };
-  }
-}
 
 /**
  * G10 r2 (J2 m3): one digest check shared by metadata, /raw and every
@@ -138,8 +131,10 @@ function evidenceStatus(read: () => ReceiptEvidence): { status: EvidenceStatus; 
  * SHA-256 answers 500 RECEIPT_CORRUPT on all of them (previously meta
  * 500 but /raw 404).
  */
-function digestCorruption(id: string): ApiError | null {
-  const row = getReceiptMeta(id);
+function digestCorruption(id: string, metaRow?: StoredReceiptMeta | null): ApiError | null {
+  // G10 r3: the metadata route passes the row it already read (one row
+  // read per call instead of two).
+  const row = metaRow === undefined ? getReceiptMeta(id) : metaRow;
   if (!row) return null;
   if (normalizeSha256Hex(row.raw_response_sha256) === null) {
     return new ApiError(500, "RECEIPT_CORRUPT", `stored digest for ${id} is not a SHA-256`);
@@ -152,8 +147,8 @@ function digestCorruption(id: string): ApiError | null {
   return null;
 }
 
-/** CORS preflight for the receipt routes (lets a browser send If-None-Match). */
-function preflight(_request: FastifyRequest, reply: FastifyReply): FastifyReply {
+/** CORS OPTIONS request on the receipt routes (lets a browser send If-None-Match). */
+function corsOptions(_request: FastifyRequest, reply: FastifyReply): FastifyReply {
   return reply
     .status(204)
     .header("access-control-allow-origin", "*")
@@ -175,7 +170,7 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
     if (!row) return sendError(reply, notFound("RECEIPT_NOT_FOUND", `no receipt ${id}`));
     const base = publicBaseUrl();
     // A stored digest that is not a SHA-256 is corruption, not a format.
-    const corrupt = digestCorruption(id);
+    const corrupt = digestCorruption(id, row);
     if (corrupt) return sendError(reply, corrupt);
     const digest = normalizeSha256Hex(row.raw_response_sha256) as string;
     // G10 r2 (J2 m3): evidence_available reflects what /raw would
@@ -183,15 +178,17 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
     // just checked for presence. A corrupt blob is evidence_available:
     // false with evidence_status "corrupt" (and /raw answers 500
     // EVIDENCE_CORRUPT); a legacy/pruned row is "missing" (/raw 404).
+    // G10 r3 (r2-m1): verified asynchronously and cached per stored blob
+    // (core/evidenceVerify.ts) — never a synchronous unzip+hash per call.
     const mainEv = row.evidence_available
-      ? evidenceStatus(() => getReceiptEvidence(id))
+      ? await checkEvidence(id, null, row.raw_response_sha256, row.evidence_bytes)
       : { status: "missing" as EvidenceStatus, bytes: 0 };
     const pages = getReceiptPages(id);
     const upstreamPages: Array<Record<string, unknown>> = [];
     for (const p of pages) {
       const pageDigest = normalizeSha256Hex(p.raw_response_sha256) as string;
       const pageEv = p.evidence_available
-        ? evidenceStatus(() => getReceiptPageEvidence(id, p.page_index))
+        ? await checkEvidence(id, p.page_index, p.raw_response_sha256, p.evidence_bytes)
         : { status: "missing" as EvidenceStatus, bytes: 0 };
       upstreamPages.push({
         page_index: p.page_index,
@@ -278,9 +275,11 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
     try {
       ev = getReceiptPageEvidence(id, n);
     } catch {
+      recordVerified(id, n, "corrupt", 0);
       return sendError(reply, new ApiError(500, "EVIDENCE_CORRUPT", `stored evidence for ${id} page ${n} failed its hash check`));
     }
     if (!ev.found) return sendError(reply, notFound("PAGE_NOT_FOUND", `receipt ${id} has no upstream page ${n}`));
+    if (ev.evidence !== null && ev.sha256 !== null) recordVerified(id, n, "ok", ev.evidence.length, { sha256: ev.sha256, evidenceBytes: ev.evidenceBytes });
     return sendBytes(request, reply, ev, `receipt ${id} page ${n}`);
   };
 
@@ -299,9 +298,11 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
     } catch {
       // getReceiptEvidence throws only when the blob fails its own hash
       // or length check: never serve those bytes.
+      recordVerified(id, null, "corrupt", 0);
       return sendError(reply, new ApiError(500, "EVIDENCE_CORRUPT", `stored evidence for ${id} failed its hash check`));
     }
     if (!ev.found) return sendError(reply, notFound("RECEIPT_NOT_FOUND", `no receipt ${id}`));
+    if (ev.evidence !== null && ev.sha256 !== null) recordVerified(id, null, "ok", ev.evidence.length, { sha256: ev.sha256, evidenceBytes: ev.evidenceBytes });
     return sendBytes(request, reply, ev, `receipt ${id}`);
   };
 
@@ -311,9 +312,10 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
     // G10 r2 (J2 m4): the /evidence alias is mirrored under /api too.
     app.get(`${prefix}/receipts/:id/evidence`, raw);
     app.get(`${prefix}/receipts/:id/pages/:n/raw`, pageRaw);
-    // G10 r2 (J2 m5): CORS preflight, so a browser may send If-None-Match.
+    // G10 r2 (J2 m5): answer the CORS OPTIONS request, so a browser may
+    // send If-None-Match.
     for (const path of ["", "/raw", "/evidence", "/pages/:n/raw"]) {
-      app.options(`${prefix}/receipts/:id${path}`, preflight);
+      app.options(`${prefix}/receipts/:id${path}`, corsOptions);
     }
   }
 }
