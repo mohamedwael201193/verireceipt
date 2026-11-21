@@ -1,15 +1,56 @@
 # VeriReceipt
 
-**VeriReceipt** is a zero-LLM, deterministic miner for the Telegraph network.
-It answers six intents with exact, sourced data — no model, no guessing, no
-hallucinated numbers. Every answer carries a **SHA-256 receipt** over the raw
-upstream response, so anyone can recompute the hash and verify the answer
-came from the stated source, unaltered.
+**Sourced answers. Re-checkable bytes. Explicit limits.**
 
-- **Base URL:** `https://verireceipt.onrender.com`
-- **Docs:** `https://verireceipt.vercel.app/docs`
-- **Health:** `https://verireceipt.onrender.com/health`
-- **Config:** [`miner.yaml`](miner.yaml) (Telegraph miner registration file)
+VeriReceipt is a deterministic six-intent miner and a Mission Desk app for
+Telegraph Season II, Tracks 1 and 3. The miner fetches data without a language
+model. Every successful answer includes the SHA-256 of its stored upstream
+bytes. The Desk agent buys answers through testnet escrow and verifies the
+signal, answer and stored bytes before saving a purchase.
+
+[Live app](https://verireceipt.vercel.app/) ·
+[API docs](https://verireceipt.vercel.app/docs) ·
+[Health](https://verireceipt.onrender.com/health) ·
+[Independent verification guide](JUDGE.md) ·
+[Registration config](miner.yaml)
+
+A matching digest proves that the stored bytes have not changed. It does not
+by itself prove source truth, answer relevance or evaluator quality.
+
+## Start with the evidence
+
+![VeriReceipt Desk showing ten committed escrow purchases, ten verified, and $0.10 Sepolia Test USDC spent](docs/images/desk-escrow-2026-11-21.png)
+
+*Production screenshot, 2026-11-21 19:09 UTC. These are operator-run,
+related-party testnet purchases, not independent customers. Browser probes
+are separate and unbilled. Open Dashboard, then its Receipts tab.*
+
+| Evidence | Measured result | Reproduce or inspect |
+| --- | --- | --- |
+| Canonical Desk purchases | 10/10 live re-verifications passed; all 10 included in epochs 31/32 | [`purchases.jsonl`](desk/ledger/purchases.jsonl), `cd desk && npm ci && npm run verify` |
+| Exact paid cost | 100,000 μUSDC, $0.10 Sepolia Test USDC | Receipt amount and epoch delivery row in each committed purchase |
+| Delivery checks | Epoch, receipt hash, payer, amount, intent and miner match; root/proof shape checked | [Epoch 32 delivery example](https://devnode.telegraphprotocol.com/v1/blocks/32/deliveries/0x1184cf63601c8766196e8de0ba9514f2243fb6f9b72739ac4008b6cfa29a4f6a) |
+| Desk verifier tests | 88/88 passed on 2026-11-21 | `cd desk && npm test` |
+| Input coverage | Six intents; CAISO and NYISO prices, Aave TVL, a real deposit transaction, SEC filings, an ETH/USDC quote and validator 1 | Committed task inputs and hash-verified answers in the ledger |
+
+All ten purchases occurred on **one UTC date**, 2026-11-21. Two epochs are
+not two dates. These direct own-provider calls do not establish ranked-routing
+credit or independent adoption. More calls are useful only when they test a
+new input, failure mode or mission outcome.
+
+### Where the project stands
+
+- **Shipped:** six callable endpoints, stored-byte receipt inspection, browser
+  Mission 12/13 workbench, testnet escrow Desk agent and public purchase ledger.
+- **Being checked:** weak-pair evaluator scores and additional purposeful input
+  coverage. A correct direct answer is not proof of a high network score.
+- **Still to prove:** paid purchases linked to explicit mission-policy outcomes,
+  a second UTC-date run and real independent use. No first-place guarantee.
+
+![VeriReceipt production documentation with callable API information and registration6160](docs/images/docs-2026-11-21.png)
+
+*Production docs screenshot, 2026-11-21 18:39 UTC. See the live docs for current
+state. Registration 6160 and YAML miner id 774921 are different identifiers.*
 
 ## The six intents
 
@@ -111,9 +152,8 @@ Field names vary per endpoint; `confidence`, `verdict`, `source`, and
 ## Limits (honest)
 
 - **Execution routing is judgment-kind.** `OPTIMAL_EXECUTION_ROUTE` is scored
-  by an evaluator whose exact criteria are not public, so a #1 placement on
-  that intent is probable, not certain. What is certain is the quote itself:
-  block-pinned, computed from live pool state, and receipted.
+  by an evaluator whose exact criteria are not public. A block-pinned quote
+  is not a promise of the network's top score or global route optimality.
 - **Grid prices vary epoch to epoch.** `GRID_POWER_PRICE` scores depend on
   which ISO feeds are reachable and fresh in a given epoch; availability of
   individual feeds can change between epochs.
@@ -154,7 +194,7 @@ npm run export                                       # copy the ledger into the 
 Escrow has no per-call transaction: each call is billed once in its epoch's
 ledger root. `npm run verify -- --write` records the epoch delivery proof
 (`GET /v1/blocks/{epoch}/deliveries/{receipt_hash}`) once the node has
-recorded that epoch's block. The official response also includes a Merkle `proof` and `deliveries_root`; we store the root and the proof length (`proof_nodes`) and shape-check the live proof (an array of 32-byte hex hashes plus the root). The leaf/node hash algorithm is not documented in the official docs, so we do not invent a proof walker. The receipt_hash ↔ signal binding comes from the paid X-PAYMENT-RESPONSE and is not re-derivable from public endpoints; a swap of receipt_hash and delivery_proof between two of our own same-intent rows, or substitution of another of our same-epoch, same-intent, same-amount deliveries (including a manual probe, `0x2a9181c9…95a1`), is not detectable. The committed `engine.result` on the three existing rows was backfilled from the captured paid replies (not fully public); ok numeric fields are re-checked against the live signal payload.
+recorded that epoch's block. The official response also includes a Merkle `proof` and `deliveries_root`; we store the root and the proof length (`proof_nodes`) and shape-check the live proof (an array of 32-byte hex hashes plus the root). The leaf/node hash algorithm is not documented in the official docs, so we do not invent a proof walker. The receipt_hash ↔ signal binding comes from the paid X-PAYMENT-RESPONSE and is not re-derivable from public endpoints; a swap of receipt_hash and delivery_proof between two of our own same-intent rows, or substitution of another of our same-epoch, same-intent, same-amount deliveries (including a manual probe, `0x2a9181c9…95a1`), is not detectable. The committed `engine.result` on the three epoch-31 rows was backfilled from the captured paid replies (not fully public); ok numeric fields are re-checked against the live signal payload.
 
 Second run (epoch 32, 2026-11-21 17:36–17:37 UTC): seven escrow-paid tasks
 covering all six intents (GRID CAISO NP15 + NYISO Zone J, TVL aave-v3, TX
@@ -165,8 +205,12 @@ itself (`field_status` ok); an ok text field must equal the hash-verified raw
 answer at its mapped path. FILINGS text fields were still `unavailable` and are
 recovered from raw. The VALIDATOR reply reused the receipt the miner had cached
 for the same finalized state root from an unpaid probe about 3 minutes
-earlier (same `receipt_id`); its bytes still hash to the receipt. Epoch-32 delivery proofs stay `pending`
-until the node records that epoch's block.
+earlier (same `receipt_id`); its bytes still hash to the receipt. Epoch 32
+is now recorded: all seven purchases have matching delivery rows, refreshed
+2026-11-21 19:06 UTC. All ten canonical purchases pass live re-verification.
+The ledger's actual receipt miner for these seven is superseded registration
+6152, not 6160. New experimental calls served by 6160 are kept separately and
+are not added to this ten-purchase catalog.
 
 ## Running locally
 
