@@ -365,7 +365,8 @@ const PAGE_CSS = `
 .vr-progress{display:flex;align-items:center;gap:12px;margin-top:14px}
 .vr-progress-bar{width:120px;height:4px;border-radius:999px;background:var(--accent,#FF5722);animation:vr-pulse 1.2s ease-in-out infinite}
 @keyframes vr-pulse{0%,100%{opacity:.35}50%{opacity:1}}
-.vr-tbl-wrap{overflow-x:auto}
+.vr-tbl-wrap{overflow-x:auto;max-width:100%;-webkit-overflow-scrolling:touch}
+@media (max-width:760px){.vr-tbl{min-width:720px}}
 .vr-tbl{width:100%;border-collapse:collapse;font-size:12.5px;text-align:left}
 .vr-tbl th{font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:500;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#8F8E8A);padding:10px 14px;border-bottom:1px solid var(--border,rgba(255,255,255,.10))}
 .vr-tbl td{padding:11px 14px;border-bottom:1px solid var(--border,rgba(255,255,255,.10));vertical-align:top}

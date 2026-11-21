@@ -302,8 +302,10 @@
     .ide-tab.active .t-dot { opacity: 1; }
     .ide-tab .t-ext { color: var(--dim); }
 
-    .ide-body { display: grid; grid-template-columns: 4.5fr 7.5fr; min-height: 465px; }
-    @media (max-width: 960px) { .ide-body { grid-template-columns: 1fr; } }
+    .ide-body { display: grid; grid-template-columns: minmax(0, 4.5fr) minmax(0, 7.5fr); min-height: 465px; }
+    @media (max-width: 960px) { .ide-body { grid-template-columns: minmax(0, 1fr); } }
+    /* QA-05: panes may shrink below their content width on phones. */
+    .ide-body > * { min-width: 0; }
     .ide-pane-l {
       padding: 24px 26px; border-right: 1px solid var(--border);
       display: flex; flex-direction: column; justify-content: space-between; gap: 18px;
@@ -527,7 +529,8 @@
       background: #111113; color: #F3F2EE;
       display: grid; grid-template-columns: 62fr 38fr;
     }
-    @media (max-width: 960px) { .stage-shell { grid-template-columns: 1fr; } }
+    @media (max-width: 960px) { .stage-shell { grid-template-columns: minmax(0, 1fr); } }
+    .stage-shell > * { min-width: 0; }
 
     .stage-main {
       position: relative; min-height: 410px; padding: 30px 32px;

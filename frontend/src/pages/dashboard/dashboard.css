@@ -284,8 +284,16 @@ html[data-theme="light"] .vr-dashboard .theme-knob { transform: translateX(0); }
 @media (max-width: 500px) { .vr-dashboard .kpi-grid-4 { grid-template-columns: 1fr; } }
 
 /* Mission Desk layout */
-.vr-dashboard .desk-grid { display: grid; grid-template-columns: 5fr 7fr; gap: 18px; align-items: start; }
-@media (max-width: 1024px) { .vr-dashboard .desk-grid { grid-template-columns: 1fr; } }
+.vr-dashboard .desk-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 18px; align-items: start; }
+@media (max-width: 1024px) { .vr-dashboard .desk-grid { grid-template-columns: minmax(0, 1fr); } }
+/* QA-05: grid/flex children default to min-width:auto, so a long hash,
+   a wide table or a pre block stretched the desk cards to ~500px inside
+   a 390px viewport and clipped them. Children may shrink; wide content
+   scrolls inside its own box. */
+.vr-dashboard .desk-grid > *,
+.vr-dashboard .card { min-width: 0; max-width: 100%; }
+.vr-dashboard .tbl-wrap { max-width: 100%; overflow-x: auto; }
+.vr-dashboard .stream-log { overflow-x: auto; }
 
 .vr-dashboard .preset-btn {
   width: 100%; padding: 11px 13px; border-radius: 9px; border: 1px solid var(--border);

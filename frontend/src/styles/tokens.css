@@ -589,3 +589,66 @@ html[data-theme="light"] .theme-knob {
     animation: none;
   }
 }
+
+/* --- QA-05: mobile navigation menu (<= 860px, where .nav-links hide) --- */
+.nav-menu-btn {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.nav-menu-btn:focus-visible,
+.mobile-nav-panel a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.mobile-nav-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 61;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
+}
+.mobile-nav-panel nav {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 20px 14px;
+}
+.mobile-nav-panel a {
+  padding: 12px 4px;
+  font-size: 15px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.mobile-nav-panel a:last-child {
+  border-bottom: none;
+}
+.mobile-nav-panel a.active {
+  color: var(--text);
+  font-weight: 500;
+}
+@media (max-width: 860px) {
+  .nav-menu-btn {
+    display: inline-flex;
+  }
+}
+@media (max-width: 380px) {
+  .nav-menu-label {
+    display: none;
+  }
+}
+@media (min-width: 861px) {
+  .mobile-nav-panel {
+    display: none;
+  }
+}

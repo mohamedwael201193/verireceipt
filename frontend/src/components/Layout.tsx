@@ -115,6 +115,78 @@ function Wordmark() {
   );
 }
 
+/**
+ * QA-05: below 860px the inline links are hidden (they do not fit next to
+ * the wordmark, CTA and theme toggle), so a Menu button opens the same
+ * six destinations in a panel. Closes on navigation, Escape, and an
+ * outside click; focus moves into the panel on open and back on Escape.
+ */
+function MobileMenu({ pathname }: { pathname: string }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // Any route change closes the menu.
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!open) return;
+    panelRef.current?.querySelector<HTMLAnchorElement>("a")?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        btnRef.current?.focus();
+      }
+    };
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null;
+      if (t && !panelRef.current?.contains(t) && !btnRef.current?.contains(t)) setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className="nav-menu-btn"
+        aria-expanded={open}
+        aria-controls="mobile-nav-panel"
+        aria-label={open ? "Close menu" : "Open menu"}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span aria-hidden="true">{open ? "✕" : "☰"}</span>
+        <span className="nav-menu-label">Menu</span>
+      </button>
+      {open && (
+        <div id="mobile-nav-panel" ref={panelRef} className="mobile-nav-panel">
+          <nav aria-label="Primary (mobile)">
+            {NAV_LINKS.map((l) => (
+              <NavLink
+                key={l.to}
+                to={l.to}
+                end={l.end}
+                className={({ isActive }) => (isActive ? "active" : undefined)}
+                onClick={() => setOpen(false)}
+              >
+                {l.label}
+              </NavLink>
+            ))}
+          </nav>
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function Layout() {
   const { theme, toggleTheme } = useTheme();
   const { pathname, search, hash } = useLocation();
@@ -179,6 +251,7 @@ export default function Layout() {
               </span>
             </Link>
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
+            <MobileMenu pathname={pathname} />
           </div>
         </div>
       </header>
