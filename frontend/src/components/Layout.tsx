@@ -26,6 +26,7 @@ const NAV_LINKS = [
   { to: "/benchmarks", label: "Benchmarks" },
   { to: "/status", label: "Status" },
   { to: "/docs", label: "Docs" },
+  { to: "/research", label: "Research" },
 ];
 
 type HealthState = "checking" | "ok" | "down";
