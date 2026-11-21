@@ -10,3 +10,6 @@ dist-check/
 data/
 .DS_Store
 coverage/
+
+# Local research plans, reservations and paid evidence, never auto-published.
+desk/research-runs/

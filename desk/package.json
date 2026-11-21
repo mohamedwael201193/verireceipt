@@ -13,7 +13,8 @@
     "purchase": "tsx scripts/run-purchase.ts",
     "verify": "tsx scripts/verify-ledger.ts",
     "export": "tsx scripts/export-frontend.ts",
-    "policy": "tsx scripts/report-policy.ts"
+    "policy": "tsx scripts/report-policy.ts",
+    "research": "tsx scripts/research-packet.ts"
   },
   "dependencies": {
     "viem": "2.58.4"
