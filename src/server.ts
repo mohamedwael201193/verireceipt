@@ -10,12 +10,13 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { handleTx } from "./handlers/txLookup";
 import { handleFilings } from "./handlers/filings";
-import { handleTvl, startTvlListsRefreshTimer, warmLists } from "./handlers/tvl";
+import { handleTvl, startTvlListsRefreshTimer, stopTvlListsRefreshTimer, warmLists } from "./handlers/tvl";
 import { handleRoute } from "./handlers/optimalRoute";
 import { handleGridPrice } from "./handlers/gridPrice";
 import { handleValidator } from "./handlers/validator";
 import { ApiError, badRequest, errorBody } from "./core/errors";
-import { getDb } from "./core/db";
+import { closeDb, getDb } from "./core/db";
+import { installGracefulShutdown } from "./core/shutdown";
 import { registerReceiptRoutes } from "./core/receiptRoutes";
 import { getJobsSnapshot, getLoopLagSnapshot, startLoopLagSampler } from "./core/loopLag";
 import {
@@ -235,15 +236,16 @@ export function buildServer(): FastifyInstance {
  * by another worker; a missing module must not prevent the server from
  * starting, so the import is lazy and guarded.
  */
-function startGridIngesterIfPresent(): void {
+function startGridIngesterIfPresent(): NodeJS.Timeout | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require("./jobs/gridIngester") as {
       startIngester?: (intervalMs?: number) => NodeJS.Timeout;
     };
     if (typeof mod.startIngester === "function") {
-      mod.startIngester();
+      const timer = mod.startIngester();
       console.log("verireceipt: grid ingester started");
+      return timer;
     } else {
       console.error(
         "verireceipt: WARNING grid ingester module exists but exports no startIngester(); grid cache will stay empty",
@@ -259,6 +261,7 @@ function startGridIngesterIfPresent(): void {
       console.error("verireceipt: WARNING grid ingester failed to start:", err);
     }
   }
+  return null;
 }
 
 /**
@@ -321,7 +324,18 @@ export async function main(): Promise<FastifyInstance> {
   // the ingester's pull begins; the ingester still starts at boot, just
   // after the socket is open. Grid-price serves cache-only until the
   // first cycle lands either way.
-  startGridIngesterIfPresent();
+  const ingesterTimer = startGridIngesterIfPresent();
+  // GRACEFUL-SHUTDOWN (2026-11-21, src/core/shutdown.ts): on Render's
+  // deploy SIGTERM, drain in-flight requests, stop timers, close SQLite
+  // (WAL checkpoint), exit 0. Without it Node died on the default signal
+  // action mid-request.
+  installGracefulShutdown(app, {
+    stopTimers: () => {
+      if (ingesterTimer) clearInterval(ingesterTimer);
+      stopTvlListsRefreshTimer();
+    },
+    closeDb,
+  });
   return app;
 }
 

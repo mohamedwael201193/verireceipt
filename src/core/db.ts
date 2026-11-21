@@ -693,6 +693,31 @@ function assertDiskReadyInner(
   return { dbPath, mounted, freeMb };
 }
 
+/**
+ * GRACEFUL-SHUTDOWN (2026-11-21): close the shared connection on SIGTERM.
+ * better-sqlite3's close() checkpoints the WAL into the main DB file, so
+ * the next boot no longer finds an "uncommitted tail" left by a killed
+ * process (every Render deploy logged that warning before this). Safe to
+ * call twice or before getDb(); never throws. Returns true when an open
+ * connection was closed.
+ */
+export function closeDb(): boolean {
+  const instance = db;
+  if (!instance) return false;
+  db = null;
+  try {
+    instance.close();
+    return true;
+  } catch (err) {
+    console.error(
+      redactSecrets(
+        `verireceipt: db close failed: ${err instanceof Error ? err.message : String(err)}`,
+      ),
+    );
+    return false;
+  }
+}
+
 export function getDb(): Database.Database {
   if (db) return db;
   // F7(b): resolveDbPath() normalizes the env value (resolve() strips a
