@@ -111,8 +111,10 @@ describe("A8 miner.yaml vs the official intent schemas", () => {
 
   it("ROUTE pair enum uses accepted_fields with exactly ETH/USDC", () => {
     const ep = block("  - path: /v1/route").join("\n");
-    expect(ep).toContain("accepted_fields:\n              - value: ETH/USDC\n");
-    expect(ep.match(/- value: /g)).toHaveLength(1);
+    expect(ep).toContain("accepted_fields:\n              ETH/USDC:\n");
+    expect(ep).toContain('intents: ["OPTIMAL_EXECUTION_ROUTE_GENERAL"]\n                description: Sell exactly 1 ETH for USDC on Ethereum mainnet.');
+    expect(ep).not.toMatch(/- value:/);
+    expect(ep.match(/^\s+ETH\/USDC:\s*$/m)).not.toBeNull();
   });
 
   it("VALIDATOR: validator_index is a canonical digit string (node cannot send integer) and the description states the 2-of-4 finalized-state quorum", () => {

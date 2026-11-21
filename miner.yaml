@@ -165,7 +165,7 @@ endpoints:
             intents: ["OPTIMAL_EXECUTION_ROUTE_GENERAL"]
             description: The swap to route. Only ETH/USDC (sell exactly 1 ETH for USDC on Ethereum mainnet).
             accepted_fields:
-              - value: ETH/USDC
+              ETH/USDC:
                 intents: ["OPTIMAL_EXECUTION_ROUTE_GENERAL"]
                 description: Sell exactly 1 ETH for USDC on Ethereum mainnet.
 

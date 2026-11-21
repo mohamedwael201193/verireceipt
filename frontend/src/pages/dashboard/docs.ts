@@ -263,7 +263,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '            intents: ["OPTIMAL_EXECUTION_ROUTE_GENERAL"]\n' +
     '            description: The swap to route. Only ETH/USDC (sell exactly 1 ETH for USDC on Ethereum mainnet).\n' +
     '            accepted_fields:\n' +
-    '              - value: ETH/USDC\n' +
+    '              ETH/USDC:\n' +
     '                intents: ["OPTIMAL_EXECUTION_ROUTE_GENERAL"]\n' +
     '                description: Sell exactly 1 ETH for USDC on Ethereum mainnet.\n' +
     '\n' +
