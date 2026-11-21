@@ -6,7 +6,7 @@ slug: verireceipt
 name: VeriReceipt Deterministic Oracle
 description: >-
   Zero-LLM, cryptographically receipted deterministic provider for on-chain
-  transactions, SEC/Federal Register filings, DeFi TVL, block-pinned ETH/USDC
+  transactions, SEC EDGAR filings, DeFi TVL, block-pinned ETH/USDC
   execution routing, and wholesale grid power prices. Every answer includes a
   verifiable source hash and fails closed rather than guessing.
 base_url: https://verireceipt.onrender.com
@@ -71,9 +71,14 @@ endpoints:
     external_path: /v1/filings
     method: GET
     description: >-
-      Queries SEC EDGAR Submissions API and Federal Register API for an entity
-      over a specified period and returns entity, filing_count, filings list,
-      urls list, and a SHA-256 receipt.
+      Counts a company's filings on SEC EDGAR (data.sec.gov submissions,
+      by filing date) in a period, optionally of one exact EDGAR form type,
+      and returns entity, form_type, filing_count, the filings newest first,
+      their URLs and a SHA-256 receipt. Use for questions such as "How many
+      Form 10-Q filings by Tesla, Inc. (CIK 1318605) in calendar 2023 are on
+      SEC EDGAR?". SEC EDGAR only: an unknown or ambiguous company or form
+      is refused (422), never answered from another source or with an
+      unfiltered count.
     intents:
       - REGULATORY_FILING_MONITOR_GENERAL
     params:
@@ -82,11 +87,19 @@ endpoints:
           - name: entity
             type: string
             intents: ["REGULATORY_FILING_MONITOR_GENERAL"]
-            description: Company name, ticker symbol, CIK, or federal agency.
+            description: >-
+              The subject of the question verbatim, including any SEC form
+              type and CIK, e.g. "Form 10-Q filings by Tesla, Inc. (CIK
+              1318605)", "Tesla, Inc.", "TSLA", "1318605".
           - name: period
             type: string
             intents: ["REGULATORY_FILING_MONITOR_GENERAL"]
-            description: Search period such as last 12 months, 2026, or YYYY-MM-DD..YYYY-MM-DD.
+            description: Search period such as last 12 months, 2026, calendar 2023, or YYYY-MM-DD..YYYY-MM-DD. Calendar years only; fiscal-year periods are rejected.
+        optional:
+          - name: form_type
+            type: string
+            intents: ["REGULATORY_FILING_MONITOR_GENERAL"]
+            description: One SEC EDGAR form type exactly as asked, e.g. 10-K, 10-Q, 8-K, 144/A, 4/A. Exact match (10-K counts originals only; 10-K/A counts amendments only). Omit to count all forms.
 
   - path: /v1/tvl
     external_path: /v1/tvl
@@ -181,10 +194,13 @@ intent_mapping:
     input:
       entity:
         from: entity
-        how: "Pass the exact company name, ticker, CIK, or agency requested."
+        how: "Copy the subject of the question verbatim, including any SEC form type and CIK (e.g. 'Form 10-Q filings by Tesla, Inc. (CIK 1318605)')."
       period:
         from: period
-        how: "Pass the requested time period verbatim (e.g., last 12 months, 2026)."
+        how: "Pass the requested time period verbatim (e.g., last 12 months, 2026, calendar 2023)."
+      form_type:
+        from: entity
+        how: "Only the SEC EDGAR form type the request names, exactly as EDGAR writes it (10-K, 10-Q, 8-K, 144/A). Leave empty when no form type is named."
     output:
       entity:
         path: entity

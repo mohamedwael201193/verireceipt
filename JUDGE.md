@@ -12,7 +12,7 @@ BASE=https://verireceipt.onrender.com
 # 1. Transaction lookup — replace the hash with any real transaction hash
 curl "$BASE/v1/tx?tx_hash=0x6ed42787fef7f854a1e8c95924a2f68b6ec113f48e141e95fe2dda1393b27005&chain=ethereum"
 
-# 2. Filings — SEC EDGAR + Federal Register for an entity over a period
+# 2. Filings — SEC EDGAR filings for a company over a period (optional form_type)
 curl "$BASE/v1/filings?entity=Apple%20Inc&period=last%2012%20months"
 
 # 3. TVL — DeFiLlama protocol TVL

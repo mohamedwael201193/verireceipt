@@ -174,7 +174,33 @@ export function buildServer(): FastifyInstance {
 
   app.get("/v1/tx", async (request) => trackIntent("tx", () => handleTx(asQuery(request.query))));
   app.get("/v1/filings", async (request) =>
-    trackIntent("filings", () => handleFilings(asQuery(request.query))),
+    trackIntent("filings", () => {
+      // A1 (2026-11-21): asQuery keeps only the FIRST value of a repeated
+      // key, so "form_type=10-K&form_type=144/A" (or a repeated entity /
+      // period) would silently answer one of them. A repeated key on the
+      // filings route is a 400, never a guess.
+      // Round 9 (J2-r8 m7): Fastify's query parser silently drops
+      // prototype keys, so "__proto__=x" used to answer 200. The raw URL
+      // is checked for them: 400 UNKNOWN_PARAM, never silently ignored.
+      const qs = (request.raw.url ?? "").split("?").slice(1).join("?");
+      for (const key of new URLSearchParams(qs).keys()) {
+        if (key === "__proto__" || key === "constructor" || key === "prototype") {
+          throw badRequest(
+            "UNKNOWN_PARAM",
+            `Query parameter "${key}" is not supported; /v1/filings takes entity, period, form_type (or form) and cik`,
+          );
+        }
+      }
+      const raw = request.query as Record<string, unknown> | null;
+      if (raw && typeof raw === "object") {
+        for (const [key, value] of Object.entries(raw)) {
+          if (Array.isArray(value)) {
+            throw badRequest("DUPLICATE_PARAM", `Query parameter "${key}" was given more than once`);
+          }
+        }
+      }
+      return handleFilings(asQuery(request.query));
+    }),
   );
   app.get("/v1/tvl", async (request) =>
     trackIntent("tvl", () => handleTvl(asQuery(request.query))),

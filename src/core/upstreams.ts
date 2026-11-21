@@ -26,7 +26,6 @@
 // KEYS ARE SERVICES, not hosts, so the success path (hostname → service)
 // and the error path (intent → primary service) agree:
 //   sec-edgar        data.sec.gov
-//   federal-register www.federalregister.gov
 //   defillama        api.llama.fi
 //   caiso-oasis      oasis.caiso.com
 //   nyiso            mis.nyiso.com
@@ -74,7 +73,6 @@ function entry(name: string): UpstreamHealth {
 /** Exact-host → service overrides. */
 const HOST_TO_SERVICE: Record<string, string> = {
   "data.sec.gov": "sec-edgar",
-  "www.federalregister.gov": "federal-register",
   "api.llama.fi": "defillama",
   "oasis.caiso.com": "caiso-oasis",
   "mis.nyiso.com": "nyiso",

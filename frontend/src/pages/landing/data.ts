@@ -56,7 +56,7 @@ export const INTENTS: IntentMeta[] = [
     sub: "# REGULATORY_FILING_MONITOR_GENERAL · Official EDGAR",
     desc: "Resolves tickers to 10-digit CIKs in RAM, streams official submissions JSON with compliant User-Agent, and hashes the raw response.",
     kind: "deterministic",
-    upstreams: "data.sec.gov · Federal Register API",
+    upstreams: "data.sec.gov",
     schema: "entity, filing_count, filings[], urls[]",
     url: "GET /v1/filings · data.sec.gov",
   },
@@ -149,7 +149,6 @@ export const UPSTREAMS: { n: string; ic: string }[] = [
   { n: "Uniswap V3", ic: "M3 11c2.5 0 3.5-6 5-6s2.5 6 5 6" },
   { n: "CAISO OASIS", ic: "M9 2L4 9h4l-1 5 5-7H8l1-5Z" },
   { n: "ENTSO-E", ic: "M8 2.5v11M3.5 5.5l9 5M12.5 5.5l-9 5" },
-  { n: "Federal Register", ic: "M4 3h8v10H4ZM6 6h4M6 9h4" },
   { n: "SushiSwap V2", ic: "M3 5.5h10M3 10.5h10M6 3v10M10 3v10" },
 ];
 

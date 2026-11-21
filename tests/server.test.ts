@@ -90,6 +90,19 @@ describe("missing params -> 400 with an error body (no stack trace)", () => {
   });
 });
 
+describe("A1: /v1/filings repeated query keys -> 400 DUPLICATE_PARAM (no upstream call)", () => {
+  it.each([
+    "/v1/filings?entity=AAPL&period=2023&form_type=10-K&form_type=144%2FA",
+    "/v1/filings?entity=AAPL&entity=TSLA&period=2023",
+    "/v1/filings?entity=AAPL&period=2023&period=2024",
+    "/v1/filings?entity=AAPL&period=2023&cik=320193&cik=1318605",
+  ])("%s", async (url) => {
+    const res = await app.inject({ method: "GET", url });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as Record<string, unknown>).code).toBe("DUPLICATE_PARAM");
+  });
+});
+
 describe("GET /health — A6 additive fields (git_sha, loop_lag_ms, upstreams)", () => {
   // Existing assertions above (status/service/uptime_s/upstreams {}) are
   // untouched: a fresh server still reports upstreams {} until a handler
@@ -281,7 +294,10 @@ describe("main() wiring — TVL hourly timer (round-3 R3, J2 FAIL F1)", () => {
   // node. Test port 18731; the temp SQLITE_PATH above keeps the boot off
   // the production DB and the repo's ./data DB.
   const TEST_PORT = 18731;
-  const TEST_UA = "verireceipt-r3-wiring-test/1.0 (test-only)";
+  // J1-r8 m4: contact e-mail from the environment (in-process only).
+  const TEST_UA =
+    (process.env.SEC_USER_AGENT_LIVE ?? process.env.SEC_USER_AGENT ?? "").trim() ||
+    "verireceipt-r3-wiring-test/1.0 (test-only)";
 
   it("buildServer() starts NO hourly TVL timer", () => {
     // Negative control (J2 atk-handles.mts): the timer belongs to main(),

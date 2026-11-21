@@ -73,7 +73,7 @@ function endpointDefs(): EndpointDef[] {
       key: "filings",
       path: "/v1/filings",
       role: "REGULATORY_FILING_MONITOR_GENERAL",
-      src: "SEC EDGAR + Federal Register",
+      src: "SEC EDGAR",
       intent: "REGULATORY_FILING_MONITOR_GENERAL",
       query: "AAPL · last 12 months",
       requestUrl: directUrl("/v1/filings", { entity: "AAPL", period: "last 12 months" }),

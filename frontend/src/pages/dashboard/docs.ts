@@ -103,7 +103,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     'name: VeriReceipt Deterministic Oracle\n' +
     'description: >-\n' +
     '  Zero-LLM, cryptographically receipted deterministic provider for on-chain\n' +
-    '  transactions, SEC/Federal Register filings, DeFi TVL, block-pinned ETH/USDC\n' +
+    '  transactions, SEC EDGAR filings, DeFi TVL, block-pinned ETH/USDC\n' +
     '  execution routing, and wholesale grid power prices. Every answer includes a\n' +
     '  verifiable source hash and fails closed rather than guessing.\n' +
     'base_url: https://verireceipt.onrender.com\n' +
@@ -168,9 +168,14 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    external_path: /v1/filings\n' +
     '    method: GET\n' +
     '    description: >-\n' +
-    '      Queries SEC EDGAR Submissions API and Federal Register API for an entity\n' +
-    '      over a specified period and returns entity, filing_count, filings list,\n' +
-    '      urls list, and a SHA-256 receipt.\n' +
+    '      Counts a company\'s filings on SEC EDGAR (data.sec.gov submissions,\n' +
+    '      by filing date) in a period, optionally of one exact EDGAR form type,\n' +
+    '      and returns entity, form_type, filing_count, the filings newest first,\n' +
+    '      their URLs and a SHA-256 receipt. Use for questions such as "How many\n' +
+    '      Form 10-Q filings by Tesla, Inc. (CIK 1318605) in calendar 2023 are on\n' +
+    '      SEC EDGAR?". SEC EDGAR only: an unknown or ambiguous company or form\n' +
+    '      is refused (422), never answered from another source or with an\n' +
+    '      unfiltered count.\n' +
     '    intents:\n' +
     '      - REGULATORY_FILING_MONITOR_GENERAL\n' +
     '    params:\n' +
@@ -179,11 +184,19 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          - name: entity\n' +
     '            type: string\n' +
     '            intents: ["REGULATORY_FILING_MONITOR_GENERAL"]\n' +
-    '            description: Company name, ticker symbol, CIK, or federal agency.\n' +
+    '            description: >-\n' +
+    '              The subject of the question verbatim, including any SEC form\n' +
+    '              type and CIK, e.g. "Form 10-Q filings by Tesla, Inc. (CIK\n' +
+    '              1318605)", "Tesla, Inc.", "TSLA", "1318605".\n' +
     '          - name: period\n' +
     '            type: string\n' +
     '            intents: ["REGULATORY_FILING_MONITOR_GENERAL"]\n' +
-    '            description: Search period such as last 12 months, 2026, or YYYY-MM-DD..YYYY-MM-DD.\n' +
+    '            description: Search period such as last 12 months, 2026, calendar 2023, or YYYY-MM-DD..YYYY-MM-DD. Calendar years only; fiscal-year periods are rejected.\n' +
+    '        optional:\n' +
+    '          - name: form_type\n' +
+    '            type: string\n' +
+    '            intents: ["REGULATORY_FILING_MONITOR_GENERAL"]\n' +
+    '            description: One SEC EDGAR form type exactly as asked, e.g. 10-K, 10-Q, 8-K, 144/A, 4/A. Exact match (10-K counts originals only; 10-K/A counts amendments only). Omit to count all forms.\n' +
     '\n' +
     '  - path: /v1/tvl\n' +
     '    external_path: /v1/tvl\n' +
@@ -278,10 +291,13 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    input:\n' +
     '      entity:\n' +
     '        from: entity\n' +
-    '        how: "Pass the exact company name, ticker, CIK, or agency requested."\n' +
+    '        how: "Copy the subject of the question verbatim, including any SEC form type and CIK (e.g. \'Form 10-Q filings by Tesla, Inc. (CIK 1318605)\')."\n' +
     '      period:\n' +
     '        from: period\n' +
-    '        how: "Pass the requested time period verbatim (e.g., last 12 months, 2026)."\n' +
+    '        how: "Pass the requested time period verbatim (e.g., last 12 months, 2026, calendar 2023)."\n' +
+    '      form_type:\n' +
+    '        from: entity\n' +
+    '        how: "Only the SEC EDGAR form type the request names, exactly as EDGAR writes it (10-K, 10-Q, 8-K, 144/A). Leave empty when no form type is named."\n' +
     '    output:\n' +
     '      entity:\n' +
     '        path: entity\n' +

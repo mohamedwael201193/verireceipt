@@ -15,7 +15,7 @@ came from the stated source, unaltered.
 | Intent | Endpoint | What it returns |
 | --- | --- | --- |
 | `ONCHAIN_TX_LOOKUP_GENERAL` | `GET /v1/tx` | Transaction status, from/to, block, value — from a 2-of-3 archive-RPC quorum (incl. OP-stack L1 data fee) |
-| `REGULATORY_FILING_MONITOR_GENERAL` | `GET /v1/filings` | SEC EDGAR + Federal Register filings for an entity over a period |
+| `REGULATORY_FILING_MONITOR_GENERAL` | `GET /v1/filings` | SEC EDGAR filings for a company over a period, optionally of one EDGAR form type |
 | `TVL_LOOKUP_GENERAL` | `GET /v1/tvl` | DeFi TVL (USD) for a protocol or chain, via DeFiLlama |
 | `OPTIMAL_EXECUTION_ROUTE_GENERAL` | `GET /v1/route` | Block-pinned quote for selling exactly 1 ETH for USDC on Ethereum mainnet (Uniswap V2/V3, SushiSwap V2, Curve) |
 | `GRID_POWER_PRICE_GENERAL` | `GET /v1/grid-price` | Wholesale locational marginal price (USD/MWh) from official ISO feeds (CAISO, NYISO, ENTSO-E/Elering) |
@@ -83,7 +83,7 @@ Field names vary per endpoint; `confidence`, `verdict`, `source`, and
 
 1. A request hits one of the five deterministic endpoints.
 2. The server queries the official upstream source(s) directly — archive
-   RPCs, SEC EDGAR, the Federal Register, DeFiLlama, on-chain DEX pools,
+   RPCs, SEC EDGAR, DeFiLlama, on-chain DEX pools,
    official ISO price feeds. No language model is involved anywhere.
 3. The raw upstream response is hashed (SHA-256) and the hash is returned
    as `receipt.raw_response_sha256` alongside the parsed answer.

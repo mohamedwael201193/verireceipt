@@ -71,7 +71,7 @@ const ENDPOINTS: EndpointDoc[] = [
     path: '/v1/filings',
     intent: 'REGULATORY_FILING_MONITOR_GENERAL',
     description:
-      'Queries SEC EDGAR Submissions API and Federal Register API for an entity over a specified period and returns entity, filing_count, filings list, urls list, and a SHA-256 receipt.',
+      'Counts a company\'s filings on SEC EDGAR (data.sec.gov submissions, by filing date) in a period, optionally of one exact EDGAR form type, and returns entity, form_type, filing_count, the filings, their URLs and a SHA-256 receipt. SEC EDGAR only: an unknown or ambiguous company or form is refused (422).',
     params: [
       {
         name: 'entity',
@@ -182,7 +182,8 @@ const ERROR_ROWS: { status: number; code: string; meaning: string }[] = [
   { status: 400, code: 'INVALID_NODE', meaning: 'node_or_zone is required.' },
   { status: 400, code: 'INVALID_INTERVAL', meaning: 'interval_start is required or is not a valid datetime.' },
   { status: 422, code: 'INVALID_PAIR', meaning: 'pair must be ETH/USDC.' },
-  { status: 422, code: 'ENTITY_NOT_FOUND', meaning: 'No SEC/Federal Register entity matches the query.' },
+  { status: 422, code: 'ENTITY_NOT_FOUND', meaning: 'No SEC EDGAR filer matches the query (there is no Federal Register fallback).' },
+  { status: 422, code: 'UNKNOWN_FORM', meaning: 'The form type is not one SEC EDGAR has ever recorded (closed vocabulary from the EDGAR full index).' },
   { status: 422, code: 'AMBIGUOUS_ENTITY', meaning: 'The entity matches more than one candidate; refine it.' },
   { status: 422, code: 'PROTOCOL_NOT_FOUND', meaning: 'Protocol slug not found in DeFiLlama; never fabricates $0.' },
   { status: 422, code: 'UNSUPPORTED_ZONE', meaning: 'node_or_zone is not a supported pricing node/zone.' },
@@ -192,7 +193,9 @@ const ERROR_ROWS: { status: number; code: string; meaning: string }[] = [
   { status: 502, code: 'GRID_CACHE_STALE', meaning: 'Cached price is older than the staleness bound; never served as verified.' },
   { status: 502, code: 'SEC_UNAVAILABLE', meaning: 'SEC EDGAR upstream unreachable.' },
   { status: 502, code: 'SEC_USER_AGENT_MISSING', meaning: 'SEC_USER_AGENT is not set on the server, so SEC EDGAR cannot be called.' },
-  { status: 502, code: 'FEDREG_UNAVAILABLE', meaning: 'Federal Register upstream unreachable.' },
+  { status: 504, code: 'SEC_TIMEOUT', meaning: 'SEC EDGAR did not answer in time; fails closed.' },
+  { status: 502, code: 'SEC_DOCUMENT_TOO_LARGE', meaning: 'An SEC EDGAR submissions document or history page exceeds the 8,000,000-character cap; fails closed.' },
+  { status: 500, code: 'RECEIPT_STORE_FAILED', meaning: 'The receipt could not be stored, so no verified answer (with a dead audit link) is served.' },
   { status: 502, code: 'DEFILLAMA_UNAVAILABLE', meaning: 'DeFiLlama upstream unreachable.' },
   { status: 502, code: 'DEFILLAMA_BAD_RESPONSE', meaning: 'DeFiLlama response has no usable TVL data.' },
   { status: 502, code: 'RPC_CONFIG', meaning: 'Archive-RPC configuration unavailable.' },

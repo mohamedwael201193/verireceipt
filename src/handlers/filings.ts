@@ -1,46 +1,66 @@
 // REGULATORY_FILING_MONITOR_GENERAL handler.
 // Zero-LLM. No mocks/fakes in handler logic. Every answer is derived from a
-// live upstream response (SEC EDGAR Submissions API for entities that resolve
-// to a CIK; Federal Register API v1 ONLY for entities that do not resolve to
-// a CIK, i.e. agency / rule-topic queries) and carries a SHA-256 receipt over
-// the raw response.
+// live SEC EDGAR Submissions API response (data.sec.gov, the main document
+// plus every overlapping history page) and carries a SHA-256 receipt over
+// the raw main document; each history page carries its own sha256 in
+// upstream_pages[] and is stored with the receipt.
 //
-// Failover rule: Federal Register is a full-text term search whose hits are
-// never checked against the entity, so it must NEVER stand in for a resolved
-// company's filings. When a CIK resolved and EDGAR is down, the handler fails
-// CLOSED with 502 SEC_UNAVAILABLE instead of misattributing FedReg hits.
-// The same rule applies one step earlier: a company-like entity (multi-token
-// name ending in Corp/Inc/Co/Ltd/LLC/... or a foreign corporate suffix such
-// as AG/SE/SA/GmbH/NV/BV, S.A. de C.V./Ltda/OyJ/A/S/S.r.l./Sp. z o.o. — see
-// COMPANY_SUFFIX_TOKENS) that does NOT resolve
-// to a CIK never reaches FedReg at all — it 422s instead — because FedReg
-// matches full text, so a rule can match via a name buried in the body (live
-// proof: "Microsoft Corporation" returned a UAE export rule whose body merely
-// lists Microsoft among License Exception STA entities). FedReg is used only
-// on the no-CIK, non-company-like path (agency / rule-topic entities).
+// SEC EDGAR ONLY (A1 round 8). The intent counts filings "on SEC EDGAR"
+// (reference template "How many {key} are on SEC EDGAR?"). The former
+// Federal Register fallback — a full-text term search whose hits are never
+// attributed to the entity — was REMOVED from the count path: it served
+// "verified" counts for "AAPL X", "Tesla Motors", "Google" and
+// "Apple Inc.—10-K" that were not filings of anyone. An entity that does
+// not resolve to exactly one SEC filer is a 422 (ENTITY_NOT_FOUND /
+// AMBIGUOUS_ENTITY); EDGAR being down is a 502/504, never a substitute.
 // Tickers payloads are shape-validated before caching: a parseable but
 // wrong-shape payload (null, [], {}, {"0":null}) is a 502 SEC_UNAVAILABLE,
-// never cached, never trusted — a broken tickers response can neither crash
-// the resolver nor poison the cache nor fall through to FedReg-as-filings.
+// never cached, never trusted.
 //
 // Quorum note: quorum_votes is "1/1 primary source" — a single authoritative
-// source (SEC EDGAR, or Federal Register on failover). The multi-source
-// quorum layer used by other intents does not apply here; there is exactly
-// one authoritative registry per entity, so one primary source is the whole
-// verification.
+// source (SEC EDGAR). There is exactly one authoritative registry per
+// filer, so one primary source is the whole verification.
 
 import { ApiError, badRequest, unprocessable, upstreamUnavailable } from '../core/errors';
-import { envelope, makeReceipt } from '../core/receipt';
+import { envelope, makeReceipt, sha256Hex } from '../core/receipt';
+import { saveReceipt } from '../core/db';
+import { resolveEntitySpans } from './filingsEntity';
+import {
+  assertNoUnconsumedFormTokens,
+  blankCikClauses,
+  foldBasic,
+  extractForms,
+  filterFilingsByForm,
+  FILING_KEYWORDS,
+  FILLER_WORDS,
+  formFamily,
+  FORM_FAMILY_SOURCE,
+  isFillerOnly,
+  mergeFormSpecs,
+  parseFormType,
+  stripInvisible,
+  type FormSpec,
+} from './filingsForms';
+
+export {
+  assertNoUnconsumedFormTokens,
+  extractForms,
+  filterFilingsByForm,
+  parseFormType,
+  canonicalFormOrThrow,
+  isFillerOnly,
+  mergeFormSpecs,
+  formFamily,
+  FORM_FAMILIES,
+  FORM_FAMILY_SOURCE,
+} from './filingsForms';
+export type { FormSpec } from './filingsForms';
 
 export const INTENT = 'REGULATORY_FILING_MONITOR_GENERAL';
 
 const TICKERS_URL = 'https://www.sec.gov/files/company_tickers.json';
 const EDGAR_SUBMISSIONS_URL = (cik10: string): string =>
   `https://data.sec.gov/submissions/CIK${cik10}.json`;
-const FEDREG_URL = (entity: string): string =>
-  `https://www.federalregister.gov/api/v1/documents.json?conditions%5Bterm%5D=${encodeURIComponent(
-    entity,
-  )}&conditions%5Btype%5D%5B%5D=RULE&per_page=20`;
 
 const TICKERS_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -63,6 +83,52 @@ export interface Period {
 /** Optional transport override — used only by tests to inject fixtures. */
 export interface FilingsDeps {
   fetchImpl?: typeof fetch;
+  /** Per-request SEC timeout (ms); default SEC_TIMEOUT_MS. */
+  timeoutMs?: number;
+  /** Whole-answer SEC budget (ms); default SEC_DEADLINE_MS. */
+  deadlineMs?: number;
+  /** Receipt persistence (tests inject a failing store); default core/db saveReceipt. */
+  saveReceiptImpl?: typeof saveReceipt;
+}
+
+/** Per-request timeout for every SEC fetch (tickers, submissions, history pages). */
+export const SEC_TIMEOUT_MS = 10_000;
+/** Budget for all SEC fetches of one answer (stays well under the host's request cutoff). */
+export const SEC_DEADLINE_MS = 30_000;
+
+interface Timeouts {
+  perRequestMs: number;
+  deadline: number;
+}
+
+/**
+ * fetch + body read under a hard timeout (round 8, J2 minor 1): a hung
+ * SEC socket used to hold the request for undici's ~300 s default. The
+ * timer covers headers AND body, honours the whole-answer deadline, and
+ * aborts the request; a timeout is 504 SEC_TIMEOUT (fail closed).
+ */
+async function fetchTextWithTimeout(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: RequestInit,
+  t: Timeouts,
+): Promise<{ res: Response; body: string | null }> {
+  const ms = Math.max(1, Math.min(t.perRequestMs, t.deadline - Date.now()));
+  const ac = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      ac.abort();
+      reject(new ApiError(504, 'SEC_TIMEOUT', `SEC EDGAR did not answer within ${ms} ms (${url})`));
+    }, ms);
+  });
+  try {
+    const res = await Promise.race([fetchImpl(url, { ...init, signal: ac.signal }), timeout]);
+    const body = res.ok ? await Promise.race([res.text(), timeout]) : null;
+    return { res, body };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 interface TickerEntry {
@@ -102,8 +168,74 @@ function formatUtcDate(dt: Date): string {
  * Accepted forms: "last N months", "YYYY", "YYYY-MM-DD..YYYY-MM-DD".
  * Throws a 400 ApiError for anything else.
  */
+/**
+ * A1 (2026-11-21): fold the calendar-year phrasings the request builder
+ * produces from reference questions ("in calendar 2023", "calendar year
+ * 2023", "CY2023", "during 2023", "the year 2023") to the bare "YYYY"
+ * form. Fiscal-year phrasings are a 400 FISCAL_PERIOD_UNSUPPORTED: a
+ * fiscal year is not a calendar range, and guessing one would serve a
+ * wrong count as verified. Anything else is returned unchanged for the
+ * strict grammar below.
+ */
+function foldPeriodPhrase(period: string): string {
+  const p = period.replace(/\s+/g, ' ').trim();
+  if (/\b(fiscal|fy)\b|^fy\s?\d{2,4}$|^fy\d{2,4}$/i.test(p)) {
+    throw badRequest(
+      'FISCAL_PERIOD_UNSUPPORTED',
+      `Fiscal periods are not supported ("${period}"); use a calendar year (2023), a date range (YYYY-MM-DD..YYYY-MM-DD) or "last N months"`,
+    );
+  }
+  const m = /^(?:(?:in|during|for|over)\s+)?(?:the\s+)?(?:(?:calendar\s+year|calendar|cal\.?\s+year|year|cy)\s*)?(\d{4})$/i.exec(p);
+  if (m && /[a-z]/i.test(p)) return m[1];
+  return p;
+}
+
+/** Trailing/leading filing words around a period ("last 3 months filings", "filings in 2023"). */
+export function stripPeriodFiller(periodRaw: string): string {
+  return periodRaw
+    .normalize('NFKC')
+    .trim()
+    .replace(/^(?:(?:sec|edgar|filings?|filed|reports?)\s+)+/i, '')
+    .replace(/(?:\s+(?:sec|edgar|filings?|filed|reports?|on sec edgar))+$/i, '')
+    .trim();
+}
+
+/** parsePeriod, or null when the text is not a period (INVALID_PERIOD); other errors (fiscal) propagate. */
+export function tryParsePeriod(text: string): Period | null {
+  try {
+    return parsePeriod(text);
+  } catch (err) {
+    if (err instanceof ApiError && err.code === 'INVALID_PERIOD') return null;
+    throw err;
+  }
+}
+
+function yearInRange(y: number): boolean {
+  return y >= 1993 && y <= new Date().getUTCFullYear();
+}
+
 export function parsePeriod(periodRaw: string): Period {
-  const period = periodRaw.trim();
+  const label = periodRaw.trim();
+  // Round 8: fullwidth digits/punctuation fold (NFKC) before the grammar.
+  const period = foldPeriodPhrase(label.normalize('NFKC'));
+
+  // "2023 to 2023", "2021 through 2023", "2023-01-01 to 2023-03-31".
+  const toRange = /^(\d{4}(?:-\d{2}-\d{2})?)\s+(?:to|through|thru|until)\s+(\d{4}(?:-\d{2}-\d{2})?)$/i.exec(period);
+  if (toRange) {
+    const a = toRange[1];
+    const b = toRange[2];
+    if (a.length !== b.length) throw badRequest('INVALID_PERIOD', `Unparseable period: "${periodRaw}"`);
+    if (a.length === 4) {
+      if (!yearInRange(Number(a)) || !yearInRange(Number(b)) || a > b) {
+        throw badRequest('INVALID_PERIOD', `Unparseable period: "${periodRaw}"`);
+      }
+      return { start: `${a}-01-01`, end: `${b}-12-31`, label };
+    }
+    if (!isValidDateString(a) || !isValidDateString(b) || a > b) {
+      throw badRequest('INVALID_PERIOD', `Unparseable period: "${periodRaw}"`);
+    }
+    return { start: a, end: b, label };
+  }
 
   const lastMonths = /^last\s+(\d+)\s+months?$/i.exec(period);
   if (lastMonths) {
@@ -122,7 +254,7 @@ export function parsePeriod(periodRaw: string): Period {
     const daysInTargetMonth = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
     const day = Math.min(now.getUTCDate(), daysInTargetMonth);
     const startDt = new Date(Date.UTC(targetYear, targetMonth, day));
-    return { start: formatUtcDate(startDt), end, label: period };
+    return { start: formatUtcDate(startDt), end, label };
   }
 
   const yearOnly = /^(\d{4})$/.exec(period);
@@ -136,7 +268,7 @@ export function parsePeriod(periodRaw: string): Period {
     if (yNum < 1993 || yNum > currentYear) {
       throw badRequest('INVALID_PERIOD', `Unparseable period: "${periodRaw}"`);
     }
-    return { start: `${y}-01-01`, end: `${y}-12-31`, label: period };
+    return { start: `${y}-01-01`, end: `${y}-12-31`, label };
   }
 
   const range = /^(\d{4}-\d{2}-\d{2})\s*\.\.\s*(\d{4}-\d{2}-\d{2})$/.exec(period);
@@ -146,7 +278,7 @@ export function parsePeriod(periodRaw: string): Period {
     if (!isValidDateString(start) || !isValidDateString(end) || start > end) {
       throw badRequest('INVALID_PERIOD', `Unparseable period: "${periodRaw}"`);
     }
-    return { start, end, label: period };
+    return { start, end, label };
   }
 
   throw badRequest('INVALID_PERIOD', `Unparseable period: "${periodRaw}"`);
@@ -444,7 +576,22 @@ function stripInvisibleChars(s: string): string {
  * stay "société", not become "societe").
  */
 function canonicalTicker(s: string): string {
-  return stripInvisibleChars(s.normalize('NFD')).trim().toUpperCase();
+  const hit = TICKER_MEMO.get(s);
+  if (hit !== undefined) return hit;
+  const out = stripInvisibleChars(s.normalize('NFD')).trim().toUpperCase();
+  memoSet(TICKER_MEMO, s, out);
+  return out;
+}
+
+// Round 8: canonicalTicker / normalizeCompanyName are pure and run once per
+// company_tickers entry on every resolution (10k+ entries); memoize them
+// (bounded, cleared when full) so the span engine stays fast.
+const MEMO_MAX = 50_000;
+const TICKER_MEMO = new Map<string, string>();
+const NAME_MEMO = new Map<string, string>();
+function memoSet(m: Map<string, string>, k: string, v: string): void {
+  if (m.size >= MEMO_MAX) m.clear();
+  m.set(k, v);
 }
 
 /**
@@ -496,6 +643,14 @@ const LEGAL_SUFFIX_FOLD: Record<string, string> = {
 };
 
 export function normalizeCompanyName(s: string): string {
+  const hit = NAME_MEMO.get(s);
+  if (hit !== undefined) return hit;
+  const out = normalizeCompanyNameUncached(s);
+  memoSet(NAME_MEMO, s, out);
+  return out;
+}
+
+function normalizeCompanyNameUncached(s: string): string {
   return s
     .toLowerCase()
     .replace(INVISIBLE_CHARS_RE, ' ')
@@ -683,6 +838,12 @@ export function resolveCikFromTickers(entity: string, tickers: TickersMap): CikM
     }
   }
 
+  // A1 trailing-token rule: a query with a strong legal suffix followed
+  // by more tokens ("apple inc x") is never prefix-matched — only the
+  // exact-title match above may resolve it. Otherwise "Apple Inc. X"
+  // could silently resolve to any title that happens to start with it.
+  if (hasNonTerminalStrongSuffix(normQuery.split(' '))) return null;
+
   // (4) Prefix/substring matches on a word/token boundary, deduplicated by
   // CIK (one company may hold several tickers). Exactly one distinct
   // company resolves; more than one is ambiguous and must refuse.
@@ -762,6 +923,31 @@ export function isCompanyLikeEntity(entity: string): boolean {
       .filter((w) => w.length > 0);
     if (tokens.length < 2) continue;
     if (COMPANY_SUFFIX_TOKENS.has(tokens[tokens.length - 1])) return true;
+    // A1 (2026-11-21) trailing-token rule: a STRONG legal suffix that is
+    // followed by more tokens ("Apple Inc. X", "Tesla, Inc. X",
+    // "Apple Inc X1") is still a company name with junk after it — it
+    // must 422, never reach the Federal Register term search (live
+    // before A1: "Apple Inc. X" served 1 FedReg rule and "Tesla, Inc. X"
+    // 2, both stamped verified).
+    if (hasNonTerminalStrongSuffix(tokens)) return true;
+  }
+  return false;
+}
+
+/**
+ * Unambiguous legal-form tokens for the non-terminal check. Short
+ * suffixes that are also ordinary words or name parts (co, as, se, sa,
+ * ab, oy, kk, gk, cv, oo, group, holdings) are deliberately excluded:
+ * "group health plans" is a Federal Register topic, not a company.
+ */
+const STRONG_SUFFIX_TOKENS = new Set([
+  'inc', 'corp', 'ltd', 'llc', 'plc', 'llp', 'lp', 'gmbh', 'ag', 'nv', 'bv', 'spa', 'srl', 'ltda', 'oyj', 'pty', 'pte', 'bhd', 'sdn',
+]);
+
+/** True when a strong legal suffix sits at a non-first, non-last position. */
+export function hasNonTerminalStrongSuffix(tokens: string[]): boolean {
+  for (let k = 1; k < tokens.length - 1; k++) {
+    if (STRONG_SUFFIX_TOKENS.has(tokens[k])) return true;
   }
   return false;
 }
@@ -933,7 +1119,7 @@ function validateTickersPayload(data: unknown): TickersMap {
   return out;
 }
 
-async function loadTickers(fetchImpl: typeof fetch): Promise<TickersMap> {
+async function loadTickers(fetchImpl: typeof fetch, t?: Timeouts): Promise<TickersMap> {
   const now = Date.now();
   if (tickersCache && now - tickersCache.fetchedAt < TICKERS_TTL_MS) {
     return tickersCache.data;
@@ -942,7 +1128,7 @@ async function loadTickers(fetchImpl: typeof fetch): Promise<TickersMap> {
   // first caller starts the fetch, the rest await the same promise. The
   // promise is cleared on settle, so a later call re-fetches after TTL.
   if (tickersInflight) return tickersInflight;
-  const p = doLoadTickers(fetchImpl, now);
+  const p = doLoadTickers(fetchImpl, now, t ?? { perRequestMs: SEC_TIMEOUT_MS, deadline: now + SEC_DEADLINE_MS });
   tickersInflight = p;
   try {
     return await p;
@@ -951,20 +1137,25 @@ async function loadTickers(fetchImpl: typeof fetch): Promise<TickersMap> {
   }
 }
 
-async function doLoadTickers(fetchImpl: typeof fetch, now: number): Promise<TickersMap> {
+async function doLoadTickers(fetchImpl: typeof fetch, now: number, t: Timeouts): Promise<TickersMap> {
   let res: Response;
+  let body: string | null;
   try {
-    res = await fetchImpl(TICKERS_URL, {
-      headers: { 'User-Agent': requireUserAgent(), Accept: 'application/json' },
-    });
+    ({ res, body } = await fetchTextWithTimeout(
+      fetchImpl,
+      TICKERS_URL,
+      { headers: { 'User-Agent': requireUserAgent(), Accept: 'application/json' } },
+      t,
+    ));
   } catch (err) {
     if (tickersCache) return tickersCache.data; // stale cache beats no data
+    if (err instanceof ApiError) throw err;
     throw upstreamUnavailable(
       'SEC_UNAVAILABLE',
       `SEC company_tickers.json fetch failed: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
-  if (!res.ok) {
+  if (!res.ok || body === null) {
     // Any non-OK fetch reuses the last cached copy when one exists (a 403
     // with a usable cache is no reason to fail the request); 502 only when
     // there is no cache at all.
@@ -976,7 +1167,7 @@ async function doLoadTickers(fetchImpl: typeof fetch, now: number): Promise<Tick
   }
   let parsed: unknown;
   try {
-    parsed = (await res.json()) as unknown;
+    parsed = JSON.parse(body) as unknown;
   } catch {
     // A 200 with a non-JSON body is an upstream failure, not a raw
     // SyntaxError escaping the handler: SEC genuinely returns HTML error
@@ -1016,7 +1207,9 @@ interface EdgarSubmissions {
       form?: string[];
       primaryDocument?: string[];
     };
+    files?: unknown;
   };
+  name?: unknown;
 }
 
 const ACCESSION_RE = /^\d{10}-\d{2}-\d{6}$/;
@@ -1323,157 +1516,48 @@ export function buildFilingsFromSubmissions(payload: EdgarSubmissions): Filing[]
     // is "no document" and contributes no filing. The URL is built
     // from per-segment encodeURIComponent, so it can never escape the
     // accession directory or carry a query/fragment.
+    // A1 (2026-11-21) — COUNT COMPLETENESS: an entry whose primary
+    // document is missing or fails the closed filename shape is STILL a
+    // real filing (EDGAR leaves primaryDocument blank on every pre-2001
+    // filing: Apple has 109 such filings 1994-2000, verified live
+    // 2026-11-21). Skipping it served wrong verified counts (Apple 10-K
+    // 1999 = 0, truth 1). The entry now counts, and its URL is the
+    // EDGAR filing-index page built ONLY from the validated CIK and the
+    // validated accession (^\d{10}-\d{2}-\d{6}$) — the untrusted doc
+    // string is never embedded, so no URL can be fabricated or injected
+    // (the round-8..11 guarantees hold: the doc never reaches the URL
+    // unless it passes the closed shape).
+    //
+    // ABSENT documents (empty / whitespace-only / invisible-only — the
+    // round-6..10 "no document" class) count with the index URL. A
+    // PRESENT document that fails the closed filename shape (traversal,
+    // query/fragment injection, 2+ slashes) never occurs in real EDGAR
+    // data (17,196 docs checked, round 9) and is still SKIPPED exactly
+    // as rounds 9-11 decided — a corrupted entry is not counted.
     const cleanDoc = stripInvisibleChars(doc).trim();
-    if (cleanDoc === '' || !hasVisibleContent(cleanDoc) || !isSafePrimaryDocument(cleanDoc)) {
-      continue;
-    }
-    const encodedDoc = cleanDoc.split('/').map((seg) => encodeURIComponent(seg)).join('/');
+    const accNoDash = accession.replace(/-/g, '');
+    const docAbsent = cleanDoc === '' || !hasVisibleContent(cleanDoc);
+    if (!docAbsent && !isSafePrimaryDocument(cleanDoc)) continue;
+    const docOk = !docAbsent;
+    const url = docOk
+      ? `https://www.sec.gov/Archives/edgar/data/${cikNum}/${accNoDash}/${cleanDoc
+          .split('/')
+          .map((seg) => encodeURIComponent(seg))
+          .join('/')}`
+      : `https://www.sec.gov/Archives/edgar/data/${cikNum}/${accNoDash}/${accession}-index.htm`;
     out.push({
       form: formStr,
       accession,
       filing_date: filingDateStr,
-      url: `https://www.sec.gov/Archives/edgar/data/${cikNum}/${accession.replace(/-/g, '')}/${encodedDoc}`,
+      url,
     });
   }
   return out;
 }
 
-interface FedRegDocument {
-  document_number?: string;
-  publication_date?: string;
-  html_url?: string;
-  title?: string;
-}
+// Round 8: the Federal Register fallback (builder + validator) was removed —
+// see the header comment. /v1/filings answers from SEC EDGAR only.
 
-function isHttpUrl(s: string): boolean {
-  try {
-    const u = new URL(s);
-    return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-export function buildFilingsFromFedReg(payload: { results?: FedRegDocument[] }): Filing[] {
-  const out: Filing[] = [];
-  if (!Array.isArray(payload.results)) return out;
-  for (const doc of payload.results) {
-    if (!doc || typeof doc !== 'object') continue;
-    // Same strict shape the validator enforces (defense in depth for
-    // direct callers): a non-string / malformed field never becomes a
-    // verified filing — it is skipped here and 502s in the validator.
-    // `title` is checked here too, exactly as the validator requires it
-    // (non-empty string), even though the builder does not use the title
-    // to build the filing — the comment above used to claim this parity
-    // while the title check was missing (round-5 F2).
-    if (
-      typeof doc.document_number !== 'string' ||
-      doc.document_number.trim() === '' ||
-      typeof doc.publication_date !== 'string' ||
-      !isValidDateString(doc.publication_date) ||
-      typeof doc.html_url !== 'string' ||
-      !isHttpUrl(doc.html_url) ||
-      typeof doc.title !== 'string' ||
-      doc.title.trim() === ''
-    ) {
-      continue;
-    }
-    out.push({
-      form: 'Federal Register',
-      accession: doc.document_number,
-      filing_date: doc.publication_date,
-      url: doc.html_url,
-    });
-  }
-  return out;
-}
-
-/**
- * Validate a Federal Register payload before answering from it. A malformed
- * shape — payload not an object, results present but not an array, an entry
- * not an object, or an entry failing ANY field check below — is an upstream
- * data error (502 FEDREG_UNAVAILABLE), not proof the entity does not exist
- * (422 ENTITY_NOT_FOUND is reserved for a well-formed response with zero
- * results). Required fields, with TYPES, are exactly the ones the handler
- * uses to build a filing: document_number (non-empty string), html_url
- * (a string that parses as an http(s) URL), title (non-empty string), and
- * publication_date (a string that is a real YYYY-MM-DD calendar date,
- * checked with the same isValidDateString the EDGAR path uses). A partial
- * or mistyped entry (e.g. only document_number, a missing publication_date,
- * a numeric document_number, a non-URL html_url, a malformed date) is
- * therefore a 502, never a silently skipped 422 and never a verified
- * filing with a garbage date/URL/accession.
- *
- * document_number shape note: live FedReg RULE documents all carry
- * YYYY-NNNNN numbers (40/40 sampled 2026-11-20: "Microsoft Corporation"
- * term search and "Environmental Protection Agency" term search, 20 each,
- * incl. 2026-14132 and 2025-21713). The YYYY-NNNNN pattern is NOT enforced
- * here because the API does not guarantee it for every document type; the
- * enforced check is non-empty string.
- *
- * LIVE zero-result shape: the API returns
- * {"description":"Documents matching 'ZZZZNOTREAL' and of type Rule",
- * "count":0} with NO `results` key at all (HTTP 200). A missing `results`
- * with count 0 (or no count) is a well-formed zero — the handler's 422
- * branch handles it. A missing `results` with a nonzero count is malformed
- * (502), as is a present-but-non-array `results`.
- */
-function validateFedRegPayload(payload: unknown): asserts payload is { results?: FedRegDocument[] } {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw upstreamUnavailable(
-      'FEDREG_UNAVAILABLE',
-      'Federal Register API returned a malformed payload',
-    );
-  }
-  const results = (payload as { results?: unknown }).results;
-  const count = (payload as { count?: unknown }).count;
-  if (results === undefined) {
-    if (count === 0 || count === undefined) return; // well-formed zero
-    throw upstreamUnavailable(
-      'FEDREG_UNAVAILABLE',
-      'Federal Register API returned a malformed payload (results missing with nonzero count)',
-    );
-  }
-  if (!Array.isArray(results)) {
-    throw upstreamUnavailable(
-      'FEDREG_UNAVAILABLE',
-      'Federal Register API returned a malformed payload (results is not an array)',
-    );
-  }
-  for (const doc of results) {
-    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
-      throw upstreamUnavailable(
-        'FEDREG_UNAVAILABLE',
-        'Federal Register API returned a malformed document entry',
-      );
-    }
-    const d = doc as FedRegDocument;
-    if (typeof d.document_number !== 'string' || d.document_number.trim() === '') {
-      throw upstreamUnavailable(
-        'FEDREG_UNAVAILABLE',
-        'Federal Register API returned a document entry with a missing or non-string document_number',
-      );
-    }
-    if (typeof d.publication_date !== 'string' || !isValidDateString(d.publication_date)) {
-      throw upstreamUnavailable(
-        'FEDREG_UNAVAILABLE',
-        'Federal Register API returned a document entry with a missing or malformed publication_date (must be a real YYYY-MM-DD date)',
-      );
-    }
-    if (typeof d.html_url !== 'string' || !isHttpUrl(d.html_url)) {
-      throw upstreamUnavailable(
-        'FEDREG_UNAVAILABLE',
-        'Federal Register API returned a document entry with a missing or non-http(s) html_url',
-      );
-    }
-    if (typeof d.title !== 'string' || d.title.trim() === '') {
-      throw upstreamUnavailable(
-        'FEDREG_UNAVAILABLE',
-        'Federal Register API returned a document entry with a missing or non-string title',
-      );
-    }
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Handler
@@ -1488,6 +1572,313 @@ function requireUserAgent(): string {
     );
   }
   return ua;
+}
+
+/**
+ * Round 8: per-tickers-map lookup index (built once per map object, the
+ * same semantics as the linear scans it replaces: the FIRST entry with a
+ * given canonical ticker wins; titles are grouped by valid CIK).
+ */
+interface TickerIndex {
+  firstByTicker: Map<string, TickerEntry>;
+  titlesByCik: Map<number, string[]>;
+}
+const TICKER_INDEX = new WeakMap<object, TickerIndex>();
+function tickerIndex(tickers: TickersMap): TickerIndex {
+  const hit = TICKER_INDEX.get(tickers);
+  if (hit) return hit;
+  const firstByTicker = new Map<string, TickerEntry>();
+  const titlesByCik = new Map<number, string[]>();
+  for (const e of Object.values(tickers)) {
+    if (!e || typeof e !== 'object') continue;
+    if (typeof e.ticker === 'string') {
+      const t = canonicalTicker(e.ticker);
+      if (t !== '' && !firstByTicker.has(t)) firstByTicker.set(t, e);
+    }
+    const cik = tickerEntryCik(e);
+    if (cik !== null && typeof e.title === 'string') {
+      const list = titlesByCik.get(cik) ?? [];
+      list.push(normalizeCompanyName(e.title));
+      titlesByCik.set(cik, list);
+    }
+  }
+  const idx = { firstByTicker, titlesByCik };
+  TICKER_INDEX.set(tickers, idx);
+  return idx;
+}
+
+/** Exact ticker or exact canonical SEC title only (no prefix matching). */
+function exactTickerOrTitle(entity: string, tickers: TickersMap): CikMatch | null {
+  const upper = canonicalTicker(entity);
+  const norm = normalizeCompanyName(entity);
+  for (const e of Object.values(tickers)) {
+    const cik = tickerEntryCik(e);
+    if (cik === null) continue;
+    if (upper !== '' && typeof e.ticker === 'string' && canonicalTicker(e.ticker) === upper) {
+      return { cik, cik10: padCik(cik), matchKind: 'ticker' };
+    }
+  }
+  if (norm === '') return null;
+  for (const e of Object.values(tickers)) {
+    const cik = tickerEntryCik(e);
+    if (cik === null || typeof e.title !== 'string') continue;
+    if (normalizeCompanyName(e.title) === norm) return { cik, cik10: padCik(cik), matchKind: 'name' };
+  }
+  return null;
+}
+
+/**
+ * "Microsoft MSFT" / "MSFT Microsoft": exactly one token is an exact
+ * ticker, and the remaining tokens are a whole-word prefix of THAT
+ * company's own SEC title. Anything else returns null (no guess).
+ */
+export function resolveNameTickerPair(entity: string, tickers: TickersMap): CikMatch | null {
+  if (!tickers || typeof tickers !== 'object') return null;
+  const words = entity.trim().split(/\s+/);
+  if (words.length < 2) return null;
+  const idx = tickerIndex(tickers);
+  let found: CikMatch | null = null;
+  for (let k = 0; k < words.length; k++) {
+    const upper = canonicalTicker(words[k]);
+    if (upper === '') continue;
+    const tickerEntry = idx.firstByTicker.get(upper);
+    if (!tickerEntry) continue;
+    const cik = tickerEntryCik(tickerEntry);
+    if (cik === null) continue;
+    const others = normalizeCompanyName(words.filter((_w, j) => j !== k).join(' '));
+    if (others === '' || isTooGenericEntity(others)) continue;
+    const titleOk = (idx.titlesByCik.get(cik) ?? []).some((t) => t === others || t.startsWith(`${others} `));
+    if (!titleOk) continue;
+    if (found && found.cik !== cik) return null;
+    found = { cik, cik10: padCik(cik), matchKind: 'name' };
+  }
+  return found;
+}
+
+/** Query keys handleFilings consumes; any other key is guarded (A1). */
+const FILINGS_QUERY_KEYS = new Set(['entity', 'period', 'form_type', 'form', 'cik']);
+
+/**
+ * GET one data.sec.gov JSON document as text, failing CLOSED: network
+ * error / 429 / 5xx / any non-2xx is 502 SEC_UNAVAILABLE. For the main
+ * submissions document (`notFoundIs422`) a 404 is 422 ENTITY_NOT_FOUND
+ * (the CIK does not exist); for an older page listed in the index a 404
+ * is an upstream inconsistency and therefore a 502.
+ */
+async function fetchEdgarJsonText(
+  url: string,
+  userAgent: string,
+  fetchImpl: typeof fetch,
+  entity: string,
+  notFoundIs422: boolean,
+  t: Timeouts,
+): Promise<string> {
+  let res: Response;
+  let body: string | null;
+  try {
+    ({ res, body } = await fetchTextWithTimeout(
+      fetchImpl,
+      url,
+      { headers: { 'User-Agent': userAgent, Accept: 'application/json' } },
+      t,
+    ));
+  } catch (err) {
+    if (err instanceof ApiError) throw err; // 504 SEC_TIMEOUT
+    throw upstreamUnavailable(
+      'SEC_UNAVAILABLE',
+      `SEC EDGAR Submissions API fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (res.status === 429) {
+    throw new ApiError(502, 'SEC_UNAVAILABLE', 'SEC EDGAR Submissions API returned HTTP 429 (rate limited)', 60);
+  }
+  if (res.status >= 500) {
+    throw upstreamUnavailable('SEC_UNAVAILABLE', `SEC EDGAR Submissions API returned HTTP ${res.status}`);
+  }
+  if (res.status === 404 && notFoundIs422) {
+    throw unprocessable('ENTITY_NOT_FOUND', `No SEC EDGAR submissions found for entity "${entity}"`);
+  }
+  if (!res.ok || body === null) {
+    throw upstreamUnavailable('SEC_UNAVAILABLE', `SEC EDGAR Submissions API returned HTTP ${res.status}`);
+  }
+  if (body.length > MAX_SEC_DOCUMENT_CHARS) {
+    // Round 9 (J2-r8 m3): an oversized submissions document or history
+    // page is refused, never parsed, stored and served as verified.
+    throw upstreamUnavailable(
+      'SEC_DOCUMENT_TOO_LARGE',
+      `SEC EDGAR document ${url} is ${body.length} characters (max ${MAX_SEC_DOCUMENT_CHARS})`,
+    );
+  }
+  return body;
+}
+
+/**
+ * Size cap for one data.sec.gov submissions document or history page
+ * (round 9, J2-r8 m3). Measured over the whole SEC bulk submissions.zip
+ * (Last-Modified 2026-11-20 05:00:09 GMT, 993,860 filer documents + 5,431
+ * history pages): largest filer document 4,645,478 bytes
+ * (CIK0000019617.json), largest history page 426,820 bytes
+ * (CIK0000876796-submissions-001.json), p99.99 190,320 / 426,649 bytes.
+ * 8,000,000 characters is ~1.7x the largest document ever served; above
+ * it the answer fails closed (502 SEC_DOCUMENT_TOO_LARGE).
+ */
+export const MAX_SEC_DOCUMENT_CHARS = 8_000_000;
+
+/** Hard cap on older submissions pages fetched for one answer. */
+const MAX_OLDER_PAGES = 25;
+
+interface EdgarFileRef {
+  name: string;
+  filingFrom: string;
+  filingTo: string;
+  filingCount: number | null;
+}
+
+/** Older pages fetched concurrently (SEC fair-access: stays far under 10 requests/second). */
+const PAGE_CONCURRENCY = 4;
+
+/**
+ * A1 (2026-11-21) — EDGAR pagination. `filings.recent` holds only the
+ * newest ~1,000 filings (Apple: back to 2015-10-07; Tesla: 2018-06-18,
+ * verified live 2026-11-21); older filings live ONLY in the pages listed
+ * in `filings.files`. Every page whose [filingFrom, filingTo] overlaps the
+ * period is fetched and validated exactly like the main document. A
+ * malformed index, a failed page fetch or a malformed page is a 502 —
+ * never a partial count stamped verified. Round 8 (J2 minor 2): a page
+ * must also MATCH its index entry — non-empty, row count equal to the
+ * index's filingCount, every filingDate inside [filingFrom, filingTo] —
+ * so an empty or truncated page can never serve a verified undercount.
+ */
+/** Margin (days) around an EDGAR history page's filingFrom..filingTo. */
+const PAGE_DATE_SLACK_DAYS = 7;
+/** A neighbouring (non-overlapping) page this close to the period is fetched and date-checked too (round 9, m1). */
+const NEIGHBOR_PROBE_DAYS = 366;
+
+function shiftIsoDate(d: string, days: number): string {
+  const t = Date.parse(`${d}T00:00:00Z`) + days * 86_400_000;
+  return new Date(t).toISOString().slice(0, 10);
+}
+
+async function fetchOlderSubmissionPages(
+  payload: EdgarSubmissions,
+  cikMatch: CikMatch,
+  period: Period,
+  userAgent: string,
+  fetchImpl: typeof fetch,
+  t: Timeouts,
+): Promise<{ filings: Filing[]; pages: Array<{ url: string; raw_response_sha256: string }>; bodies: string[] }> {
+  const files = payload.filings?.files;
+  if (files === undefined) return { filings: [], pages: [], bodies: [] };
+  if (!Array.isArray(files)) {
+    throw upstreamUnavailable('SEC_UNAVAILABLE', 'SEC EDGAR Submissions API returned a malformed filings.files index');
+  }
+  const nameRe = new RegExp(`^CIK${cikMatch.cik10}-submissions-\\d{3}\\.json$`);
+  const refs: EdgarFileRef[] = [];
+  for (const f of files as unknown[]) {
+    const r = f as (Partial<Omit<EdgarFileRef, 'filingCount'>> & { filingCount?: unknown }) | null;
+    if (
+      !r ||
+      typeof r !== 'object' ||
+      typeof r.name !== 'string' ||
+      !nameRe.test(r.name) ||
+      typeof r.filingFrom !== 'string' ||
+      !isValidDateString(r.filingFrom) ||
+      typeof r.filingTo !== 'string' ||
+      !isValidDateString(r.filingTo) ||
+      r.filingFrom > r.filingTo ||
+      (r.filingCount !== undefined && (typeof r.filingCount !== 'number' || !Number.isInteger(r.filingCount) || r.filingCount < 1))
+    ) {
+      throw upstreamUnavailable(
+        'SEC_UNAVAILABLE',
+        'SEC EDGAR Submissions API returned a malformed filings.files entry',
+      );
+    }
+    refs.push({
+      name: r.name,
+      filingFrom: r.filingFrom,
+      filingTo: r.filingTo,
+      filingCount: typeof r.filingCount === 'number' ? r.filingCount : null,
+    });
+  }
+  // EDGAR's index range is NOT exact: on live pages filingTo is routinely
+  // one day earlier than the page's last filingDate (measured 2026-11-21:
+  // 51 history pages of 14 large filers, worst drift 1 day, always on the
+  // filingTo side). Page selection and the page-date check both use a
+  // PAGE_DATE_SLACK_DAYS margin, so a boundary filing is never skipped
+  // and a page whose dates drift further still fails closed.
+  const lo = (d: string) => shiftIsoDate(d, -PAGE_DATE_SLACK_DAYS);
+  const hi = (d: string) => shiftIsoDate(d, PAGE_DATE_SLACK_DAYS);
+  const overlapping = refs.filter((r) => hi(r.filingTo) >= period.start && lo(r.filingFrom) <= period.end);
+  if (overlapping.length > MAX_OLDER_PAGES) {
+    throw unprocessable(
+      'PERIOD_TOO_BROAD',
+      `Period "${period.label}" spans ${overlapping.length} EDGAR history pages (max ${MAX_OLDER_PAGES}); use a narrower period`,
+    );
+  }
+  // Round 9 (J2-r8 m1): a page whose rows drift MORE than the slack past
+  // its index range would not be selected above, and its rows inside the
+  // period would be silently missing. The nearest non-overlapping page on
+  // each side of the period (when its boundary is within
+  // NEIGHBOR_PROBE_DAYS) is fetched too and held to the same
+  // [filingFrom - slack, filingTo + slack] date check, so such drift fails
+  // closed (502) instead of serving a verified undercount.
+  const rest = refs.filter((r) => !overlapping.includes(r));
+  const below = rest
+    .filter((r) => r.filingTo < period.start && shiftIsoDate(r.filingTo, NEIGHBOR_PROBE_DAYS) >= period.start)
+    .sort((a, b) => (a.filingTo < b.filingTo ? 1 : -1))[0];
+  const above = rest
+    .filter((r) => r.filingFrom > period.end && shiftIsoDate(r.filingFrom, -NEIGHBOR_PROBE_DAYS) <= period.end)
+    .sort((a, b) => (a.filingFrom > b.filingFrom ? 1 : -1))[0];
+  const needed = [...overlapping, ...[below, above].filter((r): r is EdgarFileRef => r !== undefined)];
+  const results: Array<{ filings: Filing[]; page: { url: string; raw_response_sha256: string }; body: string }> = new Array(needed.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < needed.length) {
+      const k = next++;
+      const ref = needed[k];
+      const url = `https://data.sec.gov/submissions/${ref.name}`;
+      const raw = await fetchEdgarJsonText(url, userAgent, fetchImpl, String(cikMatch.cik), false, t);
+      let page: unknown;
+      try {
+        page = JSON.parse(raw);
+      } catch {
+        throw upstreamUnavailable('SEC_UNAVAILABLE', `SEC EDGAR submissions page ${ref.name} returned malformed JSON`);
+      }
+      if (!page || typeof page !== 'object' || Array.isArray(page)) {
+        throw upstreamUnavailable('SEC_UNAVAILABLE', `SEC EDGAR submissions page ${ref.name} returned a malformed payload`);
+      }
+      const wrapped = { cik: payload.cik, filings: { recent: page as Record<string, unknown> } };
+      validateSubmissionsPayload(wrapped, cikMatch.cik);
+      const p = page as { accessionNumber?: unknown; filingDate?: unknown };
+      const rows = Array.isArray(p.accessionNumber) ? p.accessionNumber.length : 0;
+      const dates = Array.isArray(p.filingDate) ? (p.filingDate as unknown[]) : [];
+      if (ref.filingCount === null) {
+        // Round 9 (J2-r8 m2): without the index's row count a truncated
+        // page cannot be detected, so it is never accepted.
+        throw upstreamUnavailable(
+          'SEC_UNAVAILABLE',
+          `SEC EDGAR filings.files entry ${ref.name} has no filingCount; the page cannot be checked for truncation`,
+        );
+      }
+      if (
+        rows === 0 ||
+        rows !== ref.filingCount ||
+        dates.some((d) => typeof d !== 'string' || !isValidDateString(d) || d < lo(ref.filingFrom) || d > hi(ref.filingTo))
+      ) {
+        throw upstreamUnavailable(
+          'SEC_UNAVAILABLE',
+          `SEC EDGAR submissions page ${ref.name} does not match its index entry (${rows} rows; index ${ref.filingCount ?? '?'} rows ${ref.filingFrom}..${ref.filingTo})`,
+        );
+      }
+      results[k] = {
+        filings: buildFilingsFromSubmissions(wrapped as EdgarSubmissions),
+        page: { url, raw_response_sha256: sha256Hex(raw) },
+        body: raw,
+      };
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(PAGE_CONCURRENCY, needed.length) }, () => worker()));
+  return { filings: results.flatMap((r) => r.filings), pages: results.map((r) => r.page), bodies: results.map((r) => r.body) };
 }
 
 export async function handleFilings(
@@ -1548,224 +1939,400 @@ export async function handleFilings(
   // at the handler top only: direct calls to resolveCikFromTickers /
   // normalizeCompanyName still strip combining marks (see the
   // comment above INVISIBLE_CHARS_RE).
-  const entity = entityRaw.trim().normalize('NFC');
-  if (entity.length > 512) {
+  const entityNfc = entityRaw.trim().normalize('NFC');
+  if (entityNfc.length > 512) {
     throw badRequest('ENTITY_TOO_LONG', 'Query parameter "entity" must not exceed 512 characters');
   }
-  const period = parsePeriod(periodRaw);
+
+  // --- A1 (2026-11-21, round 8): form type, CIK claims, longest-match ---
+  // entity resolution and the fail-closed residue rule. Order is
+  // load-bearing: every explicit form source is parsed (return-or-throw,
+  // never null) BEFORE any upstream call; the entity is resolved by
+  // longest match against SEC titles/tickers FIRST and only the tokens
+  // OUTSIDE the matched filer are read as forms / filing words / CIK
+  // claims / the requested year. Any other leftover token is a 422. There
+  // is NO Federal Register fallback: the intent counts filings "on SEC
+  // EDGAR" (reference template "How many {key} are on SEC EDGAR?"), and a
+  // Federal Register full-text term search is not attributed to the
+  // entity, so it can never stand in for a filings count.
+  const cikClaims: Array<{ field: string; cik: number }> = [];
+  const formParams: Array<{ field: string; forms: string[] }> = [];
+  const explicitAll: string[] = [];
+  for (const key of ['form_type', 'form'] as const) {
+    const v: unknown = query[key];
+    // A CIK sent in the form field ("320193", "CIK 320193") is a CIK
+    // claim, not an unknown form.
+    if (typeof v === 'string' && /^\s*(?:CIK\s*[:#]?\s*)?\d{5,10}\s*$/i.test(v)) {
+      cikClaims.push({ field: key, cik: Number(v.replace(/\D/g, '')) });
+      continue;
+    }
+    const spec = parseFormType(v, key);
+    if (spec.kind === 'none' && typeof v === 'string' && stripInvisible(foldBasic(v)).trim() !== '') explicitAll.push(key);
+    formParams.push({ field: key, forms: spec.kind === 'form' ? [spec.form] : [] });
+  }
+  if (query.cik !== undefined) {
+    const c: unknown = query.cik;
+    if (typeof c !== 'string' || !/^\s*(?:CIK\s*[:#]?\s*)?\d{1,10}\s*$/i.test(c) || Number(c.replace(/\D/g, '')) <= 0) {
+      throw badRequest('INVALID_CIK', 'Query parameter "cik" must be a positive SEC CIK (1-10 digits)');
+    }
+    cikClaims.push({ field: 'cik', cik: Number(c.replace(/\D/g, '')) });
+  }
+  for (const key of Object.keys(query)) {
+    if (FILINGS_QUERY_KEYS.has(key)) continue;
+    if (/form|type|filing|doc|kind|categ|amend/i.test(key)) {
+      throw unprocessable(
+        'UNSUPPORTED_FORM_PARAM',
+        `Query parameter "${key}" is not supported; pass the EDGAR form as form_type`,
+      );
+    }
+    // Round 8 (J1-m2): an unknown key is a 400, never silently ignored —
+    // its value could carry a form or a CIK the answer would not reflect.
+    throw badRequest(
+      'UNKNOWN_PARAM',
+      `Query parameter "${key}" is not supported; /v1/filings takes entity, period, form_type (or form) and cik`,
+    );
+  }
+
+  const entityFolded = foldBasic(entityNfc);
+  if (/^\d{11,}$/.test(entityFolded.trim())) {
+    throw unprocessable('INVALID_CIK', `Entity "${entityNfc}" is not a CIK: an SEC CIK has at most 10 digits`);
+  }
+  // Round 8 (J2-r7 M1): a CIK padded past 10 digits anywhere in the
+  // entity ("CIK 00000000320193", "Apple Inc. 00000320193") is a 422,
+  // never stripped to a shorter CIK and never read as a name token.
+  const longNumber = /(?<![\p{L}\p{N}])\d{11,}(?![\p{L}\p{N}])/u.exec(entityFolded);
+  if (longNumber) {
+    throw unprocessable('INVALID_CIK', `Entity "${entityNfc}": "${longNumber[0]}" is not a CIK — an SEC CIK has at most 10 digits`);
+  }
+  const entityIsBareCik = /^\d{1,10}$/.test(entityFolded.trim());
+  // extractForms runs on the entity for its early refusals only (a known
+  // form with a junk suffix such as "10-K/A-1" is 422 before any upstream
+  // call) and for the filler-only / bare-number checks; the FORM FILTER
+  // is taken from the longest-match complement below, never from here.
+  // A form-syntax refusal from this early pass is DEFERRED until the
+  // longest-match engine has run: a real SEC title can contain a
+  // form-looking slash ("JOST Werke SE/ADR" — SE is an EDGAR form, found
+  // by the full-title scan). It is thrown when no SEC filer consumes it.
+  let deferredFormError: ApiError | null = null;
+  let ent: { rest: string; forms: string[]; ciks: number[]; edgarQuestion: boolean };
+  if (entityIsBareCik) {
+    ent = { rest: entityNfc, forms: [], ciks: [], edgarQuestion: false };
+  } else {
+    try {
+      ent = extractForms(entityNfc, { allowCik: true, bareNumberCik: false });
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.code !== 'INVALID_FORM_TYPE') throw err;
+      deferredFormError = err;
+      ent = { rest: entityNfc, forms: [], ciks: [], edgarQuestion: false };
+    }
+  }
+  for (const c of ent.ciks) cikClaims.push({ field: 'entity', cik: c });
+
+  // Period first: a period that parses on its own ("last 3 months
+  // filings") is never mined for forms ("3" is not Form 3 there).
+  const periodText = stripPeriodFiller(periodRaw);
+  let per: { rest: string; forms: string[]; ciks: number[] };
+  if (tryParsePeriod(periodText) !== null) {
+    per = { rest: periodText, forms: [], ciks: [] };
+  } else {
+    per = extractForms(periodRaw, { allowCik: true, bareNumberCik: false });
+    assertNoUnconsumedFormTokens([{ field: 'period', value: per.rest }]);
+  }
+  for (const c of per.ciks) cikClaims.push({ field: 'period', cik: c });
+
+  const restForChecks = ent.rest.trim();
+  // A token typed in capitals that is also an SEC ticker can be a filler
+  // or form word too ("ALL" Allstate, "ON", "ARE", "FOR", "BY", "FORM"
+  // FormFactor — found by the full-ticker scan). Such a MISSING_ENTITY is
+  // deferred until the tickers map is loaded and thrown only when none of
+  // those capital tokens is a ticker.
+  // Round 9 (J2-r8 m4): one-letter tickers ("C", "D") and lowercase
+  // tickers that are not filler words ("c filings", "ma filings") defer
+  // too, so "C 10-K" / "CB Form 4 filings" reach the longest-match engine;
+  // when no ticker resolves, its own error (AMBIGUOUS / NOT_FOUND) is
+  // returned instead of a misleading MISSING_ENTITY.
+  const capsTokens = entityNfc
+    .split(/[ \t\r\n\f\v]+/)
+    .map((t) => t.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
+    .filter(
+      (t) =>
+        /^[A-Z][A-Z0-9.-]*$/.test(t) ||
+        (/^[a-z][a-z0-9.-]*$/i.test(t) && !FILLER_WORDS.has(t.toUpperCase()) && !FILING_KEYWORDS.has(t.toUpperCase())),
+    );
+  let deferredMissing: ApiError | null = null;
+  const missing = (msg: string): void => {
+    const err = badRequest('MISSING_ENTITY', msg);
+    if (capsTokens.length === 0) throw err;
+    deferredMissing = err;
+  };
+  if (restForChecks === '' && cikClaims.length === 0) {
+    missing('Query parameter "entity" names no company, ticker, CIK or agency');
+  } else if (restForChecks !== '' && isFillerOnly(restForChecks, ent.edgarQuestion) && !isTooGenericEntity(restForChecks)) {
+    missing(`Entity "${entityNfc}" names no company, ticker, CIK or agency`);
+  }
+  if (ent.edgarQuestion && /^\d{1,4}$/.test(restForChecks)) {
+    throw unprocessable(
+      'AMBIGUOUS_ENTITY',
+      `Entity "${entityNfc}" is not a company; a bare number in a filings question must be a full CIK (5-10 digits) or labelled "CIK nnnn"`,
+    );
+  }
+  if (/^\d{1,10}$/.test(restForChecks) && Number(restForChecks) === 0) {
+    // "0", "000": all zeros is never a CIK.
+    throw unprocessable('AMBIGUOUS_ENTITY', `Entity "${restForChecks}" is not a CIK, ticker or company`);
+  }
+  if (per.rest.trim() === '') {
+    throw badRequest('MISSING_PERIOD', 'Query parameter "period" names no period');
+  }
+  const period = parsePeriod(per.rest);
+  const periodYear =
+    period.start.endsWith('-01-01') && period.end.endsWith('-12-31') && period.start.slice(0, 4) === period.end.slice(0, 4)
+      ? Number(period.start.slice(0, 4))
+      : null;
 
   // SEC requires a User-Agent on every request; fail closed if unset.
   const userAgent = requireUserAgent();
+  const timeouts = { perRequestMs: deps.timeoutMs ?? SEC_TIMEOUT_MS, deadline: Date.now() + (deps.deadlineMs ?? SEC_DEADLINE_MS) };
 
-  // --- Resolve entity -> CIK (unless it is already a bare CIK). ---
+  // --- Resolve entity -> CIK. ---
+  let entity = restForChecks !== '' ? restForChecks : '';
   let cikMatch: CikMatch | null = null;
-  // Bare CIK only when the digits denote a real CIK (> 0): "0" is not a
-  // CIK and falls through to the tickers path (which returns null for it),
-  // instead of building an EDGAR URL for CIK 0000000000.
-  if (/^\d{1,10}$/.test(entity) && Number(entity) > 0) {
-    cikMatch = { cik: Number(entity), cik10: padCik(Number(entity)), matchKind: 'cik' };
+  let cikNameMustMatch: string | null = null;
+  let entityForms: string[] = [];
+  let phraseForm = false;
+  if (entityIsBareCik) {
+    const n = Number(entityFolded.trim());
+    if (n > 0) cikMatch = { cik: n, cik10: padCik(n), matchKind: 'cik' };
+    entity = String(n);
   } else {
-    const tickers = await loadTickers(fetchImpl);
-    // Exact-ticker matches are checked inside resolveCikFromTickers first
-    // in priority, but a generic query must never reach the FedReg term
-    // search as a supposed company either: it cannot identify a company.
-    // The exact-ticker check canonicalizes BOTH sides (canonicalTicker:
-    // invisible chars removed, trimmed, uppercased — the same choke
-    // point resolveCikFromTickers and canonicalTickerEntry use), so a
-    // control/ZWSP-padded query ("AAPL\x00") is recognised as the exact
-    // ticker AAPL here too and never slips past this gate into the
-    // generic/FedReg path. An all-invisible entity canonicalizes to ""
-    // and must never match a ticker, so the check is skipped then.
-    const upper = canonicalTicker(entity);
-    const exactTicker =
-      upper !== '' &&
-      Object.values(tickers).some(
-        (e) => typeof e.ticker === 'string' && canonicalTicker(e.ticker) === upper,
-      );
-    // ROUND 9, F4 — the generic gate runs on the NORMALIZED form too,
-    // and on the closed emptiness test, not only on the raw form. The
-    // raw-form gate cannot see what normalization does: "..." / "///" /
-    // ",,," normalize to "" and "..A" normalizes to "a", so they
-    // slipped past it into resolveCikFromTickers, where the empty
-    // normalized query built the match-all regex /\b/ and the handler
-    // reported "matches 7993 companies" for an entity that matches
-    // none. An invisible-only entity ("\u200b\u200b\u200b") did the
-    // same. These now 422 here with an honest reason (no visible
-    // content / too generic) and NEVER a match count. The resolver
-    // enforces the same rule independently (defense in depth for
-    // direct callers), so the two levels cannot disagree the way the
-    // validator/builder did in round 8.
-    const normEntity = normalizeCompanyName(entity);
+    const tickers = await loadTickers(fetchImpl, timeouts);
+    if (deferredMissing) {
+      const idx = tickerIndex(tickers);
+      if (!capsTokens.some((t) => idx.firstByTicker.has(canonicalTicker(t)))) throw deferredMissing;
+    }
+    // Generic / invisible-only gate on the whole entity (ROUND 9 F4):
+    // content-free or too-generic entities 422 with an honest reason.
+    const upper = canonicalTicker(restForChecks);
+    const exactTicker = upper !== '' && tickerIndex(tickers).firstByTicker.has(upper);
+    const normEntity = normalizeCompanyName(restForChecks);
     if (
+      restForChecks !== '' &&
       !exactTicker &&
-      (!hasVisibleContent(entity) ||
-        isTooGenericEntity(entity) ||
-        isTooGenericEntity(normEntity))
+      (!hasVisibleContent(restForChecks) || isTooGenericEntity(restForChecks) || isTooGenericEntity(normEntity))
     ) {
       throw unprocessable(
         'AMBIGUOUS_ENTITY',
-        !hasVisibleContent(entity)
-          ? `Entity "${entity}" contains no visible characters; use a ticker, CIK, or fuller company name`
-          : `Entity "${entity}" is too generic to identify a company; use a ticker, CIK, or fuller company name`,
+        !hasVisibleContent(restForChecks)
+          ? `Entity "${restForChecks}" contains no visible characters; use a ticker, CIK, or fuller company name`
+          : `Entity "${restForChecks}" is too generic to identify a company; use a ticker, CIK, or fuller company name`,
       );
     }
-    cikMatch = resolveCikFromTickers(entity, tickers);
+    const blanked = blankCikClauses(entityNfc);
+    const spans = resolveEntitySpans(blanked.text, periodYear, {
+      normalize: normalizeCompanyName,
+      canonicalTicker,
+      resolveName: (s) => resolveCikFromTickers(s, tickers),
+      resolvePair: (s) => resolveNameTickerPair(s, tickers),
+      entries: () => Object.values(tickers).map((e) => ({ ticker: e.ticker, title: e.title, cik: tickerEntryCik(e) })),
+    }, tickers, { cikClaimed: cikClaims.length > 0 || blanked.ciks.length > 0 });
+    if (deferredFormError && spans.kind !== 'match') throw deferredFormError;
+    if (spans.kind === 'match') {
+      cikMatch = { cik: spans.match.cik, cik10: padCik(spans.match.cik), matchKind: spans.match.matchKind };
+      entity = spans.entity;
+      entityForms = spans.comp.forms;
+      phraseForm = spans.comp.phraseForm;
+      for (const c of spans.comp.ciks) cikClaims.push({ field: 'entity', cik: c });
+    } else if (spans.kind === 'no-name') {
+      entityForms = spans.comp.forms;
+      phraseForm = spans.comp.phraseForm;
+      for (const c of spans.comp.ciks) cikClaims.push({ field: 'entity', cik: c });
+      if (cikClaims.length === 0) {
+        // Round 9 (J2-r8 m4): a form token that is also an exact SEC
+        // ticker typed in lower case ("c filings", "ma filings") is
+        // ambiguous between Form C and ticker C, not a missing entity.
+        const idx = tickerIndex(tickers);
+        const tickerForm = entityForms.find((f) => idx.firstByTicker.has(canonicalTicker(f)));
+        if (tickerForm !== undefined) {
+          const e = idx.firstByTicker.get(canonicalTicker(tickerForm));
+          throw unprocessable(
+            'AMBIGUOUS_ENTITY',
+            `Entity "${entityNfc}" reads as Form ${tickerForm} or as ticker ${canonicalTicker(tickerForm)} (${e?.title ?? 'an SEC filer'}); type the ticker in capitals, or add the company name or CIK`,
+          );
+        }
+        throw badRequest('MISSING_ENTITY', `Entity "${entityNfc}" names no company, ticker or CIK`);
+      }
+    } else {
+      // No SEC filer in the entity. A named CIK may still answer it, but
+      // only when the leftover name equals the EDGAR name of that CIK.
+      const hasClaim = cikClaims.length > 0 || (spans.name?.comp.ciks.length ?? 0) > 0;
+      if (!hasClaim || !spans.name) throw spans.error;
+      entity = spans.name.entity;
+      cikNameMustMatch = spans.name.entity;
+      entityForms = spans.name.comp.forms;
+      phraseForm = spans.name.comp.phraseForm;
+      for (const c of spans.name.comp.ciks) cikClaims.push({ field: 'entity', cik: c });
+    }
   }
 
-  // --- Primary: SEC EDGAR Submissions API. ---
-  // Failover rule: Federal Register is a full-text term search whose hits
-  // are never checked against the entity, so it must NEVER stand in for a
-  // resolved company's filings. When a CIK resolved and EDGAR is down
-  // (429/5xx/network error), fail CLOSED with 502 SEC_UNAVAILABLE. FedReg
-  // is used only on the no-CIK path (agency / rule-topic entities).
-  if (cikMatch) {
-    const upstreamUrl = EDGAR_SUBMISSIONS_URL(cikMatch.cik10);
-    let res: Response;
-    try {
-      res = await fetchImpl(upstreamUrl, {
-        headers: { 'User-Agent': userAgent, Accept: 'application/json' },
-      });
-    } catch (err) {
-      throw upstreamUnavailable(
-        'SEC_UNAVAILABLE',
-        `SEC EDGAR Submissions API fetch failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    if (res.status === 429) {
-      throw new ApiError(
-        502,
-        'SEC_UNAVAILABLE',
-        'SEC EDGAR Submissions API returned HTTP 429 (rate limited)',
-        60,
-      );
-    }
-    if (res.status >= 500) {
-      throw upstreamUnavailable(
-        'SEC_UNAVAILABLE',
-        `SEC EDGAR Submissions API returned HTTP ${res.status}`,
-      );
-    }
-    if (res.status === 404) {
-      throw unprocessable(
-        'ENTITY_NOT_FOUND',
-        `No SEC EDGAR submissions found for entity "${entity}"`,
-      );
-    }
-    if (!res.ok) {
-      throw upstreamUnavailable(
-        'SEC_UNAVAILABLE',
-        `SEC EDGAR Submissions API returned HTTP ${res.status}`,
-      );
-    }
-    const rawBody = await res.text();
-    let payload: EdgarSubmissions;
-    try {
-      payload = JSON.parse(rawBody) as EdgarSubmissions;
-    } catch {
-      throw upstreamUnavailable(
-        'SEC_UNAVAILABLE',
-        'SEC EDGAR Submissions API returned malformed JSON',
-      );
-    }
-    validateSubmissionsPayload(payload, cikMatch.cik);
-    const all = buildFilingsFromSubmissions(payload);
-    const filings = filterFilingsByPeriod(all, period);
-    const confidence = cikMatch.matchKind === 'name' ? 0.9 : 1.0;
-    const receipt = makeReceipt(INTENT, upstreamUrl, rawBody, '1/1 primary source');
-    return envelope(
-      INTENT,
-      {
-        entity,
-        filing_count: filings.length,
-        filings,
-        urls: filings.map((f) => f.url),
-      },
-      receipt,
-      {
-        answer: `Found ${filings.length} filing${filings.length === 1 ? '' : 's'} for ${entity} in ${period.label}.`,
-        verdict: 'verified',
-        confidence,
-        source: 'SEC EDGAR Submissions API',
-      },
-    );
-  }
-
-  // --- No CIK match: entity looks like an agency / rule topic -> FedReg. ---
-  // Company-like entities never take this path (see the failover rule in
-  // the header comment): a name ending in a corporate suffix that failed
-  // to resolve is a refusal, not a FedReg term search whose full-text hits
-  // would be stamped as that company's verified filings. No FedReg call
-  // is made for them.
-  if (isCompanyLikeEntity(entity)) {
+  const formSpec: FormSpec = mergeFormSpecs([
+    ...formParams,
+    { field: 'entity', forms: entityForms },
+    { field: 'period', forms: per.forms },
+  ]);
+  if (formSpec.kind === 'form' && formParams.some((p) => p.forms.length > 0)) phraseForm = false;
+  if (explicitAll.length > 0 && (entityForms.length > 0 || per.forms.length > 0)) {
+    // Round 9 (J2-r8 m5): form_type=all contradicts a form named in the
+    // entity / period ("Tesla 10-K" + all) -> 422, never one silently wins.
     throw unprocessable(
-      'ENTITY_NOT_FOUND',
-      `No SEC EDGAR entry found for entity "${entity}"; Federal Register fallback is not used for company-like entities`,
+      'CONFLICTING_FORM_TYPE',
+      `"${explicitAll[0]}" asks for all forms but ${entityForms.length > 0 ? 'the entity' : 'the period'} names Form ${
+        [...entityForms, ...per.forms][0]
+      }; send one of them`,
     );
   }
-  return await fedRegOrFail(entity, period, fetchImpl);
+  const distinctCiks = [...new Set(cikClaims.map((c) => c.cik))];
+  if (distinctCiks.length > 1) {
+    throw unprocessable(
+      'CIK_CONFLICT',
+      `Conflicting CIKs were named (${cikClaims.map((c) => `${c.field}: ${c.cik}`).join(', ')})`,
+    );
+  }
+  const namedCik = distinctCiks.length === 1 ? distinctCiks[0] : undefined;
+  if (namedCik !== undefined && namedCik <= 0) {
+    throw badRequest('INVALID_CIK', 'A named CIK must be positive');
+  }
+  if (namedCik !== undefined) {
+    if (cikMatch && cikMatch.cik !== namedCik) {
+      throw unprocessable(
+        'ENTITY_CIK_MISMATCH',
+        `Entity "${entity}" resolves to CIK ${cikMatch.cik}, not the named CIK ${namedCik}`,
+      );
+    }
+    if (!cikMatch) {
+      cikMatch = { cik: namedCik, cik10: padCik(namedCik), matchKind: 'cik' };
+      if (entity === '') entity = String(namedCik);
+    }
+  }
+  if (!cikMatch) {
+    throw unprocessable('ENTITY_NOT_FOUND', `No SEC EDGAR entry found for entity "${entityNfc}"`);
+  }
+  const formLabel = formSpec.kind === 'form' ? formSpec.form : null;
+
+  // --- SEC EDGAR Submissions API (the only source). Fail CLOSED. ---
+  const upstreamUrl = EDGAR_SUBMISSIONS_URL(cikMatch.cik10);
+  const rawBody = await fetchEdgarJsonText(upstreamUrl, userAgent, fetchImpl, entity, true, timeouts);
+  let payload: EdgarSubmissions;
+  try {
+    payload = JSON.parse(rawBody) as EdgarSubmissions;
+  } catch {
+    throw upstreamUnavailable('SEC_UNAVAILABLE', 'SEC EDGAR Submissions API returned malformed JSON');
+  }
+  validateSubmissionsPayload(payload, cikMatch.cik);
+  if (cikNameMustMatch !== null) {
+    const payloadName = typeof payload.name === 'string' ? normalizeCompanyName(payload.name) : '';
+    if (payloadName === '' || payloadName !== normalizeCompanyName(cikNameMustMatch)) {
+      throw unprocessable(
+        'ENTITY_CIK_MISMATCH',
+        `Entity "${cikNameMustMatch}" does not match the EDGAR name of CIK ${cikMatch.cik}`,
+      );
+    }
+  }
+  const older = await fetchOlderSubmissionPages(payload, cikMatch, period, userAgent, fetchImpl, timeouts);
+  const seen = new Set<string>();
+  const all: Filing[] = [];
+  for (const f of [...buildFilingsFromSubmissions(payload), ...older.filings]) {
+    if (seen.has(f.accession)) continue;
+    seen.add(f.accession);
+    all.push(f);
+  }
+  const inPeriod = filterFilingsByPeriod(all, period);
+  const filings = filterFilingsByForm(inPeriod, formSpec);
+  if (phraseForm && formLabel !== null) assertPhraseFormUnambiguous(formLabel, all, inPeriod, entity);
+  const confidence = cikMatch.matchKind === 'name' ? 0.9 : 1.0;
+  const receipt = makeReceipt(INTENT, upstreamUrl, rawBody, '1/1 primary source');
+  // Persist like the other intents (txLookup / grid / route): the stored
+  // evidence is the exact main-document bytes the receipt hashes, and
+  // every EDGAR history page is stored with its own bytes + sha256 in the
+  // same transaction (served at /receipts/:id/pages/:n/raw, index n =
+  // upstream_pages[n]). Round 9 (J2-r8 m8): a verified answer must never
+  // carry an audit_url whose /raw would 404, so a failed save FAILS
+  // CLOSED (500 RECEIPT_STORE_FAILED, no answer).
+  try {
+    (deps.saveReceiptImpl ?? saveReceipt)(
+      receipt,
+      rawBody,
+      older.pages.map((p, i) => ({ url: p.url, raw_response_sha256: p.raw_response_sha256, body: older.bodies[i] })),
+    );
+  } catch (err) {
+    console.warn(
+      `verireceipt: failed to persist FILINGS receipt ${receipt.receipt_id}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    throw new ApiError(500, 'RECEIPT_STORE_FAILED', 'The receipt could not be stored, so no verified answer is served');
+  }
+  const family = formLabel ? formFamily(formLabel) : [];
+  const what = formLabel ? `Form ${formLabel} filing` : 'filing';
+  const listed = filings.slice(0, MAX_LISTED_FILINGS);
+  const fields: Record<string, unknown> = {
+    entity,
+    form_type: formLabel,
+    filing_count: filings.length,
+    filings: listed,
+    urls: listed.map((f) => f.url),
+  };
+  if (formLabel) {
+    // Round 9 (J2-r8 M1): the literal EDGAR form strings counted, with
+    // the per-spelling count, so a renamed family is never hidden.
+    fields.forms_counted = [...family];
+    fields.form_counts = Object.fromEntries(family.map((f) => [f, filings.filter((x) => x.form === f).length]));
+    if (family.length > 1) fields.form_alias_source = FORM_FAMILY_SOURCE;
+  }
+  if (listed.length < filings.length) {
+    fields.filings_listed = listed.length;
+    fields.filings_truncated = true;
+  }
+  if (older.pages.length > 0) {
+    fields.upstream_pages = older.pages;
+    // One hash committing to the main document AND every history page, in order.
+    fields.upstream_bundle_sha256 = sha256Hex(
+      [`${upstreamUrl} ${receipt.raw_response_sha256}`, ...older.pages.map((p) => `${p.url} ${p.raw_response_sha256}`)].join('\n'),
+    );
+  }
+  return envelope(INTENT, fields, receipt, {
+    answer: `Found ${filings.length} ${what}${filings.length === 1 ? '' : 's'} for ${entity} in ${period.label}${
+      family.length > 1
+        ? ` (counting ${family.map((f) => `${f} ${fields.form_counts ? (fields.form_counts as Record<string, number>)[f] : 0}`).join(' + ')}: EDGAR renamed this form in Release 24.4)`
+        : ''
+    }.`,
+    verdict: 'verified',
+    confidence,
+    source: 'SEC EDGAR Submissions API',
+  });
 }
 
-async function fedRegOrFail(
-  entity: string,
-  period: Period,
-  fetchImpl: typeof fetch,
-): Promise<Record<string, unknown>> {
-  const upstreamUrl = FEDREG_URL(entity);
-  let res: Response;
-  try {
-    res = await fetchImpl(upstreamUrl, { headers: { Accept: 'application/json' } });
-  } catch (err) {
-    throw upstreamUnavailable(
-      'FEDREG_UNAVAILABLE',
-      `Federal Register API fetch failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-  if (res.status === 429 || res.status >= 500) {
-    throw upstreamUnavailable(
-      'FEDREG_UNAVAILABLE',
-      `Federal Register API returned HTTP ${res.status}`,
-    );
-  }
-  if (!res.ok) {
-    throw upstreamUnavailable(
-      'FEDREG_UNAVAILABLE',
-      `Federal Register API returned HTTP ${res.status}`,
-    );
-  }
-  const rawBody = await res.text();
-  let payload: { results?: FedRegDocument[] };
-  try {
-    payload = JSON.parse(rawBody) as { results?: FedRegDocument[] };
-  } catch {
-    throw upstreamUnavailable(
-      'FEDREG_UNAVAILABLE',
-      'Federal Register API returned malformed JSON',
-    );
-  }
-  validateFedRegPayload(payload);
-  const all = buildFilingsFromFedReg(payload);
-  const filings = filterFilingsByPeriod(all, period);
-  if (filings.length === 0 && all.length === 0) {
+/** Most filings listed in one answer; filing_count is always the full count. */
+const MAX_LISTED_FILINGS = 1000;
+
+const PHRASE_ALTERNATIVES: Record<string, string[]> = {
+  '10-K': ['10-K405', '10-KSB', '10-KSB40', '10-KT', '10-KT405', '20-F', '40-F'],
+  '10-Q': ['10-QSB', '10-QT'],
+};
+
+/**
+ * "annual report" / "quarterly report" read as 10-K / 10-Q only when
+ * that is unambiguous for THIS filer: it must file that form at all, and
+ * no other annual/quarterly report form may appear in the period
+ * (a 20-F filer's "annual report" is not a 10-K; a 1990s 10-KSB filer's
+ * is not either). Otherwise 422 — never a verified 0.
+ */
+function assertPhraseFormUnambiguous(form: string, all: Filing[], inPeriod: Filing[], entity: string): void {
+  const alts = PHRASE_ALTERNATIVES[form] ?? [];
+  const altHit = inPeriod.find((f) => alts.includes(f.form) || alts.includes(f.form.replace(/\/A$/, '')));
+  const fam = formFamily(form);
+  if (altHit || !all.some((f) => fam.includes(f.form))) {
     throw unprocessable(
-      'ENTITY_NOT_FOUND',
-      `No SEC EDGAR entry and no Federal Register documents found for entity "${entity}"`,
+      'FORM_PHRASE_AMBIGUOUS',
+      `"${form === '10-K' ? 'annual report' : 'quarterly report'}" is not unambiguously Form ${form} for ${entity}${
+        altHit ? ` (it filed ${altHit.form} in this period)` : ` (it has no Form ${form} on EDGAR)`
+      }; pass the EDGAR form as form_type`,
     );
   }
-  const receipt = makeReceipt(INTENT, upstreamUrl, rawBody, '1/1 primary source');
-  return envelope(
-    INTENT,
-    {
-      entity,
-      filing_count: filings.length,
-      filings,
-      urls: filings.map((f) => f.url),
-    },
-    receipt,
-    {
-      answer: `Found ${filings.length} filing${filings.length === 1 ? '' : 's'} for ${entity} in ${period.label}.`,
-      verdict: 'verified',
-      confidence: 0.9,
-      source: 'Federal Register API',
-    },
-  );
 }
