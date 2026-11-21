@@ -10,14 +10,14 @@
 //
 // Registration snippet uses the real repo and the real commit SHA:
 // github.com/mohamedwael201193/verireceipt @
-// 1ca9fed846ae4e063be1f9a30562f17d830a07a4 (A8 commit on origin/main; this tree's miner.yaml).
+// 03a29014bce6f6d38055eb39449cf40611e06a4c (A9 validator-r3 commit on origin/main; this tree's miner.yaml).
 
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
 const API_BASE_URL = 'https://verireceipt.onrender.com';
 const REPO_URL = 'https://github.com/mohamedwael201193/verireceipt';
-const MINER_YAML_COMMIT = '1ca9fed846ae4e063be1f9a30562f17d830a07a4';
+const MINER_YAML_COMMIT = '03a29014bce6f6d38055eb39449cf40611e06a4c';
 const MINER_YAML_URL = `https://raw.githubusercontent.com/mohamedwael201193/verireceipt/${MINER_YAML_COMMIT}/miner.yaml`;
 
 interface EndpointDoc {

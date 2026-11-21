@@ -445,7 +445,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     "cast send $USDC \"mint(address,uint256)\" $YOUR_ADDRESS 10000000 --rpc-url $RPC --private-key $KEY\n" +
     "cast send $USDC \"approve(address,uint256)\" $DIAMOND 2000000 --rpc-url $RPC --private-key $KEY\n\n" +
     "# 3. Compute exact SHA-256 (NOT keccak256) of commit-pinned miner.yaml\n" +
-    'export YAML_URL="https://raw.githubusercontent.com/mohamedwael201193/verireceipt/1ca9fed846ae4e063be1f9a30562f17d830a07a4/miner.yaml"\n' +
+    'export YAML_URL="https://raw.githubusercontent.com/mohamedwael201193/verireceipt/03a29014bce6f6d38055eb39449cf40611e06a4c/miner.yaml"\n' +
     'export YAML_HASH="0x$(curl -s "$YAML_URL" | sha256sum | awk \'{print $1}\')"\n\n' +
     "# 4. Dry-run registerMiner (free) then broadcast\n" +
     'cast call $DIAMOND "registerMiner(string,bytes32,address,uint256,string[])(uint256)" \\\n' +
