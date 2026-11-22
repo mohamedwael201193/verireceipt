@@ -69,13 +69,13 @@ describe("CVE handler failure and evidence paths", () => {
       expect(String(result.answer)).toContain("coverage is degraded");
     }
   });
-  it("hung source is named unavailable in the receipt and costs only the 800ms grace", async () => {
+  it("hung source is named unavailable after the bounded semantic-check deadline", async () => {
     vi.stubGlobal("fetch", (url: string) => String(url).includes("nist.gov")
       ? new Promise<Response>(() => {})
       : Promise.resolve(new Response(mitre, { status: 200 })));
     const started = Date.now();
     const result = await handleCve({ cve_id: "CVE-2021-44228" });
-    expect(Date.now() - started).toBeLessThan(1800);
+    expect(Date.now() - started).toBeLessThan(4400);
     expect(result.confidence).toBe(0.9);
     expect(result.cvss_score).toBe(10);
     const receipt = result.receipt as { receipt_id: string };

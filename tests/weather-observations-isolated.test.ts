@@ -11,3 +11,5 @@ it('refuses missing/failing/unknown quality flags and nonnumeric values', () => 
     expect(() => parseNoaaDaily(JSON.stringify([r]), d.STATION, d.DATE)).toThrow(); });
 it('discloses trace precipitation while refusing inferred nonzero trace', () => { expect(parseNoaaDaily(JSON.stringify([{ ...d, PRCP_ATTRIBUTES: 'T,,1' }]), d.STATION, d.DATE).tracePrecipitation).toBe(true); expect(() => parseNoaaDaily(JSON.stringify([{ ...d, PRCP: '1', PRCP_ATTRIBUTES: 'T,,1' }]), d.STATION, d.DATE)).toThrow(); });
 it('requires exactly one matching calendar-valid station day', () => { expect(() => parseNoaaDaily(JSON.stringify([d, d]), d.STATION, d.DATE)).toThrow(); expect(() => parseNoaaDaily(JSON.stringify([d]), d.STATION, '2026-02-30')).toThrow(); expect(() => parseNoaaDaily(JSON.stringify([d]), 'USW00000001', d.DATE)).toThrow(); });
+
+it('refuses symmetric missing max/min sentinel instead of calling it a valid cold day',()=>{expect(()=>parseNoaaDaily(JSON.stringify([{...d,TMAX:'-9999',TMIN:'-9999'}]),d.STATION,d.DATE)).toThrow()});

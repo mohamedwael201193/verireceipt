@@ -17,6 +17,7 @@ export const INTENT = "CVE_LOOKUP_CVSS";
 interface Assessment { score: number; version: string; vector: string; assessor: string }
 interface SourceRecord { url: string; raw: string; assessment: Assessment | null; description: string; published: string | null; references: string[]; fetchedAt?: string }
 type Obj = Record<string, any>;
+class RejectedCveRecord extends Error {}
 function assessment(data: Obj | undefined, assessor: string): Assessment | null {
   if (!data || !["3.0", "3.1"].includes(data.version) || typeof data.baseScore !== "number" ||
       !Number.isFinite(data.baseScore) || data.baseScore < 0 || data.baseScore > 10 ||
@@ -28,7 +29,7 @@ export function parseNvdCve(id: string, url: string, raw: string): SourceRecord 
   if (!Array.isArray(json.vulnerabilities)) throw new Error("malformed NVD result");
   const cve = json.vulnerabilities.find((v: Obj) => v.cve?.id === id)?.cve;
   if (!cve) throw new Error("NVD record does not match requested CVE ID");
-  if (cve.vulnStatus === "Rejected") throw new Error("NVD record is rejected");
+  if (cve.vulnStatus === "Rejected") throw new RejectedCveRecord("NVD record is rejected");
   let selected: Assessment | null = null;
   for (const key of ["cvssMetricV31", "cvssMetricV30"]) {
     const metrics = cve.metrics?.[key];
@@ -47,6 +48,7 @@ export function parseNvdCve(id: string, url: string, raw: string): SourceRecord 
 }
 export function parseMitreCve(id: string, url: string, raw: string): SourceRecord {
   const json = JSON.parse(raw) as Obj;
+  if (json.cveMetadata?.cveId === id && json.cveMetadata?.state === 'REJECTED') throw new RejectedCveRecord('CVE record is rejected');
   if (json.cveMetadata?.cveId !== id || json.cveMetadata?.state !== "PUBLISHED" || !json.containers?.cna) {
     throw new Error("CVE record is not a matching published record");
   }
@@ -97,28 +99,24 @@ async function fetchRecord(url: string, parse: (raw: string) => SourceRecord): P
   });
   return { ...parse(body.raw), fetchedAt: body.fetchedAt };
 }
-// Wait for both assessments when healthy. Once one usable v3 score is
-// available, a hung second source gets only 800ms grace, not its full
-// 3.5s budget. Its fetch still has its own abort deadline.
+// Wait for both enabled sources up to their bounded transport deadline.
+// Returning early could hide a matching semantic REJECTED record.
 async function collectRecords(tasks: Promise<SourceRecord>[]): Promise<Array<PromiseSettledResult<SourceRecord> | undefined>> {
   return new Promise((resolve) => {
     const results: Array<PromiseSettledResult<SourceRecord> | undefined> = Array.from({ length: tasks.length }, () => undefined);
     let finished = false;
     let count = 0;
-    let grace: ReturnType<typeof setTimeout> | undefined;
     const wall = setTimeout(done, 3700);
     function done(): void {
       if (finished) return;
       finished = true;
       clearTimeout(wall);
-      if (grace) clearTimeout(grace);
       resolve(results.slice());
     }
     tasks.forEach((task, i) => task.then((value) => {
       if (finished) return;
       results[i] = { status: "fulfilled", value }; count++;
       if (count === tasks.length) done();
-      else if (value.assessment && !grace) grace = setTimeout(done, 800);
     }, (reason) => {
       if (finished) return;
       results[i] = { status: "rejected", reason }; count++;
@@ -142,10 +140,16 @@ export async function handleCve(query: Record<string, string | undefined>): Prom
     nvdEnabled ? fetchRecord(nvd, (raw) => parseNvdCve(id, nvd, raw)) : Promise.reject(new Error("NVD disabled by source policy")),
     fetchRecord(mitre, (raw) => parseMitreCve(id, mitre, raw)),
   ]);
+  if (outcomes.some(r => r?.status === 'rejected' && r.reason instanceof RejectedCveRecord)) {
+    throw unprocessable('CVE_REJECTED', `a matching source marks ${id} rejected; refusing another source's published score`);
+  }
   const records = outcomes.flatMap((r) => r?.status === "fulfilled" ? [r.value] : []);
   if (!records.length) throw upstreamUnavailable("CVE_SOURCES_DOWN", `no source returned a usable record for ${id}`);
   const candidates = records.filter((r): r is SourceRecord & { assessment: Assessment } => r.assessment !== null);
   if (!candidates.length) throw unprocessable("NO_CVSS_V3", `no published CVSS v3 assessment found for ${id}; v2/v4 scores are not substituted`);
+  if (new Set(candidates.map(c => c.assessment.version)).size > 1) {
+    throw upstreamUnavailable('CVE_VERSION_DISAGREEMENT', 'published assessments use different CVSS v3 minor versions; refusing to compare them as agreement');
+  }
   const scores = candidates.map((c) => c.assessment.score);
   if (Math.max(...scores) - Math.min(...scores) > 0.30000001) {
     throw upstreamUnavailable("CVE_ASSESSMENTS_DISAGREE", `published CVSS v3 assessments disagree for ${id}: ` +
