@@ -1,0 +1,139 @@
+{
+  "provenance": {
+    "captured_at": "2026-11-22T11:43:38.080Z",
+    "catalog_sources": [
+      {
+        "url": "https://api.llama.fi/protocols",
+        "status": 200,
+        "bytes": 9676332,
+        "wire_sha256": "da23f2269142115daeefe98a738219ba096d03e0d5f9d5a83e115d468610e1ea"
+      },
+      {
+        "url": "https://api.llama.fi/v2/chains",
+        "status": 200,
+        "bytes": 58504,
+        "wire_sha256": "9874bad8dfd87052ea1e07c9415a5690ac394ed45b2ee9180cc77a3e63d40fda"
+      }
+    ],
+    "selection": "For each additionally observed metric key, descending source slug among current catalog rows containing the bare or chain-suffixed key. Source values unmodified. Tests isolate existing fields, not synthetic positive values or claimed full-wire responses."
+  },
+  "cases": [
+    {
+      "metric": "vesting",
+      "entry": {
+        "id": "8818",
+        "slug": "unicrypt-vesting-v2",
+        "name": "Unicrypt Vesting V2",
+        "chains": [
+          "Ethereum",
+          "Optimism",
+          "Binance",
+          "Unichain",
+          "Polygon",
+          "Base",
+          "Krown Network",
+          "Arbitrum",
+          "Avalanche",
+          "Robinhood Chain"
+        ],
+        "chainTvls": {
+          "Ethereum": 0,
+          "Optimism": 0,
+          "Optimism-vesting": 0,
+          "Binance": 0,
+          "Unichain": 0,
+          "Polygon": 0,
+          "Base": 0,
+          "Krown Network": 0,
+          "Arbitrum": 0,
+          "Avalanche": 0,
+          "Robinhood Chain": 0,
+          "Arbitrum-vesting": 0.00522441146854,
+          "Unichain-vesting": 2.0780965664172153,
+          "Polygon-vesting": 0.0016248169639,
+          "Binance-vesting": 1896856.83769352,
+          "Ethereum-vesting": 502814.3805232526,
+          "Base-vesting": 769843.6318071747,
+          "Krown Network-vesting": 2699893.42412878,
+          "Robinhood Chain-vesting": 207405.2799761701,
+          "Avalanche-vesting": 0.24785907860324882,
+          "vesting": 6076815.886933771
+        }
+      }
+    },
+    {
+      "metric": "offers",
+      "entry": {
+        "id": "800",
+        "slug": "zigzag",
+        "name": "ZigZag",
+        "chains": [
+          "Arbitrum",
+          "zkSync"
+        ],
+        "chainTvls": {
+          "zkSync-offers": 0,
+          "zkSync": 0,
+          "Arbitrum": 2758.9885205600513,
+          "offers": 0
+        }
+      }
+    },
+    {
+      "metric": "treasury",
+      "entry": {
+        "id": "1379",
+        "slug": "based-v1",
+        "name": "Based V1",
+        "chains": [
+          "Fantom"
+        ],
+        "chainTvls": {
+          "Fantom-treasury": 0.28499188080312,
+          "Fantom": 83.25649312412907,
+          "Fantom-staking": 0,
+          "treasury": 0.28499188080312,
+          "staking": 0
+        }
+      }
+    },
+    {
+      "metric": "owntokens",
+      "entry": {
+        "id": "2346",
+        "slug": "woo-x",
+        "name": "WOO X",
+        "chains": [
+          "Ethereum",
+          "Binance",
+          "Tron",
+          "Optimism",
+          "Arbitrum",
+          "Polygon",
+          "Avalanche",
+          "Bitcoin",
+          "Fantom"
+        ],
+        "chainTvls": {
+          "Bitcoin": 3823.2197848401333,
+          "Ethereum-OwnTokens": 3730.2642275987632,
+          "Fantom": 0.005245034064761505,
+          "Fantom-OwnTokens": 3832.7455385166545,
+          "Avalanche": 24604.91843921743,
+          "Binance-OwnTokens": 2456.5633461669217,
+          "Tron": 281817.4356807965,
+          "Polygon-OwnTokens": 0.004011059183131072,
+          "Optimism": 86204.99559950795,
+          "Ethereum": 616789.6985087357,
+          "Optimism-OwnTokens": 1.232858546430091e-11,
+          "Binance": 416794.0522457833,
+          "Arbitrum": 85673.32447854361,
+          "Arbitrum-OwnTokens": 61025.86244161967,
+          "Avalanche-OwnTokens": 1596.3194520658594,
+          "Polygon": 29265.35055197425,
+          "OwnTokens": 72641.75901702707
+        }
+      }
+    }
+  ]
+}

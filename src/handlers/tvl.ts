@@ -640,12 +640,15 @@ export function resolveTvlTarget(
   return null;
 }
 
+const NON_CHAIN_TVL_METRIC = /(?:^|-)(?:borrowed|staking|pool2|vesting|offers|treasury|owntokens)$/i;
+
 /**
- * Dominant-chain TVL from a protocol's `currentChainTvls` snapshot: the
- * largest per-chain value, ignoring `*-borrowed` entries (borrowed coins are
- * not locked value) and the bare "borrowed" aggregate key (aave-v3 carries
- * "borrowed": 10494199350.46 — it is not a chain). Returns null — never 0 —
- * when no per-chain split applies (missing/empty map, or no positive value).
+ * Dominant-chain TVL excludes known non-chain metric buckets, both bare
+ * and chain-suffixed. Publisher maps also carry staking, pool2, vesting,
+ * offers, treasury and OwnTokens alongside chain totals. They must not
+ * become a chain reading merely because they are larger than every chain.
+ * This is a bounded known-bucket filter, not a chain-name allowlist.
+ * Returns null when no positive usable chain split remains.
  */
 export function dominantChainTvl(
   currentChainTvls: Record<string, number> | undefined | null,
@@ -653,7 +656,7 @@ export function dominantChainTvl(
   if (!currentChainTvls || typeof currentChainTvls !== 'object') return null;
   let best: number | null = null;
   for (const [chain, value] of Object.entries(currentChainTvls)) {
-    if (chain === 'borrowed' || chain.endsWith('-borrowed')) continue;
+    if (NON_CHAIN_TVL_METRIC.test(chain)) continue;
     if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) continue;
     if (best === null || value > best) best = value;
   }
