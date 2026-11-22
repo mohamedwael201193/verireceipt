@@ -3,7 +3,7 @@
 // mainnet RPCs and REAL quoter contracts (no mocks anywhere in handler code).
 // The stubbed-RPC tests below run local HTTP JSON-RPC servers and exercise
 // the handler through handleRouteWithRpcs with injectable RPC URLs.
-import { countReceipts, storedReceiptRow } from "./helpers/storeView";
+import { countReceipts, storedReceiptRow, storedReceiptEvidence } from "./helpers/storeView";
 import { describe, expect, it } from "vitest";
 import { createServer } from "http";
 import { mkdtempSync, readFileSync } from "fs";
@@ -76,6 +76,7 @@ import {
   TIMESTAMP_CONSISTENCY_DRIFT_RATE,
   TIMESTAMP_CONSISTENCY_MAX_LAG_SEC,
   TIMESTAMP_CONSISTENCY_SLACK_SEC,
+  buildGetStEthByWstEthCalldata,
   decodeCurveGetDyReturn,
   type QuorumBlock,
   type VenueQuote,
@@ -193,6 +194,9 @@ describe("pair input normalization (2026-11-22 owner requirement: every reasonab
     "DAI/USDC", "dai-usdc", "DAI->USDC", " dai / usdc ",
     "USDT/USDC", "usdt-usdc", "DAI/USDT", "dai->usdt", "ETH/USDT", "eth-usdt",
     "WBTC/USDC", "wbtc/usdc",
+    "wstETH/ETH", "WSTETH/ETH", "wsteth-eth", "wstETH->ETH", "wstETH/WETH",
+    "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0/eth",
   ];
   it.each(accepted)('"%s" resolves to a registered pair and reaches the RPC stage', async (pair) => {
     await expect(handleRouteWithRpcs({ pair }, ["http://127.0.0.1:9"])).rejects.toMatchObject({
@@ -237,7 +241,20 @@ describe("pair input normalization (2026-11-22 owner requirement: every reasonab
       expect(spec.plausibleMaxOut).toBeGreaterThan(spec.plausibleMinOut);
       expect(spec.amountIn).toBeGreaterThan(0n);
       expect(spec.v3Fees.length).toBeGreaterThan(0);
-      expect(spec.v2Routers.length).toBeGreaterThan(0);
+      // Every entry registers at least one corroborating venue beyond V3.
+      // V2 routers are the usual corroborators; wstETH/ETH replaces them
+      // with the composed Curve stETH venue because its V2 liquidity is
+      // dust (measured live 2026-11-22, block 26471676: Uni V2 quoted
+      // 0.109 WETH, Sushi 0.003 WETH for 1 wstETH) and would be dropped
+      // by the plausibility band on every run.
+      const corroborators =
+        spec.v2Routers.length +
+        (spec.curve3pool === undefined ? 0 : 1) +
+        (spec.curveStEthPool === undefined ? 0 : 1);
+      expect(corroborators).toBeGreaterThan(0);
+      if (spec.v2Routers.length === 0) {
+        expect(spec.curveStEthPool).not.toBeUndefined();
+      }
     }
   });
 });
@@ -361,6 +378,161 @@ describe("stable pairs: DAI/USDC end-to-end (stubbed RPCs)", () => {
   });
 });
 
+describe("wstETH/ETH ABI (composed Curve venue)", () => {
+  it("encodes getStETHByWstETH selector 0xbb2952fc + uint256 wstEthAmount", () => {
+    const data = buildGetStEthByWstEthCalldata(1000000000000000000n);
+    expect(data.startsWith("0xbb2952fc")).toBe(true);
+    expect(data.length).toBe(2 + 8 + 64);
+    expect(data.endsWith("0de0b6b3a7640000")).toBe(true); // 1e18
+  });
+});
+
+describe("wstETH/ETH end-to-end (stubbed RPCs)", () => {
+  const blockHash = "0x" + "ab".repeat(32);
+  const STETH_POOL = "0xdc24316b9ae028f1497c275eb9192a3ea0f67022";
+  const WSTETH_ADDR = "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0";
+  const ONE_WSTETH = 1_000_000_000_000_000_000n;
+  // Live-shaped values from blocks 26471676/26471742 (2026-11-22): the
+  // wstETH contract unwraps 1 wstETH to 1.249887559605929876 stETH. The
+  // stub's stETH pool answers get_dy by ECHOING the decoded dx (a 1:1
+  // stETH/ETH model), so the composed Curve quote IS the unwrap rate and
+  // a handler that feeds the swap the raw wstETH amount instead of the
+  // unwrap result gets a different quote (R126 mutant goes RED).
+  const STETH_RATE = 1_249_887_559_605_929_876n;
+  const V3_QUOTE = 1_249_392_000_000_000_000n;
+  const mk = (over: Partial<Parameters<typeof startStubRpc>[0]> = {}) =>
+    startStubRpc({
+      blockNumber: FRESH_BLOCK,
+      blockHash,
+      failCalls: false,
+      v3AmountOut: V3_QUOTE,
+      // Required by StubRpcOptions but unused: wstETH/ETH registers no V2
+      // routers (dust liquidity, see the registry comment).
+      v2AmountOut: 1_249_000_000_000_000_000n,
+      stEthRate: STETH_RATE,
+      ...over,
+    });
+
+  it("both venues plausible -> Curve wins, exact base units, above-range honesty note; swap input bound to the unwrap result at one pinned block; evidence retains both calls", async () => {
+    const aCalls: Array<{ to: string; data: string; blockRef: unknown }> = [];
+    const bCalls: Array<{ to: string; data: string; blockRef: unknown }> = [];
+    const a = await mk({ capturedCalls: aCalls });
+    const b = await mk({ capturedCalls: bCalls });
+    try {
+      const result = await handleRouteWithRpcs({ pair: "wstETH/ETH" }, [a.url, b.url]);
+      // R126 fix 2: amount_out is the approximate JSON-number rendering;
+      // amount_out_base_units carries the exact integer as a string.
+      expect(result.amount_out).toBe(Number(STETH_RATE));
+      expect(result.amount_out_base_units).toBe(STETH_RATE.toString());
+      expect(BigInt(result.amount_out_base_units as string)).toBe(STETH_RATE);
+      expect(result.winning_venue).toBe("Curve stETH pool");
+      expect(result.confidence).toBe(1.0);
+      const answer = result.answer as string;
+      expect(answer).toContain("1 wstETH");
+      expect(answer).toContain("Curve stETH pool 1.249887559605929876 ETH");
+      expect(answer).toContain("Uniswap V3 (fee 100) 1.249392000000000000 ETH");
+      expect(answer).toContain("18 decimals");
+      expect(answer).toContain("above the published amount_out range");
+      expect(result.source).toContain("all 2 venues this pair registers produced plausible quotes");
+      expect(result.source).toContain("amount_out is the JSON-number rendering (approximate");
+      // R126 fix 1 (request-level binding): the unwrap call and the Curve
+      // swap call must hit BOTH exact contract targets with exact
+      // selectors/args - unwrap of exactly 1e18 wstETH; get_dy(1, 0, dx)
+      // with dx equal to the RETURNED stETH amount - and every eth_call
+      // must share the same canonical blockHash/requireCanonical pin.
+      // Mutating dx to the raw 1e18 wstETH amount makes the swap-call
+      // assertion fail (and changes the echo quote), so this goes RED.
+      const allCalls = [...aCalls, ...bCalls];
+      expect(allCalls.length).toBeGreaterThan(0);
+      const expectedBlockRef = JSON.stringify({ blockHash, requireCanonical: true });
+      for (const c of allCalls) expect(JSON.stringify(c.blockRef)).toBe(expectedBlockRef);
+      const unwrapCalls = allCalls.filter((c) => c.to === WSTETH_ADDR);
+      expect(unwrapCalls.length).toBeGreaterThan(0);
+      for (const c of unwrapCalls) expect(c.data).toBe(buildGetStEthByWstEthCalldata(ONE_WSTETH));
+      const swapCalls = allCalls.filter((c) => c.to === STETH_POOL);
+      expect(swapCalls.length).toBeGreaterThan(0);
+      for (const c of swapCalls) expect(c.data).toBe(buildCurveGetDyCalldata(1n, 0n, STETH_RATE));
+      // R126 fix 1 (evidence): the persisted receipt evidence retains
+      // both composed calls and the pinned block hash.
+      const receipt = result.receipt as Record<string, unknown>;
+      expect(receipt.intent).toBe("OPTIMAL_EXECUTION_ROUTE_GENERAL");
+      const evidence = await storedReceiptEvidence(receipt.receipt_id as string);
+      expect(evidence).toBeDefined();
+      expect(evidence).toContain(buildGetStEthByWstEthCalldata(ONE_WSTETH));
+      expect(evidence).toContain(buildCurveGetDyCalldata(1n, 0n, STETH_RATE));
+      expect(evidence).toContain(blockHash);
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("Curve stETH leg failing leaves V3 alone -> answers at 0.9, absence named", async () => {
+    const a = await mk({ failCurve: true });
+    const b = await mk({ failCurve: true });
+    try {
+      const result = await handleRouteWithRpcs({ pair: "wstETH/ETH" }, [a.url, b.url]);
+      expect(result.amount_out).toBe(Number(V3_QUOTE));
+      expect(result.amount_out_base_units).toBe(V3_QUOTE.toString());
+      expect(result.winning_venue).toBe("Uniswap V3 (fee 100)");
+      expect(result.confidence).toBe(0.9);
+      expect(result.source).toContain("fewer than 2 venues produced plausible quotes (1 of 2)");
+      expect(result.source).toContain("Curve stETH pool produced no plausible quote");
+      expect(result.answer).toContain("Curve stETH pool produced no plausible quote");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("unwrap-rate call failing takes the Curve venue out -> V3 alone at 0.9", async () => {
+    const a = await mk({ failStEthRate: true });
+    const b = await mk({ failStEthRate: true });
+    try {
+      const result = await handleRouteWithRpcs({ pair: "wstETH/ETH" }, [a.url, b.url]);
+      expect(result.winning_venue).toBe("Uniswap V3 (fee 100)");
+      expect(result.confidence).toBe(0.9);
+      expect(result.source).toContain("Curve stETH pool produced no plausible quote");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("every venue outside the wstETH band -> 502 ALL_QUOTERS_FAILED (fail-closed)", async () => {
+    const far = 5_000_000_000_000_000_000n; // 5 ETH per wstETH: absurd
+    // With the echo model the composed Curve quote follows the unwrap
+    // rate, so an absurd rate puts that venue outside the band too.
+    const a = await mk({ v3AmountOut: far, stEthRate: far });
+    const b = await mk({ v3AmountOut: far, stEthRate: far });
+    try {
+      await expect(handleRouteWithRpcs({ pair: "wstETH/ETH" }, [a.url, b.url])).rejects.toMatchObject({
+        status: 502,
+        code: "ALL_QUOTERS_FAILED",
+      });
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("a depeg-magnitude V3 quote below the band is dropped; the Curve survivor answers at 0.9", async () => {
+    const a = await mk({ v3AmountOut: 100_000_000_000_000_000n }); // 0.1 ETH: below the 0.9 floor
+    const b = await mk({ v3AmountOut: 100_000_000_000_000_000n });
+    try {
+      const result = await handleRouteWithRpcs({ pair: "wstETH/ETH" }, [a.url, b.url]);
+      expect(result.amount_out).toBe(Number(STETH_RATE));
+      expect(result.amount_out_base_units).toBe(STETH_RATE.toString());
+      expect(result.winning_venue).toBe("Curve stETH pool");
+      expect(result.confidence).toBe(0.9);
+      expect(result.source).toContain("degraded");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+});
+
 describe("grader question replay (regression: every real question seen e32-e35)", () => {
   it("epoch 34: WBNB/SafeMoon -> 400 unavailable envelope (no verifiable liquidity; owner decision 2026-11-22)", async () => {
     const body = await expectUnavailable(handleRoute({ pair: "WBNB/SafeMoon" }), "NO_ROUTE");
@@ -376,6 +548,13 @@ describe("grader question replay (regression: every real question seen e32-e35)"
 
   it("epoch 32/33: ETH/USDC passes validation and reaches the quote path", async () => {
     await expect(handleRouteWithRpcs({ pair: "ETH/USDC" }, ["http://127.0.0.1:9"])).rejects.toMatchObject({
+      status: 502,
+      code: "RPC_CONFIG",
+    });
+  });
+
+  it("epoch 37: wstETH/ETH passes validation and reaches the quote path", async () => {
+    await expect(handleRouteWithRpcs({ pair: "wstETH/ETH" }, ["http://127.0.0.1:9"])).rejects.toMatchObject({
       status: 502,
       code: "RPC_CONFIG",
     });
@@ -424,7 +603,9 @@ describe("live: pair registry on real mainnet venues (no mocks)", () => {
       ["DAI", "0x6B175474E89094C44Da98b954EedeAC495271d0F"],
       ["USDT", "0xdAC17F958D2ee523a2206206994597C13D831ec7"],
       ["WBTC", "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"],
+      ["wstETH", "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0"],
       ["Curve 3pool", "0xbEbc44782C7dB0a1A60Cb6fe97d0b483032FF1C7"],
+      ["Curve stETH pool", "0xDC24316b9AE028F1497c275EB9192a3Ea0f67022"],
       ["QuoterV2", "0x61fFE014bA17989E743c5F6cB21bF9697530B21e"],
       ["Uniswap V2 Router", "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"],
       ["SushiSwap V2 Router", "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"],
@@ -481,6 +662,23 @@ describe("live: pair registry on real mainnet venues (no mocks)", () => {
     expect(result.amount_out as number).toBeGreaterThan(1000000000); // > $1,000
     expect(result.amount_out as number).toBeLessThan(1000000000000); // < $1,000,000
     console.log(`LIVE route WBTC/USDC: amount_out=${result.amount_out} venue=${result.winning_venue}`);
+  });
+
+  it('pair "wstETH/ETH" returns a wstETH-band amount_out with a receipt', { timeout: 60000 }, async () => {
+    const result = await handleRoute({ pair: "wstETH/ETH" });
+    // Band in wei: 0.9-1.5 ETH per wstETH. number precision at 1.25e18
+    // is ~256 wei, irrelevant against a 0.6e18-wide band.
+    expect(result.amount_out as number).toBeGreaterThanOrEqual(Number(900_000_000_000_000_000n));
+    expect(result.amount_out as number).toBeLessThanOrEqual(Number(1_500_000_000_000_000_000n));
+    expect(result.verdict).toBe("verified");
+    expect(result.answer as string).toContain("1 wstETH");
+    expect(result.answer as string).toContain("above the published amount_out range");
+    const receipt = result.receipt as Record<string, unknown>;
+    expect(receipt.intent).toBe("OPTIMAL_EXECUTION_ROUTE_GENERAL");
+    console.log(
+      `LIVE route wstETH/ETH: amount_out=${result.amount_out} block=${result.block_number} ` +
+        `venue=${result.winning_venue} confidence=${result.confidence}`,
+    );
   });
 });
 
@@ -599,6 +797,15 @@ interface StubRpcOptions {
   /** Curve 3pool get_dy leg (stable pairs only): amount or failure. */
   curveAmountOut?: bigint;
   failCurve?: boolean;
+  /** wstETH getStETHByWstETH leg (wstETH/ETH only): stETH base units
+   * returned for 1 wstETH, or failure. */
+  stEthRate?: bigint;
+  failStEthRate?: boolean;
+  /** R126: when given, every eth_call request is recorded here as
+   * { to, data, blockRef } so tests can assert request-level binding
+   * (exact contract targets, selectors, args and the shared pinned
+   * block reference) for composed venues. */
+  capturedCalls?: Array<{ to: string; data: string; blockRef: unknown }>;
   /** When true, eth_call never responds (hangs until the client's CALL_TIMEOUT_MS). */
   hangCalls?: boolean;
   /** When true, eth_blockNumber never responds (hangs until the quorum timeout). */
@@ -705,11 +912,12 @@ function startStubRpc(options: StubRpcOptions): Promise<{
       }
       if (body.method === "eth_call") {
         const answerCall = () => {
-          if (options.hangCalls) return; // Never reply: hangs until CALL_TIMEOUT_MS.
-          if (options.failCalls) return replyError(-32000, "stub RPC refuses eth_call");
           const params = (body.params ?? []) as Array<{ to?: string; data?: string }>;
           const to = (params[0]?.to ?? "").toLowerCase();
           const data = params[0]?.data ?? "";
+          options.capturedCalls?.push({ to, data, blockRef: (body.params ?? [])[1] });
+          if (options.hangCalls) return; // Never reply: hangs until CALL_TIMEOUT_MS.
+          if (options.failCalls) return replyError(-32000, "stub RPC refuses eth_call");
           if (data.startsWith("0xc6a5026a")) {
             if (options.failV3) return replyError(-32000, "stub RPC: V3 quoter reverts");
             // QuoterV2: exactly 4 words, amountOut first.
@@ -736,9 +944,23 @@ function startStubRpc(options: StubRpcOptions): Promise<{
             );
           }
           if (data.startsWith("0x5e0d443f")) {
-            if (options.failCurve) return replyError(-32000, "stub RPC: Curve 3pool reverts");
-            // get_dy: exactly one word.
+            if (options.failCurve) return replyError(-32000, "stub RPC: Curve pool reverts");
+            // R126: the stETH/ETH pool leg must CONSUME the unwrap result.
+            // Answer get_dy by echoing the decoded dx (a 1:1 stETH/ETH
+            // model), so a handler mutated to pass the raw wstETH amount
+            // instead of the unwrapped stETH amount changes the composed
+            // quote and fails the request-level binding assertions.
+            if (to === "0xdc24316b9ae028f1497c275eb9192a3ea0f67022") {
+              const dx = BigInt("0x" + data.slice(2 + 8 + 128, 2 + 8 + 192));
+              return reply("0x" + word(dx));
+            }
+            // 3pool-style get_dy: exactly one word.
             return reply("0x" + word(options.curveAmountOut ?? 1_000_000n));
+          }
+          if (data.startsWith("0xbb2952fc")) {
+            if (options.failStEthRate) return replyError(-32000, "stub RPC: wstETH reverts");
+            // getStETHByWstETH: exactly one word (stETH base units).
+            return reply("0x" + word(options.stEthRate ?? 1_250_000_000_000_000_000n));
           }
           return replyError(-32602, "stub RPC: unknown eth_call data");
         };
