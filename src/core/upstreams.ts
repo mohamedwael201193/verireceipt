@@ -83,6 +83,8 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "rpc.mevblocker.io": "evm-rpc",
   "mainnet.base.org": "evm-rpc",
   "api.worldbank.org": "worldbank",
+  "eth.blockscout.com": "blockscout",
+  "explorer.optimism.io": "blockscout",
 };
 
 /** Hostname suffixes shared by every CHAIN_RPCS host family. */
@@ -188,6 +190,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   balance: "evm-rpc",
   "token-supply": "evm-rpc",
   macro: "worldbank",
+  "token-holders": "blockscout",
 };
 
 /**

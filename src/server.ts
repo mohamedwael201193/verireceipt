@@ -18,6 +18,7 @@ import { handleGasPrice } from "./handlers/gasPrice";
 import { handleBalance } from "./handlers/walletBalance";
 import { handleTokenSupply } from "./handlers/tokenSupply";
 import { handleMacro } from "./handlers/macroEconomic";
+import { handleTokenHolders } from "./handlers/tokenHolders";
 import { ApiError, badRequest, errorBody } from "./core/errors";
 import { getDb } from "./core/db";
 import {
@@ -256,6 +257,9 @@ export function buildServer(): FastifyInstance {
   );
   app.get("/v1/macro", async (request) =>
     trackIntent("macro", () => handleMacro(asQuery(request.query))),
+  );
+  app.get("/v1/token-holders", async (request) =>
+    trackIntent("token-holders", () => handleTokenHolders(asQuery(request.query))),
   );
 
   // G10: serve stored receipts + their exact raw evidence bytes
