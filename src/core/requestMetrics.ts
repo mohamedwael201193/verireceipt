@@ -1,4 +1,4 @@
-// Bounded aggregate observability. Never collect URL/query/body/header/IP/user ids.
+// Fixed-label observability. Never retain URL/query values, bodies, headers, IPs or user ids.
 const ROUTE_INTENTS: Record<string, string> = {
   "/v1/tx": "ONCHAIN_TX_LOOKUP_GENERAL", "/v1/tvl": "TVL_LOOKUP_GENERAL",
   "/v1/grid-price": "GRID_POWER_PRICE_GENERAL", "/v1/filings": "REGULATORY_FILING_MONITOR_GENERAL",
@@ -10,6 +10,85 @@ const ROUTE_INTENTS: Record<string, string> = {
   "/v1/token-holders": "TOKEN_HOLDER_COUNT_GENERAL", "/v1/email-security": "EMAIL_SECURITY_GENERAL",
   "/v1/vulnerability-triage": "VULNERABILITY_TRIAGE_GENERAL",
 };
+// Only known parameter NAMES are emitted, including rejected aliases. Never values
+// or unknown names: callers can put a credential into an arbitrary query key.
+const KNOWN_QUERY_KEYS = [
+  "address", "amount", "base", "block", "chain", "country", "cve", "domain",
+  "entity", "form_type", "host", "indicator", "interval_start", "node_or_zone",
+  "pair", "period", "protocol", "query", "question", "quote", "record_type",
+  "token", "tx_hash", "validator_index", "year",
+] as const;
+// Fixed internal categories only. A regex alone could admit a secret-looking code.
+const DIAGNOSTIC_ERROR_CODES = new Set([
+  "ALL_QUOTERS_FAILED",
+  "CHAIN_MISMATCH",
+  "CIRCUIT_OPEN",
+  "COUNTRY_NOT_FOUND",
+  "CVE_ASSESSMENTS_DISAGREE",
+  "CVE_SOURCES_DOWN",
+  "DNS_RESOLVERS_DISAGREE",
+  "DNS_RESOLVERS_DOWN",
+  "DUPLICATE_PARAM",
+  "EMAIL_DNS_SOURCES_DOWN",
+  "EMAIL_DNS_STATUS_DISAGREEMENT",
+  "ENS_CONFLICT",
+  "ENS_UNREACHABLE",
+  "EVIDENCE_CORRUPT",
+  "FUTURE_INTERVAL",
+  "FX_SOURCES_DISAGREE",
+  "FX_SOURCES_DOWN",
+  "GRID_CACHE_INVALID",
+  "GRID_CACHE_MISS",
+  "GRID_CACHE_STALE",
+  "INDEXER_UNREACHABLE",
+  "INTERNAL",
+  "INVALID_ADDRESS",
+  "INVALID_AMOUNT",
+  "INVALID_CURRENCY",
+  "INVALID_CVE",
+  "INVALID_DOMAIN",
+  "INVALID_HOST",
+  "INVALID_INTERVAL",
+  "INVALID_JSON",
+  "INVALID_NAME",
+  "INVALID_NODE",
+  "INVALID_PAGE_INDEX",
+  "INVALID_PAIR",
+  "INVALID_RECEIPT_ID",
+  "INVALID_RECORD_TYPE",
+  "INVALID_TX_HASH",
+  "INVALID_VALIDATOR_INDEX",
+  "INVALID_YEAR",
+  "MAX_PARAM_VALUE",
+  "MISSING_PARAM",
+  "NO_CVSS_V3",
+  "NO_DATA",
+  "OFF_BOUNDARY_INTERVAL",
+  "PRIVATE_HOST",
+  "QUORUM_CONFLICT",
+  "QUORUM_DISAGREEMENT",
+  "QUORUM_UNREACHABLE",
+  "RECEIPT_CORRUPT",
+  "ROUTE_DEADLINE",
+  "RPC_CONFIG",
+  "STALE_BLOCK_PIN",
+  "TLS_DNS_UNAVAILABLE",
+  "TLS_PROBE_UNAVAILABLE",
+  "TLS_UNVERIFIABLE",
+  "TOKEN_CONTRACT_MISMATCH",
+  "TOKEN_SYMBOL_MISMATCH",
+  "UNKNOWN_PARAM",
+  "UNSUPPORTED_CHAIN",
+  "UNSUPPORTED_DNS_QUERY",
+  "UNSUPPORTED_INDICATOR",
+  "UNSUPPORTED_TOKEN",
+  "UNSUPPORTED_ZONE",
+  "VALIDATOR_NOT_FOUND",
+  "WORLD_BANK_UNAVAILABLE",
+]);
+export function diagnosticErrorCode(value: unknown): string {
+  return typeof value === "string" && DIAGNOSTIC_ERROR_CODES.has(value) ? value : "OTHER_ERROR";
+}
 interface Counts { arrived: number; completed: number; total_latency_ms: number; max_latency_ms: number; statuses: Record<string, number> }
 const counts = new Map<string, Counts>();
 function intentFor(route: string | undefined): string { return route && Object.hasOwn(ROUTE_INTENTS, route) ? ROUTE_INTENTS[route] : "other"; }
@@ -21,14 +100,19 @@ function bucket(intent: string): Counts {
 export function recordRequestArrival(route?: string): void {
   try { bucket(intentFor(route)).arrived++; } catch { /* observability never changes a response */ }
 }
-export function recordRequestCompletion(route: string | undefined, status: number, latencyMs: number): void {
+export function recordRequestCompletion(route: string | undefined, status: number, latencyMs: number, details: { query?: unknown; errorCode?: unknown } = {}): void {
   try {
     const intent = intentFor(route), row = bucket(intent);
     const code = Number.isInteger(status) && status >= 100 && status <= 599 ? String(status) : "other";
     const latency = Number.isFinite(latencyMs) ? Math.max(0, Math.round(latencyMs * 10) / 10) : 0;
     row.completed++; row.total_latency_ms += latency; row.max_latency_ms = Math.max(row.max_latency_ms, latency);
     row.statuses[code] = (row.statuses[code] ?? 0) + 1;
-    if (intent !== "other") console.info(JSON.stringify({ event: "request_complete", intent, status: code, latency_ms: latency }));
+    if (intent !== "other") {
+      const query = details.query;
+      const param_keys = query !== null && typeof query === "object" ? KNOWN_QUERY_KEYS.filter(key => Object.hasOwn(query, key)) : [];
+      console.info(JSON.stringify({ event: "request_complete", intent, path: route, param_keys,
+        error_code: details.errorCode == null ? null : diagnosticErrorCode(details.errorCode), status: code, latency_ms: latency }));
+    }
   } catch { /* never log an exception or request content */ }
 }
 export function requestMetricsSnapshot(): Record<string, unknown> {

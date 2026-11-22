@@ -23,7 +23,7 @@ import { handleSsl } from "./handlers/sslVerification";
 import { handleCve } from "./handlers/cveLookup";
 import { handleEmailSecurity } from "./handlers/emailSecurity";
 import { exactQuery } from "./core/exactQuery";
-import { recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
+import { diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
 import { handleMacro } from "./handlers/macroEconomic";
 import { handleTokenHolders } from "./handlers/tokenHolders";
 import { ApiError, badRequest, errorBody } from "./core/errors";
@@ -133,6 +133,7 @@ function asQuery(raw: unknown): Query {
 export function buildServer(): FastifyInstance {
   const app = Fastify({ logger: false });
   const requestStart = new WeakMap<object, bigint>();
+  const requestErrors = new WeakMap<object, string>();
   app.addHook("onRequest", async (request) => {
     requestStart.set(request, process.hrtime.bigint());
     recordRequestArrival(request.routeOptions.url);
@@ -140,7 +141,7 @@ export function buildServer(): FastifyInstance {
   app.addHook("onResponse", async (request, reply) => {
     const started = requestStart.get(request);
     const elapsedMs = started === undefined ? 0 : Number(process.hrtime.bigint() - started) / 1e6;
-    recordRequestCompletion(request.routeOptions.url, reply.statusCode, elapsedMs);
+    recordRequestCompletion(request.routeOptions.url, reply.statusCode, elapsedMs, { query: request.query, errorCode: requestErrors.get(request) });
   });
 
   // Initialise storage (creates tables on first run). Handlers rely on it
@@ -157,8 +158,9 @@ export function buildServer(): FastifyInstance {
   // /health fields live for every server built in tests too.
   startLoopLagSampler();
 
-  app.setErrorHandler((err, _request, reply) => {
+  app.setErrorHandler((err, request, reply) => {
     if (err instanceof ApiError) {
+      requestErrors.set(request, diagnosticErrorCode(err.code));
       void reply.status(err.status).send(err.responseBody ?? errorBody(err));
       return;
     }
@@ -170,11 +172,13 @@ export function buildServer(): FastifyInstance {
       fastifyErr.statusCode === 400
     ) {
       const clientErr = badRequest("INVALID_JSON", "request body is not valid JSON");
+      requestErrors.set(request, "INVALID_JSON");
       void reply.status(clientErr.status).send(errorBody(clientErr));
       return;
     }
     // Any other error is an upstream/internal failure: 502, and never leak
     // a stack trace or internal detail in the response body.
+    requestErrors.set(request, "INTERNAL");
     void reply.status(502).send(errorBody(err));
   });
 
