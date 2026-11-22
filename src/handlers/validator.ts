@@ -1202,12 +1202,12 @@ export async function handleValidator(
   const receipt = makeReceipt(INTENT, leg.sourceUrl, leg.rawBody, votes);
   try {
     await saveReceipt(receipt, leg.rawBody);
-  } catch (err) {
-    // F5: a failed persist is logged, never silent (txLookup.ts precedent)
-    // — the answer still ships, but a receipt_id whose audit URL 404s
-    // must be visible. Mirrors txLookup.ts:874-882.
-    console.warn(
-      `verireceipt: failed to persist VALIDATOR receipt ${receipt.receipt_id}: ${err instanceof Error ? err.message : String(err)}`,
+  } catch {
+    // Never return or cache a verified answer without its stored evidence.
+    throw new ApiError(
+      502,
+      "RECEIPT_PERSIST_FAILED",
+      "receipt evidence could not be stored; answer unavailable",
     );
   }
   const answer =
