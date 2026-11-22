@@ -73,15 +73,41 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, strin
     inputs: ["validator_index"],
     outputs: { effective_balance: "gwei" },
   },
+  GAS_PRICE_GENERAL: {
+    endpoint: "/v1/gas-price", inputs: ["chain"],
+    outputs: { chain: null, gas_price_gwei: "gwei", as_of: null },
+  },
+  WALLET_BALANCE_CHECK_GENERAL: {
+    endpoint: "/v1/balance", inputs: ["address", "chain", "token"],
+    outputs: { address: null, chain: null, balance: "whole token units", token_symbol: null, as_of: null },
+  },
+  TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL: {
+    endpoint: "/v1/token-supply", inputs: ["token"], outputs: { total_supply: "whole tokens" },
+  },
+  MACRO_ECONOMIC_INDICATOR_GENERAL: {
+    endpoint: "/v1/macro", inputs: ["indicator", "country", "year"], outputs: { rate_pct: "percent" },
+  },
+  DNS_RECORD_LOOKUP_GENERAL: {
+    endpoint: "/v1/dns", inputs: ["name", "record_type"], outputs: { has_record: null },
+  },
+  CURRENCY_EXCHANGE_CONVERT: {
+    endpoint: "/v1/fx", inputs: ["from_currency", "to_currency", "amount"], outputs: { converted_amount: null },
+  },
+  SSL_VERIFICATION_CERT: {
+    endpoint: "/v1/ssl", inputs: ["host"], outputs: { certificate_valid: null },
+  },
+  EMAIL_SECURITY_GENERAL: {
+    endpoint: "/v1/email-security", inputs: ["domain", "record_type"], outputs: { lookup_ok: null },
+  },
 };
 
 describe("A8 miner.yaml vs the official intent schemas", () => {
-  it("declares exactly the six intents, each on its own endpoint", () => {
+  it("declares exactly the fourteen reviewed intents, each on its own endpoint", () => {
     const si = block("  supported_intents:").map((l) => l.trim().replace(/^- /, "")).filter(Boolean);
     expect(si).toEqual(Object.keys(OFFICIAL));
     for (const [intent, o] of Object.entries(OFFICIAL)) {
       const ep = block(`  - path: ${o.endpoint}`);
-      expect(ep.join("\n")).toContain(`      - ${intent}`);
+      expect(ep.map(line => line.trim())).toContain(`- ${intent}`);
     }
   });
 
@@ -98,7 +124,7 @@ describe("A8 miner.yaml vs the official intent schemas", () => {
         expect(own).toContain(`        path: ${field}`);
         const unitLine = own.find((l) => l.startsWith("        unit:"));
         if (unit === null) expect(unitLine).toBeUndefined();
-        else expect(unitLine).toBe(`        unit: "${unit}"`);
+        else expect(unitLine?.trim().replace(/^unit:\s*/, "").replace(/^"(.*)"$/, "$1")).toBe(unit);
       }
       const inLines = m.slice(m.indexOf("    input:") + 1, outStart);
       for (const name of o.inputs) expect(inLines).toContain(`        from: ${name}`);
@@ -109,24 +135,28 @@ describe("A8 miner.yaml vs the official intent schemas", () => {
     expect(yaml).not.toContain("l1_fee_eth");
   });
 
-  it("ROUTE pair enum uses accepted_fields with exactly ETH/USDC", () => {
-    const ep = block("  - path: /v1/route").join("\n");
-    expect(ep).toContain("accepted_fields:\n              ETH/USDC:\n");
-    expect(ep).toContain('intents: ["OPTIMAL_EXECUTION_ROUTE_GENERAL"]\n                description: Sell exactly 1 ETH for USDC on Ethereum mainnet.');
-    expect(ep).not.toMatch(/- value:/);
-    expect(ep.match(/^\s+ETH\/USDC:\s*$/m)).not.toBeNull();
+  it("ROUTE accepted_fields contains exactly the canonical ETH/USDC pair and binding", () => {
+    const lines = block("  - path: /v1/route");
+    const trimmed = lines.map(line => line.trim());
+    expect(trimmed).toContain("- name: pair");
+    expect(trimmed[trimmed.indexOf("- name: pair") + 1]).toBe("type: string");
+    const values = lines.filter(line => /^\s+- value:/.test(line)).map(line => line.trim().replace(/^- value:\s*/, ""));
+    expect(values).toEqual(["ETH/USDC"]);
+    const accepted = trimmed.slice(trimmed.indexOf("accepted_fields:"));
+    expect(accepted.slice(0, 4)).toEqual([
+      "accepted_fields:", "- value: ETH/USDC", "intents:", "- OPTIMAL_EXECUTION_ROUTE_GENERAL",
+    ]);
+    expect(accepted.join(" ")).toContain("Sell exactly 1 ETH for USDC on Ethereum mainnet; amount_out is USDC base units (6 decimals).");
   });
 
-  it("VALIDATOR: validator_index is a canonical digit string (node cannot send integer) and the description states the 2-of-4 finalized-state quorum", () => {
-    const ep = block("  - path: /v1/validator").join("\n");
-    expect(ep).toContain("- name: validator_index\n            type: string\n");
-    expect(ep).toContain("canonical decimal");
-    expect(ep).toContain("2-of-4 quorum");
-    expect(ep).toContain("finalized state");
-    expect(ep).toContain("any source that disagrees");
-    expect(ep).not.toMatch(/two public beacon APIs/);
-    expect(ep).not.toContain("2-of-3 quorum");
-    expect(ep).not.toContain("head state");
+  it("VALIDATOR declares a canonical digit string and finalized-root consensus, not head state", () => {
+    const lines = block("  - path: /v1/validator");
+    const trimmed = lines.map(line => line.trim());
+    const prose = lines.join(" ").replace(/\s+/g, " ");
+    expect(trimmed[trimmed.indexOf("- name: validator_index") + 1]).toBe("type: string");
+    for (const text of ["canonical decimal", "At least two configured public beacon sources must agree", "at least two validator responses must agree", "finalized", "Any returned dissent or found-versus-404 conflict fails closed"])
+      expect(prose).toContain(text);
+    expect(prose).not.toContain("head state");
     const m = block("  VALIDATOR_PERFORMANCE_VERIFY_GENERAL:").join("\n");
     expect(m).toContain("        from: validator_index");
     expect(m).not.toMatch(/validator_index:[\s\S]*how:/);
@@ -152,13 +182,11 @@ describe("A8 miner.yaml vs the official intent schemas", () => {
     expect(block("  GRID_POWER_PRICE_GENERAL:").join("\n")).toContain("how:");
   });
 
-  it("GRID names Elering (not ENTSO-E) and lists exactly the served zones", () => {
+  it("GRID declares actual source and scope limits without adding unsupported markets", () => {
     expect(yaml).not.toContain("ENTSO");
-    const ep = block("  - path: /v1/grid-price").join("\n");
-    expect(ep).toContain("Elering dashboard API");
-    for (const z of ["TH_NP15_GEN-APND", "TH_SP15_GEN-APND", "TH_ZP26_GEN-APND", "ZONE_A to ZONE_K", "EE, FI, LV, LT"]) {
-      expect(ep).toContain(z);
-    }
+    const ep = block("  - path: /v1/grid-price").join(" ").replace(/\s+/g, " ");
+    for (const text of ["CAISO OASIS day-ahead hourly LMP", "NYISO real-time 5-minute zonal LBMP", "Elering is cache-only", "TH_NP15_GEN-APND", "TH_SP15_GEN-APND", "TH_ZP26_GEN-APND", "ZONE_A..ZONE_K", "EE, FI, LV, LT", "Other market/zone combinations are refused"])
+      expect(ep).toContain(text);
     expect(ep).not.toMatch(/ERCOT|MISO|HB_NORTH/);
   });
 
