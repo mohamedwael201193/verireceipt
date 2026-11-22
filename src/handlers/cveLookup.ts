@@ -1,4 +1,6 @@
-// CVE_LOOKUP_CVSS: real CVSS v3 assessments from NVD and the CVE record.
+// CVE_LOOKUP_CVSS: real CVSS v3 assessments from the published CVE record.
+// NVD is disabled by default. Literal CVE_NVD_ENABLED=true opts in only
+// after aggregate egress request ownership has been verified operationally.
 // Exact source bodies are saved, with assessor/version/vector disclosed.
 // No CVSS v2/v4 substitution, no averaging of different assessments.
 // NVD keyless access is limited to 5 requests per rolling 30 seconds.
@@ -133,8 +135,11 @@ export async function handleCve(query: Record<string, string | undefined>): Prom
   if (!/^CVE-\d{4}-\d{4,19}$/.test(id)) throw badRequest("INVALID_CVE", "cve_id must have CVE-YYYY-NNNN format");
   const nvd = `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${id}`;
   const mitre = `https://cveawg.mitre.org/api/cve/${id}`;
+  // Fail closed by default. Enabling NVD requires separately verified aggregate
+  // egress ownership across every process/deployment sharing the public IP.
+  const nvdEnabled = process.env.CVE_NVD_ENABLED === "true";
   const outcomes = await collectRecords([
-    fetchRecord(nvd, (raw) => parseNvdCve(id, nvd, raw)),
+    nvdEnabled ? fetchRecord(nvd, (raw) => parseNvdCve(id, nvd, raw)) : Promise.reject(new Error("NVD disabled by source policy")),
     fetchRecord(mitre, (raw) => parseMitreCve(id, mitre, raw)),
   ]);
   const records = outcomes.flatMap((r) => r?.status === "fulfilled" ? [r.value] : []);
@@ -151,7 +156,8 @@ export async function handleCve(query: Record<string, string | undefined>): Prom
   const winner = candidates[0];
   const chosen = winner.assessment;
   const asOf = new Date().toISOString();
-  const evidence = JSON.stringify({ cve_id: id, as_of: asOf, selected: chosen,
+  const evidence = JSON.stringify({ cve_id: id, as_of: asOf, selected: chosen, nvd_enabled: nvdEnabled,
+    source_policy: nvdEnabled ? "NVD explicitly enabled; aggregate egress ownership required" : "NVD disabled; published CVE record only, degraded single-source coverage",
     sources: records.map((r) => ({ url: r.url, assessment: r.assessment, raw_body: r.raw, fetched_at: r.fetchedAt })),
     unavailable_sources: outcomes.flatMap((r, i) => r?.status !== "fulfilled" ? [i === 0 ? nvd : mitre] : []) });
   const receipt = makeReceipt(INTENT, winner.url, evidence, `${candidates.length}/2 published CVSS v3 assessments; source agreement, not independent scoring`);
@@ -165,8 +171,10 @@ export async function handleCve(query: Record<string, string | undefined>): Prom
       `Vector: ${chosen.vector}. Published assessments: ${assessmentText}. ` +
       `${winner.description.slice(0, 1800)}${winner.description.length > 1800 ? " [description truncated at 1800 characters; full text in receipt]" : ""} ` +
       (candidates.length === 1 ? "Only one usable CVSS v3 assessment was available; coverage is degraded. " : "") +
-      "This is a published base severity score, not a prediction of exploitation or your environment's risk. This product uses data from the NVD API but is not endorsed or certified by the NVD.",
+      (!nvdEnabled ? "NVD access is disabled by source policy. " : "") +
+      "This is a published base severity score, not a prediction of exploitation or your environment's risk. " +
+      (records.some(r => r.url === nvd) ? "This product uses data from the NVD API but is not endorsed or certified by the NVD." : "Published CVE record data; no NVD API data used in this response."),
     verdict: "verified", confidence: candidates.length === 2 && scores[0] === scores[1] ? 1 : 0.9,
-    source: `${candidates.map((r) => r.url).join(" + ")}; NVD primary when available, CVE record fallback; selected assessment is not an average; source fetched ${winner.fetchedAt ?? asOf}; checked ${asOf}`,
+    source: `${candidates.map((r) => r.url).join(" + ")}; ${nvdEnabled ? "NVD primary when available, CVE record fallback" : "NVD disabled; published CVE record only, degraded single-source coverage"}; selected assessment is not an average; source fetched ${winner.fetchedAt ?? asOf}; checked ${asOf}`,
   });
 }

@@ -1,10 +1,11 @@
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 const scratch = mkdtempSync("/tmp/cve-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-afterEach(() => { vi.unstubAllGlobals(); resetCveTransportForTests(); });
+beforeEach(() => vi.stubEnv("CVE_NVD_ENABLED", "true"));
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); resetCveTransportForTests(); });
 import { parseNvdCve, parseMitreCve, handleCve, cvssSeverity, resetCveTransportForTests } from "../src/handlers/cveLookup";
 import { getReceiptEvidence } from "../src/core/storage";
 import { sha256Hex } from "../src/core/receipt";
