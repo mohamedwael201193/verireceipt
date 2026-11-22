@@ -36,7 +36,7 @@ import type { FieldStatus } from "../../src/core/shapedFields.js";
 import { verifyFilingSource } from "./filingSource.js";
 import { gridContract, verifyGridSource } from "./gridSource.js";
 import { txContract, verifyTxSource } from "./txSource.js";
-import type { SourceVerification } from "./sourceTypes.js";
+import { reconcilePrimaryAnswer, type SourceVerification } from "./sourceTypes.js";
 
 export const GATE_LIMITS = [
   "Advisory evidence only: a PASS never executes a dispatch, trade or allocation. The run's only effects are the Sepolia testnet escrow purchase itself (payment and the node's public records), a journaled spend reservation and this audit record.",
@@ -568,28 +568,35 @@ async function executeVerifiedPurchase(
       minerChain = v.verified ? "passed" : "failed";
     }
 
+    const reconciled = node.ok && node.providerResponse && ["REGULATORY_FILING_MONITOR_GENERAL", "GRID_POWER_PRICE_GENERAL", "ONCHAIN_TX_LOOKUP_GENERAL"].includes(input.intent)
+      ? reconcilePrimaryAnswer(input.intent, body.result ?? {}, (body.field_status ?? {}) as Record<string,FieldStatus>, node.providerResponse, true)
+      : undefined;
+    const primaryAnswer = reconciled?.result ?? body.result ?? {};
     let sourceVerification: SourceVerification | undefined;
     if (node.ok && input.intent === "REGULATORY_FILING_MONITOR_GENERAL") {
-      sourceVerification = await verifyFilingSource({ params: input.params, result: body.result ?? {} }, { f, now: nowDate, secUserAgent: opts.secUserAgent });
+      sourceVerification = await verifyFilingSource({ params: input.params, result: primaryAnswer }, { f, now: nowDate, secUserAgent: opts.secUserAgent });
       if (input.valueField !== "filing_count") {
         sourceVerification.status = "failed";
         sourceVerification.checks.push({name:"primary source supported filing field",ok:false,detail:"only independently recounted filing_count is supported"});
       }
     }
     if (node.ok && input.intent === "GRID_POWER_PRICE_GENERAL") {
-      sourceVerification = await verifyGridSource({ params: input.params, result: body.result ?? {}, providerResult: node.providerResponse }, { f, now: nowDate });
+      sourceVerification = await verifyGridSource({ params: input.params, result: primaryAnswer, providerResult: node.providerResponse }, { f, now: nowDate });
       if (input.valueField !== "lmp_usd_per_mwh") {
         sourceVerification.status = "failed";
         sourceVerification.checks.push({name:"primary source supported grid field",ok:false,detail:"only independently matched LMP is supported"});
       }
     }
     if (node.ok && input.intent === "ONCHAIN_TX_LOOKUP_GENERAL") {
-      sourceVerification = await verifyTxSource({ params: input.params, result: body.result ?? {} }, { f, now: nowDate });
+      sourceVerification = await verifyTxSource({ params: input.params, result: primaryAnswer }, { f, now: nowDate });
       if (input.valueField !== "block_number") {
         sourceVerification.status = "failed";
         sourceVerification.checks.push({name:"primary source supported TX field",ok:false,detail:"only chain-bound mined block_number is supported"});
       }
     }
+    if (sourceVerification && reconciled) sourceVerification.details.reconciled_fields = Object.fromEntries(
+      Object.entries(reconciled.fields).map(([key,field]) => [key,{node_status:field.node_status,source:field.source}]),
+    );
     const reasons = [
       ...(sourceVerification?.checks ?? []).filter(c => !c.ok).map(c => `${c.name}: ${c.detail}`),
       ...node.checks.filter((c) => !c.ok).map((c) => `${c.name}: ${c.detail}`),

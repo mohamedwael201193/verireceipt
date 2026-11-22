@@ -166,6 +166,12 @@ async function readFeed(url:string,r:SourceVerification,options:SourceOptions):P
  return {status:200,bytes};
 }
 function caisoTime(ms:number):string {return new Date(ms).toISOString().slice(0,16).replace(/-/g,'')+'-0000';}
+function caisoWindowTime(value:string|null):number {
+ if(value===null)throw new Error('missing OASIS window');
+ const m=/^(\d{4})(\d{2})(\d{2})T(\d{2}):(\d{2})-0000$/.exec(value);
+ if(!m)throw new Error('invalid OASIS window timestamp');
+ return timestamp(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00Z`);
+}
 function productUrl(value:unknown,c:GridContract):boolean {
  if(typeof value!=='string')return false;
  try{
@@ -177,13 +183,14 @@ function productUrl(value:unknown,c:GridContract):boolean {
   }
   if(u.hostname!=='oasis.caiso.com'||u.pathname!=='/oasisapi/SingleZip')return false;
   const q=u.searchParams;if([...q.keys()].some(key=>q.getAll(key).length!==1))return false;
-  return q.get('queryname')==='PRC_LMP'&&q.get('market_run_id')==='DAM'&&q.get('node')===c.node&&q.get('startdatetime')===caisoTime(c.startMs)&&q.get('enddatetime')===caisoTime(c.startMs+3600000);
+  const start=caisoWindowTime(q.get('startdatetime')),end=caisoWindowTime(q.get('enddatetime'));
+  return q.get('queryname')==='PRC_LMP'&&q.get('market_run_id')==='DAM'&&q.get('node')===c.node&&start<=c.startMs&&end>=c.startMs+3600000&&end>start&&end-start<=26*3600000;
  }catch{return false;}
 }
 function returnedProduct(result:Record<string,unknown>,provider:Record<string,unknown>|undefined,c:GridContract):boolean {
  let productEvidence=false;
  for(const claims of provider?[result,provider]:[result]){
-  if(claims.market!==undefined){if(market(claims.market)===c.market)productEvidence=true;else if(claims.market!==c.operator)return false;}
+  if(claims.market!==undefined&&claims.market!==null){if(market(claims.market)===c.market)productEvidence=true;else if(claims.market!==c.operator)return false;}
   for(const key of ['product','market_run_id'])if(claims[key]!==undefined){if(market(claims[key])!==c.market)return false;productEvidence=true;}
   if(claims.receipt!==undefined){
    if(!claims.receipt||typeof claims.receipt!=='object'||Array.isArray(claims.receipt))return false;
@@ -191,15 +198,15 @@ function returnedProduct(result:Record<string,unknown>,provider:Record<string,un
    if(url!==undefined){if(!productUrl(url,c))return false;productEvidence=true;}
   }
  }
- return result.market!==undefined&&productEvidence;
+ return (result.market!=null||provider?.market!=null)&&productEvidence;
 }
 export async function verifyGridSource(input:{params:Record<string,string>;result:Record<string,unknown>;providerResult?:Record<string,unknown>},options:SourceOptions={}):Promise<SourceVerification>{
  const r=sourceResult();
  try{
   const c=gridContract(input.params);
   r.details={contract_version:'grid-source-contract-v2',...c};
-  const claims=input.providerResult?[input.result,input.providerResult]:[input.result];
-  const identitiesMatch=claims.every(p=>(c.operator==='NYISO'?nyNode(String(p.node_or_zone??'')):p.node_or_zone)===c.node && p.currency==='USD' && timestamp(p.interval_start)===c.startMs);
+  const identityMatches=(p:Record<string,unknown>)=>(c.operator==='NYISO'?nyNode(String(p.node_or_zone??'')):p.node_or_zone)===c.node && p.currency==='USD' && timestamp(p.interval_start)===c.startMs;
+  const identitiesMatch=identityMatches(input.result)&&(!input.providerResult||identityMatches(input.providerResult));
   sourceCheck(r,'grid response identity',returnedProduct(input.result,input.providerResult,c) && identitiesMatch,'returned ISO/product claims need explicit product metadata or exact official product URL; node, UTC interval and currency must match the query');
   if(!r.checks.every(x=>x.ok))return finishSource(r);
   let price:number;
@@ -219,7 +226,7 @@ export async function verifyGridSource(input:{params:Record<string,string>;resul
    price=parseCaisoRows(officialCsvFromZip(feed.bytes),c);
   }
   r.details.primary_value=price;
-  sourceCheck(r,'grid value',typeof input.result.lmp_usd_per_mwh==='number'&&Number.isFinite(input.result.lmp_usd_per_mwh)&&input.result.lmp_usd_per_mwh===price,`provider ${String(input.result.lmp_usd_per_mwh)}; exact official row ${price}`);
+  sourceCheck(r,'grid value',(!input.providerResult||input.providerResult.lmp_usd_per_mwh===input.result.lmp_usd_per_mwh)&&typeof input.result.lmp_usd_per_mwh==='number'&&Number.isFinite(input.result.lmp_usd_per_mwh)&&input.result.lmp_usd_per_mwh===price,`provider ${String(input.result.lmp_usd_per_mwh)}; exact official row ${price}`);
  }catch(error){sourceCheck(r,'grid evidence available',false,error instanceof Error?error.message:'grid source verification failed');}
  return finishSource(r);
 }

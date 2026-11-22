@@ -22,6 +22,7 @@ export interface NodeOpts {
   valueField?: string;
   resultFields?: Record<string, unknown>;
   upstreamUrl?: string;
+  engineResultFields?: Record<string, unknown>;
   minerSlug?: string | null;
   value?: number;
   payloadValue?: number;
@@ -61,7 +62,7 @@ export function node(opts: NodeOpts = {}) {
   const signalHash = signalHashOf(payload);
   const body: Record<string, unknown> = {
     miner_id: miner, endpoint: "/v1/tvl", result_shape: "intent",
-    result: { [valueField]: value, ...opts.resultFields }, signal_hash: opts.signalHash ?? signalHash,
+    result: { [valueField]: value, ...opts.resultFields, ...opts.engineResultFields }, signal_hash: opts.signalHash ?? signalHash,
   };
   if (opts.fieldStatus !== null) body.field_status = opts.fieldStatus ?? { [valueField]: "ok" };
   const receipt = {

@@ -12,13 +12,13 @@ const dirs:string[]=[];
 afterEach(()=>{for(const dir of dirs.splice(0))rmSync(dir,{recursive:true,force:true});});
 const params={entity:'Form 8-K filings by Example Corp (CIK 987654)',period:'calendar 2019'};
 const c={id:'source-contract-fixture',intent:'REGULATORY_FILING_MONITOR_GENERAL',params,valueField:'filing_count',question:'Synthetic exact filing-count query'};
-async function run(count:number,sourceStatus=200){
+async function run(count:number,sourceStatus=200,mapped?:'unavailable'|'missing'|'rejected'){
  const dir=mkdtempSync(join(tmpdir(),'source-integration-'));dirs.push(dir);
  const ledgerFile=join(dir,'runs.jsonl');
  const spend=spendLedgerFromFiles({reservationsFile:join(dir,'reserve.jsonl'),lockFile:join(dir,'lock'),runLedgerFiles:[ledgerFile]});
  const frozenCaseSet={version:'fixture-v1',cases:[{id:c.id,intent:c.intent,params:c.params,value_field:c.valueField,question:c.question}]};
  const casesHash=createHash('sha256').update(canonicalPayloadJson(frozenCaseSet)).digest('hex');
- const network=node({intent:c.intent,requestParams:params,valueField:c.valueField,value:count,miner:'9999',minerSlug:'synthetic-provider'}).f;
+ const network=node({...(mapped?{resultFields:{entity:params.entity,urls:['https://www.sec.gov/Archives/edgar/data/987654/000098765419000001/0000987654-19-000001-index.htm']},engineResultFields:{entity:null,urls:null},fieldStatus:{filing_count:'ok',entity:mapped,urls:mapped}}:{}),intent:c.intent,requestParams:params,valueField:c.valueField,value:count,miner:'9999',minerSlug:'synthetic-provider'}).f;
  const f=async(input:RequestInfo|URL,init?:RequestInit)=>String(input).startsWith('https://data.sec.gov/')
   ?sourceStatus!==200?new Response('unavailable',{status:sourceStatus}):Response.json({cik:987654,name:'Example Corp',filings:{recent:{accessionNumber:['0000987654-19-000001'],filingDate:['2019-02-03'],form:['8-K']},files:[]}})
   :network(input,init);
@@ -31,6 +31,9 @@ describe('source check is enforced by the live probe path',()=>{
  });
  it('accepts a primary-recounted filing count from any routed provider',async()=>{
   const r=await run(1);expect(r.outcome).toBe('ANSWERED');expect(r.source_verification?.status).toBe('verified');expect(r.source_verification?.sources).toHaveLength(1);
+ });
+ it.each(['unavailable','missing','rejected'] as const)('respects mapped filing metadata status %s',async(status)=>{
+  const r=await run(1,200,status);expect(r.outcome).toBe(status==='unavailable'?'ANSWERED':'ABSTAIN');
  });
  it('abstains on unavailable primary evidence even when provenance passes',async()=>{
   const r=await run(1,403);expect(r.outcome).toBe('ABSTAIN');expect(r.reasons.join(' ')).toMatch(/primary HTTP 403/);

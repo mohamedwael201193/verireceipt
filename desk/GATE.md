@@ -101,7 +101,7 @@ deep-copied before awaits, so a callback cannot change its rule mid-run.
 4. **Break it** - ask for a venue whose verified value cannot satisfy the
    precommitted floor (`--set protocol=…`) and the outcome is HOLD naming
    the rule; tamper with any evidence and the failed checks are named.
-5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (454 tests across 28 files,
+5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (479 tests across 30 files,
    no network, no key); the gate flow is covered with mocked nodes including
    tamper cases.
 
@@ -243,3 +243,21 @@ retained in source_verification. This is independent fetch agreement,
 not a transaction-trie proof, a finality claim, or proof that endpoint
 operators are independent. Reorganizations and correlated RPC errors remain
 limits. A verified reverted transaction's block does not mean it succeeded.
+
+CAISO receipt product evidence may name the background ingester's containing
+window instead of the on-demand one-hour window. Its timestamps must be
+valid GMT values, span no more than 26 hours and contain the entire requested
+hour. Product and exact node remain mandatory. The independently fetched
+source request and row check still use only the requested one-hour interval.
+Only nonnumeric fields explicitly marked unavailable can be reconciled
+from the hash-bound provider answer, using the existing shared mapper
+contract. Missing/rejected fields and numeric fields are never filled.
+Mapped ok claims are preserved, including contradictions that must fail. The returned
+numeric value must agree across the mapped and provider answers too.
+
+All three source verifiers use one shared primary-answer reconciliation step
+after the node hash/identity/value checks pass. It reuses reconcileShaped,
+not independent fallback rules in each verifier. Per-field node status and
+node/raw/none provenance are recorded alongside source verification. The
+saved node-shaped grid fixtures and synthetic TX/filings mapper contracts
+cover positive unavailable metadata and negative missing/rejected controls.

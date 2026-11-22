@@ -1,6 +1,17 @@
 import { createHash } from 'node:crypto';
 import type { Fetch } from './client.js';
 import type { Check } from './verify.js';
+import { reconcileShaped, type FieldStatus, type ReconciledField } from '../../src/core/shapedFields.js';
+
+/** The caller must first validate the node's hash-bound provider answer.
+ * Only the existing mapper contract decides which fields can come from raw. */
+export function reconcilePrimaryAnswer(intent:string,result:Record<string,unknown>,fieldStatus:Record<string,FieldStatus>,provider:Record<string,unknown>,rawVerified:boolean):{result:Record<string,unknown>;fields:Record<string,ReconciledField>}{
+ const fields=reconcileShaped({intent,result,field_status:fieldStatus},provider,{rawVerified});
+ const answer={...result};
+ for(const [key,field] of Object.entries(fields))answer[key]=field.value;
+ return {result:answer,fields};
+}
+
 
 export interface PrimarySource { url: string; sha256: string; retrieved_at: string; raw_text: string; encoding?: 'utf8' | 'base64' }
 export interface SourceVerification {

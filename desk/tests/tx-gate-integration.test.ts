@@ -10,7 +10,7 @@ import { node, makePayer } from './gateNodeFixture';
 const hash='0x'+'12'.repeat(32),blockHash='0x'+'34'.repeat(32),from='0x'+'56'.repeat(20),to='0x'+'78'.repeat(20);
 const dirs:string[]=[];
 afterEach(()=>{for(const dir of dirs.splice(0))rmSync(dir,{recursive:true,force:true});});
-async function run(value:number,chain='sepolia',rpcChain='0xaa36a7'){
+async function run(value:number,chain='sepolia',rpcChain='0xaa36a7',mapped?:'unavailable'|'missing'|'rejected'){
  const dir=mkdtempSync(join(tmpdir(),'tx-source-integration-'));dirs.push(dir);
  const ledgerFile=join(dir,'runs.jsonl');
  const spend=spendLedgerFromFiles({reservationsFile:join(dir,'reserve.jsonl'),lockFile:join(dir,'lock'),runLedgerFiles:[ledgerFile]});
@@ -18,7 +18,7 @@ async function run(value:number,chain='sepolia',rpcChain='0xaa36a7'){
  const c={id:'tx-source-fixture',intent:'ONCHAIN_TX_LOOKUP_GENERAL',params,valueField:'block_number',question:'Synthetic chain-explicit transaction block'};
  const frozenCaseSet={version:'fixture-v1',cases:[{id:c.id,intent:c.intent,params,value_field:c.valueField,question:c.question}]};
  const casesHash=createHash('sha256').update(canonicalPayloadJson(frozenCaseSet)).digest('hex');
- const base=node({intent:c.intent,requestParams:params,valueField:c.valueField,value,miner:'9999',minerSlug:'synthetic-provider',resultFields:{tx_hash:hash,status:'confirmed',from,to,value_eth:1}}).f;
+ const base=node({...(mapped?{engineResultFields:{tx_hash:null,status:null,from:null,to:null},fieldStatus:{block_number:'ok',value_eth:'ok',tx_hash:mapped,status:mapped,from:mapped,to:mapped}}:{}),intent:c.intent,requestParams:params,valueField:c.valueField,value,miner:'9999',minerSlug:'synthetic-provider',resultFields:{tx_hash:hash,status:'confirmed',from,to,value_eth:1}}).f;
  let requests=0,rpcRequests=0;
  const f=async(url:RequestInfo|URL,init?:RequestInit)=>{
   requests++;
@@ -40,6 +40,9 @@ describe('TX source checks are mandatory on the purchase path',()=>{
  });
  it('does not credit a correct numeric block when RPC chain identity contradicts the request',async()=>{
   const {record}=await run(42,'sepolia','0x1');expect(record.outcome).toBe('ABSTAIN');expect(record.source_verification?.status).toBe('failed');
+ });
+ it.each(['unavailable','missing','rejected'] as const)('respects mapped TX metadata status %s',async(status)=>{
+  const {record}=await run(42,'sepolia','0xaa36a7',status);expect(record.outcome).toBe(status==='unavailable'?'ANSWERED':'ABSTAIN');
  });
  it('answers only after the two configured RPC endpoints bind the transaction and receipt',async()=>{
   const {record,rpcRequests}=await run(42);expect(record.outcome).toBe('ANSWERED');expect(record.source_verification?.status).toBe('verified');expect(rpcRequests).toBe(6);
