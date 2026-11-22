@@ -328,13 +328,32 @@ describe("stable pairs: DAI/USDC end-to-end (stubbed RPCs)", () => {
     }
   });
 
-  it("Curve leg failing leaves three plausible venues -> still answers, winner from V3", async () => {
+  it("Curve leg failing leaves three plausible venues -> still answers at 0.9, Curve absence named (review 34)", async () => {
     const a = await mk({ failCurve: true });
     const b = await mk({ failCurve: true });
     try {
       const result = await handleRouteWithRpcs({ pair: "DAI/USDC" }, [a.url, b.url]);
       expect(result.amount_out).toBe(999870);
       expect(result.winning_venue).toBe("Uniswap V3 (fee 100)");
+      // Teeth: a missing Curve leg is a missing corroborating voice —
+      // confidence capped at 0.9 and BOTH the count and the venue named.
+      expect(result.confidence).toBe(0.9);
+      expect(result.source).toContain("fewer than 4 venues produced plausible quotes (3 of 4)");
+      expect(result.source).toContain("Curve 3pool produced no plausible quote");
+      expect(result.answer).toContain("Curve 3pool produced no plausible quote");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("all four venues plausible on a stable pair -> confidence 1.0 requires the FOURTH venue (review 34)", async () => {
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "DAI/USDC" }, [a.url, b.url]);
+      expect(result.confidence).toBe(1.0);
+      expect(result.source).toContain("all 4 venues this pair registers produced plausible quotes");
     } finally {
       await a.close();
       await b.close();
@@ -1659,7 +1678,7 @@ describe("round 5: any dropped quote caps confidence at 0.9 (J1 B1 + J2 B1)", ()
         expect(result.amount_out).toBe(9000000000);
         expect(result.winning_venue).toBe("Uniswap V3 (fee 500)");
         expect(result.confidence).toBe(0.9);
-        expect(result.source).toContain("fewer than three venues produced plausible quotes");
+        expect(result.source).toContain("fewer than 3 venues produced plausible quotes (2 of 3)");
       } finally {
         await a.close();
         await b.close();

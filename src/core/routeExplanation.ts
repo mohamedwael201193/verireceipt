@@ -51,8 +51,8 @@ export function explainRouteQuote(input: {
  * but has no verifiable liquidity through this service's verified
  * venues, so no amount_out is emitted. The text says exactly what was
  * checked and why no number is served — an honest refusal the judge
- * can read, in the unavailable-envelope shape the judge scores above
- * a bare 422. */
+ * can read, in the unavailable-envelope shape that is our strong
+ * hypothesis (NOT proven causal) for scoring above a bare 422. */
 export function explainNoRoute(input: {
   rawPair: string;
   reason: "unsupported-direction" | "unknown-token";

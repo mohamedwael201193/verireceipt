@@ -1266,6 +1266,16 @@ const STABLE_BAND_MAX = 1_050_000n;
 const WBTC_BAND_MIN = 1_000_000_000n;
 const WBTC_BAND_MAX = 1_000_000_000_000n;
 
+/** Number of corroborating venues a pair's full cross-check expects:
+ * one V3 quote (best of its fee tiers), one per V2 router, plus Curve
+ * 3pool when the pair registers it. Majors expect 3, stable pairs 4.
+ * Confidence 1.0 requires ALL of them plausible; a missing venue is a
+ * missing corroborating voice and caps confidence at 0.9 with the
+ * absent venue named. */
+export function expectedVenueCount(spec: PairSpec): number {
+  return 1 + spec.v2Routers.length + (spec.curve3pool === undefined ? 0 : 1);
+}
+
 export const PAIR_REGISTRY: ReadonlyArray<PairSpec> = [
   {
     pair: "ETH/USDC",
@@ -2300,17 +2310,20 @@ async function handleRouteInner(
   //   (e.g. V3=99e9, Uni=99e9, Sushi=1.74e9 — round 4 scored the 99e9
   //   winner at 1.0 because the survivors satisfied count/RPC/family).
   //   Any drop therefore caps confidence at 0.9, never 1.0.
-  // - ROUND 5 (same defect, venue-absent form): fewer than 3 plausible
-  //   quotes survived — i.e. at least one of the three venues produced
-  //   no plausible quote at all (failed to quote, or its quote was
-  //   dropped). Confidence 1.0 requires the full three-venue
-  //   cross-check; a missing venue is a missing corroborating voice.
+  // - ROUND 5 (same defect, venue-absent form): fewer plausible quotes
+  //   survived than the pair's expected venue count — i.e. at least one
+  //   of the pair's venues produced no plausible quote at all (failed
+  //   to quote, or its quote was dropped). Confidence 1.0 requires the
+  //   full cross-check of every venue the pair registers (3 for
+  //   majors, 4 for stable pairs with Curve 3pool); a missing venue is
+  //   a missing corroborating voice, and for stable pairs an absent
+  //   Curve leg is named explicitly in the degraded reasons.
   //   This also covers two absurd quotes agreeing under the cap with
   //   the third venue absent (J2's two-quote variant): they win at
   //   0.9, never 1.0. The only case that can still win at 1.0 with a
-  //   wrong value is the unanimous-absurd residual (all three venues
-  //   absurd and agreeing, nothing dropped) — bounded by the 1e10 cap
-  //   at <=~5.7x the live reference (see the header comment).
+  //   wrong value is the unanimous-absurd residual (all of the pair's
+  //   venues absurd and agreeing, nothing dropped) — bounded by the
+  //   pair's plausibility band (see the header comment).
   // A lone surviving quote therefore always scores 0.9, never 1.0.
   const servingRpcs = new Set(plausibleQuotes.map((q) => q.rpcUrl));
   const degradedReasons: string[] = [];
@@ -2323,8 +2336,15 @@ async function handleRouteInner(
   if (plausibleQuotes.length < quotes.length) {
     degradedReasons.push("at least one quote was dropped by the plausibility filter");
   }
-  if (plausibleQuotes.length < 3) {
-    degradedReasons.push("fewer than three venues produced plausible quotes");
+  const expectedVenues = expectedVenueCount(spec);
+  if (plausibleQuotes.length < expectedVenues) {
+    degradedReasons.push(
+      `fewer than ${expectedVenues} venues produced plausible quotes ` +
+        `(${plausibleQuotes.length} of ${expectedVenues})`,
+    );
+  }
+  if (spec.curve3pool !== undefined && !plausibleQuotes.some((q) => q.venue === "Curve 3pool")) {
+    degradedReasons.push("Curve 3pool produced no plausible quote");
   }
   const degraded = degradedReasons.length > 0;
   const confidence = plausibleQuotes.length >= 2 && !degraded ? 1.0 : 0.9;
@@ -2394,7 +2414,7 @@ async function handleRouteInner(
         "block number+hash agreement only; the winner is the max quote within ±5% " +
         `of the cross-venue median after this pair's plausibility band ` +
         `[${spec.plausibleMinOut}, ${spec.plausibleMaxOut}] ${spec.buySymbol} base units, and confidence ` +
-        "is 1.0 only when all three venues produced plausible quotes with no " +
+        `is 1.0 only when all ${expectedVenues} venues this pair registers produced plausible quotes with no ` +
         "quote dropped by the filter, and reflects venue count, family coverage " +
         "and cross-venue agreement" +
         (degraded ? `; degraded: ${degradedReasons.join("; ")}` : ""),
