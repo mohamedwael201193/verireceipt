@@ -1,3 +1,4 @@
+import { plainDecimal } from "../core/plainDecimal";
 // TVL_LOOKUP_GENERAL handler.
 // Zero-LLM. No mocks/fakes in handler logic. Every answer is derived from a
 // live DeFiLlama response and carries a SHA-256 receipt over the raw response.
@@ -2095,7 +2096,7 @@ export function __getTvlListsRefreshTimerForTests(): NodeJS.Timeout | null {
 // ---------------------------------------------------------------------------
 
 function formatUsd(value: number): string {
-  return '$' + value.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  return '$' + plainDecimal(value);
 }
 
 /**

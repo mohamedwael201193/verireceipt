@@ -208,7 +208,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - VALIDATOR_PERFORMANCE_VERIFY_GENERAL\n' +
     '  signal_mapping:\n' +
     '    confidence_field: confidence\n' +
-    '    label_field: verdict\n' +
+    '    label_field: answer\n' +
     '    reason_field: source\n' +
     '\n' +
     'endpoints:\n' +

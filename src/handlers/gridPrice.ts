@@ -1,3 +1,4 @@
+import { plainDecimal } from "../core/plainDecimal";
 // GET /v1/grid-price — wholesale electricity LMP.
 // Elering is served from the SQLite cache only (a cache miss is a 502
 // GRID_CACHE_MISS, a stale provisional row a 502 GRID_CACHE_STALE —
@@ -602,8 +603,8 @@ export async function handleGridPrice(
   // single raw response for this interval to hash. A reader recomputes
   // the hash from the four answer fields, in exactly this key order
   // (JSON.stringify semantics — see the F1 test in tests/grid.test.ts).
-  // NOT hashed: currency (a handler constant), answer (which rounds
-  // the price via toFixed(2)), verdict, confidence, source, checked_at.
+  // NOT hashed: currency (a handler constant), answer prose, verdict,
+  // confidence, source, checked_at. The prose preserves the measured decimal.
   const upstreamUrl = row.upstream_url || gridFallbackUrl(normalizedZone, intervalStart);
   // GRID-NP15: a CAISO system request discloses the node it was
   // answered for in the market field (hashed) as well as the prose.
@@ -649,23 +650,29 @@ export async function handleGridPrice(
   } catch {
     // Persistence must never fail the answer.
   }
-  const answer = isCaisoSystem
+  const measuredAnswer = isCaisoSystem
     ? "The CAISO day-ahead LMP at the NP15 trading hub (" +
       CAISO_SYSTEM_NODE +
       ") was $" +
-      row.lmp_usd_per_mwh.toFixed(2) +
+      plainDecimal(row.lmp_usd_per_mwh) +
       " USD per MWh for the interval starting " +
       intervalStart +
       ". The request named no CAISO pricing node, so it was answered for NP15; ask for TH_SP15_GEN-APND or TH_ZP26_GEN-APND for the other CAISO hubs."
     : "The LMP at " +
       normalizedZone +
       " was $" +
-      row.lmp_usd_per_mwh.toFixed(2) +
+      plainDecimal(row.lmp_usd_per_mwh) +
       " USD per MWh (" +
       row.market +
       ") for the interval starting " +
       intervalStart +
       ".";
+  // The mapped answer must retain uncertainty even without sibling metadata.
+  const answer = unconfirmed
+    ? "Unverified cached price: " +
+      (gridMarketKind(zone.market) === "ELERING" ? ELERING_NO_HISTORICAL_REFETCH : FAILED_REVALIDATION) +
+      ". " + measuredAnswer
+    : measuredAnswer;
   return envelope(
     "GRID_POWER_PRICE_GENERAL",
     {

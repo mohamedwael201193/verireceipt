@@ -63,7 +63,7 @@ semantics:
     - VALIDATOR_PERFORMANCE_VERIFY_GENERAL
   signal_mapping:
     confidence_field: confidence
-    label_field: verdict
+    label_field: answer
     reason_field: source
 
 endpoints:

@@ -377,6 +377,8 @@ describe("handleGridPrice staleness bound (1 hour)", () => {
     expect(res.verdict).toBe(GRID_UNCONFIRMED_VERDICT);
     expect(res.confidence).toBe(GRID_UNCONFIRMED_CONFIDENCE);
     expect(String(res.source)).toContain("no historical re-fetch");
+    expect(String(res.answer)).toMatch(/^Unverified cached price:/);
+    expect(String(res.answer)).toContain("no historical re-fetch");
   });
 
   it("receipt fetched_at is the row's ingested_at, not the response time", async () => {
@@ -1897,15 +1899,14 @@ describe("GRID round-3: receipt hash is of the fields AS SERVED (F1)", () => {
     expect(aliasReceipt.raw_response_sha256).not.toBe(storedReceipt.raw_response_sha256);
   });
 
-  it("unhashed fields: the answer rounds the price (toFixed(2)) and does not carry the hashed value verbatim", async () => {
+  it("answer carries the exact measured decimal while the evidence hash remains unchanged", async () => {
     // Fixed far-past interval, not pastIso(): the live test may cache
     // a real EE row at a recent pastIso() interval with a different price.
     const interval = "2026-01-05T05:00:00.000Z";
     saveGridPrice("EE", interval, 67.57882, "Elering EE");
     const res = await handleGridPrice({ node_or_zone: "EE", interval_start: interval });
-    // The answer rounds: $67.58, not the hashed 67.57882.
-    expect(res.answer as string).toContain("$67.58");
-    expect(res.answer as string).not.toContain("67.57882");
+    // Human wording preserves the same measured decimal as the typed field.
+    expect(res.answer as string).toContain("$67.57882");
     // The hash still recomputes from the full-precision field.
     const receipt = res.receipt as Record<string, unknown>;
     expect(receipt.raw_response_sha256).toBe(
@@ -2207,7 +2208,7 @@ describe("GRID-NP15: a CAISO request with no node is answered for the NP15 hub (
       expect(np.lmp_usd_per_mwh).toBe(OASIS_NP15);
       expect(np.market).toBe("CAISO");
       expect(np.answer as string).toBe(
-        "The LMP at TH_NP15_GEN-APND was $38.09 USD per MWh (CAISO) for the interval starting " + REF_INTERVAL + ".",
+        `The LMP at TH_NP15_GEN-APND was $${OASIS_NP15} USD per MWh (CAISO) for the interval starting ` + REF_INTERVAL + ".",
       );
     });
   });
@@ -3817,6 +3818,8 @@ describe("A9 r2 post-provisional revalidation and single-node live repair", () =
       expect(res.verdict).toBe(GRID_UNCONFIRMED_VERDICT);
       expect(res.confidence).toBe(GRID_UNCONFIRMED_CONFIDENCE);
       expect(String(res.source)).toContain("post-close revalidation did not confirm");
+      expect(String(res.answer)).toMatch(/unverified/i);
+      expect(String(res.answer)).toContain("post-close revalidation did not confirm");
       const receipt = res.receipt as Record<string, unknown>;
       expect(receipt.fetched_at).toBe("2026-09-14T12:00:00.000Z");
       expect(String(receipt.quorum_votes)).toContain("post-close revalidation did not confirm");

@@ -858,7 +858,7 @@ describe('handleTvl with fixture transport', () => {
     expect(Math.abs(Date.now() - asOfMs)).toBeLessThan(60_000);
     const today = new Date().toISOString().slice(0, 10);
     expect((out.as_of as string).slice(0, 10)).toBe(today);
-    expect(out.answer).toBe(`Aave V3 has a total value locked of $15,121,752,429 as of ${today}.`);
+    expect(out.answer).toBe(`Aave V3 has a total value locked of $15121752429 as of ${today}.`);
     expect(out.verdict).toBe('verified');
     expect(out.confidence).toBe(1.0);
     expect(out.source).toBe('DeFiLlama API (https://api.llama.fi/tvl/aave-v3)');
@@ -3086,7 +3086,7 @@ describe('handleTvl round-4 (answer carries the as_of date)', () => {
       return fixtureFetch(payload)(u);
     }) as typeof fetch;
     const out = await handleTvl({ protocol: 'lido' }, { fetchImpl });
-    expect(out.answer).toBe(`Lido has a total value locked of $123,456,789 as of ${dateStr}.`);
+    expect(out.answer).toBe(`Lido has a total value locked of $123456789 as of ${dateStr}.`);
     expect(out.as_of).toBe(new Date(threeDaysAgo * 1000).toISOString());
   });
 
@@ -3142,7 +3142,7 @@ describe('handleTvl round-4 (answer carries the as_of date)', () => {
       return new Response('not found', { status: 404 });
     }) as typeof fetch;
     const out = await handleTvl({ protocol: 'ethereum' }, { fetchImpl });
-    expect(out.answer).toBe(`Ethereum has a total value locked of $35,974,180,659 as of ${dateStr}.`);
+    expect(out.answer).toBe(`Ethereum has a total value locked of $35974180659 as of ${dateStr}.`);
   });
 });
 

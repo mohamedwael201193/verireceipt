@@ -166,8 +166,10 @@ export function envelope(
     }
   }
   return {
-    ...fields,
+    // Put the factual answer before potentially large lists. JSON field names,
+    // numeric units, verification status and receipt evidence stay unchanged.
     answer: meta.answer,
+    ...fields,
     verdict: meta.verdict,
     confidence: meta.confidence,
     source: meta.source,
