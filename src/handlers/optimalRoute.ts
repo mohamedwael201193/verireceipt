@@ -1121,9 +1121,13 @@ export function filterPlausibleQuotes(
   );
 }
 
+// Every venue uses the agreed header hash, never a mutable number tag.
+// Canonicality is checked by the upstream at call time, not forever after.
+type CanonicalBlockRef = Readonly<{ blockHash: string; requireCanonical: true }>;
+
 async function quoteV3AtBlock(
   rpcUrl: string,
-  blockHex: string,
+  blockRef: CanonicalBlockRef,
   tokenIn: string,
   tokenOut: string,
   amountIn: bigint,
@@ -1137,7 +1141,7 @@ async function quoteV3AtBlock(
       const call = await rpcCall(
         rpcUrl,
         "eth_call",
-        [{ to: QUOTER_V2, data }, blockHex],
+        [{ to: QUOTER_V2, data }, blockRef],
         callTimeoutMs,
         signal,
       );
@@ -1159,7 +1163,7 @@ async function quoteV3AtBlock(
 
 async function quoteV2AtBlock(
   rpcUrl: string,
-  blockHex: string,
+  blockRef: CanonicalBlockRef,
   router: string,
   venueName: string,
   amountIn: bigint,
@@ -1171,7 +1175,7 @@ async function quoteV2AtBlock(
   const call = await rpcCall(
     rpcUrl,
     "eth_call",
-    [{ to: router, data }, blockHex],
+    [{ to: router, data }, blockRef],
     callTimeoutMs,
     signal,
   );
@@ -1190,7 +1194,7 @@ const V2_VENUES: Array<{ router: string; name: string }> = [
  * returns one word; the Tricrypto uint256 selector is not involved). */
 async function quoteCurve3poolAtBlock(
   rpcUrl: string,
-  blockHex: string,
+  blockRef: CanonicalBlockRef,
   i: bigint,
   j: bigint,
   dx: bigint,
@@ -1201,7 +1205,7 @@ async function quoteCurve3poolAtBlock(
   const call = await rpcCall(
     rpcUrl,
     "eth_call",
-    [{ to: CURVE_3POOL, data }, blockHex],
+    [{ to: CURVE_3POOL, data }, blockRef],
     callTimeoutMs,
     signal,
   );
@@ -2066,6 +2070,7 @@ async function handleRouteInner(
   const block = pinQuorumBlock(quorumValue, [...blockByRpc.values()]);
   const blockNumber = block.blockNumber;
   const blockHex = "0x" + blockNumber.toString(16);
+  const blockRef: CanonicalBlockRef = { blockHash: block.blockHash, requireCanonical: true };
   // 1b. Freshness bounds (round 6 age bound + round 7 height anchor and
   // future-skew bound + round 8 number-vs-timestamp consistency check):
   // refuse a quorum pin older than MAX_BLOCK_AGE_SEC, a timestamp more
@@ -2191,12 +2196,12 @@ async function handleRouteInner(
     {
       offset: 0,
       quoter: (rpcUrl, signal) =>
-        quoteV3AtBlock(rpcUrl, blockHex, spec.sellToken, spec.buyToken, spec.amountIn, spec.v3Fees, callTimeoutMs, signal),
+        quoteV3AtBlock(rpcUrl, blockRef, spec.sellToken, spec.buyToken, spec.amountIn, spec.v3Fees, callTimeoutMs, signal),
     },
     ...spec.v2Routers.map((venue, index) => ({
       offset: index + 1,
       quoter: (rpcUrl: string, signal?: AbortSignal) =>
-        quoteV2AtBlock(rpcUrl, blockHex, venue.router, venue.name, spec.amountIn, [spec.sellToken, spec.buyToken], callTimeoutMs, signal),
+        quoteV2AtBlock(rpcUrl, blockRef, venue.router, venue.name, spec.amountIn, [spec.sellToken, spec.buyToken], callTimeoutMs, signal),
     })),
     ...(curve === undefined
       ? []
@@ -2204,7 +2209,7 @@ async function handleRouteInner(
           {
             offset: spec.v2Routers.length + 1,
             quoter: (rpcUrl: string, signal?: AbortSignal) =>
-              quoteCurve3poolAtBlock(rpcUrl, blockHex, curve.i, curve.j, spec.amountIn, callTimeoutMs, signal),
+              quoteCurve3poolAtBlock(rpcUrl, blockRef, curve.i, curve.j, spec.amountIn, callTimeoutMs, signal),
           },
         ]),
   ];
@@ -2358,6 +2363,7 @@ async function handleRouteInner(
   const receiptEvidence = JSON.stringify({
     block_number: blockNumber,
     block_number_hex: blockHex,
+    block_hash: block.blockHash,
     winning_venue: best.venue,
     pair: spec.pair,
     amount_in: spec.amountIn.toString(),
