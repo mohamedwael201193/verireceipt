@@ -43,6 +43,7 @@ export const ACCURACY_SELECT_SQL =
   "FROM miner_receipts";
 
 /** k/n must LITERALLY begin the stored string (no trimming anywhere). */
+const REFUSED_PREFIX = "no upstream quorum:";
 const KN_RE = /^(\d+)\s*\/\s*(\d+)/;
 
 export function resolveAccuracyBackend(opts, env = process.env) {
@@ -94,25 +95,31 @@ export function parseFetchedAtMs(value) {
 function blankBucket() {
   return {
     receipts: 0,
+    answered: 0,
+    refused: 0,
     with_evidence: 0,
     missing_evidence: 0,
-    quorum_strings_parsed: 0,
-    quorum_strings_unparsed: 0,
+    multi_source_receipts: 0,
     // BigInt during aggregation; serialized as exact decimal strings.
-    quorum_votes_agreeing: 0n,
-    quorum_votes_cast: 0n,
+    multi_source_votes_agreeing: 0n,
+    multi_source_votes_cast: 0n,
+    single_source_receipts: 0,
+    quorum_strings_unparsed: 0,
   };
 }
 
 function serializeBucket(b) {
   return {
     receipts: b.receipts,
+    answered: b.answered,
+    refused: b.refused,
     with_evidence: b.with_evidence,
     missing_evidence: b.missing_evidence,
-    quorum_strings_parsed: b.quorum_strings_parsed,
+    multi_source_receipts: b.multi_source_receipts,
+    multi_source_votes_agreeing: b.multi_source_votes_agreeing.toString(),
+    multi_source_votes_cast: b.multi_source_votes_cast.toString(),
+    single_source_receipts: b.single_source_receipts,
     quorum_strings_unparsed: b.quorum_strings_unparsed,
-    quorum_votes_agreeing: b.quorum_votes_agreeing.toString(),
-    quorum_votes_cast: b.quorum_votes_cast.toString(),
   };
 }
 
@@ -147,19 +154,28 @@ export function computeAccuracyDoc(rows, { days, nowMs, source }) {
     const rawVotes = row.quorum_votes === undefined || row.quorum_votes === null ? null : String(row.quorum_votes);
     const m = rawVotes === null ? null : KN_RE.exec(rawVotes);
 
+    // refusal receipts (optimalRoute): no source was queried, exact prefix only
+    const refused = rawVotes !== null && rawVotes.startsWith(REFUSED_PREFIX);
     for (const b of buckets) {
       b.receipts++;
+      if (refused) b.refused++;
+      else b.answered++;
       if (hasEvidence) b.with_evidence++;
       else b.missing_evidence++;
+      if (refused) continue;
       if (m) {
-        b.quorum_strings_parsed++;
-        b.quorum_votes_agreeing += BigInt(m[1]);
-        b.quorum_votes_cast += BigInt(m[2]);
+        if (BigInt(m[2]) >= 2n) {
+          b.multi_source_receipts++;
+          b.multi_source_votes_agreeing += BigInt(m[1]);
+          b.multi_source_votes_cast += BigInt(m[2]);
+        } else {
+          b.single_source_receipts++;
+        }
       } else {
         b.quorum_strings_unparsed++;
       }
     }
-    if (!m) unparsed.set(rawVotes, (unparsed.get(rawVotes) ?? 0) + 1);
+    if (!m && !refused) unparsed.set(rawVotes, (unparsed.get(rawVotes) ?? 0) + 1);
   }
 
   const daysSorted = [...byDay.keys()].sort();
@@ -191,13 +207,17 @@ export function computeAccuracyDoc(rows, { days, nowMs, source }) {
     rows_skipped_bad_fetched_at: skippedBadTimestamp,
     notes:
       "Exact counts of receipts this service issued and stored. Days are the UTC " +
-      "calendar day of the parsed fetched_at (offsets honored). with_evidence means a " +
-      "stored blob, even a gzip of empty bytes. quorum_votes_agreeing/cast are exact " +
-      "decimal strings summed with BigInt from stored quorum_votes values that " +
-      "literally begin 'k/n'; every other value is counted and listed verbatim in " +
-      "unparsed_quorum_strings (stored NULL stays null, never merged with ''). This " +
-      "file records issuance and evidence retention only: no estimated, sampled, or " +
-      "invented numbers, and no answer-correctness claim.",
+      "calendar day of the parsed fetched_at (offsets honored). answered + refused = " +
+      "receipts; refused are refusal receipts whose stored quorum label is exactly of " +
+      "the form 'no upstream quorum: ...' (no source was queried). with_evidence means " +
+      "a stored blob, even a gzip of empty bytes. Quorum figures are a serve-time vote " +
+      "tally, not a correctness rate: multi_source_* covers stored labels that begin " +
+      "'k/n' with n >= 2, with votes agreeing/cast as exact decimal strings (BigInt); " +
+      "single_source_receipts counts labels with n = 1, which attest one source and are " +
+      "never summed with multi-source votes. Every other non-refusal value is counted " +
+      "in quorum_strings_unparsed and listed verbatim in unparsed_quorum_strings (stored " +
+      "NULL stays null, never merged with ''). No estimated, sampled, or invented " +
+      "numbers, and no answer-correctness claim.",
   };
 }
 
