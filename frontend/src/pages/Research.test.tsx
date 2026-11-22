@@ -36,16 +36,18 @@ describe("Research page, honest preparation and synthetic failure lab", () => {
   });
   it("illustrates each failure as HOLD and resets without changing plan or making requests", () => {
     const f = vi.fn(); vi.stubGlobal("fetch", f); render(<Research />);
+    fireEvent.click(screen.getByRole("tab", { name: /Explore failure cases/ }));
     const first = screen.getByRole("checkbox", { name: /Wrong company/ });
     fireEvent.click(first); expect(screen.getByText("HOLD")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: /Missing history page/ }));
     expect(screen.getByText(/2 illustrated evidence gates fail/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reset lab" }));
-    expect(screen.getByText("SUPPORTED")).toBeInTheDocument(); expect(first).not.toBeChecked();
+    expect(screen.getAllByText("SUPPORTED").length).toBeGreaterThanOrEqual(1); expect(first).not.toBeChecked();
     expect(screen.getByText(/says nothing about your CIK/)).toBeInTheDocument(); expect(f).not.toHaveBeenCalled();
   });
   it("inspects a file locally as an unverified claim and exposes contradictory checks", async () => {
     const f = vi.fn(); vi.stubGlobal("fetch", f); render(<Research />);
+    fireEvent.click(screen.getByRole("tab", { name: /Inspect a saved report/ }));
     const data = { version: "research-run-v1", plan: { version: "research-packet-v1", cik: "320193", year: 2025, form: "10-Q", minimum_count: 3, network: "eip155:11155111" }, plan_hash: "a".repeat(64),
       result: { status: "SUPPORTED", reason: "Synthetic file test", observed_count: 3, checks: [{ name: "source mismatch", ok: false }] }, verification_checks: [], delivery: { status: "pending" } };
     const file = new File([JSON.stringify(data)], "report.json", { type: "application/json" });
@@ -56,7 +58,7 @@ describe("Research page, honest preparation and synthetic failure lab", () => {
     expect(screen.getByText("REPORTED FAIL")).toBeInTheDocument(); expect(f).not.toHaveBeenCalled();
   });
   it("rejects a malformed imported file instead of showing its claimed result", async () => {
-    render(<Research />); const file = new File(["{}"], "wrong.json");
+    render(<Research />); fireEvent.click(screen.getByRole("tab", { name: /Inspect a saved report/ })); const file = new File(["{}"], "wrong.json");
     Object.defineProperty(file, "text", { value: async () => "{}" });
     fireEvent.change(screen.getByLabelText("Choose a saved report.json"), { target: { files: [file] } });
     expect(await screen.findByRole("alert")).toHaveTextContent("Cannot inspect this file");
@@ -66,7 +68,7 @@ describe("Research page, honest preparation and synthetic failure lab", () => {
     render(<Research />);
     expect(screen.getByText(/Pending delivery is not settlement/)).toBeInTheDocument();
     expect(screen.getByText(/prize incentives/)).toBeInTheDocument();
-    expect(screen.getByText(/requires|Requires/)).toHaveTextContent(/One call is capped at \$0.01 test USDC/);
+    expect(screen.getByText(/Requires the reviewed research CLI/)).toHaveTextContent(/One call is capped at \$0.01 test USDC/);
     expect(screen.getByText(/Source|Stored-byte integrity/)).toHaveTextContent(/not independent source truth/);
   });
 });
