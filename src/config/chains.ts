@@ -105,6 +105,38 @@ export const CHAIN_RPCS: Record<string, string[]> = {
     "https://base-sepolia-rpc.publicnode.com",
     "https://sepolia.base.org",
   ],
+  // Coverage expansion 2026-11-22 (epoch-36+ question mix draws chains
+  // beyond the original seven). Two legs each (2-of-2 quorum), every leg
+  // verified live 2026-11-22 with eth_getTransactionByHash AND
+  // eth_getTransactionReceipt on a real OLD tx of its chain (bsc block
+  // 20,000,000; avalanche block 20,000,000 and 10,000,000; gnosis block
+  // 15,000,000; linea block 5,000,000; scroll block 3,000,000) AND on an
+  // unknown hash (null, no error). Rejected live the same day: bsc.drpc.org
+  // and bsc-rpc.publicnode.com (old-tx lookup failed), avalanche publicnode
+  // (old-tx lookup failed), avax.drpc.org (HTTP 404), gnosis publicnode and
+  // gnosis.drpc.org (old-tx lookup failed), gnosis blastapi ("Blast API is
+  // no longer available"), bsc.meowrpc.com / binance.llamarpc.com /
+  // bsc.api.onfinality.io (no usable response).
+  bsc: [
+    "https://bsc-dataseed.binance.org",
+    "https://bsc-mainnet.public.blastapi.io",
+  ],
+  avalanche: [
+    "https://api.avax.network/ext/bc/C/rpc",
+    "https://avalanche.drpc.org",
+  ],
+  gnosis: [
+    "https://rpc.gnosischain.com",
+    "https://rpc.gnosis.gateway.fm",
+  ],
+  linea: [
+    "https://rpc.linea.build",
+    "https://linea.drpc.org",
+  ],
+  scroll: [
+    "https://rpc.scroll.io",
+    "https://scroll.drpc.org",
+  ],
 };
 
 export const MAINNET_RPCS: string[] = [
