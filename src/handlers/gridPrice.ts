@@ -335,7 +335,17 @@ export async function handleGridPrice(
   // The node every lookup, fetch, cache write, receipt and answer below
   // uses: the NP15 hub for a system request, the canonical hub for a
   // hub short name, else the exact supported-map key.
-  const normalizedZone = isCaisoSystem ? CAISO_SYSTEM_NODE : hubAlias ?? zoneKey;
+  let normalizedZone = isCaisoSystem ? CAISO_SYSTEM_NODE : hubAlias ?? zoneKey;
+  // An explicit source qualifier may name only an existing identifier in
+  // that same source. Strip it once, never recursively or across markets.
+  const qualified = /^(NYISO|ELERING) (.+)$/.exec(zoneKey);
+  if (qualified && Object.hasOwn(SUPPORTED_ZONES, qualified[2])) {
+    const candidate = SUPPORTED_ZONES[qualified[2]];
+    if ((qualified[1] === "NYISO" && candidate.market === "NYISO") ||
+        (qualified[1] === "ELERING" && candidate.market === "Elering " + qualified[2])) {
+      normalizedZone = qualified[2];
+    }
+  }
   const zone = Object.hasOwn(SUPPORTED_ZONES, normalizedZone)
     ? SUPPORTED_ZONES[normalizedZone]
     : undefined;
