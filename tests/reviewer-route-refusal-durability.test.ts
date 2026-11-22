@@ -1,0 +1,6 @@
+import {afterAll,beforeEach,expect,it,vi} from 'vitest';import{mkdtempSync,rmSync}from'node:fs';import{tmpdir}from'node:os';import{join}from'node:path';
+const fixture=vi.hoisted(()=>{process.env.SQLITE_PATH='/tmp/vr-route-refusal-'+process.pid+'.sqlite';delete process.env.DATABASE_URL;return{path:process.env.SQLITE_PATH}});
+vi.mock('../src/core/storage',async original=>({...await original<typeof import('../src/core/storage')>(),saveReceipt:vi.fn(async()=>{throw Error('REVIEWER_PRIVATE_STORAGE_DIAGNOSTIC')})}));
+import{buildServer}from'../src/server';import{closeStorage}from'../src/core/storage';
+afterAll(async()=>{await closeStorage();for(const s of['','-wal','-shm'])rmSync(fixture.path+s,{force:true})});
+it.each(['NOT-A-PAIR','UNLISTED/USDC'])('refusal for %s must fail closed if its promised evidence cannot be saved',async pair=>{const sink=vi.spyOn(console,'warn').mockImplementation(()=>{});const a=buildServer();try{const r=await a.inject({url:'/v1/route?pair='+encodeURIComponent(pair)});expect.soft(r.statusCode).toBe(502);expect.soft(r.json().code).toBe('RECEIPT_PERSIST_FAILED');expect.soft(r.body).not.toContain('rcpt_');expect.soft(JSON.stringify(sink.mock.calls)).not.toContain('REVIEWER_PRIVATE_STORAGE_DIAGNOSTIC')}finally{await a.close();sink.mockRestore()}});

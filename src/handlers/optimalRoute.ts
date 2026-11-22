@@ -340,8 +340,8 @@
 // drpc 3.8 s, mevblocker 5.9 s on first connection), so one agent per
 // scheme reuses connections for the process lifetime. Pair is
 // case-normalized ("eth/usdc" accepted). Every receipt is persisted via
-// saveReceipt(receipt, receiptEvidence) (txLookup pattern: warn-and-ship
-// on persist failure) so /receipts/:id serves it.
+// saveReceipt(receipt, receiptEvidence) before a quote or refusal is returned.
+// Persistence failure is unavailable, never a receipt reference without stored evidence.
 // ROUND 11 FIX (A7-fix, 2026-11-20 — J2 FAIL verdict, F1–F6; J1 PASS on
 // the A7 patch is preserved — the checklist items below still hold, with
 // the noted behaviour changes):
@@ -1805,7 +1805,21 @@ export async function handleRouteWithRpcs(
   }
 }
 
-/** The honest refusal path (2026-11-22, owner decision, review-gated):
+async function saveRouteReceipt(receipt: Receipt, evidence: string, ctx: RouteRequestContext): Promise<void> {
+  if (ctx.signal?.aborted) {
+    throw upstreamUnavailable("ROUTE_DEADLINE", "route request exceeded its total deadline; answer unavailable");
+  }
+  try {
+    await saveReceipt(receipt, evidence);
+  } catch {
+    throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
+  }
+  if (ctx.signal?.aborted) {
+    throw upstreamUnavailable("ROUTE_DEADLINE", "route request exceeded its total deadline; answer unavailable");
+  }
+}
+
+/** The receipted refusal path:
  * every refused pair — well-formed with no verifiable liquidity, or
  * malformed — is answered with the HTTP 400 unavailable envelope
  * (routeUnavailable above), never a bare 422 and never an invented
@@ -1848,20 +1862,7 @@ async function refusePair(
     receiptEvidence,
     "no upstream quorum: no venue was queried for a refused pair",
   );
-  if (ctx.signal?.aborted) {
-    console.warn(
-      "verireceipt: skipping ROUTE refusal receipt persist: the request already " +
-        "exceeded its total deadline; refusing a phantom receipt",
-    );
-  } else {
-    try {
-      await saveReceipt(receipt, receiptEvidence);
-    } catch (err) {
-      console.warn(
-        `verireceipt: failed to persist ROUTE refusal receipt ${receipt.receipt_id}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
+  await saveRouteReceipt(receipt, receiptEvidence, ctx);
   return resolution.kind === "malformed"
     ? routeUnavailable("INVALID_PAIR", "the pair parameter is not a well-formed pair string", summary, receipt)
     : routeUnavailable("NO_ROUTE", `no route found for pair "${cappedRaw}"`, summary, receipt);
@@ -1885,13 +1886,10 @@ async function handleRouteInner(
   if (pair === undefined) {
     throw badRequest("MISSING_PARAM", `pair is required; supported pairs: ${SUPPORTED_PAIRS.join(", ")}`);
   }
-  // A7: case-normalized. 2026-11-22 (owner requirement): separators
-  // ("DAI/USDC", "DAI-USDC", "DAI->USDC"), surrounding whitespace and
-  // raw token addresses all resolve through parsePair. The registry key
-  // — never the raw casing — reaches downstream values and receipts.
-  // 2026-11-22 (owner decision, review-gated): a well-formed pair with
-  // no verified liquidity takes the HTTP 400 unavailable-envelope path; malformed input
-  // stays 422 INVALID_PAIR (fail-closed).
+  // Pair separators, surrounding whitespace and raw token addresses resolve
+  // through parsePair. The registry key, never the raw casing, reaches
+  // downstream values and receipts. A refused unregistered/malformed pair
+  // uses the HTTP400 unavailable envelope only after its evidence is saved.
   const resolution = classifyPair(pair);
   if (resolution.kind !== "registered") {
     if (!noRouteEnvelopeEnabled()) {
@@ -2381,20 +2379,7 @@ async function handleRouteInner(
   // moment up to here), and the deadline aborts the in-flight work
   // itself, so in the normal slow case the handler never reaches this
   // point after the deadline at all.
-  if (ctx.signal?.aborted) {
-    console.warn(
-      `verireceipt: skipping ROUTE receipt persist for block ${blockNumber}: ` +
-        `the request already exceeded its total deadline; refusing a phantom receipt`,
-    );
-  } else {
-    try {
-      await saveReceipt(receipt, receiptEvidence);
-    } catch (err) {
-      console.warn(
-        `verireceipt: failed to persist ROUTE receipt ${receipt.receipt_id}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
+  await saveRouteReceipt(receipt, receiptEvidence, ctx);
 
   return envelope(
     INTENT,
