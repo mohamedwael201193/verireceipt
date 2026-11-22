@@ -1,0 +1,50 @@
+{
+  "notice": "Dated ordinary publisher catalog projection, independently selected before the original metric-context edit. Unit controls only; injected transports are not live publisher observations. No historical evaluation input or other-provider source.",
+  "captured_at": "2026-11-22T11:43:38.080Z",
+  "source": {
+    "url": "https://api.llama.fi/protocols",
+    "status": 200,
+    "bytes": 9676332,
+    "wire_sha256": "da23f2269142115daeefe98a738219ba096d03e0d5f9d5a83e115d468610e1ea"
+  },
+  "selection_record_sha256": "2911f83a90684a8c4b1c55c576ca8ea38a32dec2b232bf656683207e01a0b4de",
+  "subjects": [
+    {
+      "entry": {
+        "slug": "antimatter",
+        "name": "Antimatter",
+        "symbol": "MATTER",
+        "tvl": 9722.392833643466,
+        "chainTvls": {
+          "Binance": 1394.4383975496028,
+          "Ethereum": 2843.9725596822072,
+          "Arbitrum": 1228.4687801149873,
+          "Avalanche": 4255.513096296668,
+          "Ethereum-staking": 8818.965187670685,
+          "Kava": 0,
+          "staking": 8818.965187670685
+        }
+      },
+      "expected_chain_tvl_usd": 4255.513096296668
+    },
+    {
+      "entry": {
+        "slug": "numbers-protocol",
+        "name": "Numbers Protocol",
+        "symbol": "NUM",
+        "tvl": 580.9478010913249,
+        "chainTvls": {
+          "Ethereum-pool2": 9.200036196607027,
+          "Binance-pool2": 571.3826884801066,
+          "Binance-staking": 2.735103864197811,
+          "Binance": 571.7240597117898,
+          "Ethereum-staking": 1.0501085096358435e-14,
+          "Ethereum": 9.223741379535099,
+          "pool2": 580.5827246767136,
+          "staking": 2.735103864197822
+        }
+      },
+      "expected_chain_tvl_usd": 571.7240597117898
+    }
+  ]
+}

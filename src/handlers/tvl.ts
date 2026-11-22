@@ -999,9 +999,9 @@ export function stripProtocolEntries(entries: ProtocolEntry[]): ProtocolEntry[] 
 //      fetch (verified live 2026-11-20: the list dominant EQUALS the
 //      /protocol currentChainTvls dominant — uniswap-v3 Ethereum
 //      643,421,478.11692 on both; lido dominant is Ethereum on both).
-//      Rebuilt on every live lists fetch and whenever the in-memory lists
-//      are seeded; NOT rebuilt from disk or seed (both hold the stripped
-//      form, which has no chainTvls).
+//      Rebuilt from each live catalog and in-memory raw seed. A compact
+//      source/time-bound disk snapshot can restore it after a restart;
+//      legacy disk and bundled seeds still contain no split to recover.
 //   3. null — honest: no split known. The field is nullable by contract
 //      (existing "null, never 0" rule); the scored field is tvl_usd.
 // A5-fix2 (2026-11-20, J2-R2 F6): the two sources are compared by
@@ -1042,16 +1042,26 @@ let protocolFillGen = 0;
 /** A fill-cache entry older than this triggers a background re-fill. */
 const PROTOCOL_FILL_TTL_MS = 60 * 60 * 1000;
 
+function deriveListsChainSplit(protocols: readonly ProtocolEntry[]): Map<string, number> {
+  const splits = new Map<string, number>();
+  for (const p of protocols) {
+    const dominant = dominantChainTvl(p.chainTvls);
+    if (dominant !== null) splits.set(p.slug, dominant);
+  }
+  return splits;
+}
+
+function installListsChainSplit(splits: ReadonlyMap<string, number>, fetchedAtMs: number): void {
+  listsChainSplit.clear();
+  for (const [slug, value] of splits) listsChainSplit.set(slug, value);
+  listsChainSplitFetchedAt = fetchedAtMs;
+}
+
 function rebuildListsChainSplit(
   protocols: readonly ProtocolEntry[],
   fetchedAtMs: number = Date.now(),
 ): void {
-  listsChainSplit.clear();
-  for (const p of protocols) {
-    const dominant = dominantChainTvl(p.chainTvls);
-    if (dominant !== null) listsChainSplit.set(p.slug, dominant);
-  }
-  listsChainSplitFetchedAt = fetchedAtMs;
+  installListsChainSplit(deriveListsChainSplit(protocols), fetchedAtMs);
 }
 
 /**
@@ -1130,7 +1140,10 @@ function chainTvlUsdFor(
   tvlUsd?: number,
 ): number | null {
   const fill = protocolChainSplitCache.get(slug);
-  const fromLists = listsChainSplit.get(slug);
+  // Context keeps its source age even if a later legacy catalog supplies
+  // fresh identities without a split. A restart never renews this clock.
+  const listsAge = listsChainSplitFetchedAt === null ? Infinity : Date.now() - listsChainSplitFetchedAt;
+  const fromLists = listsAge >= 0 && listsAge < LISTS_TTL_MS ? listsChainSplit.get(slug) : undefined;
   let chosen: number | null = null;
   if (fill !== undefined && fromLists !== undefined) {
     // Both known: the fresher wins; ties go to the fill (/protocol is
@@ -1213,9 +1226,46 @@ export function __seedTvlCachesForTests(
 // survives only inside the background warm (disk seeding / non-destructive
 // stale reuse on a failed refresh) — it never serves a request.
 
+interface CatalogChainSplits {
+  version: 1;
+  source: typeof PROTOCOLS_URL;
+  fetched_at: number;
+  values: [string, number][];
+}
+
 interface DiskListsEntry<T> {
   data: T[];
   fetchedAt: number;
+  chainSplits?: unknown;
+}
+
+/** Optional context is accepted only with the exact catalog/source clock.
+ * A malformed snapshot is ignored as a whole; its scalar catalog stays usable.
+ * Slugs and count are bounded by the same persisted catalog, not by a URL or
+ * identity supplied in the optional metadata. No remote source is followed. */
+function restoreListsChainSplit(entry: DiskListsEntry<ProtocolEntry>): void {
+  const candidate = entry.chainSplits;
+  if (candidate === null || typeof candidate !== 'object') return;
+  const snapshot = candidate as Partial<CatalogChainSplits>;
+  const age = Date.now() - entry.fetchedAt;
+  if (
+    snapshot.version !== 1 || snapshot.source !== PROTOCOLS_URL ||
+    !Number.isSafeInteger(entry.fetchedAt) || snapshot.fetched_at !== entry.fetchedAt ||
+    age < 0 || age >= LISTS_TTL_MS || !Array.isArray(snapshot.values) ||
+    snapshot.values.length > entry.data.length
+  ) return;
+  const slugs = new Set(entry.data.map(p => p.slug));
+  const values = new Map<string, number>();
+  for (const pair of snapshot.values) {
+    if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== 'string' ||
+      !slugs.has(pair[0]) || values.has(pair[0]) ||
+      typeof pair[1] !== 'number' || !Number.isFinite(pair[1]) || pair[1] <= 0) return;
+    values.set(pair[0], pair[1]);
+  }
+  // A fresh live/in-memory derivation wins ties and cannot be replaced by
+  // older disk state. A newer empty source snapshot deliberately clears it.
+  if (listsChainSplitFetchedAt !== null && listsChainSplitFetchedAt >= entry.fetchedAt) return;
+  installListsChainSplit(values, entry.fetchedAt);
 }
 
 /** Test-only override for the disk-cache directory (tests use a temp dir). */
@@ -1280,13 +1330,14 @@ async function readOneDiskList<T>(
     const parsed = JSON.parse(await readFile(path, 'utf8')) as {
       fetched_at?: unknown;
       data?: unknown;
+      chain_splits?: unknown;
     };
     if (
       typeof parsed.fetched_at === 'number' &&
       Number.isFinite(parsed.fetched_at) &&
       validate(parsed.data)
     ) {
-      return { data: parsed.data as T[], fetchedAt: parsed.fetched_at };
+      return { data: parsed.data as T[], fetchedAt: parsed.fetched_at, chainSplits: parsed.chain_splits };
     }
   } catch {
     // Missing or corrupt disk cache = no disk cache. Never throws.
@@ -1304,11 +1355,13 @@ async function readOneDiskList<T>(
  */
 let diskWriteCounter = 0;
 
-async function writeDiskListsEntry<T>(path: string, data: T[], fetchedAt: number): Promise<void> {
+async function writeDiskListsEntry<T>(
+  path: string, data: T[], fetchedAt: number, chainSplits?: CatalogChainSplits,
+): Promise<void> {
   const tmpPath = `${path}.tmp-${process.pid}-${diskWriteCounter++}`;
   try {
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(tmpPath, JSON.stringify({ fetched_at: fetchedAt, data }), 'utf8');
+    await writeFile(tmpPath, JSON.stringify({ fetched_at: fetchedAt, data, chain_splits: chainSplits }), 'utf8');
     await rename(tmpPath, path);
   } catch {
     // Disk persistence is best-effort; a failed write must never break the
@@ -1330,8 +1383,8 @@ export async function __seedTvlDiskCacheForTests(
   fetchedAtMs: number,
 ): Promise<void> {
   const { protocolsPath, chainsPath } = diskListsPaths();
-  // The disk cache holds the STRIPPED protocol form (A5) — the seed hook
-  // strips too, so a test's disk cache has exactly the production shape.
+  // Preserve the legacy stripped shape so existing old-cache controls keep
+  // testing the no-context migration path. Live refreshes add optional context.
   await writeDiskListsEntry(protocolsPath, stripProtocolEntries(protocols), fetchedAtMs);
   await writeDiskListsEntry(chainsPath, chains, fetchedAtMs);
 }
@@ -1614,7 +1667,7 @@ async function loadOneList<T>(
   // A5-fix: optional callback with the validated RAW list, before the
   // transform — the caller derives side state the stripped form cannot
   // carry (protocols: the lists chain-split map from raw chainTvls).
-  onRaw?: (data: T[]) => void,
+  onRaw?: (data: T[], fetchedAt: number) => void,
 ): Promise<T[]> {
   const now = Date.now();
   if (!forceRefresh && cached && now - cached.fetchedAt < LISTS_TTL_MS) {
@@ -1644,7 +1697,7 @@ async function loadOneList<T>(
       );
     }
     const fetchedAt = Date.now();
-    if (onRaw !== undefined) onRaw(data as T[]);
+    if (onRaw !== undefined) onRaw(data as T[], fetchedAt);
     const fresh = transform !== undefined ? transform(data as T[]) : (data as T[]);
     await onFresh(fresh, fetchedAt);
     return fresh;
@@ -1675,6 +1728,9 @@ async function fetchListsLive(
   },
 ): Promise<{ protocols: ProtocolEntry[]; chains: ChainEntry[] }> {
   const disk = diskSnapshot ?? (await readDiskLists());
+  // This refresh owns its immutable derived snapshot. Never serialize a
+  // mutable global map after a disk await or bind it to a newer clock.
+  let freshChainSplits: CatalogChainSplits | undefined;
   const [protocols, chains] = await Promise.all([
     loadOneList<ProtocolEntry>(
       PROTOCOLS_URL,
@@ -1684,14 +1740,18 @@ async function fetchListsLive(
       disk.protocols,
       async (data, fetchedAt) => {
         protocolsCache = { data, fetchedAt };
-        await writeDiskListsEntry(diskListsPaths().protocolsPath, data, fetchedAt);
+        await writeDiskListsEntry(diskListsPaths().protocolsPath, data, fetchedAt, freshChainSplits);
       },
       isProtocolList,
       forceRefresh,
       stripProtocolEntries,
-      // A5-fix: derive the lists chain-split map from the RAW entries
-      // (their chainTvls) before the strip drops them.
-      (raw) => rebuildListsChainSplit(raw),
+      // Only the validated raw catalog can create persisted split context.
+      (raw, fetchedAt) => {
+        const splits = deriveListsChainSplit(raw);
+        installListsChainSplit(splits, fetchedAt);
+        freshChainSplits = { version: 1, source: PROTOCOLS_URL,
+          fetched_at: fetchedAt, values: [...splits] };
+      },
     ),
     loadOneList<ChainEntry>(
       CHAINS_URL,
@@ -1821,6 +1881,7 @@ async function loadListsFromCache(
   ) {
     protocolsCache = { data: disk.protocols.data, fetchedAt: disk.protocols.fetchedAt };
     chainsCache = { data: disk.chains.data, fetchedAt: disk.chains.fetchedAt };
+    restoreListsChainSplit(disk.protocols);
     // Oldest fetchedAt (see above): the cache is only as fresh as its
     // stalest list.
     maybeRefreshListsInBackground(
@@ -1947,6 +2008,7 @@ export async function warmLists(
       now - disk.chains.fetchedAt < MAX_STALE_MS
     ) {
       seededFetchedAt = Math.min(disk.protocols.fetchedAt, disk.chains.fetchedAt);
+      restoreListsChainSplit(disk.protocols);
       if (!protocolsCache) {
         protocolsCache = { data: disk.protocols.data, fetchedAt: disk.protocols.fetchedAt };
       }
