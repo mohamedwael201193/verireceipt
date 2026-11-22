@@ -4244,7 +4244,10 @@ describe('handleTvl A5-fix2 (J2-R2)', () => {
     expect(out.chain_tvl_usd).toBeNull();
   });
 
-  it('F6: a fresher lists split wins over a staler fill cache', async () => {
+  it('F6: a fresher lists split wins over a staler fill cache', async (context) => {
+    // Control Date only. I/O and deadline timers keep their normal behavior.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    context.onTestFinished(() => { vi.useRealTimers(); });
     const aaveAt = (tvl: number, split: number) =>
       PROTOCOLS_FIXTURE.map((p) =>
         p.slug === 'aave-v3' ? { ...p, tvl, chainTvls: { Ethereum: split } } : p,
@@ -4270,11 +4273,10 @@ describe('handleTvl A5-fix2 (J2-R2)', () => {
     }) as typeof fetch;
     const first = await handleTvl({ protocol: 'aave-v3' }, { fetchImpl: fallbackFetch });
     expect(first.chain_tvl_usd).toBe(222);
-    // Now the lists land a FRESHER split (333, fetched after the fill).
-    // The +1000 ms fetchedAt is the test's way of stating "lists fetched
-    // after the fill" deterministically (ms-ties would fall to the fill
-    // under the tie rule); production timestamps come from real fetches.
-    __seedTvlCachesForTests(aaveAt(1000, 333), CHAINS_FIXTURE, Date.now() + 1000);
+    // Advance the clock before the newer lists arrive. Their timestamp is
+    // the current time, never a future cache date; ms-ties still favor the fill.
+    vi.setSystemTime(Date.now() + 1000);
+    __seedTvlCachesForTests(aaveAt(1000, 333), CHAINS_FIXTURE, Date.now());
     const primaryFetch = (async (url: string | URL | Request): Promise<Response> => {
       const u = String(url);
       if (u === 'https://api.llama.fi/tvl/aave-v3') {
