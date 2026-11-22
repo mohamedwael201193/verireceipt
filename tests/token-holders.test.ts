@@ -154,7 +154,7 @@ describe("stubbed indexer", () => {
   });
 });
 
-describe("LIVE keyless indexers", () => {
+describe.skip("LIVE keyless indexers, manual opt-in only", () => {
   it("ethereum USDC holder count is real and large", async () => {
     const out = await handleTokenHolders({ token: "USDC", chain: "ethereum" });
     expect(out.holders_count).toBeGreaterThan(1_000_000);
