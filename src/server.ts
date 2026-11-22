@@ -21,6 +21,9 @@ import { handleFx } from "./handlers/currencyConvert";
 import { handleDns } from "./handlers/dnsLookup";
 import { handleSsl } from "./handlers/sslVerification";
 import { handleCve } from "./handlers/cveLookup";
+import { handleEmailSecurity } from "./handlers/emailSecurity";
+import { exactQuery } from "./core/exactQuery";
+import { recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
 import { handleMacro } from "./handlers/macroEconomic";
 import { handleTokenHolders } from "./handlers/tokenHolders";
 import { ApiError, badRequest, errorBody } from "./core/errors";
@@ -129,6 +132,16 @@ function asQuery(raw: unknown): Query {
 /** Build (but do not listen on) the Fastify instance. Used by tests and scripts. */
 export function buildServer(): FastifyInstance {
   const app = Fastify({ logger: false });
+  const requestStart = new WeakMap<object, bigint>();
+  app.addHook("onRequest", async (request) => {
+    requestStart.set(request, process.hrtime.bigint());
+    recordRequestArrival(request.routeOptions.url);
+  });
+  app.addHook("onResponse", async (request, reply) => {
+    const started = requestStart.get(request);
+    const elapsedMs = started === undefined ? 0 : Number(process.hrtime.bigint() - started) / 1e6;
+    recordRequestCompletion(request.routeOptions.url, reply.statusCode, elapsedMs);
+  });
 
   // Initialise storage (creates tables on first run). Handlers rely on it
   // for receipt persistence and the grid-price cache.
@@ -198,6 +211,7 @@ export function buildServer(): FastifyInstance {
       // background storage ping (core/storage.ts, every 15 s, 2 s cap) —
       // /health never awaits the database.
       storage: getStorageHealth(),
+      requests: requestMetricsSnapshot(),
     };
   });
 
@@ -205,6 +219,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/dns", async (request) => trackIntent("dns", () => handleDns(asQuery(request.query))));
   app.get("/v1/ssl", async (request) => trackIntent("ssl", () => handleSsl(asQuery(request.query))));
   app.get("/v1/cve", async (request) => trackIntent("cve", () => handleCve(asQuery(request.query))));
+  app.get("/v1/email-security", async (request) => trackIntent("email-security", () => handleEmailSecurity(exactQuery(request.raw.url ?? "", ["domain", "record_type"])), "dns.google"));
   app.get("/v1/filings", async (request) =>
     trackIntent("filings", () => {
       // A1 (2026-11-21): asQuery keeps only the FIRST value of a repeated
