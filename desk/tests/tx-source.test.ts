@@ -64,6 +64,10 @@ describe('chain-bound independent TX block evidence',()=>{
   const f=transport((m,v)=>m==='eth_chainId'?'0x1':m==='eth_getTransactionByHash'?{...v,chainId:'0x1',blockNumber:'0x3e8'}:{...v,blockNumber:'0x3e8',status:undefined,root:'0x'+'aa'.repeat(32)});
   expect((await verifyTxSource({params:{...params,chain:'ethereum'},result:{...result,block_number:1000}},{f})).status).toBe('verified');
  });
+ it('refuses legacy root-only receipts that disagree across the two endpoints',async()=>{
+  const f=transport((m,v,index)=>m==='eth_chainId'?'0x1':m==='eth_getTransactionByHash'?{...v,chainId:'0x1',blockNumber:'0x3e8'}:{...v,blockNumber:'0x3e8',status:undefined,root:'0x'+(index<3?'aa':'bb').repeat(32)});
+  expect((await verifyTxSource({params:{...params,chain:'ethereum'},result:{...result,block_number:1000}},{f})).status).toBe('failed');
+ });
  it('accepts a reverted transaction block only when the paid status also says reverted',async()=>{
   const f=transport((method,v)=>method==='eth_getTransactionReceipt'?{...v,status:'0x0'}:v);
   expect((await verifyTxSource({params,result:{...result,status:'reverted'}},{f})).status).toBe('verified');

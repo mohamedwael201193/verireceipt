@@ -28,7 +28,7 @@ function block(value:unknown):number{
 }
 function sameHash(value:unknown,expected:string):boolean{return typeof value==='string'&&HASH.test(value)&&value.toLowerCase()===expected;}
 function address(value:unknown):string|null{if(value===null)return null;if(typeof value!=='string'||!ADDRESS.test(value))throw new Error('invalid RPC address');return value.toLowerCase();}
-interface Observation{block:number;blockHash:string;status:'confirmed'|'reverted';from:string;to:string|null;wei:string;l1Fee:string|null}
+interface Observation{block:number;blockHash:string;status:'confirmed'|'reverted';from:string;to:string|null;wei:string;l1Fee:string|null;legacyRoot:string|null}
 function minedObservation(rawTx:unknown,rawReceipt:unknown,c:TxContract):Observation{
  const tx=object(rawTx),receipt=object(rawReceipt);
  if(!sameHash(tx.hash,c.hash)||!sameHash(receipt.transactionHash,c.hash))throw new Error('RPC transaction hash mismatch');
@@ -42,7 +42,7 @@ function minedObservation(rawTx:unknown,rawReceipt:unknown,c:TxContract):Observa
  if(receipt.status!==undefined){const value=quantity(receipt.status);if(value!==0n&&value!==1n)throw new Error('invalid receipt status');status=value===1n?'confirmed':'reverted';}
  else if(c.chain==='ethereum'&&height<4370000&&typeof receipt.root==='string'&&HASH.test(receipt.root))status='confirmed';
  else throw new Error('missing supported mined receipt status');
- return {block:height,blockHash:tx.blockHash.toLowerCase(),status,from,to,wei:quantity(tx.value).toString(),l1Fee:receipt.l1Fee===undefined?null:quantity(receipt.l1Fee).toString()};
+ return {block:height,blockHash:tx.blockHash.toLowerCase(),status,from,to,legacyRoot:receipt.status===undefined?receipt.root.toLowerCase():null,wei:quantity(tx.value).toString(),l1Fee:receipt.l1Fee===undefined?null:quantity(receipt.l1Fee).toString()};
 }
 async function rpc(url:string,method:string,params:unknown[],id:number,r:SourceVerification,options:SourceOptions):Promise<unknown>{
  const requests=r.details.rpc_requests as unknown[];requests.push({url,method,params,id,source_index:r.sources.length});

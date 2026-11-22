@@ -101,7 +101,7 @@ deep-copied before awaits, so a callback cannot change its rule mid-run.
 4. **Break it** - ask for a venue whose verified value cannot satisfy the
    precommitted floor (`--set protocol=…`) and the outcome is HOLD naming
    the rule; tamper with any evidence and the failed checks are named.
-5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (479 tests across 30 files,
+5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (480 tests across 30 files,
    no network, no key); the gate flow is covered with mocked nodes including
    tamper cases.
 
@@ -261,3 +261,8 @@ not independent fallback rules in each verifier. Per-field node status and
 node/raw/none provenance are recorded alongside source verification. The
 saved node-shaped grid fixtures and synthetic TX/filings mapper contracts
 cover positive unavailable metadata and negative missing/rejected controls.
+
+Legacy root-only TX observations preserve and compare the root, not only
+their effective confirmed status. Different roots fail agreement. A mixed
+legacy-root/status-only pair also abstains under the strict observation
+comparison rather than treating missing root evidence as equality.
