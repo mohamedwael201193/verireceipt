@@ -72,7 +72,7 @@ interface IndexerTokenInfo {
   rawBody: string;
 }
 
-function parseIndexerResponse(rawBody: string, url: string): IndexerTokenInfo {
+function parseIndexerResponse(rawBody: string, url: string, contract: string): IndexerTokenInfo {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawBody);
@@ -82,11 +82,15 @@ function parseIndexerResponse(rawBody: string, url: string): IndexerTokenInfo {
   if (typeof parsed !== "object" || parsed === null) {
     throw new Error(`unexpected token response shape from ${url}`);
   }
+  if (Array.isArray(parsed)) throw new Error('token response must be an object');
   const obj = parsed as Record<string, unknown>;
+  if (typeof obj.address_hash !== 'string' || obj.address_hash.toLowerCase() !== contract.toLowerCase() || obj.type !== 'ERC-20') {
+    throw new Error('indexer token address/type does not match requested ERC-20 contract');
+  }
   const holdersRaw = obj.holders_count;
-  const holders = typeof holdersRaw === "string" || typeof holdersRaw === "number"
+  const holders = typeof holdersRaw === 'string' && /^\d+$/.test(holdersRaw)
     ? Number(holdersRaw)
-    : NaN;
+    : typeof holdersRaw === 'number' ? holdersRaw : NaN;
   if (!Number.isSafeInteger(holders) || holders < 0 || holders > MAX_HOLDERS) {
     throw new Error(`implausible holders_count ${String(holdersRaw)} from ${url}`);
   }
@@ -156,7 +160,7 @@ export async function handleTokenHolders(
   const url = `${indexer}/api/v2/tokens/${contract}`;
   let info: IndexerTokenInfo;
   try {
-    info = parseIndexerResponse(await fetchText(url), url);
+    info = parseIndexerResponse(await fetchText(url), url, contract);
   } catch (err) {
     throw upstreamUnavailable(
       "INDEXER_UNREACHABLE",

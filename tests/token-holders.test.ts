@@ -43,7 +43,7 @@ async function expectApiError(p: Promise<unknown>, status: number, code: string)
 }
 
 function indexerBody(holders: number, symbol: string): string {
-  return JSON.stringify({ holders_count: String(holders), symbol, decimals: "6" });
+  return JSON.stringify({ holders_count: String(holders), symbol, decimals: "6", address_hash: USDC_ETH, type: "ERC-20" });
 }
 
 afterEach(() => {
@@ -115,7 +115,7 @@ describe("stubbed indexer", () => {
   });
 
   it("accepts 'token on chain' packing and 0x contracts", async () => {
-    setTokenHoldersFetchForTests(async () => indexerBody(671778, "USDC"));
+    setTokenHoldersFetchForTests(async () => JSON.stringify({ ...JSON.parse(indexerBody(671778, "USDC")), address_hash: USDC_OP }));
     const out = await handleTokenHolders({ token: `${USDC_OP} on optimism` });
     expect(out.chain).toBe("optimism");
     expect(out.holders_count).toBe(671778);
