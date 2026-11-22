@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import PublicResearchReplay from "../components/PublicResearchReplay";
+import HostedResearch from "../components/HostedResearch";
 import { inspectResearchReport, type InspectedResearchReport } from "../lib/researchReport";
 import "./research.css";
 import "./research-flow.css";
@@ -47,7 +48,7 @@ export default function Research() {
       <div className="rp-eyebrow">FILING-COVERAGE RESEARCH / SEPOLIA TESTNET</div>
       <h1>A precise question.<br /><span>An answer you can inspect.</span></h1>
       <p>Turn an exact SEC filing question into a source-backed research appendix. See a real recorded run, then prepare your own question or explore the evidence tools.</p>
-      <div className="rp-mode">RESEARCH TOOLS / NO BROWSER PAYMENT <span>No wallet. No purchase. Verify the real stored source below.</span></div>
+      <div className="rp-mode">RESEARCH TOOLS / REAL EVIDENCE <span>No wallet key in this browser. Preparing input and checking stored evidence do not purchase anything.</span></div>
     </header>
     <section className="rp-case" aria-labelledby="rp-case-title">
       <div className="rp-case-top"><span className="rp-eyebrow">RECORDED PAID RUN / NOVEMBER 21, 2026</span><span className="rp-case-network">DIRECT · RELATED-PARTY · TESTNET</span></div>
@@ -70,7 +71,7 @@ export default function Research() {
       <PublicResearchReplay />
     </section>
     <section className="rp-tools" aria-labelledby="rp-tools-title">
-      <div className="rp-tools-head"><div><div className="rp-eyebrow">YOUR NEXT STEP</div><h2 id="rp-tools-title">Choose a research tool</h2></div><p>Everything below stays local to this page. Buying and independent recounting happen in the reviewed CLI.</p></div>
+      <div className="rp-tools-head"><div><div className="rp-eyebrow">YOUR NEXT STEP</div><h2 id="rp-tools-title">Choose a research tool</h2></div><p>Prepare locally, then choose the reviewed CLI or check whether real operator-sponsored testnet requests are available. Nothing is purchased automatically.</p></div>
       <div className="rp-tool-tabs" role="tablist" aria-label="Research tools">{([
         { id: "prepare", title: "Prepare a question", detail: "Create input for the CLI" },
         { id: "inspect", title: "Inspect a saved report", detail: "Read an unverified local file" },
@@ -94,6 +95,7 @@ export default function Research() {
         <div className="rp-output-head"><h3>Input ready, not a frozen policy or paid result</h3><button type="button" onClick={() => void copy()}>Copy input JSON</button></div>
         <pre tabIndex={0}>{prepared}</pre>{copyNote && <p role="status">{copyNote}</p>}
         <p>Save this as <code>research-input.json</code>. The local CLI creates the timestamped plan/hash before any key is loaded or purchase is made. Inspect it, then explicitly choose whether to buy on Sepolia.</p>
+      <HostedResearch inputJson={prepared} />
       </div>}
     </section>
     <details className="rp-details rp-cli-details"><summary>How to run the CLI, costs and prerequisites</summary>
@@ -127,7 +129,7 @@ export default function Research() {
     </div>
     <section className="rp-section rp-limits" aria-labelledby="rp-limits-title"><h2 id="rp-limits-title">A useful appendix, with honest boundaries</h2>
       <div className="rp-columns"><div><h3>What the CLI produces</h3><p>The frozen criterion, exact filing count when checks pass, a dated accession table, matching SEC document links, source checks and recorded testnet cost. A failed criterion is a valid research result.</p></div><div><h3>What it does not prove</h3><p>No investment recommendation, filing-compliance verdict, audited document contents, independent adoption or ranked routing. Stored-byte integrity is not independent source truth. Pending delivery is not settlement.</p></div></div>
-      <a href={DOCS} target="_blank" rel="noreferrer">Repository + reviewed run instructions ↗</a><p className="rp-muted">VeriReceipt is a Telegraph hackathon entry with prize incentives. The browser tools do not complete a paid mission or establish an accepted judging result.</p>
+      <a href={DOCS} target="_blank" rel="noreferrer">Repository + reviewed run instructions ↗</a><p className="rp-muted">VeriReceipt is a Telegraph hackathon entry with prize incentives. A hosted related-party testnet run does not establish whole-mission acceptance or an accepted judging result.</p>
     </section>
   </main>;
 }

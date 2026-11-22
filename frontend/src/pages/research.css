@@ -52,3 +52,5 @@
 .rp-saved{overflow-wrap:anywhere}
 
 .rp-public-replay{margin-top:28px;border-top:1px solid var(--border);padding-top:25px}.rp-public-replay h3{font-size:20px;margin-bottom:12px}.rp-public-replay p{font-size:13px;line-height:1.8;color:var(--soft);max-width:850px}.rp-public-replay .rp-hash{font:11px/1.8 monospace;overflow-wrap:anywhere}.rp-public-replay ul{padding-left:20px;font:12px/1.9 monospace;overflow-wrap:anywhere}.rp-public-replay .rp-secondary{margin-top:12px}.rp-public-replay pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.9 monospace;padding:16px 0}.rp-public-replay h4{margin-bottom:12px}.rp-public-replay a{color:var(--accent);font-size:13px}.rp-public-replay button:disabled{opacity:.65;cursor:wait}
+
+.rp-hosted{margin-top:24px;padding-top:24px;border-top:1px solid var(--border-strong)}.rp-hosted .rp-eyebrow{margin-bottom:14px}.rp-hosted>p{margin-bottom:14px}.rp-hosted .rp-hash{overflow-wrap:anywhere;font:11px/1.8 monospace}.rp-hosted h4{font-size:17px;margin-bottom:12px}.rp-hosted button:disabled{opacity:.6;cursor:wait}.rp-hosted details{margin:16px 0}.rp-hosted .rp-prepared{padding:18px}.rp-hosted .rp-prepared p{margin-bottom:12px}

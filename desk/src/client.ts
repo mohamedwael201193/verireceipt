@@ -56,7 +56,7 @@ export interface AskOptions {
   /** Every id the node may use for this miner in the receipt (catalogue id, registration id). */
   minerIds?: readonly string[];
   /** Called with the raw served response BEFORE any check, so evidence is never lost. */
-  onRawResponse?: (raw: RawResponse) => void;
+  onRawResponse?: (raw: RawResponse) => void | Promise<void>;
 }
 
 export interface RawResponse {
@@ -112,7 +112,7 @@ export async function escrowAskMiner(
 
   const paid = await f(url, { method: "POST", headers: { ...json, "X-PAYMENT": payment }, body });
   const text = await paid.text();
-  opts.onRawResponse?.({
+  await opts.onRawResponse?.({
     status: paid.status,
     headers: Object.fromEntries(paid.headers.entries()),
     bodyText: text,

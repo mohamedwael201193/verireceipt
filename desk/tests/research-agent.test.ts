@@ -61,6 +61,19 @@ describe("research purchase pipeline (synthetic network, no live purchases)", ()
     await expect(runResearch(n.plan, planHash(n.plan), { address: payer, signMessage: n.signMessage }, { ...n, spentTodayUusdc: 0n, now: () => done })).rejects.toThrow("disk full");
     expect(n.signMessage).not.toHaveBeenCalled(); expect(n.events).not.toContain("paid-call");
   });
+  it("awaits an asynchronous reservation failure before signing or paying", async () => {
+    const n = testNode();
+    const beforeSign = vi.fn(async () => { await new Promise(resolve => setTimeout(resolve,5)); throw new Error("database commit failed"); });
+    await expect(runResearch(n.plan,planHash(n.plan),{ address:payer,signMessage:n.signMessage },{ ...n,beforeSign,spentTodayUusdc:0n,now:()=>done })).rejects.toThrow("database commit failed");
+    expect(n.signMessage).not.toHaveBeenCalled(); expect(n.events).not.toContain("paid-call");
+  });
+  it("awaits private response persistence before trusting a paid result", async () => {
+    const n = testNode();
+    const onRawResponse = vi.fn(async () => { await new Promise(resolve => setTimeout(resolve,5)); throw new Error("private evidence commit failed"); });
+    await expect(runResearch(n.plan,planHash(n.plan),{ address:payer,signMessage:n.signMessage },{ ...n,onRawResponse,spentTodayUusdc:0n,now:()=>done })).rejects.toThrow("private evidence commit failed");
+    expect(n.events.filter(x=>x==="paid-call")).toHaveLength(1);
+    expect(vi.mocked(n.f).mock.calls.some(x=>String(x[0]).includes('/engine/v1/signal/'))).toBe(false);
+  });
   it("holds a receipt carrying the wrong intent even when other evidence verifies", async () => {
     const n = testNode({ intent: "WRONG" });
     const r = await runResearch(n.plan, planHash(n.plan), { address: payer, signMessage: n.signMessage }, { ...n, spentTodayUusdc: 0n, now: () => done });

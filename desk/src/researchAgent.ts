@@ -9,8 +9,10 @@ import { evaluateResearch, RESEARCH_INTENT, validateResearchPlan, type ResearchP
 export async function runResearch(p: ResearchPlan, hash: string, payer: Payer, opts: {
   spentTodayUusdc: bigint;
   /** Persist a conservative spend reservation BEFORE signing. Must throw if persistence fails. */
-  beforeSign: (reservation: { plan_hash: string; at: string; reserved_uusdc: string; nonce: string }) => void;
-  onRawResponse: (raw: RawResponse) => void;
+  beforeSign: (reservation: { plan_hash: string; at: string; reserved_uusdc: string; nonce: string }) => void | Promise<void>;
+  /** Hosted service may supply a separately approved cap; local CLI default is unchanged. */
+  dailyCapUusdc?: bigint;
+  onRawResponse: (raw: RawResponse) => void | Promise<void>;
   f?: Fetch;
   now?: () => Date;
 }) {
@@ -23,10 +25,10 @@ export async function runResearch(p: ResearchPlan, hash: string, payer: Payer, o
     signMessage: async message => {
       // Recheck the frozen object immediately before signing, not just at entry.
       validateResearchPlan(p, hash, now());
-      opts.beforeSign({ plan_hash: hash, at: now().toISOString(), reserved_uusdc: p.maximum_call_uusdc, nonce });
+      await opts.beforeSign({ plan_hash: hash, at: now().toISOString(), reserved_uusdc: p.maximum_call_uusdc, nonce });
       return payer.signMessage(message);
     },
-  }, { spentTodayUusdc: opts.spentTodayUusdc, dailyCapUusdc: DESK_DAILY_CAP_UUSDC,
+  }, { spentTodayUusdc: opts.spentTodayUusdc, dailyCapUusdc: opts.dailyCapUusdc ?? DESK_DAILY_CAP_UUSDC,
     minerIds: VERIRECEIPT_ONCHAIN_MINER_IDS, f, now: () => now().getTime(), nonce: () => nonce, onRawResponse: opts.onRawResponse });
   const body = paid.body as { result?: Record<string, unknown>; signal_hash?: string; field_status?: Record<string, FieldStatus> };
   const verified = await verifyPurchase({ payer: payer.address, minerSlug: "verireceipt", signalHash: String(body.signal_hash ?? ""),
