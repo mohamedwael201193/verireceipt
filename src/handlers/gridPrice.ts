@@ -128,7 +128,8 @@ export const CAISO_SYSTEM_MARKET =
  * whitespace-normalised, lower-cased node_or_zone via Object.hasOwn.
  * Each resolves to its canonical OASIS node; the answer is a plain hub
  * answer for that node (node_or_zone is the canonical spelling). The
- * canonical spellings themselves stay case-sensitive (see A4-FIX F7).
+ * canonical identifiers also accept ASCII letter-case variants. Punctuation
+ * and suffixes still have to match a known supported identifier exactly.
  */
 const CAISO_HUB_ALIASES: Record<string, string> = (() => {
   const out: Record<string, string> = {};
@@ -322,17 +323,19 @@ export async function handleGridPrice(
   // resolves to its canonical spelling instead of 422. The normalised
   // spelling is used for every lookup, fetch, receipt and answer
   // below, so a trailing-space query finds the row stored under the
-  // canonical name. Matching stays case-sensitive for single hubs
-  // ("th_np15_gen-apnd" is still 422); only the system spellings are
-  // lower-cased.
+  // canonical name. Known identifiers also accept ASCII letter-case
+  // variants below; this does not add nodes or guess punctuation.
   const requestedZone = nodeOrZone.trim().replace(/\s+/g, " ");
   const systemKey = requestedZone.toLowerCase();
   const isCaisoSystem = Object.hasOwn(CAISO_SYSTEM_REQUESTS, systemKey);
   const hubAlias = isCaisoSystem ? undefined : resolveCaisoHubAlias(requestedZone);
+  // Fold ASCII only: Unicode lookalikes, unknown prefixes and near matches
+  // must still fail the exact own-property check against SUPPORTED_ZONES.
+  const zoneKey = requestedZone.replace(/[a-z]/g, (ch) => ch.toUpperCase());
   // The node every lookup, fetch, cache write, receipt and answer below
   // uses: the NP15 hub for a system request, the canonical hub for a
-  // hub short name, else the normalised query spelling.
-  const normalizedZone = isCaisoSystem ? CAISO_SYSTEM_NODE : hubAlias ?? requestedZone;
+  // hub short name, else the exact supported-map key.
+  const normalizedZone = isCaisoSystem ? CAISO_SYSTEM_NODE : hubAlias ?? zoneKey;
   const zone = Object.hasOwn(SUPPORTED_ZONES, normalizedZone)
     ? SUPPORTED_ZONES[normalizedZone]
     : undefined;
