@@ -5,8 +5,10 @@ export interface SourceApproval {
     /** Maintainer-reviewed terms, not an assertion received from a request. */
     termsUrl: string;
     checkedAt: string;
-    commercialUse: true;
-    redistribution: true;
+    commercialUse: boolean;
+    redistribution: boolean;
+    /** Owner accepts recorded terms risk for this testnet project. Not a licence. */
+    ownerRiskAcceptance?: { sourceMessageId: string; scope: 'testnet-hackathon'; acceptedAt: string };
 }
 export interface SourceObservation<T> {
     value: T;
@@ -37,7 +39,7 @@ function timestamp(x: string): number { const n = Date.parse(x); if (!Number.isF
     throw new Error('invalid source timestamp'); return n; }
 function approved(a: SourceApproval): boolean {
     try {
-        return a.commercialUse === true && a.redistribution === true && new URL(a.termsUrl).protocol === 'https:' && Number.isFinite(Date.parse(a.checkedAt));
+        return ((a.commercialUse === true && a.redistribution === true) || (a.ownerRiskAcceptance?.scope === 'testnet-hackathon' && !!a.ownerRiskAcceptance.sourceMessageId && Number.isFinite(Date.parse(a.ownerRiskAcceptance.acceptedAt)))) && new URL(a.termsUrl).protocol === 'https:' && Number.isFinite(Date.parse(a.checkedAt));
     }
     catch {
         return false;
@@ -73,7 +75,7 @@ export async function observeFromSources<Q, T>(query: Q, sources: readonly Obser
             // ignores AbortSignal may finish late, but cannot save a late receipt here.
             clearTimeout(timer);
             timer = undefined;
-            const evidence = JSON.stringify({ identity, provider: source.name, source_url: observation.sourceUrl, observed_at: observation.observedAt, fetched_at: observation.fetchedAt, raw_body: observation.rawBody, value: observation.value, source_scope: policy.scope, prior_sources: failed, terms: { url: source.approval.termsUrl, checked_at: source.approval.checkedAt } });
+            const evidence = JSON.stringify({ identity, provider: source.name, source_url: observation.sourceUrl, observed_at: observation.observedAt, fetched_at: observation.fetchedAt, raw_body: observation.rawBody, value: observation.value, source_scope: policy.scope, prior_sources: failed, terms: { url: source.approval.termsUrl, checked_at: source.approval.checkedAt, commercial_use_confirmed:source.approval.commercialUse, redistribution_confirmed:source.approval.redistribution, owner_terms_risk_accepted:!!source.approval.ownerRiskAcceptance } });
             const receipt = makeReceipt(policy.intent, observation.sourceUrl, evidence, '1/1 named observation; primary/fallback, not cross-source consensus');
             receipt.fetched_at = observation.fetchedAt;
             // Once persistence starts, errors propagate. Do not retry another source
@@ -92,5 +94,5 @@ export async function observeFromSources<Q, T>(query: Q, sources: readonly Obser
             controller.abort();
         }
     }
-    throw upstreamUnavailable('APPROVED_SOURCES_UNAVAILABLE', 'no current identity-matching observation from a commercially approved redistribution source');
+    throw upstreamUnavailable('APPROVED_SOURCES_UNAVAILABLE', 'no current identity-matching observation from a source with reviewed terms or scoped owner risk acceptance');
 }
