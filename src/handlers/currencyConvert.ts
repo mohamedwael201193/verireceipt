@@ -361,10 +361,9 @@ export async function handleFx(
   );
   try {
     await saveReceipt(receiptDoc, receiptEvidence);
-  } catch (err) {
-    console.warn(
-      `verireceipt: failed to persist FX receipt ${receiptDoc.receipt_id}: ${err instanceof Error ? err.message : String(err)}`,
-    );
+  } catch {
+    // A source observation is not a receipted answer until its evidence is stored.
+    throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
 
   const fields: Record<string, unknown> = {

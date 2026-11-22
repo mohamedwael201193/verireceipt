@@ -184,10 +184,9 @@ export async function handleTokenHolders(
   const receiptDoc: Receipt = makeReceipt(INTENT, url, info.rawBody, "1/1 indexer of record (Blockscout)");
   try {
     await saveReceipt(receiptDoc, info.rawBody);
-  } catch (err) {
-    console.warn(
-      `verireceipt: failed to persist TOKEN_HOLDERS receipt ${receiptDoc.receipt_id}: ${err instanceof Error ? err.message : String(err)}`,
-    );
+  } catch {
+    // A source observation is not a receipted answer until its evidence is stored.
+    throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
 
   return envelope(INTENT, fields, receiptDoc, {
