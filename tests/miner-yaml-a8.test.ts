@@ -36,6 +36,22 @@ function keysAt(lines: string[], indent: number): string[] {
   return lines.map((l) => re.exec(l)?.[1]).filter((k): k is string => k !== undefined);
 }
 
+function acceptedFieldEntries(lines: string[]): Array<{ value: string; lines: string[] }> {
+  const start = lines.findIndex(line => line.trim() === "accepted_fields:");
+  expect(start).toBeGreaterThan(-1);
+  const indent = lines[start].length - lines[start].trimStart().length;
+  let end = start + 1;
+  while (end < lines.length && (lines[end].trim() === "" || lines[end].length - lines[end].trimStart().length > indent)) end++;
+  const body = lines.slice(start + 1, end).filter(line => line.trim() !== "");
+  const starts = body.flatMap((line, index) => line.length - line.trimStart().length === indent + 2 ? [index] : []);
+  return starts.map((index, position) => {
+    const own = body.slice(index, starts[position + 1] ?? body.length).map(line => line.trim());
+    expect(own[0]).not.toMatch(/^-/);
+    expect(own[0]).toMatch(/^[^:]+:$/);
+    return { value: own[0].slice(0, -1), lines: own };
+  });
+}
+
 const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, string | null>; inputs: string[] }> = {
   ONCHAIN_TX_LOOKUP_GENERAL: {
     endpoint: "/v1/tx",
@@ -140,13 +156,30 @@ describe("A8 miner.yaml vs the official intent schemas", () => {
     const trimmed = lines.map(line => line.trim());
     expect(trimmed).toContain("- name: pair");
     expect(trimmed[trimmed.indexOf("- name: pair") + 1]).toBe("type: string");
-    const values = lines.filter(line => /^\s+- value:/.test(line)).map(line => line.trim().replace(/^- value:\s*/, ""));
-    expect(values).toEqual(["ETH/USDC"]);
-    const accepted = trimmed.slice(trimmed.indexOf("accepted_fields:"));
-    expect(accepted.slice(0, 4)).toEqual([
-      "accepted_fields:", "- value: ETH/USDC", "intents:", "- OPTIMAL_EXECUTION_ROUTE_GENERAL",
+    const entries = acceptedFieldEntries(lines);
+    expect(entries.map(entry => entry.value)).toEqual(["ETH/USDC"]);
+    expect(entries[0].lines.slice(0, 3)).toEqual([
+      "ETH/USDC:", "intents:", "- OPTIMAL_EXECUTION_ROUTE_GENERAL",
     ]);
-    expect(accepted.join(" ")).toContain("Sell exactly 1 ETH for USDC on Ethereum mainnet; amount_out is USDC base units (6 decimals).");
+    expect(entries[0].lines.join(" ")).toContain("Sell exactly 1 ETH for USDC on Ethereum mainnet; amount_out is USDC base units (6 decimals).");
+  });
+
+  it.each([
+    ["/v1/macro", ["unemployment rate"], "MACRO_ECONOMIC_INDICATOR_GENERAL"],
+    ["/v1/dns", ["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA", "SRV", "PTR"], "DNS_RECORD_LOOKUP_GENERAL"],
+  ] as const)("%s uses a value-keyed accepted_fields map with exact values and intent bindings", (endpoint, values, intent) => {
+    const entries = acceptedFieldEntries(block(`  - path: ${endpoint}`));
+    expect(entries.map(entry => entry.value)).toEqual(values);
+    for (const entry of entries) expect(entry.lines.slice(0, 3)).toEqual([`${entry.value}:`, "intents:", `- ${intent}`]);
+  });
+
+  it.each(["/v1/route", "/v1/macro", "/v1/dns"])("%s accepted_fields control rejects the former sequence representation", endpoint => {
+    const lines = block(`  - path: ${endpoint}`);
+    const values = new Set(acceptedFieldEntries(lines).map(entry => `${entry.value}:`));
+    const sequence = lines.map(line => values.has(line.trim())
+      ? `${" ".repeat(line.length - line.trimStart().length)}- value: ${line.trim().slice(0, -1)}`
+      : line);
+    expect(() => acceptedFieldEntries(sequence)).toThrow();
   });
 
   it("VALIDATOR declares a canonical digit string and finalized-root consensus, not head state", () => {
