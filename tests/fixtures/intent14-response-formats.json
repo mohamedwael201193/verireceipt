@@ -1,0 +1,280 @@
+{
+  "scope": "Held official response-format projections only; no evaluation payloads. Captured times are historical, not a fresh source-state claim. The immutable manifest selects the mapped subset.",
+  "intents": {
+    "GAS_PRICE_GENERAL": {
+      "intent_id": "GAS_PRICE_GENERAL",
+      "version": 2,
+      "captured_at": "2026-11-22T04:17:46.962385+00:00",
+      "response": {
+        "fields": [
+          {
+            "name": "chain",
+            "description": "The chain the gas price is for",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "gas_price_gwei",
+            "description": "Current gas price in gwei",
+            "type": "number",
+            "unit": "gwei",
+            "unit_aliases": {
+              "wei": 1e-09
+            },
+            "range": [
+              0,
+              100000
+            ],
+            "scored": true,
+            "decimals": 6,
+            "aliases": [
+              "gas",
+              "gas fee",
+              "gas fees",
+              "gwei"
+            ]
+          },
+          {
+            "name": "transfer_fee_usd",
+            "description": "Estimated US dollar cost of a standard 21,000-gas transfer",
+            "type": "number",
+            "unit": "USD",
+            "range": [
+              0,
+              10000
+            ],
+            "decimals": 6,
+            "off_chain": true,
+            "aliases": [
+              "transfer fee",
+              "transaction fee"
+            ]
+          },
+          {
+            "name": "as_of",
+            "description": "Timestamp of the reading",
+            "type": "string",
+            "off_chain": true
+          }
+        ],
+        "format_version": 3,
+        "served_by": "GAS_PRICE"
+      },
+      "projection_sha256": "ae058aaf1d0e3f5129b9841025a5ecbbfd0576acc6496057599ba9c16657aca8"
+    },
+    "WALLET_BALANCE_CHECK_GENERAL": {
+      "intent_id": "WALLET_BALANCE_CHECK_GENERAL",
+      "version": 2,
+      "captured_at": "2026-11-22T04:17:49.478003+00:00",
+      "response": {
+        "fields": [
+          {
+            "name": "address",
+            "description": "The blockchain address whose balance is reported",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "chain",
+            "description": "The chain the balance is on",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "balance",
+            "description": "Balance held, in whole units of the coin or token (not wei)",
+            "type": "number",
+            "unit": "whole token units",
+            "range": [
+              0,
+              1000000000000000
+            ],
+            "scored": true,
+            "decimals": 6,
+            "aliases": [
+              "holding",
+              "hold",
+              "holds",
+              "holdings"
+            ]
+          },
+          {
+            "name": "token_symbol",
+            "description": "Symbol of the coin or token the balance is in",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "as_of",
+            "description": "Timestamp of the balance reading",
+            "type": "string",
+            "off_chain": true
+          }
+        ],
+        "format_version": 5,
+        "served_by": "WALLET_BALANCE_CHECK"
+      },
+      "projection_sha256": "ffb78741d0394d723e626aa5bf4d1362d69b5c20565de6c98e51ce5158549387"
+    },
+    "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL": {
+      "intent_id": "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL",
+      "version": 2,
+      "captured_at": "2026-11-22T04:17:48.758065+00:00",
+      "response": {
+        "fields": [
+          {
+            "name": "total_supply",
+            "description": "Current total supply of the token, in whole tokens (decimals applied)",
+            "type": "number",
+            "unit": "whole tokens",
+            "range": [
+              0,
+              1000000000000000
+            ],
+            "scored": true
+          }
+        ],
+        "format_version": 1,
+        "served_by": "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL"
+      },
+      "projection_sha256": "5f1ee6e067dd42ca96c3d265f9a9aeaf7ce854cd3c89921ac36374433f55ff9d"
+    },
+    "MACRO_ECONOMIC_INDICATOR_GENERAL": {
+      "intent_id": "MACRO_ECONOMIC_INDICATOR_GENERAL",
+      "version": 2,
+      "captured_at": "2026-11-22T04:17:47.436412+00:00",
+      "response": {
+        "fields": [
+          {
+            "name": "rate_pct",
+            "description": "Unemployment rate (% of total labour force, World Bank indicator {indicator}) for {country_name} ({country}) in {year}, in percent",
+            "type": "number",
+            "unit": "percent",
+            "range": [
+              0,
+              100
+            ],
+            "scored": true,
+            "decimals": 6,
+            "aliases": [
+              "inflation",
+              "cpi"
+            ]
+          }
+        ],
+        "format_version": 5,
+        "served_by": "MACRO_ECONOMIC_INDICATOR"
+      },
+      "projection_sha256": "08bfcdbbe57992244a0e689e0bd992c37a31ca997333436f37a040802752f28c"
+    },
+    "DNS_RECORD_LOOKUP_GENERAL": {
+      "intent_id": "DNS_RECORD_LOOKUP_GENERAL",
+      "version": 2,
+      "captured_at": "2026-11-22T04:17:46.536303+00:00",
+      "response": {
+        "fields": [
+          {
+            "name": "has_record",
+            "description": "Whether the DNS {type} lookup for {name} returned at least one record: 1 or true means yes, 0 or false means no",
+            "type": "bool",
+            "true_when": [
+              "1",
+              "true",
+              "yes"
+            ],
+            "false_when": [
+              "false",
+              "no",
+              "0"
+            ],
+            "scored": true
+          }
+        ],
+        "format_version": 3,
+        "served_by": "DNS_RECORD_LOOKUP"
+      },
+      "projection_sha256": "42cd2674f482ba9f131c046825d0b710b90108dfc8485359af9b7e5dff25162b"
+    },
+    "CURRENCY_EXCHANGE_CONVERT": {
+      "intent_id": "CURRENCY_EXCHANGE_CONVERT",
+      "version": 1,
+      "captured_at": "2026-11-22T04:17:46.506137+00:00",
+      "response": {
+        "fields": [
+          {
+            "name": "converted_amount",
+            "description": "What 100 US dollars convert to in {key}",
+            "type": "number",
+            "unit": "{key}",
+            "range": [
+              0.01,
+              100000000
+            ],
+            "scored": true
+          }
+        ],
+        "format_version": 1,
+        "served_by": "CURRENCY_EXCHANGE_CONVERT"
+      },
+      "projection_sha256": "9f6fca4de965ad5c8993a4390db0198622ffc47290789e03356f7ae9913592d3"
+    },
+    "SSL_VERIFICATION_CERT": {
+      "intent_id": "SSL_VERIFICATION_CERT",
+      "version": 1,
+      "captured_at": "2026-11-22T04:17:48.439504+00:00",
+      "response": {
+        "fields": [
+          {
+            "name": "certificate_valid",
+            "description": "Whether the TLS certificate of {key} is currently valid and trusted",
+            "type": "bool",
+            "true_when": [
+              "true",
+              "yes",
+              "valid",
+              "trusted"
+            ],
+            "scored": true
+          }
+        ],
+        "format_version": 1,
+        "served_by": "SSL_VERIFICATION_CERT"
+      },
+      "projection_sha256": "c7b61f6044a6933b7543b01deb9450357500aab1b1d13d4bde8278770a1aecbc"
+    },
+    "EMAIL_SECURITY_GENERAL": {
+      "intent_id": "EMAIL_SECURITY_GENERAL",
+      "version": 1,
+      "captured_at": "2026-11-22T04:17:46.585416+00:00",
+      "response": {
+        "fields": [
+          {
+            "name": "lookup_ok",
+            "description": "Whether the DNS {type} lookup for {name} succeeded: DNS Status 0 (NOERROR) means yes, any other status means no",
+            "type": "bool",
+            "true_when": [
+              "0",
+              "NOERROR"
+            ],
+            "false_when": [
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "FORMERR",
+              "SERVFAIL",
+              "NXDOMAIN",
+              "NOTIMP",
+              "REFUSED"
+            ],
+            "scored": true
+          }
+        ],
+        "format_version": 3,
+        "served_by": "EMAIL_SECURITY"
+      },
+      "projection_sha256": "bf32cc0f8fc5db880c58cd67d4bfcc31cafca4b2c622746dbc2cb60f3e5775f1"
+    }
+  }
+}
