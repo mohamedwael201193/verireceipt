@@ -3,12 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import Research from "./Research";
 
 afterEach(() => vi.unstubAllGlobals());
-describe("Research page, honest preparation and synthetic failure lab", () => {
+describe("Research page, real evidence and local preparation", () => {
   it("does not ask for a wallet, make a payment or fetch evidence", () => {
     const f = vi.fn(); vi.stubGlobal("fetch", f);
     render(<Research />);
     expect(screen.getByText(/No wallet. No purchase. No live verification/)).toBeInTheDocument();
-    expect(screen.getByText(/SIMULATION \/ NOT A RECEIPT/)).toBeInTheDocument();
+    expect(screen.queryByText(/SIMULATION|synthetic fixture/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /buy|pay|connect wallet/i })).not.toBeInTheDocument();
     expect(f).not.toHaveBeenCalled();
   });
@@ -33,17 +33,6 @@ describe("Research page, honest preparation and synthetic failure lab", () => {
     fireEvent.change(screen.getByLabelText("Minimum count"), { target: { value: "1.5" } });
     fireEvent.click(screen.getByRole("button", { name: /Prepare input/ }));
     expect(screen.getByRole("alert")).toHaveTextContent("integer");
-  });
-  it("illustrates each failure as HOLD and resets without changing plan or making requests", () => {
-    const f = vi.fn(); vi.stubGlobal("fetch", f); render(<Research />);
-    fireEvent.click(screen.getByRole("tab", { name: /Explore failure cases/ }));
-    const first = screen.getByRole("checkbox", { name: /Wrong company/ });
-    fireEvent.click(first); expect(screen.getByText("HOLD")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("checkbox", { name: /Missing history page/ }));
-    expect(screen.getByText(/2 illustrated evidence gates fail/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Reset lab" }));
-    expect(screen.getAllByText("SUPPORTED").length).toBeGreaterThanOrEqual(1); expect(first).not.toBeChecked();
-    expect(screen.getByText(/says nothing about your CIK/)).toBeInTheDocument(); expect(f).not.toHaveBeenCalled();
   });
   it("inspects a file locally as an unverified claim and exposes contradictory checks", async () => {
     const f = vi.fn(); vi.stubGlobal("fetch", f); render(<Research />);

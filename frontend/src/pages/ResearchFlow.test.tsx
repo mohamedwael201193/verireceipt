@@ -32,10 +32,10 @@ describe("Evidence-first research journey", () => {
     render(<Research />);
     expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
     fireEvent.change(screen.getByLabelText("SEC CIK"), { target: { value: "1318605" } });
-    fireEvent.click(screen.getByRole("tab", { name: /Explore failure cases/ }));
-    expect(screen.getByRole("tabpanel")).toHaveAccessibleName(/Explore failure cases/);
+    fireEvent.click(screen.getByRole("tab", { name: /Inspect a saved report/ }));
+    expect(screen.getByRole("tabpanel")).toHaveAccessibleName(/Inspect a saved report/);
     expect(screen.queryByRole("button", { name: /Prepare input/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /Wrong company/ })).toBeInTheDocument();
+    expect(screen.getByLabelText("Choose a saved report.json")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: /Prepare a question/ }));
     expect(screen.getByLabelText("SEC CIK")).toHaveValue("1318605");
   });
@@ -45,10 +45,9 @@ describe("Evidence-first research journey", () => {
     prepare.focus(); fireEvent.keyDown(prepare, { key: "ArrowRight" });
     const inspect = screen.getByRole("tab", { name: /Inspect a saved report/ });
     expect(inspect).toHaveFocus(); expect(inspect).toHaveAttribute("aria-selected", "true");
-    fireEvent.keyDown(inspect, { key: "End" });
-    const lab = screen.getByRole("tab", { name: /Explore failure cases/ });
-    expect(lab).toHaveFocus(); fireEvent.keyDown(lab, { key: "ArrowRight" });
-    expect(prepare).toHaveFocus(); fireEvent.keyDown(prepare, { key: "ArrowLeft" });
-    expect(lab).toHaveFocus(); fireEvent.keyDown(lab, { key: "Home" }); expect(prepare).toHaveFocus();
+    fireEvent.keyDown(inspect, { key: "ArrowRight" }); expect(prepare).toHaveFocus();
+    fireEvent.keyDown(prepare, { key: "End" }); expect(inspect).toHaveFocus();
+    fireEvent.keyDown(inspect, { key: "Home" }); expect(prepare).toHaveFocus();
+    fireEvent.keyDown(prepare, { key: "ArrowLeft" }); expect(inspect).toHaveFocus();
   });
 });
