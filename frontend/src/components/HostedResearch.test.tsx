@@ -1,4 +1,4 @@
-import { fireEvent,render,screen,waitFor } from '@testing-library/react';
+import { cleanup,fireEvent,render,screen,waitFor } from '@testing-library/react';
 import { afterEach,describe,expect,it,vi } from 'vitest';
 import HostedResearch from './HostedResearch';
 const input=JSON.stringify({cik:'1318605',year:2024,form:'10-Q',minimum_count:3});
@@ -12,7 +12,7 @@ function setup(last:(url:string,opts?:RequestInit)=>Promise<Response>){
  });vi.stubGlobal('fetch',fetcher);render(<HostedResearch inputJson={input}/>);return fetcher;
 }
 async function ready(){fireEvent.click(screen.getByRole('button',{name:'Check hosted availability'}));await screen.findByRole('button',{name:/Run once, operator pays/});}
-afterEach(()=>vi.unstubAllGlobals());
+afterEach(()=>{vi.unstubAllGlobals();sessionStorage.clear();});
 describe('hosted browser job boundary, test-only HTTP responses and no real purchases',()=>{
  it('does no network work or payment on mount and shows the exact terms',()=>{
   const f=setup(async()=>json({}));expect(f).not.toHaveBeenCalled();expect(screen.getByText(/one real \$0.01 test-USDC/)).toBeInTheDocument();expect(screen.getByText(/related-party purchase/)).toBeInTheDocument();expect(screen.getByText(/hash.*session\/network/)).toBeInTheDocument();expect(screen.queryByRole('button',{name:/Run once/})).not.toBeInTheDocument();
@@ -34,4 +34,15 @@ describe('hosted browser job boundary, test-only HTTP responses and no real purc
  it('does not turn capacity rejection into another paid request',async()=>{
   const f=setup(async()=>json({code:'BUSY'},429));await ready();fireEvent.click(screen.getByRole('button',{name:/Run once/}));await screen.findByText(/capacity or the testnet safety budget/);expect(f.mock.calls.filter(c=>c[1]?.method==='POST')).toHaveLength(1);
  });
+});
+
+it('recovers the original submission across reload even when the edited question changes',async()=>{
+ const f=setup(async()=>{throw new Error('response lost');});await ready();fireEvent.click(screen.getByRole('button',{name:/Run once/}));await screen.findByText(/may have reached the payer/);
+ const first=f.mock.calls.find(c=>c[1]?.method==='POST')!;cleanup();render(<HostedResearch inputJson={input.replace('2024','2023')}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Recover this same submission'}));await waitFor(()=>expect(f.mock.calls.filter(c=>c[1]?.method==='POST')).toHaveLength(2));
+ const last=f.mock.calls.filter(c=>c[1]?.method==='POST')[1];expect(last[1]?.body).toBe(input);expect(new Headers(last[1]?.headers).get('Idempotency-Key')).toBe(new Headers(first[1]?.headers).get('Idempotency-Key'));
+});
+it('does not POST when durable browser recovery storage is unavailable',async()=>{
+ const f=setup(async()=>json({}));await ready();const spy=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new Error('storage blocked');});
+ fireEvent.click(screen.getByRole('button',{name:/Run once/}));await screen.findByText(/browser recovery storage is unavailable/);expect(f.mock.calls.filter(c=>c[1]?.method==='POST')).toHaveLength(0);spy.mockRestore();
 });

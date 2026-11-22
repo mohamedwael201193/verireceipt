@@ -51,6 +51,13 @@ describe.skipIf(!enabled)('hosted API with real isolated PostgreSQL, no-payment 
     const again=await post({},h);expect(again.json().job_id).toBe(id);expect(again.json().reused).toBe(true);expect(runtime).toHaveBeenCalledTimes(1);
     await vi.waitFor(async()=>{const r=await app.inject({url:'/v1/research/jobs/'+id,headers:{cookie}});expect(r.json().state).toBe('complete');expect(r.json().result.version).toBe('test-runtime-only');});
   });
+  it('does not classify an old creation as stale while the renewed signing lease remains active',async()=>{
+    runtime.mockImplementationOnce(async(_input,opts)=>{await opts.beforeSign({plan_hash:'c'.repeat(64),at:new Date().toISOString(),reserved_uusdc:'10000',nonce:'late-sign-test'});return new Promise((_resolve,reject)=>opts.signal.addEventListener('abort',()=>reject(new Error('shutdown')),{once:true}));});
+    const r=await post(),id=r.json().job_id;await vi.waitFor(async()=>expect((await pool.query('SELECT state FROM visitor_research_jobs WHERE id=$1',[id])).rows[0].state).toBe('signed'));
+    await pool.query("UPDATE visitor_research_jobs SET created_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",[id]);
+    const fresh=await app.inject({url:'/v1/research/jobs/'+id,headers:{cookie}});expect(fresh.json().state).toBe('signed');expect(fresh.json().retention_policy).toBe('undecided');
+    await pool.query("UPDATE visitor_research_payer SET blocked_until=clock_timestamp()-interval '1 second'");expect((await app.inject({url:'/v1/research/jobs/'+id,headers:{cookie}})).json().state).toBe('uncertain');
+  });
   it('another visitor cannot retrieve a job or result',async()=>{const r=await post();const id=r.json().job_id;expect((await app.inject({url:'/v1/research/jobs/'+id,headers:{cookie:'vr_research='+'b'.repeat(64)}})).statusCode).toBe(404);});
   it('shutdown aborts an active request without refunding or retrying it',async()=>{
     runtime.mockImplementationOnce(async(_input,opts)=>new Promise((_resolve,reject)=>{

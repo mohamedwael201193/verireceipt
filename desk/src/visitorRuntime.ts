@@ -19,11 +19,12 @@ export function assertVisitorConfiguration(): void { configuredPayer(); }
 export async function executeVisitorResearch(input: { cik: string; year: number; form: string; minimum_count: number }, options: {
   spentTodayUusdc: string; dailyCapUusdc: string; reserveUusdc: string;
   signal: AbortSignal;
+  recordHeaders: (response: { status: number; receiptHeader: string | null }) => Promise<void>;
   recordResponse: (response: { status: number; receiptHeader: string | null; bodyText: string }) => Promise<void>;
   beforeSign: (reservation: { plan_hash: string; at: string; reserved_uusdc: string; nonce: string }) => Promise<void>;
 }) {
   const account = configuredPayer();
-  const f = makeVisitorFetch(options.signal,account.address);
+  const f = makeVisitorFetch(options.signal,account.address,fetch,options.recordHeaders);
   const available = await readLedgerAccount(account.address, f);
   if (!/^\d+$/.test(available.available) || BigInt(available.available) < BigInt(options.reserveUusdc) + 10_000n) throw new Error('Hosted payer reserve reached');
   const p = makeResearchPlan(input), hash = planHash(p);

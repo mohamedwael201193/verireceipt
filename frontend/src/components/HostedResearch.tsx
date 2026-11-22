@@ -9,14 +9,25 @@ async function readJson(response:Response):Promise<Record<string,unknown>> {
   finally { await reader.cancel();reader.releaseLock(); }
   const value:unknown=JSON.parse(text);if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Invalid response');return value as Record<string,unknown>;
 }
+const RECOVERY_KEY='vr-hosted-research-recovery-v1';
+interface Recovery { requestId:string; input:string; jobId:string|null }
+function readRecovery():Recovery|null {
+  const raw=sessionStorage.getItem(RECOVERY_KEY);if(!raw)return null;
+  const value=JSON.parse(raw) as Recovery;
+  if(!value||typeof value.requestId!=='string'||!/^[0-9a-f-]{36}$/.test(value.requestId)||typeof value.input!=='string'||value.input.length>2048||(value.jobId!==null&&(typeof value.jobId!=='string'||!/^[0-9a-f-]{36}$/.test(value.jobId))))throw new Error('Recovery record invalid');
+  return value;
+}
 export default function HostedResearch({ inputJson }:{inputJson:string}) {
   const [available,setAvailable]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[job,setJob]=useState<Job|null>(null);
-  const requestId=useRef<string|null>(null),controller=useRef<AbortController|null>(null),submitted=useRef(false);
+  const recovery=useRef<Recovery|null>(null),recoveryBlocked=useRef(false);
+  const [restored]=useState(()=>{try{recovery.current=readRecovery();return recovery.current;}catch{recoveryBlocked.current=true;return null;}});
+  const requestId=useRef<string|null>(restored?.requestId??null),controller=useRef<AbortController|null>(null),submitted=useRef(Boolean(restored)||recoveryBlocked.current);
+  useEffect(()=>{if(restored?.jobId)setJob({id:restored.jobId,state:'reserved',raw:null,report:null});if(restored)setMessage('Recovered the original submission from this tab. Recovery only reads its job or reuses its original input and submission ID.');if(recoveryBlocked.current)setMessage('HOLD: the saved recovery record is unavailable or invalid. No new purchase is allowed. Keep any job ID for operator reconciliation.');},[restored]);
   useEffect(()=>()=>{controller.current?.abort();controller.current=null;},[]);
   async function action(work:(signal:AbortSignal)=>Promise<void>){
     if(controller.current)return;const c=new AbortController();controller.current=c;setBusy(true);setMessage('');const timer=setTimeout(()=>c.abort(),125_000);
     try{await work(c.signal);}
-    catch{if(controller.current===c)setMessage(submitted.current?'HOLD: this submission may have reached the payer. Do not create another request to fix it. Recover the same submission below, or keep the job ID for reconciliation. No refund or settlement is assumed.':'Hosted research is unavailable or did not complete its readiness check. Nothing was submitted. You can use the local CLI.');}
+    catch{if(controller.current===c)setMessage(recoveryBlocked.current?'HOLD: browser recovery storage is unavailable. No new submission was sent. Do not create another purchase to recover an older job.':submitted.current?'HOLD: this submission may have reached the payer. Do not create another request to fix it. Recover the same submission below, or keep the job ID for reconciliation. No refund or settlement is assumed.':'Hosted research is unavailable or did not complete its readiness check. Nothing was submitted. You can use the local CLI.');}
     finally{clearTimeout(timer);if(controller.current===c){controller.current=null;setBusy(false);}}
   }
   async function check(signal:AbortSignal){
@@ -33,13 +44,19 @@ export default function HostedResearch({ inputJson }:{inputJson:string}) {
     setJob({id,state:String(found.state),raw:found.result,report});return found.state==='complete'||found.state==='uncertain';
   }
   async function submit(signal:AbortSignal){
+    if(recoveryBlocked.current)throw new Error('Recovery unavailable');
     if(!requestId.current)requestId.current=crypto.randomUUID();
-    submitted.current=true;
-    const response=await fetch(`${API_BASE}/v1/research/jobs`,{method:'POST',signal,cache:'no-store',credentials:'same-origin',headers:{'Content-Type':'application/json','Idempotency-Key':requestId.current},body:inputJson});
+    const saved=recovery.current??{requestId:requestId.current,input:inputJson,jobId:null};
+    // Persist the exact original body and ID before any chargeable POST. A storage
+    // failure blocks submission, rather than losing the only recovery handle.
+    try{sessionStorage.setItem(RECOVERY_KEY,JSON.stringify(saved));}catch{recoveryBlocked.current=true;submitted.current=true;throw new Error('Recovery storage unavailable');}
+    recovery.current=saved;submitted.current=true;
+    const response=await fetch(`${API_BASE}/v1/research/jobs`,{method:'POST',signal,cache:'no-store',credentials:'same-origin',headers:{'Content-Type':'application/json','Idempotency-Key':requestId.current},body:saved.input});
     if(response.status===429){setMessage('HOLD: hosted capacity or the testnet safety budget is reached. This attempt did not start another purchase. Keep this same submission ID if you try again.');return;}
     if(response.status!==202)throw new Error('Submission uncertain');
     const accepted=await readJson(response),id=accepted.job_id;
     if(typeof id!=='string'||!/^[0-9a-f-]{36}$/.test(id)||accepted.network!=='eip155:11155111')throw new Error('Invalid job');
+    recovery.current={...saved,jobId:id};sessionStorage.setItem(RECOVERY_KEY,JSON.stringify(recovery.current));
     setJob({id,state:'reserved',raw:null,report:null});
     for(let i=0;i<38;i++){
       if(await readJob(id,signal))return;
@@ -54,10 +71,10 @@ export default function HostedResearch({ inputJson }:{inputJson:string}) {
     <h3>Run this exact question without a wallet</h3>
     <p>The operator pays one real $0.01 test-USDC request on Ethereum Sepolia. This is a related-party purchase, not independent adoption or ranked routing. Your browser never receives a signing key. No real money is spent.</p>
     <details className="rp-details"><summary>Safety limits and stored data</summary><p className="rp-muted">One active hosted purchase at a time. Safety limits: 10 submissions per session per minute, 100 per shared network per minute, $100 test USDC per UTC day across the service, and a 1 test-USDC payer reserve. Shared proxies can group visitors. There is no separate per-visitor daily cap. A 512 MB/day stored-output budget can also pause new submissions. The CLI has its own lower cap.</p>
-    <p className="rp-muted">Submission creates a server-side job and stores this question, hashed session/network identifiers and paid evidence for reconciliation. A cookie controls access to your report for 24 hours; download the finished report. Stored reconciliation records do not currently auto-expire. Do not put secrets in the question.</p></details>
+    <p className="rp-muted">Submission creates a server-side job and stores this question, hashed session/network identifiers and paid evidence for reconciliation. A cookie controls access to your report for 24 hours; download the finished report. Stored reconciliation records do not currently auto-expire. The retention policy is undecided and must be approved before this service is enabled. This tab stores its original question and submission ID until the tab closes, allowing reload recovery; the 24-hour access cookie can expire earlier. Do not put secrets in the question.</p></details>
     {!available&&<button type="button" disabled={busy} onClick={()=>void action(check)}>Check hosted availability</button>}
     {available&&!submitted.current&&<button className="rp-primary" type="button" disabled={busy} onClick={()=>void action(submit)}>Run once, operator pays $0.01 test USDC</button>}
-    {submitted.current&&!busy&&job?.state!=='complete'&&job?.state!=='uncertain'&&<button type="button" onClick={()=>void action(job?signal=>readJob(job.id,signal).then(()=>{}):submit)}>{job?'Check this same job':'Recover this same submission'}</button>}
+    {submitted.current&&!recoveryBlocked.current&&!busy&&job?.state!=='complete'&&job?.state!=='uncertain'&&<button type="button" onClick={()=>void action(job?signal=>readJob(job.id,signal).then(()=>{}):submit)}>{job?'Check this same job':'Recover this same submission'}</button>}
     {busy&&<p role="status">{submitted.current?'Waiting for the real hosted job. No automatic paid retry.':'Checking service and secure session only. No purchase.'}</p>}
     {busy&&<button type="button" onClick={()=>controller.current?.abort()}>Stop waiting</button>}
     <div aria-live="polite">{message&&<p className="rp-muted">{message}</p>}

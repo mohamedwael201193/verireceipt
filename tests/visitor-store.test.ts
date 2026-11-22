@@ -4,6 +4,7 @@ import { userInfo } from 'node:os';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { VisitorJobStore } from '../src/visitor/store';
+import { inspectVisitorJobs } from '../src/visitor/reconcile';
 const LOCAL = `postgresql://${userInfo().username}@127.0.0.1:55439/postgres`;
 const enabled = process.env.VISITOR_LOCAL_PG_TEST === '1';
 const schema = 'visitor_' + randomUUID().replace(/-/g,'');
@@ -29,6 +30,20 @@ describe.skipIf(!enabled)('visitor reservations on real isolated PostgreSQL', ()
     await expect(store.recordResponse(job.id,{ status:200,receiptHeader:null,bodyText:'replacement' })).rejects.toThrow();
     const found = await store.read(job.id,hash); expect(found).not.toHaveProperty('private_response');
     expect((await pool.query('SELECT private_response FROM visitor_research_jobs WHERE id=$1',[job.id])).rows[0].private_response.bodyText).toBe('private-test-response-for-reconciliation');
+  });
+  it('captures paid headers independently of a failed or missing body',async()=>{
+    const job=await store.reserve(hash,network,id(),input);await store.markSigned(job.id,reservation);
+    await store.recordHeaders(job.id,{status:200,receiptHeader:'public-header-only'});await store.uncertain(job.id);
+    const q=await pool.query('SELECT response_headers,private_response FROM visitor_research_jobs WHERE id=$1',[job.id]);expect(q.rows[0].response_headers.receiptHeader).toBe('public-header-only');expect(q.rows[0].private_response).toBeNull();
+    expect(await store.read(job.id,hash)).not.toHaveProperty('response_headers');
+  });
+  it('operator inspection and hypothetical expiry preview are read-only and omit private input and body',async()=>{
+    const job=await store.reserve(hash,network,id(),input);await store.markSigned(job.id,reservation);await store.recordHeaders(job.id,{status:200,receiptHeader:'public-test-header'});await store.uncertain(job.id);
+    const c=await pool.connect();try{
+      const report=await inspectVisitorJobs(c,job.id,{payloadDays:7,accountingDays:90});expect(report.read_only).toBe(true);expect(report.settlement_verified).toBe(false);expect(report.retention_preview?.erasure_performed).toBe(false);expect(report.jobs[0].receipt_header).toBe('public-test-header');expect(report.jobs[0]).not.toHaveProperty('input');expect(report.jobs[0]).not.toHaveProperty('visitor_hash');expect(report.jobs[0]).not.toHaveProperty('private_response');
+      await expect(inspectVisitorJobs(c,undefined,{payloadDays:90,accountingDays:7})).rejects.toThrow();
+    }finally{c.release();}
+    expect((await store.read(job.id,hash)).state).toBe('uncertain');expect((await pool.query('SELECT reserved_uusdc FROM visitor_research_jobs WHERE id=$1',[job.id])).rows[0].reserved_uusdc).toBe('10000');
   });
   it('serializes two independent processes through a persisted payer lease', async () => {
     const second = new VisitorJobStore(url); await second.init();
@@ -88,3 +103,5 @@ describe.skipIf(!enabled)('visitor reservations on real isolated PostgreSQL', ()
     await expect(store.markSigned(a.id,reservation)).rejects.toThrow('unavailable'); expect(await store.read(a.id,'f'.repeat(64))).toBeNull();
   });
 });
+
+// Header capture precedes any body read; a missing body is still auditable.

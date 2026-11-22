@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS visitor_research_jobs (
  plan_hash TEXT, nonce TEXT, signed_at TIMESTAMPTZ, private_response JSONB, result JSONB,
  UNIQUE(visitor_hash,request_id)
 );
+ALTER TABLE visitor_research_jobs ADD COLUMN IF NOT EXISTS response_headers JSONB;
 CREATE TABLE IF NOT EXISTS visitor_research_payer (
  id INTEGER PRIMARY KEY CHECK(id=1), active_job UUID,
  blocked_until TIMESTAMPTZ NOT NULL DEFAULT '-infinity'
@@ -84,6 +85,12 @@ export class VisitorJobStore {
     });
   }
 
+  async recordHeaders(id: string, response: { status: number; receiptHeader: string | null }): Promise<void> {
+    const serialized = JSON.stringify(response);
+    if (!Number.isInteger(response.status) || response.status < 100 || response.status > 599 || Buffer.byteLength(serialized) > 16000) throw new Error('Invalid paid response headers');
+    const r = await this.pool.query("UPDATE visitor_research_jobs SET response_headers=$2 WHERE id=$1 AND state='signed' AND response_headers IS NULL", [id,serialized]);
+    if (r.rowCount !== 1) throw new Error('Paid response headers could not be recorded');
+  }
   async recordResponse(id: string, response: { status: number; receiptHeader: string | null; bodyText: string }): Promise<void> {
     const serialized = JSON.stringify(response);
     if (!Number.isInteger(response.status) || response.status < 100 || response.status > 599 || Buffer.byteLength(serialized) > 2_100_000) throw new Error('Invalid paid response');
@@ -105,7 +112,7 @@ export class VisitorJobStore {
   }
   async read(id: string, visitor: string) {
     await this.init();
-    const r = await this.pool.query('SELECT id,state,created_at,result FROM visitor_research_jobs WHERE id=$1 AND visitor_hash=$2',[id,visitor]);
+    const r = await this.pool.query('SELECT j.id,j.state,j.created_at,j.signed_at,j.result, EXISTS(SELECT 1 FROM visitor_research_payer p WHERE p.id=1 AND p.active_job=j.id AND p.blocked_until>clock_timestamp()) AS lease_active FROM visitor_research_jobs j WHERE j.id=$1 AND j.visitor_hash=$2',[id,visitor]);
     return r.rows[0] ?? null;
   }
   async close(): Promise<void> { await this.pool.end(); }

@@ -8,7 +8,7 @@ vi.mock('../src/researchAgent.js',()=>({runResearch:mocks.run}));
 vi.mock('../src/client.js',()=>({readLedgerAccount:mocks.ledger}));
 import { assertVisitorConfiguration,executeVisitorResearch } from '../src/visitorRuntime';
 const payer='0x'+'12'.repeat(20),input={cik:'1318605',year:2024,form:'10-Q',minimum_count:3};
-const options=()=>({spentTodayUusdc:'0',dailyCapUusdc:'100000000',reserveUusdc:'1000000',signal:new AbortController().signal,beforeSign:vi.fn(async()=>{}),recordResponse:vi.fn(async()=>{})});
+const options=()=>({spentTodayUusdc:'0',dailyCapUusdc:'100000000',reserveUusdc:'1000000',signal:new AbortController().signal,beforeSign:vi.fn(async()=>{}),recordHeaders:vi.fn(async()=>{}),recordResponse:vi.fn(async()=>{})});
 beforeEach(()=>{
  vi.stubEnv('VISITOR_PAYER_PRIVATE_KEY','test-only-not-a-secret');vi.stubEnv('VISITOR_PAYER_ADDRESS',payer);
  mocks.account.mockReturnValue({address:payer,signMessage:vi.fn()});mocks.normalize.mockReturnValue('test-only-not-a-key');mocks.ledger.mockResolvedValue({available:'1010000'});mocks.run.mockReset();mocks.run.mockResolvedValue({version:'test-runner-only'});

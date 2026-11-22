@@ -6,6 +6,7 @@ import { VisitorCapacityError, VisitorJobStore } from './store';
 import { validateRequestId, validateVisitorInput, visitorHash, VISITOR_LIMITS, type VisitorInput } from './policy';
 interface RuntimeOptions {
   spentTodayUusdc: string; dailyCapUusdc: string; reserveUusdc: string; signal: AbortSignal;
+  recordHeaders: (r: { status: number; receiptHeader: string | null }) => Promise<void>;
   recordResponse: (r: { status: number; receiptHeader: string | null; bodyText: string }) => Promise<void>;
   beforeSign: (r: { plan_hash: string; at: string; reserved_uusdc: string; nonce: string }) => Promise<void>;
 }
@@ -67,7 +68,7 @@ export function registerVisitorResearch(app: FastifyInstance, options: { runtime
         controllers.add(controller);
         const work = (async () => {
           try {
-            const result = await runtime(input, { spentTodayUusdc:job.spentBeforeUusdc!, dailyCapUusdc:VISITOR_LIMITS.dailyUusdc.toString(), reserveUusdc:VISITOR_LIMITS.minimumReserveUusdc.toString(), signal:AbortSignal.any([controller.signal,AbortSignal.timeout(VISITOR_LIMITS.executionMs)]), beforeSign:r => store.markSigned(job.id,r),recordResponse:r => store.recordResponse(job.id,r) });
+            const result = await runtime(input, { spentTodayUusdc:job.spentBeforeUusdc!, dailyCapUusdc:VISITOR_LIMITS.dailyUusdc.toString(), reserveUusdc:VISITOR_LIMITS.minimumReserveUusdc.toString(), signal:AbortSignal.any([controller.signal,AbortSignal.timeout(VISITOR_LIMITS.executionMs)]), beforeSign:r => store.markSigned(job.id,r),recordHeaders:r => store.recordHeaders(job.id,r),recordResponse:r => store.recordResponse(job.id,r) });
             const serialized = JSON.stringify(result);
             if (!serialized || Buffer.byteLength(serialized)>2_000_000) throw new Error('Research report exceeds bounds');
             await store.complete(job.id,result);
@@ -90,8 +91,8 @@ export function registerVisitorResearch(app: FastifyInstance, options: { runtime
     try {
       const job = await store.read(request.params.id,visitorHash(visitor));
       if (!job) return reply.status(404).send({ status:'HOLD',code:'NOT_FOUND' });
-      const stale = ['reserved','signed'].includes(job.state) && Date.now()-new Date(job.created_at).getTime()>VISITOR_LIMITS.uncertainLeaseSeconds*1000;
-      return { job_id:job.id,state:stale?'uncertain':job.state,result:job.state==='complete'?job.result:null,
+      const stale = ['reserved','signed'].includes(job.state) && !job.lease_active;
+      return { retention_policy:'undecided',records_auto_expire:false,cookie_access_seconds:86400,job_id:job.id,state:stale?'uncertain':job.state,result:job.state==='complete'?job.result:null,
         limit:'Operator-sponsored related-party testnet request. Pending delivery is not settlement. Uncertain jobs are not retried or refunded automatically.' };
     } catch { return reply.status(503).send({ status:'HOLD',code:'RESEARCH_UNAVAILABLE' }); }
   });

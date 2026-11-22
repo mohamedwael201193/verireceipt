@@ -1,7 +1,7 @@
 // Server-only transport: fixed testnet node and receipt reads, bounded bytes/time.
 import { ENGINE_URL, MINER_BASE_URL, NODE_URL, VERIRECEIPT_MINER_ID } from './constants.js';
 import type { Fetch } from './client.js';
-export function makeVisitorFetch(signal: AbortSignal, payer: string, transport: Fetch = fetch): Fetch {
+export function makeVisitorFetch(signal: AbortSignal, payer: string, transport: Fetch = fetch, recordHeaders?: (r: { status:number; receiptHeader:string|null }) => Promise<void>): Fetch {
   let totalBytes = 0, calls = 0;
   return async (input, init) => {
     signal.throwIfAborted();
@@ -15,6 +15,11 @@ export function makeVisitorFetch(signal: AbortSignal, payer: string, transport: 
     const receiptGet = url.origin === MINER_BASE_URL && method === 'GET' && /^\/receipts\/rcpt_[A-Z0-9]{26}(?:\/raw|\/pages\/(?:[0-9]|1[0-9])\/raw)?$/.test(url.pathname);
     if ((!nodeGet && !nodeAsk && !receiptGet) || ++calls > 40) throw new Error('Hosted evidence destination or request count refused');
     const response = await transport(raw, { ...init,redirect:'error',signal: init?.signal ? AbortSignal.any([signal,init.signal]) : signal });
+    if (nodeAsk && new Headers(init?.headers).has('X-PAYMENT')) {
+      if (!recordHeaders) { await response.body?.cancel(); throw new Error('Durable response header capture required'); }
+      try { await recordHeaders({ status:response.status,receiptHeader:response.headers.get('x-payment-response') }); }
+      catch (error) { await response.body?.cancel(); throw error; }
+    }
     if (!response.body) return response;
     const reader = response.body.getReader(), chunks: Uint8Array[] = [];
     let size = 0;

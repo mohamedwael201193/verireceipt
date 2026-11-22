@@ -27,3 +27,16 @@ describe('hosted fixed-destination bounded transport, no live network',()=>{
   await expect(f(ledger)).rejects.toThrow('request count');expect(transport).toHaveBeenCalledTimes(40);
  });
 });
+
+it('persists paid response headers before reading a broken body',async()=>{
+ const receipt='public-header-for-reconciliation',order:string[]=[];
+ const transport=vi.fn(async()=>new Response(new ReadableStream({pull(){order.push('read');throw new Error('body failed');}}),{headers:{'x-payment-response':receipt}}));
+ const save=vi.fn(async(r:{status:number;receiptHeader:string|null})=>{expect(r).toEqual({status:200,receiptHeader:receipt});order.push('saved');});
+ const f=makeVisitorFetch(new AbortController().signal,payer,transport,save);
+ await expect(f('https://devnode.telegraphprotocol.com/engine/v1/ask/774921',{method:'POST',headers:{'X-PAYMENT':'test-only-not-a-real-authorization'}})).rejects.toThrow();expect(save).toHaveBeenCalledOnce();
+});
+it('refuses paid header capture failure before consuming its body',async()=>{
+ let cancelled=false;const transport=vi.fn(async()=>new Response(new ReadableStream({cancel(){cancelled=true;}})));
+ const f=makeVisitorFetch(new AbortController().signal,payer,transport,async()=>{throw new Error('capture failed');});
+ await expect(f('https://devnode.telegraphprotocol.com/engine/v1/ask/774921',{method:'POST',headers:{'X-PAYMENT':'test-only'}})).rejects.toThrow('capture failed');expect(cancelled).toBe(true);
+});
