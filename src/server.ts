@@ -18,6 +18,7 @@ import { handleGasPrice } from "./handlers/gasPrice";
 import { handleBalance } from "./handlers/walletBalance";
 import { handleTokenSupply } from "./handlers/tokenSupply";
 import { handleFx } from "./handlers/currencyConvert";
+import { handleDns } from "./handlers/dnsLookup";
 import { handleMacro } from "./handlers/macroEconomic";
 import { handleTokenHolders } from "./handlers/tokenHolders";
 import { ApiError, badRequest, errorBody } from "./core/errors";
@@ -199,6 +200,7 @@ export function buildServer(): FastifyInstance {
   });
 
   app.get("/v1/tx", async (request) => trackIntent("tx", () => handleTx(asQuery(request.query))));
+  app.get("/v1/dns", async (request) => trackIntent("dns", () => handleDns(asQuery(request.query))));
   app.get("/v1/filings", async (request) =>
     trackIntent("filings", () => {
       // A1 (2026-11-21): asQuery keeps only the FIRST value of a repeated
