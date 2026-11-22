@@ -7,6 +7,7 @@
 // Run directly: `node dist/server.js` (after `npm run build`).
 // Requires SEC_USER_AGENT in the environment — never a placeholder value.
 
+import {registerBuyer} from './buyer/routes';
 import Fastify, { type FastifyInstance } from "fastify";
 import { handleTx } from "./handlers/txLookup";
 import { handleFilings } from "./handlers/filings";
@@ -296,6 +297,7 @@ export function buildServer(): FastifyInstance {
   // (GET /receipts/:id, /receipts/:id/raw; /api/* aliases). See
   // src/core/receiptRoutes.ts for the contract.
   registerReceiptRoutes(app);
+  registerBuyer(app);
 
   // S2: serve the daily accuracy document (exact counts over stored
   // receipts, same contract as scripts/accuracy.mjs — core/accuracy.ts).

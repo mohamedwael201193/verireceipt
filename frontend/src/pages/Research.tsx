@@ -48,6 +48,7 @@ export default function Research() {
       <div className="rp-eyebrow">FILING-COVERAGE RESEARCH / SEPOLIA TESTNET</div>
       <h1>A precise question.<br /><span>An answer you can inspect.</span></h1>
       <p>Turn an exact SEC filing question into a source-backed research appendix. See a real recorded run, then prepare your own question or explore the evidence tools.</p>
+      <p><a href="/buyer">Open the separate ranked filing buyer (Sepolia testnet)</a></p>
       <div className="rp-mode">RESEARCH TOOLS / REAL EVIDENCE <span>No wallet key in this browser. Preparing input and checking stored evidence do not purchase anything.</span></div>
     </header>
     <section className="rp-case" aria-labelledby="rp-case-title">

@@ -2,6 +2,7 @@
 // the payer key) -> verify end to end -> record. No human step between.
 import { DESK_DAILY_CAP_UUSDC, VERIRECEIPT_MINER_ID } from "./constants.js";
 import { escrowAskMiner, type Fetch, type Payer, type RawResponse } from "./client.js";
+import { committedExposureUusdc, reserveSpend, type SpendLedger } from "./gate.js";
 import { appendLedger, readLedger, spentOnUtcDay, type PurchaseRecord } from "./ledger.js";
 import { planTasks, type DeskTask } from "./missions.js";
 import { verifyPurchase } from "./verify.js";
@@ -16,6 +17,13 @@ export interface AgentOptions {
   f?: Fetch;
   onRawResponse?: (task: DeskTask, raw: RawResponse) => void;
   log?: (line: string) => void;
+  /**
+   * Shared reservation journal (spendLedgerFromFiles). When set, every
+   * purchase joins the same cross-ledger daily cap as the gate and
+   * benchmark: the quote is reserved before signing and settled+reserved is
+   * rechecked under the lock. Without it the desk counts its own ledger only.
+   */
+  spend?: SpendLedger;
 }
 
 export async function runDesk(payer: Payer, opts: AgentOptions): Promise<PurchaseRecord[]> {
@@ -24,7 +32,9 @@ export async function runDesk(payer: Payer, opts: AgentOptions): Promise<Purchas
   const tasks = planTasks(now).filter((t) => !opts.taskIds || opts.taskIds.includes(t.id));
   const out: PurchaseRecord[] = [];
   for (const task of tasks) {
-    const spent = spentOnUtcDay(readLedger(opts.ledgerFile), new Date());
+    const spent = opts.spend
+      ? committedExposureUusdc(opts.spend, now)
+      : spentOnUtcDay(readLedger(opts.ledgerFile), new Date());
     log(`${task.id}: buying ${task.intent} ${JSON.stringify(task.params)} (spent today ${spent} μUSDC)`);
     const paid = await escrowAskMiner(VERIRECEIPT_MINER_ID, { intent: task.intent, params: task.params }, payer, {
       spentTodayUusdc: spent,
@@ -32,6 +42,9 @@ export async function runDesk(payer: Payer, opts: AgentOptions): Promise<Purchas
       minerIds: opts.minerIds,
       f: opts.f,
       onRawResponse: (raw) => opts.onRawResponse?.(task, raw),
+      onBeforeSign: opts.spend
+        ? ({ amountUusdc, authorization }) => reserveSpend(opts.spend!, "desk", amountUusdc, authorization.nonce, DESK_DAILY_CAP_UUSDC, now)
+        : undefined,
     });
     const body = paid.body as {
       miner_id?: string; endpoint?: string; result?: Record<string, unknown>; result_shape?: string;

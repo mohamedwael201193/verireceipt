@@ -155,10 +155,13 @@ export interface TelegraphReceipt {
 /**
  * Decode X-PAYMENT-RESPONSE and check it describes this payment: escrow rail,
  * our payer, the miner we called (any of its ids), the exact amount we signed, epoch settlement.
+ * For an auto-routed ask the network picks the provider, so `miners` is omitted
+ * and any decimal on-chain registration id is accepted; the payer and exact
+ * signed amount still bind the receipt to this payment.
  */
 export function decodeReceipt(
   header: string | null,
-  expect: { payer: string; miners: readonly string[]; amountUusdc: string },
+  expect: { payer: string; miners?: readonly string[]; amountUusdc: string },
 ): TelegraphReceipt {
   if (!header) throw new EscrowRefusal("served response carries no X-PAYMENT-RESPONSE header");
   let r: TelegraphReceipt;
@@ -173,8 +176,14 @@ export function decodeReceipt(
   if (String(r.payer).toLowerCase() !== expect.payer.toLowerCase()) problems.push(`payer=${r.payer}`);
   // The live node names the miner by its on-chain registration id (6152)
   // in the receipt, while the engine route takes the catalogue id (774921);
-  // the caller passes every id that denotes the miner it paid.
-  if (!expect.miners.includes(String(r.miner))) problems.push(`miner=${r.miner}`);
+  // the caller passes every id that denotes the miner it paid. An auto-routed
+  // ask passes no list: the network chose the provider, so the receipt must
+  // simply name a decimal registration id, which the caller records.
+  if (expect.miners) {
+    if (!expect.miners.includes(String(r.miner))) problems.push(`miner=${r.miner}`);
+  } else if (!/^\d+$/.test(String(r.miner))) {
+    problems.push(`miner=${r.miner}`);
+  }
   if (String(r.amount_uusdc) !== expect.amountUusdc) problems.push(`amount_uusdc=${r.amount_uusdc}`);
   if (!Number.isInteger(r.epoch_id)) problems.push("epoch_id");
   if (r.settlement !== "epoch") problems.push(`settlement=${r.settlement}`);

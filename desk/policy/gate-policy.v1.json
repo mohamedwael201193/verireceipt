@@ -1,0 +1,83 @@
+{
+  "version": "gate-policy-v1",
+  "committed_at": "2026-11-22T16:40:00Z",
+  "network": "eip155:11155111",
+  "rail": "escrow",
+  "routing": "auto",
+  "max_call_uusdc": "10000",
+  "note": "Precommitted before any gate run. Rules are advisory evidence gates only: a PASS never executes a dispatch, trade or allocation, and a HOLD is the safe default on any missing, invalid or unverified evidence.",
+  "tasks": [
+    {
+      "id": "gate-grid-curtail-caiso-np15",
+      "mission": "M12",
+      "title": "CAISO NP15 dispatch gate: run only while the verified LMP is at or below the precommitted ceiling",
+      "intent": "GRID_POWER_PRICE_GENERAL",
+      "value_field": "lmp_usd_per_mwh",
+      "fixed_params": { "node_or_zone": "TH_NP15_GEN-APND" },
+      "dynamic_params": { "interval_start": "caiso_hour" },
+      "accepts_params": ["node_or_zone", "interval_start"],
+      "rule": { "op": "<=", "value": 150, "units": "USD/MWh", "label": "Verified grid price at or below 150 USD/MWh" }
+    },
+    {
+      "id": "gate-grid-curtail-nyiso-zone-j",
+      "mission": "M12",
+      "title": "NYISO Zone J dispatch gate: run only while the verified LMP is at or below the precommitted ceiling",
+      "intent": "GRID_POWER_PRICE_GENERAL",
+      "value_field": "lmp_usd_per_mwh",
+      "fixed_params": { "node_or_zone": "ZONE_J" },
+      "dynamic_params": { "interval_start": "nyiso_interval" },
+      "accepts_params": ["node_or_zone", "interval_start"],
+      "rule": { "op": "<=", "value": 150, "units": "USD/MWh", "label": "Verified grid price at or below 150 USD/MWh" }
+    },
+    {
+      "id": "gate-tvl-floor-aave-v3",
+      "mission": "M13",
+      "title": "Treasury venue screen: pass only while the verified protocol TVL is at or above the precommitted floor",
+      "intent": "TVL_LOOKUP_GENERAL",
+      "value_field": "tvl_usd",
+      "fixed_params": { "protocol": "aave-v3" },
+      "accepts_params": ["protocol"],
+      "rule": { "op": ">=", "value": 1000000000, "units": "USD", "label": "Verified protocol TVL at or above 1,000,000,000 USD" }
+    },
+    {
+      "id": "gate-route-min-out-eth-usdc",
+      "mission": "M14",
+      "title": "Execution screen: pass only while the verified executable quote for 1 ETH meets the precommitted minimum output",
+      "intent": "OPTIMAL_EXECUTION_ROUTE_GENERAL",
+      "value_field": "amount_out",
+      "fixed_params": { "pair": "ETH/USDC" },
+      "accepts_params": ["pair"],
+      "rule": { "op": ">=", "value": 1000000000, "units": "USDC base units (6 decimals)", "label": "Verified executable output for 1 ETH at or above 1,000 USDC" }
+    },
+    {
+      "id": "gate-tx-settled",
+      "mission": "M13",
+      "title": "Settlement check: pass only when the verified lookup places the transaction in a block",
+      "intent": "ONCHAIN_TX_LOOKUP_GENERAL",
+      "value_field": "block_number",
+      "fixed_params": { "tx_hash": "0xe8696cc29652173b1fdce601cfbd5d61649583bf811163d778d412739b78d2d3", "chain": "sepolia" },
+      "accepts_params": ["tx_hash", "chain"],
+      "rule": { "op": ">=", "value": 1, "units": "block number", "label": "Verified block number at least 1 (transaction settled)" }
+    },
+    {
+      "id": "gate-filings-min-aapl-10q-2025",
+      "mission": "M4",
+      "title": "Diligence screen: pass only while the verified 10-Q count for Apple Inc. in calendar 2025 meets the precommitted minimum",
+      "intent": "REGULATORY_FILING_MONITOR_GENERAL",
+      "value_field": "filing_count",
+      "fixed_params": { "entity": "Form 10-Q filings by Apple Inc. (CIK 320193)", "period": "calendar 2025" },
+      "accepts_params": ["entity", "period"],
+      "rule": { "op": ">=", "value": 3, "units": "filings", "label": "Verified 10-Q filing count at or above 3" }
+    },
+    {
+      "id": "gate-validator-min-balance",
+      "mission": "M13",
+      "title": "Validator screen: pass only while the verified effective balance meets the precommitted minimum",
+      "intent": "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
+      "value_field": "effective_balance",
+      "fixed_params": { "validator_index": "1" },
+      "accepts_params": ["validator_index"],
+      "rule": { "op": ">=", "value": 31000000000, "units": "gwei", "label": "Verified effective balance at or above 31 ETH (gwei)" }
+    }
+  ]
+}

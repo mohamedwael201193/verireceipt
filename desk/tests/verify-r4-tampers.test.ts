@@ -201,6 +201,45 @@ describe("J2 r3 / J1 r3 tampers (desk-d r4)", () => {
     expect(bad99.failures.join(" ")).toMatch(/pending epoch_id must be 32/);
   });
 
+  it("J1 r5: a failed predecessor block-window lookup fails closed, never falls through to success", async () => {
+    const t = honest.telegraph_receipt.timestamp * 1000;
+    const base = epochFetch(EPOCH31);
+    const failing = (async (url: string) => {
+      if (/\/v1\/blocks\/31$/.test(url)) return new Response("node exploded", { status: 500 });
+      return base(url);
+    }) as unknown as typeof fetch;
+    // claimed 32 pending; the walk must read epoch 31's window and fails closed.
+    const r = await checkEpochConsistency({ claimedEpoch: 32, receiptTimeMs: Date.parse("2026-11-21T16:00:00Z") }, failing);
+    expect(r.ok).toBe(false);
+    expect(r.failures.join(" ")).toMatch(/epoch block 31 lookup failed/);
+    // and the recorded-claim path fails closed the same way
+    const r2 = await checkEpochConsistency({ claimedEpoch: 31, receiptTimeMs: t }, failing);
+    expect(r2.ok).toBe(false);
+  });
+
+  it("J1 r5: a probe error during the recorded-epoch search fails closed", async () => {
+    const base = epochFetch(EPOCH31);
+    const failing = (async (url: string) => {
+      if (/\/v1\/blocks\/15\/deliveries\//.test(url)) return new Response("node exploded", { status: 500 });
+      return base(url);
+    }) as unknown as typeof fetch;
+    const r = await checkEpochConsistency({ claimedEpoch: 32, receiptTimeMs: Date.parse("2026-11-21T16:00:00Z") }, failing);
+    expect(r.ok).toBe(false);
+    expect(r.failures.join(" ")).toMatch(/probe failed/);
+  });
+
+  it("J1 r5: a receipt time in no recorded window (a gap before the latest window) fails closed", async () => {
+    const GAP: Record<number, { from: string; to: string }> = {
+      30: { from: "2026-11-20T00:00:00Z", to: "2026-11-21T07:37:35Z" },
+      31: { from: "2026-11-21T10:54:36Z", to: "2026-11-21T15:44:52Z" },
+    };
+    for (let e = 0; e < 30; e++) GAP[e] = { from: "2026-11-19T00:00:00Z", to: "2026-11-20T00:00:00Z" };
+    // 09:00 is after epoch 30's window and before epoch 31's window: no recorded window contains it.
+    const r = await checkEpochConsistency({ claimedEpoch: 32, receiptTimeMs: Date.parse("2026-11-21T09:00:00Z") }, epochFetch(GAP));
+    expect(r.ok).toBe(false);
+    expect(r.failures.join(" ")).toMatch(/matches no recorded window/);
+  });
+
   it("J1: a forged check detail or title fails checksAgree / storedLedgerAgrees", async () => {
     const v = await live();
     const forgedDetail = honest.checks.map((c, i) => (i === 0 ? { ...c, detail: "forged detail" } : c));

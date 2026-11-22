@@ -85,4 +85,13 @@ describe("escrowAskMiner", () => {
     expect(nonces).toHaveLength(2);
     expect(nonces[0]).not.toBe(nonces[1]);
   });
+  it("with opts.minerIds omitted, accepts a receipt naming the called id", async () => {
+    const { f } = node({ header: receiptHeader({ miner: "774921" }) });
+    const r = await escrowAskMiner("774921", body, payer, { spentTodayUusdc: 0n, dailyCapUusdc: 2_000_000n, f });
+    expect(r.receipt.miner).toBe("774921");
+  });
+  it("with opts.minerIds omitted, rejects a receipt naming a different decimal id", async () => {
+    const { f } = node({ header: receiptHeader({ miner: "6152" }) });
+    await expect(escrowAskMiner("774921", body, payer, { spentTodayUusdc: 0n, dailyCapUusdc: 2_000_000n, f })).rejects.toThrow(/miner=6152/);
+  });
 });
