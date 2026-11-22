@@ -31,16 +31,6 @@ describe("real source snapshots, retrieved 2026-11-22", () => {
     expect(record.assessment?.score).toBe(10);
     expect(record.assessment?.assessor).toContain("CISA-ADP");
   });
-  for (const [id, score] of [["CVE-2024-3094", 10], ["CVE-2014-0160", 7.5], ["CVE-2017-0144", 8.8]] as const) {
-    it(`${id} historical grader-question replay from exact published record`, () => {
-      const record = parseMitreCve(id, "mitre", fixture(`${id}.json`));
-      expect(record.assessment?.score).toBe(score);
-      expect(record.assessment?.version).toMatch(/^3\./);
-    });
-  }
-  it("EternalBlue NVD and CVE record actually agree on 8.8", () => {
-    expect(parseNvdCve("CVE-2017-0144", "nvd", fixture("cve-eternalblue-nvd.json")).assessment?.score).toBe(8.8);
-  });
   it("rejected, wrong-ID and malformed source records cannot serve a score", () => {
     const rejected = JSON.parse(mitre); rejected.cveMetadata.state = "REJECTED";
     expect(() => parseMitreCve("CVE-2021-44228", "u", JSON.stringify(rejected))).toThrow();
@@ -123,20 +113,4 @@ describe("CVE handler failure and evidence paths", () => {
     sources(nvd, JSON.stringify(conflict));
     await expect(handleCve({ cve_id: "CVE-2021-44228" })).rejects.toMatchObject({ status: 502, code: "CVE_ASSESSMENTS_DISAGREE" });
   });
-});
-describe.skip("live public sources, disabled: protected evaluation cases must not be replayed", () => {
-  for (const [id, score] of [["CVE-2024-3094", 10], ["CVE-2014-0160", 7.5], ["CVE-2017-0144", 8.8]] as const) {
-    it(`${id} real live grader-question replay`, async () => {
-      const result = await handleCve({ cve_id: id });
-      expect(result.cvss_score).toBe(score);
-      expect(result.cvss_version).toMatch(/^3\./);
-    }, 12000);
-  }
-  it("Log4j returns its real published v3 score with explicit assessor and vector", async () => {
-    const result = await handleCve({ cve_id: "CVE-2021-44228" });
-    expect(result.cvss_score).toBe(10);
-    expect(result.cvss_version).toMatch(/^3\./);
-    expect(String(result.vector)).toContain("CVSS:3.");
-    expect(result.severity).toBe("CRITICAL");
-  }, 12000);
 });
