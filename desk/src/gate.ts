@@ -34,6 +34,7 @@ import {
 } from "./verify.js";
 import type { FieldStatus } from "../../src/core/shapedFields.js";
 import { verifyFilingSource } from "./filingSource.js";
+import { gridContract, verifyGridSource } from "./gridSource.js";
 import type { SourceVerification } from "./sourceTypes.js";
 
 export const GATE_LIMITS = [
@@ -467,6 +468,14 @@ async function executeVerifiedPurchase(
     miner_checks: extra?.miner_checks ?? [], reasons, evidenceOk: false, ...extra,
   });
 
+  // Under-specified grid questions must not consume a paid authorization.
+  // The old frozen v1 cases/policy are left unchanged; their grid requests
+  // have no market selector and therefore abstain under this new contract.
+  if (input.intent === "GRID_POWER_PRICE_GENERAL") {
+    try { gridContract(input.params); }
+    catch (error) { return failed([`grid contract: ${error instanceof Error ? error.message : String(error)}`]); }
+  }
+
   // The quote+nonce are reserved BEFORE signing (inside onBeforeSign), under
   // the shared lock. If the reservation cannot be journaled, the signature
   // is refused and worst_case stays null (nothing was signed).
@@ -558,6 +567,13 @@ async function executeVerifiedPurchase(
       if (input.valueField !== "filing_count") {
         sourceVerification.status = "failed";
         sourceVerification.checks.push({name:"primary source supported filing field",ok:false,detail:"only independently recounted filing_count is supported"});
+      }
+    }
+    if (node.ok && input.intent === "GRID_POWER_PRICE_GENERAL") {
+      sourceVerification = await verifyGridSource({ params: input.params, result: body.result ?? {} }, { f, now: nowDate });
+      if (input.valueField !== "lmp_usd_per_mwh") {
+        sourceVerification.status = "failed";
+        sourceVerification.checks.push({name:"primary source supported grid field",ok:false,detail:"only independently matched LMP is supported"});
       }
     }
     const reasons = [

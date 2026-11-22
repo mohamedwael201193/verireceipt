@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Fetch } from './client.js';
 import type { Check } from './verify.js';
 
-export interface PrimarySource { url: string; sha256: string; retrieved_at: string; raw_text: string }
+export interface PrimarySource { url: string; sha256: string; retrieved_at: string; raw_text: string; encoding?: 'utf8' | 'base64' }
 export interface SourceVerification {
   status: 'verified' | 'failed' | 'not_applicable';
   checks: Check[];

@@ -101,7 +101,7 @@ deep-copied before awaits, so a callback cannot change its rule mid-run.
 4. **Break it** - ask for a venue whose verified value cannot satisfy the
    precommitted floor (`--set protocol=…`) and the outcome is HOLD naming
    the rule; tamper with any evidence and the failed checks are named.
-5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (382 tests across 23 files,
+5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (403 tests across 25 files,
    no network, no key); the gate flow is covered with mocked nodes including
    tamper cases.
 
@@ -177,3 +177,26 @@ as returned by the miner, or the independently verified issuer name/CIK.
 Changing the issuer or form inside a query-shaped result is not an echo.
 Primary document paths use the same invisible-character cleanup and
 one-safe-subdirectory contract as the miner; traversal/deeper paths are refused.
+
+## Explicit grid market and official-row checks
+
+Grid purchases now require an explicit structured `market` before any
+network request or signature. Supported source contracts are NYISO RTM
+(five-minute realtime LBMP) and CAISO DAM (hourly PRC_LMP LMP_PRC) for the
+supported named zones/hubs. There is no inferred market default. The old
+v1 grid cases and gate policy omit a market and are left unchanged; under
+this new implementation they abstain/HOLD before buying. Enabling a new
+market-aware policy or corrected comparison requires a new precommitment,
+not an edit to the v1 answers or gold. Live acceptance of an added market
+selector by routed providers has not yet been tested.
+
+The returned node, market, UTC interval and USD currency must match the
+explicit contract. The verifier then fetches and parses the exact official
+NYISO row (including Eastern/DST conversion), or CAISO DAM LMP row. NYISO
+uses its dated CSV, with a dated monthly ZIP fallback only on a genuine 404.
+CAISO uses a bounded OASIS SingleZip request. ZIP evidence is size/CRC
+checked and saved as base64 with its encoding and digest. Missing, ambiguous,
+wrong-market, duplicate or disagreeing source rows fail closed. The verifier
+makes no finality guarantee about a price that its source might later revise.
+Evaluation counts are separate from paid/uncertain-cost attempt counts;
+a no-purchase preflight abstention does not count as a paid attempt.

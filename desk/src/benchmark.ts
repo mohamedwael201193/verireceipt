@@ -291,6 +291,7 @@ export interface BenchmarkReport {
   gate: ArmScore & {
     /** Every paid probe record in this report; duplicates are rejected, never collapsed. */
     attempts: number;
+    evaluations: number;
     cost_uusdc: string;
     cost_usd: string;
     /** Paid request round-trip only (challenge + paid ask), excluding verification and grading. */
@@ -330,7 +331,8 @@ export function buildReport(
     frozen_at: caseSet.frozen_at,
     gate: {
       ...gate,
-      attempts: runs.length,
+      attempts: runs.filter(r => r.purchase.paid_uusdc !== null || r.purchase.worst_case_uusdc !== null).length,
+      evaluations: runs.length,
       cost_uusdc: cost.toString(),
       cost_usd: `$${(Number(cost) / 1e6).toFixed(2)}`,
       paid_request_latency_ms: lat.length
@@ -364,7 +366,7 @@ export function renderMarkdown(r: BenchmarkReport, cases: BenchmarkCase[]): stri
       ? [`| ${r.frontier.model} (web search: ${r.frontier.web_search ? "on" : "off"}) | ${r.frontier.correct} (${pct(r.frontier.accuracy)}) | ${pct(r.frontier.precision_when_answered)} | ${r.frontier.false_passes} | ${r.frontier.abstain} |`]
       : []),
     ``,
-    `Gate: ${r.gate.attempts} paid attempt(s) disclosed, cost ${r.gate.cost_usd} (${r.gate.cost_uusdc} μUSDC, Sepolia testnet). Paid request round-trip ms: min ${r.gate.paid_request_latency_ms.min ?? "-"}, mean ${r.gate.paid_request_latency_ms.mean ?? "-"}, max ${r.gate.paid_request_latency_ms.max ?? "-"} (verification and grading excluded).`,
+    `Gate: ${r.gate.attempts} paid/uncertain-cost attempt(s) disclosed, cost ${r.gate.cost_usd} (${r.gate.cost_uusdc} μUSDC, Sepolia testnet). Paid request round-trip ms: min ${r.gate.paid_request_latency_ms.min ?? "-"}, mean ${r.gate.paid_request_latency_ms.mean ?? "-"}, max ${r.gate.paid_request_latency_ms.max ?? "-"} (verification and grading excluded).`,
     ``,
     `| Case | Expected | Gate | Frontier |`,
     `| --- | --- | --- | --- |`,

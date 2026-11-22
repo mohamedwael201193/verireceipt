@@ -186,6 +186,15 @@ describe("exportQuestionPacket", () => {
 });
 
 describe("buildReport + renderMarkdown", () => {
+  it("does not count no-purchase preflight abstentions as paid attempts", () => {
+    const c = caseSet.cases[0];
+    const r = probe({ case_id:c.id, outcome:"ABSTAIN", value:null, purchase:{ routed:"auto", quoted_uusdc:"0", paid_uusdc:null, worst_case_uusdc:null, receipt_hash:null, epoch_id:null, serving_miner:null, serving_miner_slug:null, duration_ms:null, nonce:null } });
+    const report = buildReport(caseSet,hash,[r],null);
+    expect(report.gate.evaluations).toBe(1);
+    expect(report.gate.attempts).toBe(0);
+    expect(report.gate.cost_uusdc).toBe("0");
+  });
+
   it("sums cost across paid and worst-case runs, discloses attempts, labels latency, renders the comparison", () => {
     const runs = caseSet.cases.map((c, i) => probe({
       case_id: c.id, value: c.grader.expected, outcome: "ANSWERED",
@@ -207,7 +216,7 @@ describe("buildReport + renderMarkdown", () => {
     expect(md).toContain("Frontier benchmark");
     expect(md).toContain("| VeriReceipt Gate | 8 (100.0%)");
     expect(md).toContain("frontier-x (web search: on) | 0 (0.0%)");
-    expect(md).toContain("8 paid attempt(s) disclosed");
+    expect(md).toContain("8 paid/uncertain-cost attempt(s) disclosed");
     expect(md).toContain("Paid request round-trip ms");
     expect(md).toContain("ABSTAIN counts against accuracy");
   });
