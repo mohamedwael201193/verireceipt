@@ -1,6 +1,6 @@
 # Sponsored ranked filing buyer
 
-Status: offline implementation in progress. No hosted payer is created or funded,
+Status: offline implementation, not enabled or deployed. No hosted payer is created or funded,
 no purchase is authorized by this document, and nothing is enabled or deployed.
 The existing dashboard direct probes remain unbilled and separate.
 
@@ -137,8 +137,8 @@ Next route layer: disabled by default, fixed same-origin UI with private session
 cookie, preview-only server plan creation, explicit buy by stored plan ID/hash,
 owner-bound result/evidence reads and rate-limited read-only follow-up. No
 startup job replay or paid retry. Abort work on shutdown and retain uncertain
-exposure; arrange startup/hourly payload cleanup. Routes and the UI are not yet
-mounted in this increment and need their own independent review.
+exposure; arrange startup/hourly payload cleanup. The following increments add the route layer and UI; activation and deployment
+still need separate operator approval.
 
 ## Additive HTTP wiring (still disabled)
 
@@ -178,9 +178,50 @@ owner checks, rejection of client plan objects/rehashed terms, repeated and
 concurrent starts, recovery GETs, unknown outcomes, response hooks, false PASS,
 full evidence versus summary, followup cooldown, startup/hourly cleanup,
 expiration and shutdown abort. Synthetic test results are not experiment data.
-The UI is not implemented by this increment. No hosted purchase has been run.
+The separate frontend increment below adds the UI. No hosted purchase has been run.
 
 Owner-cookie continuity: accepting a buy renews the same secure owner token for
 86400 seconds, including duplicate acceptance. A session opened earlier cannot
 lose its cookie before that newly reserved job's 24-hour payload access window.
 This does not extend the job's payload retention or create a new purchase.
+
+
+## Separate buyer workspace (offline UI increment)
+
+`/buyer` is a dedicated evidence workspace linked from `/research`. It does not
+alter the dashboard direct probes or original v1 policy/cases. Only canonical
+CIK and completed calendar year can be entered. Free preview creates no purchase.
+The screen shows the fixed rule, exact 0.01 test-USDC ceiling, 2 test-USDC daily
+service cap, Sepolia network, ranked route, ten-minute expiry and all three hashes.
+
+The browser pins the frozen server policy/task hashes and recomputes the full
+canonical plan SHA-256, including Gate's HTML-character escaping. Missing
+WebCrypto fails closed. These are display/binding checks, not independent source
+authentication. A named root regression checks the browser constants against the
+server contract without adding a browser dependency to the server runtime.
+
+Before its one explicit buy POST, the browser writes and reads back the exact
+plan with an attempted flag in this tab's session storage. Storage failure blocks
+purchase. A lost acceptance response leaves that flag set. Refresh recovery only
+GETs the same job and cannot issue another paid POST. Manual result checks and
+separate delivery follow-ups are read-only. Unknown charge exposure never becomes
+a refund or permission for a paid retry. Clearing this tab's recovery record is
+blocked while an attempted job is not complete; it never cancels a job. Server
+idempotency and shared authority remain the actual purchasing safeguards.
+
+The result distinguishes verified PASS, below-threshold HOLD, rejected/unverified
+returned numbers, pending/uncertain exposure, not-signed status and node-reported
+receipt charge. A receipt amount is not final settlement. Original delivery and
+later read-only delivery observations are separate. Full evidence uses an
+owner-cookie-bound download and expires 24 hours after reservation. No source
+truth, proof walk or real paid run is claimed by rendering the screen.
+
+UI tests use synthetic local responses and no payment. Desktop/mobile rendering
+covers empty, preview, PASS, below-threshold HOLD, source-rejected HOLD, pending,
+uncertain, not-signed and unavailable/error states. Screenshot fixtures are labeled
+synthetic and are not result records. No live source, signature, hosted API,
+deployment or purchase was exercised by this UI work.
+
+Validation caveat: the existing dashboard test requiring its copied YAML docs
+snippet to equal root `miner.yaml` fails on the unchanged parent as well. This UI
+increment does not modify either file or claim a clean full frontend suite.

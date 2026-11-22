@@ -8,6 +8,7 @@ import Landing from "./pages/Landing";
 import NotFound from "./pages/NotFound";
 import Receipts from "./pages/Receipts";
 import Status from "./pages/Status";
+import Buyer from "./pages/Buyer";
 import Research from "./pages/Research";
 
 /** App shell routes.
@@ -59,6 +60,7 @@ export default function App() {
           <Route path="status" element={<Status />} />
           <Route path="docs" element={<Docs />} />
           <Route path="research" element={<Research />} />
+          <Route path="buyer" element={<Buyer />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

@@ -1,0 +1,2 @@
+import {it,expect} from 'vitest';import {readFileSync} from 'node:fs';import {resolve} from 'node:path';import {HOSTED_BUYER_POLICY_HASH,HOSTED_BUYER_TASK_HASH} from '../src/buyer/contracts';
+it('pins the browser product to the same frozen server policy/task hashes',()=>{const code=readFileSync(resolve('frontend/src/lib/buyerView.ts'),'utf8');expect(/BUYER_POLICY_HASH\s*=\s*['"]([a-f0-9]{64})['"]/.exec(code)?.[1]).toBe(HOSTED_BUYER_POLICY_HASH);expect(/BUYER_TASK_HASH\s*=\s*['"]([a-f0-9]{64})['"]/.exec(code)?.[1]).toBe(HOSTED_BUYER_TASK_HASH);});
