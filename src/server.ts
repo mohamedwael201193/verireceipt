@@ -14,6 +14,10 @@ import { handleTvl, startTvlListsRefreshTimer, stopTvlListsRefreshTimer, tvlDisk
 import { handleRoute } from "./handlers/optimalRoute";
 import { handleGridPrice } from "./handlers/gridPrice";
 import { handleValidator } from "./handlers/validator";
+import { handleGasPrice } from "./handlers/gasPrice";
+import { handleBalance } from "./handlers/walletBalance";
+import { handleTokenSupply } from "./handlers/tokenSupply";
+import { handleMacro } from "./handlers/macroEconomic";
 import { ApiError, badRequest, errorBody } from "./core/errors";
 import { getDb } from "./core/db";
 import {
@@ -240,6 +244,18 @@ export function buildServer(): FastifyInstance {
   });
   app.get("/v1/validator", async (request) =>
     trackIntent("validator", () => handleValidator(asQuery(request.query))),
+  );
+  app.get("/v1/gas-price", async (request) =>
+    trackIntent("gas-price", () => handleGasPrice(asQuery(request.query))),
+  );
+  app.get("/v1/balance", async (request) =>
+    trackIntent("balance", () => handleBalance(asQuery(request.query))),
+  );
+  app.get("/v1/token-supply", async (request) =>
+    trackIntent("token-supply", () => handleTokenSupply(asQuery(request.query))),
+  );
+  app.get("/v1/macro", async (request) =>
+    trackIntent("macro", () => handleMacro(asQuery(request.query))),
   );
 
   // G10: serve stored receipts + their exact raw evidence bytes

@@ -82,6 +82,7 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "ethereum-beacon-api.publicnode.com": "beacon-api",
   "rpc.mevblocker.io": "evm-rpc",
   "mainnet.base.org": "evm-rpc",
+  "api.worldbank.org": "worldbank",
 };
 
 /** Hostname suffixes shared by every CHAIN_RPCS host family. */
@@ -183,6 +184,10 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   route: "evm-rpc",
   "grid-price": "caiso-oasis",
   validator: "beacon-api",
+  "gas-price": "evm-rpc",
+  balance: "evm-rpc",
+  "token-supply": "evm-rpc",
+  macro: "worldbank",
 };
 
 /**

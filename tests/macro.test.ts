@@ -1,0 +1,270 @@
+// Tests for src/handlers/macroEconomic.ts (MACRO_ECONOMIC_INDICATOR_GENERAL).
+//
+// resolveCountry is tested as a pure function against a small fixture
+// catalog; the handler paths are driven by a stubbed global fetch
+// (catalog + indicator calls), and the LIVE tests at the bottom hit the
+// real keyless World Bank API. Hermetic DB via a unique scratch
+// SQLITE_PATH per run.
+
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync } from "fs";
+import { join, resolve } from "path";
+
+const SCRATCH_PARENT = resolve(process.cwd(), "..", "tmp");
+mkdirSync(SCRATCH_PARENT, { recursive: true });
+const SCRATCH_DIR = mkdtempSync(join(SCRATCH_PARENT, "macro-test-"));
+process.env.SQLITE_PATH = join(SCRATCH_DIR, "verireceipt.sqlite");
+
+afterAll(() => {
+  rmSync(SCRATCH_DIR, { recursive: true, force: true });
+});
+
+import { ApiError } from "../src/core/errors";
+import { sha256Hex } from "../src/core/receipt";
+import { getReceiptEvidence } from "../src/core/storage";
+import {
+  INTENT,
+  handleMacro,
+  resetMacroCachesForTests,
+  resolveCountry,
+} from "../src/handlers/macroEconomic";
+
+const SHA256_RE = /^[0-9a-f]{64}$/;
+
+async function expectApiError(p: Promise<unknown>, status: number, code: string): Promise<void> {
+  try {
+    await p;
+  } catch (err) {
+    expect(err).toBeInstanceOf(ApiError);
+    const e = err as ApiError;
+    expect(e.status).toBe(status);
+    expect(e.code).toBe(code);
+    return;
+  }
+  throw new Error(`expected ApiError ${status}/${code} but the call succeeded`);
+}
+
+const FIXTURE_CATALOG = [
+  { id: "EG", iso2Code: "EG", name: "Egypt, Arab Rep.", iso3: "EGY", isAggregate: false },
+  { id: "US", iso2Code: "US", name: "United States", iso3: "USA", isAggregate: false },
+  { id: "GB", iso2Code: "GB", name: "United Kingdom", iso3: "GBR", isAggregate: false },
+  { id: "TR", iso2Code: "TR", name: "Turkiye", iso3: "TUR", isAggregate: false },
+  { id: "KR", iso2Code: "KR", name: "Korea, Rep.", iso3: "KOR", isAggregate: false },
+  { id: "WLD", iso2Code: "1W", name: "World", iso3: "WLD", isAggregate: true },
+];
+
+describe("resolveCountry (pure, fixture catalog)", () => {
+  it("matches the WB name case-insensitively", () => {
+    expect(resolveCountry(FIXTURE_CATALOG, "egypt, arab rep.")?.iso2Code).toBe("EG");
+    expect(resolveCountry(FIXTURE_CATALOG, "United States")?.iso2Code).toBe("US");
+  });
+
+  it("matches ISO-2 and ISO-3", () => {
+    expect(resolveCountry(FIXTURE_CATALOG, "eg")?.iso2Code).toBe("EG");
+    expect(resolveCountry(FIXTURE_CATALOG, "EGY")?.iso2Code).toBe("EG");
+    expect(resolveCountry(FIXTURE_CATALOG, "gbr")?.iso2Code).toBe("GB");
+  });
+
+  it("resolves the alias table (Egypt, UK, Turkey, South Korea)", () => {
+    expect(resolveCountry(FIXTURE_CATALOG, "Egypt")?.iso2Code).toBe("EG");
+    expect(resolveCountry(FIXTURE_CATALOG, "UK")?.iso2Code).toBe("GB");
+    expect(resolveCountry(FIXTURE_CATALOG, "Turkey")?.iso2Code).toBe("TR");
+    expect(resolveCountry(FIXTURE_CATALOG, "South Korea")?.iso2Code).toBe("KR");
+  });
+
+  it("excludes aggregate regions", () => {
+    expect(resolveCountry(FIXTURE_CATALOG, "World")).toBeNull();
+    expect(resolveCountry(FIXTURE_CATALOG, "WLD")).toBeNull();
+  });
+
+  it("returns null for an unknown country", () => {
+    expect(resolveCountry(FIXTURE_CATALOG, "Narnia")).toBeNull();
+  });
+});
+
+/** Stub the two World Bank calls: catalog, then indicator. */
+function stubWorldBank(opts: {
+  catalog?: string | "ERR";
+  indicator?: string | "ERR";
+}): void {
+  const fetchStub = async (url: unknown) => {
+    const u = String(url);
+    if (u.includes("/country?") || u.endsWith("/country?format=json&per_page=400")) {
+      if (opts.catalog === "ERR" || opts.catalog === undefined) throw new Error("wb down");
+      return { ok: true, status: 200, text: async () => opts.catalog! } as Response;
+    }
+    if (u.includes("/indicator/")) {
+      if (opts.indicator === "ERR" || opts.indicator === undefined) throw new Error("wb down");
+      return { ok: true, status: 200, text: async () => opts.indicator! } as Response;
+    }
+    throw new Error(`unexpected fetch to ${u}`);
+  };
+  vi.stubGlobal("fetch", fetchStub);
+}
+
+function catalogJson(): string {
+  return JSON.stringify([
+    { page: 1, pages: 1, per_page: 400, total: FIXTURE_CATALOG.length },
+    FIXTURE_CATALOG.map((c) => ({
+      id: c.iso3,
+      iso2Code: c.iso2Code,
+      name: c.name,
+      region: { id: c.isAggregate ? "NA" : "MEA", value: c.isAggregate ? "Aggregates" : "Region" },
+    })),
+  ]);
+}
+
+function indicatorJson(year: number, value: number | null): string {
+  return JSON.stringify([
+    { page: 1, pages: 1, per_page: 100, total: 1 },
+    [
+      {
+        indicator: { id: "SL.UEM.TOTL.ZS", value: "Unemployment, total (% of total labor force)" },
+        country: { id: "EG", value: "Egypt, Arab Rep." },
+        countryiso3code: "EGY",
+        date: String(year),
+        value,
+        decimal: 1,
+      },
+    ],
+  ]);
+}
+
+beforeEach(() => {
+  resetMacroCachesForTests();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  resetMacroCachesForTests();
+});
+
+describe("handleMacro validation (stubbed, no network use)", () => {
+  it("rejects missing params with 400 MISSING_PARAM", async () => {
+    await expectApiError(handleMacro({}), 400, "MISSING_PARAM");
+  });
+
+  it("rejects an unsupported indicator with 422 UNSUPPORTED_INDICATOR", async () => {
+    await expectApiError(
+      handleMacro({ indicator: "CPI", country: "Egypt", year: "2023" }),
+      422,
+      "UNSUPPORTED_INDICATOR",
+    );
+  });
+
+  it("rejects a malformed year with 400 INVALID_YEAR", async () => {
+    await expectApiError(
+      handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "20x3" }),
+      400,
+      "INVALID_YEAR",
+    );
+    await expectApiError(
+      handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "1959" }),
+      400,
+      "INVALID_YEAR",
+    );
+  });
+
+  it("rejects an unknown country with 422 COUNTRY_NOT_FOUND", async () => {
+    stubWorldBank({ catalog: catalogJson() });
+    await expectApiError(
+      handleMacro({ indicator: "unemployment rate", country: "Narnia", year: "2023" }),
+      422,
+      "COUNTRY_NOT_FOUND",
+    );
+  });
+});
+
+describe("handleMacro answers (stubbed World Bank)", () => {
+  it("answers a country's rate with 6-decimal rounding and a raw-bytes receipt", async () => {
+    stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2023, 5.30999994277954) });
+    const res = await handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2023" });
+    expect(res.rate_pct).toBe(5.31);
+    expect(res.country).toBe("Egypt, Arab Rep.");
+    expect(res.country_iso3).toBe("EGY");
+    expect(res.year).toBe(2023);
+    expect(res.indicator_id).toBe("SL.UEM.TOTL.ZS");
+    expect(res.verdict).toBe("verified");
+    const rc = res.receipt as { raw_response_sha256: string; receipt_id: string; upstream_url: string };
+    expect(rc.upstream_url).toContain("api.worldbank.org");
+    const ev = await getReceiptEvidence(rc.receipt_id);
+    expect(ev.found).toBe(true);
+    expect(ev.evidence!.toString("utf8")).toBe(indicatorJson(2023, 5.30999994277954));
+    expect(sha256Hex(ev.evidence!)).toBe(rc.raw_response_sha256);
+  });
+
+  it("resolves the alias 'Turkey' to Turkiye", async () => {
+    stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2022, 10.25) });
+    const res = await handleMacro({ indicator: "unemployment rate", country: "Turkey", year: "2022" });
+    expect(res.country).toBe("Turkiye");
+    expect(res.rate_pct).toBe(10.25);
+  });
+
+  it("422 NO_DATA when the year has a null value", async () => {
+    stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2024, null) });
+    await expectApiError(
+      handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2024" }),
+      422,
+      "NO_DATA",
+    );
+  });
+
+  it("502 WORLD_BANK_UNAVAILABLE when the catalog call fails", async () => {
+    stubWorldBank({ catalog: "ERR" });
+    await expectApiError(
+      handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2023" }),
+      502,
+      "WORLD_BANK_UNAVAILABLE",
+    );
+  });
+
+  it("502 WORLD_BANK_UNAVAILABLE when the indicator call fails", async () => {
+    stubWorldBank({ catalog: catalogJson(), indicator: "ERR" });
+    await expectApiError(
+      handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2023" }),
+      502,
+      "WORLD_BANK_UNAVAILABLE",
+    );
+  });
+
+  it("502 on an out-of-range value, never serves it", async () => {
+    stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2023, 150) });
+    await expectApiError(
+      handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2023" }),
+      502,
+      "WORLD_BANK_UNAVAILABLE",
+    );
+  });
+});
+
+describe("handleMacro LIVE (real World Bank API, no stub)", () => {
+  const LIVE_TIMEOUT_MS = 60000;
+
+  it(
+    "answers Egypt's live published unemployment rate for 2023 with a verifiable receipt",
+    async () => {
+      const res = await handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2023" });
+      const rate = res.rate_pct as number;
+      expect(rate).toBeGreaterThan(0);
+      expect(rate).toBeLessThanOrEqual(100);
+      expect(res.country).toBe("Egypt, Arab Rep.");
+      const rc = res.receipt as { raw_response_sha256: string; receipt_id: string; intent: string };
+      expect(rc.intent).toBe(INTENT);
+      expect(rc.raw_response_sha256).toMatch(SHA256_RE);
+      const ev = await getReceiptEvidence(rc.receipt_id);
+      expect(ev.found).toBe(true);
+      expect(sha256Hex(ev.evidence!)).toBe(rc.raw_response_sha256);
+    },
+    LIVE_TIMEOUT_MS,
+  );
+
+  it(
+    "answers the United States rate via the 'USA' ISO-3 input",
+    async () => {
+      const res = await handleMacro({ indicator: "unemployment rate", country: "USA", year: "2022" });
+      expect(res.rate_pct as number).toBeGreaterThan(0);
+      expect(res.country).toBe("United States");
+    },
+    LIVE_TIMEOUT_MS,
+  );
+});
