@@ -999,6 +999,16 @@ const protocolFillInFlight = new Map<string, Promise<void>>();
 // 256MB V8 heap on the starter instance. At most one optional fill runs.
 let activeProtocolFill = false;
 const MAX_PROTOCOL_BODY_BYTES = 2 * 1024 * 1024;
+// Measured 2026-11-22: protocols 9,682,478 B; chains 58,511 B;
+// Ethereum history 123,498 B; bare totals about 18 B. Bound every
+// source before parsing, with headroom and explicit failure on growth.
+function sourceBodyByteLimit(url: string): number {
+  if (url === PROTOCOLS_URL) return 16 * 1024 * 1024;
+  if (url === CHAINS_URL) return 1024 * 1024;
+  if (url.startsWith('https://api.llama.fi/v2/historicalChainTvl/')) return 4 * 1024 * 1024;
+  if (url.startsWith('https://api.llama.fi/tvl/')) return 4 * 1024;
+  return MAX_PROTOCOL_BODY_BYTES;
+}
 
 /** Generation guard: bumped whenever the caches are cleared (tests), so a
  * fill started under a previous generation can never write stale values. */
@@ -1500,15 +1510,15 @@ async function fetchText(
         res.status >= 500,
       );
     }
-    if (!url.startsWith('https://api.llama.fi/protocol/')) return await res.text();
+    const byteLimit = sourceBodyByteLimit(url);
     // Bound DECOMPRESSED bytes before string concatenation and JSON.parse.
     // Content-Length alone is not a bound: upstream may compress or omit it.
     const tooLarge = (): ApiError => upstreamUnavailable(
       'DEFILLAMA_RESPONSE_TOO_LARGE',
-      `DeFiLlama protocol response exceeds the ${MAX_PROTOCOL_BODY_BYTES}-byte safety limit; total/split unavailable, not zero`,
+      `DeFiLlama response exceeds the ${byteLimit}-byte safety limit; unavailable, not zero`,
     );
     const length = Number(res.headers.get('content-length'));
-    if (Number.isFinite(length) && length > MAX_PROTOCOL_BODY_BYTES) {
+    if (Number.isFinite(length) && length > byteLimit) {
       controller.abort();
       void res.body?.cancel().catch(() => undefined);
       throw tooLarge();
@@ -1523,7 +1533,7 @@ async function fetchText(
         const { done, value } = await reader.read();
         if (done) break;
         bytes += value.byteLength;
-        if (bytes > MAX_PROTOCOL_BODY_BYTES) {
+        if (bytes > byteLimit) {
           controller.abort();
           void reader.cancel().catch(() => undefined);
           throw tooLarge();
@@ -2406,3 +2416,6 @@ export async function handleTvl(
     },
   );
 }
+
+// Test-only transport seam, never mounted as a route.
+export { fetchText as __fetchTvlTextForTests };
