@@ -8,6 +8,39 @@ export interface Receipt {
   quorum_votes: string;
   fetched_at: string;
   audit_url: string;
+  /**
+   * Base64 Ed25519 signature over the receipt content (core/receiptSign.ts).
+   * Present only when a receipt signer is active (server boot with
+   * VERIRECEIPT_RECEIPT_SIGNING_KEY set); never fabricated when absent.
+   */
+  signature?: string;
+}
+
+/**
+ * Pluggable receipt signer (dependency inversion so this module stays
+ * free of key handling): server boot registers core/receiptSign's
+ * signReceipt when VERIRECEIPT_RECEIPT_SIGNING_KEY is configured, tests
+ * may register their own. makeReceipt attaches the returned signature.
+ */
+export type ReceiptSigner = (receipt: Receipt) => string | undefined;
+let activeReceiptSigner: ReceiptSigner | null = null;
+export function setReceiptSigner(signer: ReceiptSigner | null): void {
+  activeReceiptSigner = signer;
+}
+
+/**
+ * Attach the active signer's signature to a FINALIZED receipt (no-op
+ * when signing is not configured). Every assembly path that puts a
+ * receipt into a response must call this: envelope() does, and the one
+ * audited bypass — optimalRoute's routeUnavailable refusal body — calls
+ * it directly. Never sign before the caller's final field values are
+ * set (see the envelope comment).
+ */
+export function applyReceiptSignature(receipt: Receipt): void {
+  if (activeReceiptSigner) {
+    const signature = activeReceiptSigner(receipt);
+    if (signature) receipt.signature = signature;
+  }
 }
 
 const RECEIPT_ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -142,7 +175,7 @@ export function makeReceipt(
 ): Receipt {
   const receipt_id = newReceiptId();
   const baseUrl = publicBaseUrl();
-  return {
+  const receipt: Receipt = {
     receipt_id,
     intent,
     upstream_url: upstreamUrl,
@@ -151,6 +184,11 @@ export function makeReceipt(
     fetched_at: new Date().toISOString(),
     audit_url: baseUrl + "/receipts/" + receipt_id,
   };
+  // No signing here (S2 r1, reviewer r146): handlers legitimately
+  // finalize signed fields AFTER creation — gridPrice and emailSecurity
+  // overwrite fetched_at with the actual upstream fetch time. Signing
+  // happens in envelope(), the final assembly point, over final fields.
+  return receipt;
 }
 
 export function envelope(
@@ -165,6 +203,13 @@ export function envelope(
       throw new Error(`envelope field collides with reserved key: ${key}`);
     }
   }
+  // Sign at FINALIZATION time (S2 r1): every signed field must have its
+  // final value here. Handlers that adjust a signed field after
+  // makeReceipt (gridPrice: fetched_at = cache ingest time; emailSecurity:
+  // fetched_at = resolver fetch time) do so before envelope(), so the
+  // inline signature covers the same final fields the store persists and
+  // the metadata route re-signs — inline and stored signatures match.
+  applyReceiptSignature(receipt);
   return {
     // Put the factual answer before potentially large lists. JSON field names,
     // numeric units, verification status and receipt evidence stay unchanged.

@@ -39,6 +39,8 @@ import {
 import { installGracefulShutdown } from "./core/shutdown";
 import { maybeMigrateOnBoot } from "./tools/bootMigrate";
 import { registerReceiptRoutes } from "./core/receiptRoutes";
+import { configureReceiptSigningFromEnv, signReceipt } from "./core/receiptSign";
+import { setReceiptSigner } from "./core/receipt";
 import { getJobsSnapshot, getLoopLagSnapshot, startLoopLagSampler } from "./core/loopLag";
 import {
   INTENT_PRIMARY_UPSTREAM,
@@ -294,6 +296,11 @@ export function buildServer(): FastifyInstance {
   // G10: serve stored receipts + their exact raw evidence bytes
   // (GET /receipts/:id, /receipts/:id/raw; /api/* aliases). See
   // src/core/receiptRoutes.ts for the contract.
+  // S2: Ed25519 receipt signing. Key comes only from the environment
+  // (vault-provisioned); when absent or invalid, signing is off and no
+  // receipt carries a fabricated signature. Reset on every build so test
+  // processes that flip the env var never leak a signer across servers.
+  setReceiptSigner(configureReceiptSigningFromEnv() ? signReceipt : null);
   registerReceiptRoutes(app);
 
   return app;

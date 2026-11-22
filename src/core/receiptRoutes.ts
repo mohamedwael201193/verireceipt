@@ -57,6 +57,7 @@ import type { ReceiptEvidence, StoredReceiptMeta } from "./db";
 import { EvidenceCorruptError } from "./db";
 import { getReceiptEvidence, getReceiptMeta, getReceiptPageEvidence, getReceiptPages } from "./storage";
 import { RECEIPT_ID_RE, normalizeSha256Hex, publicBaseUrl, sha256Hex } from "./receipt";
+import { receiptSigningPublicInfo, signReceipt } from "./receiptSign";
 import { checkEvidence, recordVerified, type EvidenceStatus } from "./evidenceVerify";
 
 const notFound = (code: string, message: string): ApiError => new ApiError(404, code, message);
@@ -161,6 +162,24 @@ function corsOptions(_request: FastifyRequest, reply: FastifyReply): FastifyRepl
 }
 
 export function registerReceiptRoutes(app: FastifyInstance): void {
+  // Public Ed25519 verify key + the exact signing contract, so any holder
+  // of a receipt can verify it offline (scripts/verify.mjs does). 404
+  // when no signing key is configured — never a placeholder key.
+  app.get("/.well-known/verireceipt.json", async (_request, reply) => {
+    const info = receiptSigningPublicInfo();
+    if (!info) {
+      return sendError(
+        reply,
+        notFound("SIGNING_NOT_CONFIGURED", "receipt signing is not configured on this service"),
+      );
+    }
+    return reply
+      .header("cache-control", "public, max-age=300")
+      .header("access-control-allow-origin", "*")
+      .type("application/json; charset=utf-8")
+      .send(info);
+  });
+
   const meta = async (request: { params: unknown }, reply: FastifyReply) => {
     let id: string;
     try {
@@ -175,6 +194,18 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
     const corrupt = await digestCorruption(id, row);
     if (corrupt) return sendError(reply, corrupt);
     const digest = normalizeSha256Hex(row.raw_response_sha256) as string;
+    // Ed25519 signing (S2): sign the exact content fields served here, so
+    // a verifier can rebuild the payload from THIS response. Covers
+    // legacy rows too (they are signed at serve time, not at write time).
+    // undefined when no key is configured -> the field is omitted.
+    const signature = signReceipt({
+      receipt_id: row.receipt_id,
+      intent: row.intent,
+      upstream_url: row.upstream_url,
+      raw_response_sha256: digest,
+      quorum_votes: row.quorum_votes,
+      fetched_at: row.fetched_at,
+    });
     // G10 r2 (J2 m3): evidence_available reflects what /raw would
     // actually do — the blob is verified (gunzip + length + sha256), not
     // just checked for presence. A corrupt blob is evidence_available:
@@ -216,6 +247,7 @@ export function registerReceiptRoutes(app: FastifyInstance): void {
         fetched_at: row.fetched_at,
         audit_url: `${base}/receipts/${row.receipt_id}`,
         raw_url: `${base}/receipts/${row.receipt_id}/raw`,
+        ...(signature ? { signature, signature_alg: "Ed25519" } : {}),
         evidence_available: mainEv.status === "ok",
         evidence_status: mainEv.status,
         evidence_bytes: mainEv.bytes,

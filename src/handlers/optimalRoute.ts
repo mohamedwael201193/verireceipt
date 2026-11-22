@@ -425,7 +425,7 @@
 import { request as httpsRequest, Agent as HttpsAgent } from "https";
 import { request as httpRequest, Agent as HttpAgent } from "http";
 import { ApiError, badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
-import { envelope, makeReceipt, type Receipt } from "../core/receipt";
+import { applyReceiptSignature, envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { quorum2of3 } from "../core/quorum";
 import { MAINNET_RPCS } from "../config/chains";
@@ -1493,6 +1493,13 @@ export function routeUnavailable(
   receipt: Receipt,
 ): ApiError {
   const err = new ApiError(400, code, message);
+  // S2 r2 (reviewer r151): this refusal body bypasses envelope(), so it
+  // must sign the finalized receipt itself — same signature the answer
+  // path would have produced; refusal semantics (status, code, fields)
+  // are unchanged. Audit 2026-11-22: this is the ONLY receipt-carrying
+  // assembly outside envelope() (all other sites pass the receipt to
+  // envelope or to saveReceipt).
+  applyReceiptSignature(receipt);
   err.responseBody = {
     status: "unavailable",
     error: { code, message },
