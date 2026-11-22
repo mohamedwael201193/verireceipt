@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import PublicResearchReplay from "../components/PublicResearchReplay";
 import { inspectResearchReport, type InspectedResearchReport } from "../lib/researchReport";
 import "./research.css";
 import "./research-flow.css";
@@ -46,7 +47,7 @@ export default function Research() {
       <div className="rp-eyebrow">FILING-COVERAGE RESEARCH / SEPOLIA TESTNET</div>
       <h1>A precise question.<br /><span>An answer you can inspect.</span></h1>
       <p>Turn an exact SEC filing question into a source-backed research appendix. See a real recorded run, then prepare your own question or explore the evidence tools.</p>
-      <div className="rp-mode">RESEARCH TOOLS / NO BROWSER PAYMENT <span>No wallet. No purchase. No live verification on this page.</span></div>
+      <div className="rp-mode">RESEARCH TOOLS / NO BROWSER PAYMENT <span>No wallet. No purchase. Verify the real stored source below.</span></div>
     </header>
     <section className="rp-case" aria-labelledby="rp-case-title">
       <div className="rp-case-top"><span className="rp-eyebrow">RECORDED PAID RUN / NOVEMBER 21, 2026</span><span className="rp-case-network">DIRECT · RELATED-PARTY · TESTNET</span></div>
@@ -66,6 +67,7 @@ export default function Research() {
         <p>A free rehearsal had already returned 3. The outcome was not blind. The plan hash was not independently timestamped. This is not independent adoption, ranked routing, customer revenue or whole-mission acceptance.</p>
         <p>No time or money saving has been measured. You can obtain the same SEC files and count the exact forms and calendar dates without Telegraph.</p>
       </details>
+      <PublicResearchReplay />
     </section>
     <section className="rp-tools" aria-labelledby="rp-tools-title">
       <div className="rp-tools-head"><div><div className="rp-eyebrow">YOUR NEXT STEP</div><h2 id="rp-tools-title">Choose a research tool</h2></div><p>Everything below stays local to this page. Buying and independent recounting happen in the reviewed CLI.</p></div>

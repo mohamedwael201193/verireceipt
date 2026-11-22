@@ -7,7 +7,7 @@ describe("Research page, real evidence and local preparation", () => {
   it("does not ask for a wallet, make a payment or fetch evidence", () => {
     const f = vi.fn(); vi.stubGlobal("fetch", f);
     render(<Research />);
-    expect(screen.getByText(/No wallet. No purchase. No live verification/)).toBeInTheDocument();
+    expect(screen.getByText(/No wallet. No purchase. Verify the real stored source/)).toBeInTheDocument();
     expect(screen.queryByText(/SIMULATION|synthetic fixture/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /buy|pay|connect wallet/i })).not.toBeInTheDocument();
     expect(f).not.toHaveBeenCalled();
