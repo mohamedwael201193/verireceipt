@@ -1396,10 +1396,11 @@ function resolveRouteToken(raw: string): string | null {
  * not resolve to a registered pair returns null and the caller takes
  * the no-route path (200) or 422s malformed input — see classifyPair. */
 export function parsePair(raw: string): PairSpec | null {
-  // Surrounding spaces/tabs are tolerated; control characters (embedded
-  // newlines etc.) are not a pair format and stay 422.
-  if (/[\x00-\x1f]/.test(raw)) return null;
-  const normalized = raw.replace(/^[ \t]+|[ \t]+$/g, "").replace(/->/g, "/");
+  // Trim only the advertised ASCII boundary spaces/tabs before checking
+  // controls. Embedded tabs and every other control remain malformed.
+  const trimmed = raw.replace(/^[ \t]+|[ \t]+$/g, "");
+  if (/[\x00-\x1f]/.test(trimmed)) return null;
+  const normalized = trimmed.replace(/->/g, "/");
   const sides = normalized.includes("/")
     ? normalized.split("/")
     : normalized.includes("-")
@@ -1436,8 +1437,9 @@ export type PairResolution =
 export function classifyPair(raw: string): PairResolution {
   const spec = parsePair(raw);
   if (spec !== null) return { kind: "registered", spec };
-  if (/[\x00-\x1f]/.test(raw)) return { kind: "malformed" };
-  const normalized = raw.replace(/^[ \t]+|[ \t]+$/g, "").replace(/->/g, "/");
+  const trimmed = raw.replace(/^[ \t]+|[ \t]+$/g, "");
+  if (/[\x00-\x1f]/.test(trimmed)) return { kind: "malformed" };
+  const normalized = trimmed.replace(/->/g, "/");
   const sides = normalized.includes("/")
     ? normalized.split("/")
     : normalized.includes("-")
