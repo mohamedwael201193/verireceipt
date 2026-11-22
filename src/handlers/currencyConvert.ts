@@ -169,23 +169,27 @@ export function settleWithStragglerGrace<T>(
   graceMs: number,
   wallMs: number,
 ): Promise<Array<PromiseSettledResult<T | null> | undefined>> {
-  const results: Array<PromiseSettledResult<T | null> | undefined> = new Array(tasks.length);
+  const results: Array<PromiseSettledResult<T | null> | undefined> = Array.from({ length: tasks.length }, () => undefined);
   return new Promise((resolvePromise) => {
+    let finished = false;
     let settledCount = 0;
     let fulfilledCount = 0;
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
     const wallTimer = setTimeout(done, wallMs);
     function done(): void {
+      if (finished) return;
+      finished = true;
       if (graceTimer !== undefined) clearTimeout(graceTimer);
       clearTimeout(wallTimer);
-      resolvePromise(results);
+      resolvePromise(results.slice());
     }
     tasks.forEach((task, i) => {
       task.then(
         (value) => {
+          if (finished) return;
           results[i] = { status: "fulfilled", value };
           settledCount += 1;
-          fulfilledCount += 1;
+          if (value !== null) fulfilledCount += 1;
           if (settledCount === tasks.length) {
             done();
           } else if (fulfilledCount >= 2 && graceTimer === undefined) {
@@ -193,6 +197,7 @@ export function settleWithStragglerGrace<T>(
           }
         },
         (reason) => {
+          if (finished) return;
           results[i] = { status: "rejected", reason };
           settledCount += 1;
           if (settledCount === tasks.length) done();

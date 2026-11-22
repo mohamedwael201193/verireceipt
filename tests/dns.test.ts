@@ -145,6 +145,8 @@ describe("handleDns stubbed resolvers", () => {
     const result = await handleDns({ name: "example.com", record_type: "A" });
     expect(result.has_record).toBe(true);
     expect(result.confidence).toBe(1.0);
+    expect(String(result.source)).not.toContain("degraded");
+    expect(result.resolvers_used).toHaveLength(3);
     expect(String(result.answer)).toContain("93.184.216.34");
     expect(String(result.answer)).toContain("all answering resolvers agree on existence");
     const receipt = result.receipt as Record<string, unknown>;
@@ -221,6 +223,10 @@ describe("handleDns stubbed resolvers", () => {
     const result = await handleDns({ name: "example.com", record_type: "A" });
     const wall = Date.now() - started;
     expect(result.has_record).toBe(true);
+    expect(result.confidence).toBe(0.9);
+    expect(String(result.source)).toContain("degraded");
+    expect(String(result.source)).toContain("resolvers failed: AdGuard");
+    expect(result.resolvers_used).toHaveLength(2);
     expect(wall).toBeLessThan(3500); // grace 800 ms, never the 4 s budget
   });
 

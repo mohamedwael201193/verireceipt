@@ -19,7 +19,35 @@ afterAll(() => {
 import { ApiError } from "../src/core/errors";
 import { sha256Hex } from "../src/core/receipt";
 import { getReceiptEvidence } from "../src/core/storage";
-import { AGREEMENT_TOLERANCE, INTENT, handleFx } from "../src/handlers/currencyConvert";
+import { AGREEMENT_TOLERANCE, INTENT, handleFx, settleWithStragglerGrace } from "../src/handlers/currencyConvert";
+
+describe("settleWithStragglerGrace coverage accounting", () => {
+  it("pending results are dense, explicit undefined slots and late completions cannot mutate the snapshot", async () => {
+    let complete!: (value: string) => void;
+    const late = new Promise<string>((resolve) => { complete = resolve; });
+    const results = await settleWithStragglerGrace([Promise.resolve("a"), Promise.resolve("b"), late], 10, 500);
+    expect(results).toHaveLength(3);
+    expect(2 in results).toBe(true);
+    let visited = 0;
+    results.forEach(() => visited++);
+    expect(visited).toBe(3);
+    expect(results[2]).toBeUndefined();
+    complete("late");
+    await Promise.resolve(); await Promise.resolve();
+    expect(results[2]).toBeUndefined();
+  });
+  it("two null coverage misses cannot start the grace and discard a later real answer", async () => {
+    const result = await settleWithStragglerGrace([
+      Promise.resolve(null), Promise.resolve(null),
+      new Promise<string>((resolve) => setTimeout(() => resolve("real quote"), 60)),
+    ], 10, 500);
+    expect(result[2]).toEqual({ status: "fulfilled", value: "real quote" });
+  });
+  it("healthy negative control retains every fulfilled result", async () => {
+    const results = await settleWithStragglerGrace([Promise.resolve("a"), Promise.resolve("b"), Promise.resolve("c")], 10, 500);
+    expect(results.map((r) => r?.status)).toEqual(["fulfilled", "fulfilled", "fulfilled"]);
+  });
+});
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
 
@@ -158,6 +186,10 @@ describe("handleFx answers (stubbed sources)", () => {
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR" });
     const wall = Date.now() - start;
     expect(result.converted_amount).toBeCloseTo(0.91, 6);
+    expect(result.confidence).toBe(0.9);
+    expect(String(result.source)).toContain("degraded");
+    expect(String(result.source)).toContain("frankfurter");
+    expect(result.sources_used).toHaveLength(2);
     expect(wall).toBeLessThan(1000);
   });
 
