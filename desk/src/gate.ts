@@ -33,6 +33,8 @@ import {
   type SignalPayload,
 } from "./verify.js";
 import type { FieldStatus } from "../../src/core/shapedFields.js";
+import { verifyFilingSource } from "./filingSource.js";
+import type { SourceVerification } from "./sourceTypes.js";
 
 export const GATE_LIMITS = [
   "Advisory evidence only: a PASS never executes a dispatch, trade or allocation. The run's only effects are the Sepolia testnet escrow purchase itself (payment and the node's public records), a journaled spend reservation and this audit record.",
@@ -90,6 +92,7 @@ export interface GateRun {
   node_checks: Check[];
   miner_chain: "passed" | "failed" | "not_applicable";
   miner_checks: Check[];
+  source_verification?: SourceVerification;
   outcome: "PASS" | "HOLD";
   reasons: string[];
   limits: readonly string[];
@@ -118,6 +121,7 @@ export interface ProbeRun {
   node_checks: Check[];
   miner_chain: "passed" | "failed" | "not_applicable";
   miner_checks: Check[];
+  source_verification?: SourceVerification;
   outcome: "ANSWERED" | "ABSTAIN";
   reasons: string[];
   limits: readonly string[];
@@ -280,6 +284,7 @@ export interface GateOptions {
   now?: () => Date;
   f?: Fetch;
   onRawResponse?: (raw: RawResponse) => void | Promise<void>;
+  secUserAgent?: string;
 }
 
 /** Resolve a task's params: fixed, then dynamic (computed from `now`), then operator overrides. */
@@ -434,6 +439,7 @@ interface VerifiedCore {
   node_checks: Check[];
   miner_chain: "passed" | "failed" | "not_applicable";
   miner_checks: Check[];
+  source_verification?: SourceVerification;
   /** Verification failures (purchase refusals included); empty when the evidence stands. */
   reasons: string[];
   evidenceOk: boolean;
@@ -447,7 +453,7 @@ interface VerifiedCore {
 async function executeVerifiedPurchase(
   input: { intent: string; params: Record<string, string>; valueField: string; kind: string },
   payer: Payer,
-  opts: { spend: SpendLedger; now?: () => Date; f?: Fetch; onRawResponse?: (raw: RawResponse) => void | Promise<void> },
+  opts: { spend: SpendLedger; now?: () => Date; f?: Fetch; onRawResponse?: (raw: RawResponse) => void | Promise<void>; secUserAgent?: string },
 ): Promise<VerifiedCore> {
   const nowDate = (opts.now ?? (() => new Date()))();
   const f = opts.f ?? fetch;
@@ -546,7 +552,16 @@ async function executeVerifiedPurchase(
       minerChain = v.verified ? "passed" : "failed";
     }
 
+    let sourceVerification: SourceVerification | undefined;
+    if (node.ok && input.intent === "REGULATORY_FILING_MONITOR_GENERAL") {
+      sourceVerification = await verifyFilingSource({ params: input.params, result: body.result ?? {} }, { f, now: nowDate, secUserAgent: opts.secUserAgent });
+      if (input.valueField !== "filing_count") {
+        sourceVerification.status = "failed";
+        sourceVerification.checks.push({name:"primary source supported filing field",ok:false,detail:"only independently recounted filing_count is supported"});
+      }
+    }
     const reasons = [
+      ...(sourceVerification?.checks ?? []).filter(c => !c.ok).map(c => `${c.name}: ${c.detail}`),
       ...node.checks.filter((c) => !c.ok).map((c) => `${c.name}: ${c.detail}`),
       ...minerChecks.filter((c) => !c.ok).map((c) => `miner chain ${c.name}: ${c.detail}`),
     ];
@@ -559,7 +574,8 @@ async function executeVerifiedPurchase(
       miner_chain: minerChain,
       miner_checks: minerChecks,
       reasons,
-      evidenceOk: node.ok && minerChain !== "failed",
+      source_verification: sourceVerification,
+      evidenceOk: node.ok && minerChain !== "failed" && (!sourceVerification || sourceVerification.status === "verified"),
     };
   } catch (e) {
     purchase.worst_case_uusdc = reservedUusdc;
@@ -641,6 +657,7 @@ export async function runGate(taskId: string, payer: Payer, opts: GateOptions): 
     base.node_checks = core.node_checks;
     base.miner_chain = core.miner_chain;
     base.miner_checks = core.miner_checks;
+    base.source_verification = core.source_verification;
 
     const reasons = [...core.reasons];
     if (!ruleHolds(task.rule, core.value)) {
@@ -686,6 +703,7 @@ export interface ProbeOptions {
   now?: () => Date;
   f?: Fetch;
   onRawResponse?: (raw: RawResponse) => void | Promise<void>;
+  secUserAgent?: string;
 }
 
 /**
@@ -747,6 +765,7 @@ export async function runProbe(c0: ProbeCase, payer: Payer, opts: ProbeOptions):
   base.node_checks = core.node_checks;
   base.miner_chain = core.miner_chain;
   base.miner_checks = core.miner_checks;
+  base.source_verification = core.source_verification;
 
   const finite = typeof core.value === "number" && Number.isFinite(core.value);
   const answered = core.evidenceOk && finite;

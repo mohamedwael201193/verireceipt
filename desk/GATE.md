@@ -101,7 +101,7 @@ deep-copied before awaits, so a callback cannot change its rule mid-run.
 4. **Break it** - ask for a venue whose verified value cannot satisfy the
    precommitted floor (`--set protocol=…`) and the outcome is HOLD naming
    the rule; tamper with any evidence and the failed checks are named.
-5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (344 tests across 21 files,
+5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (363 tests across 23 files,
    no network, no key); the gate flow is covered with mocked nodes including
    tamper cases.
 
@@ -150,3 +150,19 @@ revenue or a mainnet claim. A fresh purchase's delivery may legitimately
 still be pending its epoch block (recorded as `delivery_status`), and the
 delivery Merkle proof is shape-checked only (the leaf/node hash algorithm is
 not documented), never walked.
+
+## Primary-source verification after the first live run
+
+The first frozen benchmark remains an as-run result of the earlier revision.
+It is not rescored with later checks. Receipt integrity alone did not establish
+answer correctness. The filing verifier now independently resolves the SEC
+issuer, exact form and supported explicit year/date range, reads the main
+submissions document and every listed history page, validates coverage and
+deduplicates accessions before comparing the primary recount with the paid
+answer. Contradictory returned form/date/source assertions also fail closed.
+It applies regardless of the serving miner. Source URLs, exact response text,
+SHA-256 digests and recount details are carried in `source_verification`.
+Missing source evidence, unsupported query grammar or an absent SEC contact
+User-Agent causes abstention/HOLD. Set `SEC_USER_AGENT` with a contact email;
+the verifier does not infer one. Other intents do not gain source-truth
+verification from this filing-specific check.
