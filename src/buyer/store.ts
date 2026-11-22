@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS buyer_one_shot(id INTEGER PRIMARY KEY CHECK(id=1),acc
 CREATE TABLE IF NOT EXISTS buyer_operator_sessions(owner_hash TEXT PRIMARY KEY,expires_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS buyer_jobs_reserved ON buyer_jobs(reserved_at);
 CREATE INDEX IF NOT EXISTS buyer_jobs_created ON buyer_jobs(created_at);
+CREATE TABLE IF NOT EXISTS buyer_lifetime(id INTEGER PRIMARY KEY CHECK(id=1),reservation_history TEXT NOT NULL CHECK(reservation_history IN ('never_reserved','reserved','unknown')));
 CREATE TABLE IF NOT EXISTS buyer_followups(job_id TEXT NOT NULL REFERENCES buyer_jobs(id) ON DELETE CASCADE,observed_at INTEGER NOT NULL,data TEXT NOT NULL);
 `;
 const DAY=86400000,PER_JOB_STORAGE=BUYER.maxResultBytes+2100000+16000+320000+4096;
@@ -32,8 +33,10 @@ export class BuyerStore {
   this.db=new Database(filename,{timeout:5000});
   if(filename!==':memory:')chmodSync(filename,0o600);
   this.db.pragma('journal_mode = WAL');this.db.pragma('synchronous = FULL');this.db.pragma('foreign_keys = ON');
-  this.db.exec(SCHEMA);
   this.db.transaction(()=>{
+   const existed=!!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='buyer_payer'").get();
+   this.db.exec(SCHEMA);
+   this.db.prepare('INSERT OR IGNORE INTO buyer_lifetime(id,reservation_history) VALUES(1,?)').run(existed?'unknown':'never_reserved');
    this.db.prepare('INSERT OR IGNORE INTO buyer_payer(id,address) VALUES(1,?)').run(payer);
    const saved=this.db.prepare('SELECT address FROM buyer_payer WHERE id=1').get() as {address:string};
    if(saved.address!==payer)throw new Error('Persistent buyer authority belongs to another payer');
@@ -45,9 +48,9 @@ export class BuyerStore {
   if(!/^[a-f0-9]{64}$/.test(accessHash)||!Number.isSafeInteger(expiresAt))throw new Error('Operator access hash and expiry required');
   this.immediate(()=>{
    const saved=this.db.prepare('SELECT access_hash,access_expires FROM buyer_one_shot WHERE id=1').get() as {access_hash:string;access_expires:number}|undefined;
-   if(saved){if(saved.access_hash!==accessHash||saved.access_expires!==expiresAt)throw new Error('One-shot access configuration is immutable');return;}
+   if(saved){if(this.lifetimeHistory()==='unknown'&& !['consumed','disarmed'].includes(this.gate()!.state))throw new Error('One-shot mode requires an unused payer authority with known history');if(saved.access_hash!==accessHash||saved.access_expires!==expiresAt)throw new Error('One-shot access configuration is immutable');return;}
    const now=this.clock();if(expiresAt<=now||expiresAt>now+3600000)throw new Error('Initial operator access window must be within one hour');
-   if((this.db.prepare('SELECT count(*) n FROM buyer_jobs WHERE reserved_at IS NOT NULL').get() as {n:number}).n)throw new Error('One-shot mode requires an unused payer authority');
+   if((this.db.prepare('SELECT reservation_history history FROM buyer_lifetime WHERE id=1').get() as {history:string}|undefined)?.history!=='never_reserved')throw new Error('One-shot mode requires an unused payer authority');
    this.db.prepare('INSERT INTO buyer_one_shot(id,access_hash,access_expires) VALUES(1,?,?)').run(accessHash,expiresAt);
   });
  }
@@ -60,6 +63,7 @@ export class BuyerStore {
   });
  }
  isOperator(owner:string):boolean {return !!this.db.prepare('SELECT 1 FROM buyer_operator_sessions WHERE owner_hash=? AND expires_at>?').get(owner,this.clock());}
+ private lifetimeHistory():string {return (this.db.prepare('SELECT reservation_history history FROM buyer_lifetime WHERE id=1').get() as {history:string}|undefined)?.history??'unknown';}
  private gate():{access_hash:string;access_expires:number;closed:number;state:'unarmed'|'armed'|'consumed'|'disarmed';plan_id:string|null;plan_hash:string|null;owner_hash:string|null;arm_expires:number;ceiling:string|null;consumed_at:number|null}|undefined {return this.db.prepare('SELECT * FROM buyer_one_shot WHERE id=1').get() as ReturnType<BuyerStore['gate']>;}
  private requireOperator(owner:string):void {const gate=this.gate();if(gate&&(!this.isOperator(owner)||gate.closed||gate.access_expires<=this.clock()||gate.state==='consumed'||gate.state==='disarmed'))throw new BuyerStoreError('OPERATOR_REQUIRED');}
  armOneShot(id:string,expectedHash:string,expiresAt:number,ceiling:string):void {
@@ -103,13 +107,14 @@ export class BuyerStore {
    validateBuyerPlan(plan,new Date(now),row.state!=='planned');
    if(row.state!=='planned'){this.db.prepare('UPDATE buyer_operator_sessions SET expires_at=max(expires_at,?) WHERE owner_hash=?').run((row.reserved_at??now)+86400000,owner);return {id,reused:true,plan,state:row.state};}
    this.requireOperator(owner);
-   const gate=this.gate();if(gate&&(!this.isOperator(owner)||gate.closed||gate.state!=='armed'||gate.plan_id!==id||gate.plan_hash!==expectedHash||gate.owner_hash!==owner||gate.arm_expires<=now||gate.access_expires<=now||gate.ceiling!==BUYER.callUusdc))throw new BuyerStoreError('ONE_SHOT_REQUIRED');
+   const gate=this.gate();if(gate&&(this.lifetimeHistory()!=='never_reserved'||!this.isOperator(owner)||gate.closed||gate.state!=='armed'||gate.plan_id!==id||gate.plan_hash!==expectedHash||gate.owner_hash!==owner||gate.arm_expires<=now||gate.access_expires<=now||gate.ceiling!==BUYER.callUusdc))throw new BuyerStoreError('ONE_SHOT_REQUIRED');
    if(row.expires_at<=now)throw new BuyerStoreError('EXPIRED');
    const payer=this.db.prepare('SELECT blocked_until FROM buyer_payer WHERE id=1').get() as {blocked_until:number};
    if(payer.blocked_until>now)throw new BuyerStoreError('BUSY');
    if(this.exposure(now)+BigInt(BUYER.callUusdc)>BigInt(BUYER.dailyUusdc))throw new BuyerStoreError('DAILY_CAP');
    const retained=this.db.prepare("SELECT coalesce(sum(CASE WHEN state IN ('reserved','signing') THEN ? ELSE coalesce(length(CAST(result AS BLOB)),0)+coalesce(length(CAST(paid_body AS BLOB)),0)+coalesce(length(CAST(headers AS BLOB)),0)+320000+4096 END),0) bytes FROM buyer_jobs WHERE reserved_at>?").get(PER_JOB_STORAGE,now-BUYER.payloadHours*3600000) as {bytes:number};
    if(retained.bytes+PER_JOB_STORAGE>BUYER.maxRetainedBytes)throw new BuyerStoreError('STORAGE_CAP');
+   this.db.prepare("UPDATE buyer_lifetime SET reservation_history='reserved' WHERE id=1").run();
    if(gate)this.db.prepare('UPDATE buyer_operator_sessions SET expires_at=max(expires_at,?) WHERE owner_hash=?').run(now+86400000,owner);
    if(gate)this.db.prepare("UPDATE buyer_one_shot SET state='consumed',consumed_at=? WHERE id=1 AND state='armed'").run(now);
    this.db.prepare("UPDATE buyer_jobs SET state='reserved',reserved_at=? WHERE id=? AND state='planned'").run(now,id);
@@ -122,7 +127,7 @@ export class BuyerStore {
   this.immediate(()=>{
    const now=this.clock(),row=this.db.prepare('SELECT * FROM buyer_jobs WHERE id=?').get(id) as Row|undefined;
    const payer=this.db.prepare('SELECT active_job,blocked_until FROM buyer_payer WHERE id=1').get() as {active_job:string;blocked_until:number};
-   const gate=this.gate();if(gate&&(gate.closed||gate.state!=='consumed'||gate.plan_id!==id||gate.plan_hash!==notice.plan_hash||gate.owner_hash!==row?.owner_hash||gate.arm_expires<=now||gate.access_expires<=now||notice.valid_before*1000>Math.min(gate.arm_expires,gate.access_expires)||gate.ceiling!==notice.amount_uusdc))throw new BuyerStoreError('ONE_SHOT_REQUIRED');
+   const gate=this.gate();if(gate&&(this.lifetimeHistory()!=='reserved'||gate.closed||gate.state!=='consumed'||gate.plan_id!==id||gate.plan_hash!==notice.plan_hash||gate.owner_hash!==row?.owner_hash||gate.arm_expires<=now||gate.access_expires<=now||notice.valid_before*1000>Math.min(gate.arm_expires,gate.access_expires)||gate.ceiling!==notice.amount_uusdc))throw new BuyerStoreError('ONE_SHOT_REQUIRED');
    if(!row||row.state!=='reserved'||row.plan_hash!==notice.plan_hash||!row.plan||payer.active_job!==id||payer.blocked_until<=now||notice.valid_before*1000<=now+2000||notice.valid_before*1000>now+120000)throw new BuyerStoreError('STATE_CHANGED');
    validateBuyerPlan(JSON.parse(row.plan),new Date(now));
    if(this.exposure(now,id)>BigInt(BUYER.dailyUusdc))throw new BuyerStoreError('DAILY_CAP');

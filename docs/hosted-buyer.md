@@ -304,3 +304,16 @@ will deliberately HOLD and the single reservation remains consumed. Re-arming a
 replacement is never an automatic fix. Initial deployment with a used generic
 payer authority is refused. Read-only restart uses the same persisted access
 configuration even when its purchase window has expired.
+
+
+Lifetime-provenance correction: reservation history is a separate permanent
+payer-authority row, never derived from retained job rows. A brand-new authority
+is `never_reserved`; every first/generic/one-shot reservation writes `reserved`
+in the same transaction as reservation and latch consumption. Neither job purge
+nor restart removes it. An existing database lacking this provenance is migrated
+to `unknown`, even if it has no retained jobs. Unknown history refuses initial
+one-shot registration and old unarmed/armed latch registration, rather than
+pretending the payer is unused. Previously consumed/disarmed gates retain safe
+read-only restart. This migration is intentionally conservative: do not delete or
+replace the database to bypass unknown history. Review and stop; a new real payer
+or authority would need a separate owner decision and deployment verification.
