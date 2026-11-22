@@ -107,12 +107,21 @@ describe("independent stored SEC extraction (synthetic fixtures, not live use)",
   });
   it("replays required history bytes, rechecks digest and deduplicates accessions", async () => {
     const page = JSON.stringify(rows);
-    const file = { name: "CIK0000320193-submissions-001.json", filingFrom: "2024-01-01", filingTo: "2025-02-01" };
+    const file = { name: "CIK0000320193-submissions-001.json", filingFrom: "2024-01-01", filingTo: "2025-12-31", filingCount: rows.form.length };
     const main = { cik: "0000320193", name: "Apple", filings: { recent: rows, files: [file] } };
     const x = setup({ main, pages: [page], answer: { upstream_pages: [{ url: `https://data.sec.gov/submissions/${file.name}`, raw_response_sha256: sha(page) }] } });
     expect((await evaluateResearch(p(), x.v, x.fetch, completed)).status).toBe("SUPPORTED");
     const bad = setup({ main, pages: [page + " "], answer: { upstream_pages: [{ url: `https://data.sec.gov/submissions/${file.name}`, raw_response_sha256: sha(page) }] } });
     expect((await evaluateResearch(p(), bad.v, bad.fetch, completed)).status).toBe("HOLD");
+  });
+  it("replays a valid non-overlapping drift probe instead of a false HOLD (test-only fixture)", async () => {
+    const probeRows = { form: ["8-K"], accessionNumber: ["0000320193-24-999990"], filingDate: ["2024-06-16"], primaryDocument: ["probe.htm"] };
+    const page = JSON.stringify(probeRows);
+    const file = { name: "CIK0000320193-submissions-001.json", filingFrom: "2024-01-01", filingTo: "2024-06-16", filingCount: 1 };
+    const main = { cik: "0000320193", name: "Apple", filings: { recent: rows, files: [file] } };
+    const x = setup({ main, pages: [page], answer: { upstream_pages: [{ url: `https://data.sec.gov/submissions/${file.name}`, raw_response_sha256: sha(page) }] } });
+    const result = await evaluateResearch(p(), x.v, x.fetch, completed);
+    expect(result.status).toBe("SUPPORTED"); expect(result.observed_count).toBe(3);
   });
   it("does not treat duplicate conflicting rows as harmless", async () => {
     const changed = { ...rows, accessionNumber: [...rows.accessionNumber.slice(0, 4), rows.accessionNumber[0]] };

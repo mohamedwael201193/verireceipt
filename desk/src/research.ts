@@ -2,6 +2,7 @@
 // The decision policy is committed to disk BEFORE any paid call by research-packet.ts.
 import { createHash } from "node:crypto";
 import { MINER_BASE_URL } from "./constants.js";
+import { historyPolicy, historyPagesMatch, historyRowsMatch } from "./secHistory.js";
 import type { Fetch } from "./client.js";
 import type { VerifyOutput } from "./verify.js";
 
@@ -97,18 +98,11 @@ export async function evaluateResearch(p: ResearchPlan, v: VerifyOutput, f: Fetc
     const rows = extractRows(filings.recent);
     require("SEC history manifest is an array", Array.isArray(filings.files));
     const start = `${p.year}-01-01`, end = `${p.year}-12-31`;
-    const required: string[] = [];
-    for (const item of filings.files as unknown[]) {
-      const file = obj(item);
-      require("valid bounded SEC history manifest", typeof file.name === "string" && new RegExp(`^CIK${p.cik.padStart(10, "0")}-submissions-\\d{3}\\.json$`).test(file.name) &&
-        typeof file.filingFrom === "string" && /^\d{4}-\d{2}-\d{2}$/.test(file.filingFrom) && typeof file.filingTo === "string" && /^\d{4}-\d{2}-\d{2}$/.test(file.filingTo) && file.filingFrom <= file.filingTo);
-      if ((file.filingFrom as string) <= end && (file.filingTo as string) >= start) required.push(`https://data.sec.gov/submissions/${file.name as string}`);
-    }
-    require("at most 20 relevant history pages and no duplicate manifests", required.length <= 20 && new Set(required).size === required.length);
+    const policy = historyPolicy(filings.files as unknown[], p.cik, p.year);
     const pages = answer.upstream_pages === undefined ? [] : answer.upstream_pages;
     require("hash-committed history page list available", Array.isArray(pages));
     const ps = (pages as unknown[]).map(obj);
-    require("all and only required history pages represented", ps.length === required.length && new Set(ps.map(x => x.url)).size === ps.length && required.every(url => ps.some(x => x.url === url)));
+    require("all and only independently selected history pages represented", historyPagesMatch(policy, ps.map((page) => page.url)));
     for (let i = 0; i < ps.length; i++) {
       const page = ps[i];
       require("history digest has correct shape", typeof page.raw_response_sha256 === "string" && /^[0-9a-f]{64}$/.test(page.raw_response_sha256));
@@ -116,7 +110,10 @@ export async function evaluateResearch(p: ResearchPlan, v: VerifyOutput, f: Fetc
       require("stored history page reachable", res.ok);
       const body = await res.text();
       require("history SHA256 matches committed answer", sha(body) === page.raw_response_sha256);
-      rows.push(...extractRows(JSON.parse(body)));
+      const pageRows = extractRows(JSON.parse(body));
+      const ref = policy.allowed.get(page.url as string)!;
+      require("history row count and date range match SEC manifest with seven-day slack", historyRowsMatch(ref, pageRows.map((row) => row.filing_date)));
+      rows.push(...pageRows);
     }
     const unique = new Map<string, FilingRow>();
     let conflict = false;
