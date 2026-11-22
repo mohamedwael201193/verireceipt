@@ -100,11 +100,24 @@ function assertHexQty(v: string, field: string): void {
     throw new Error(`malformed ${field}: not a 0x-prefixed hex quantity: ${v}`);
   }
 }
-const SUPPORTED_CHAINS = ["ethereum", "base", "arbitrum", "optimism", "polygon", "sepolia", "base-sepolia"];
-/** A2: chain synonyms the request builder may send for Ethereum mainnet
- * (PLAN.md §2: the reference question is "… on Ethereum"). Only the
- * Ethereum spellings are aliased — every other chain keeps its single
- * canonical name, so a typo can never silently resolve to a real chain. */
+const SUPPORTED_CHAINS = [
+  "ethereum",
+  "base",
+  "arbitrum",
+  "optimism",
+  "polygon",
+  "sepolia",
+  "base-sepolia",
+  // Coverage expansion 2026-11-22 (see CHAIN_RPCS note): five more chains,
+  // each with two live-verified keyless legs.
+  "bsc",
+  "avalanche",
+  "gnosis",
+  "linea",
+  "scroll",
+];
+/** Exact aliases for the explicitly supported EVM chains. Whitespace and
+ * ASCII case are normalized; no fuzzy name or chain-ID inference is used. */
 const CHAIN_ALIASES: Record<string, string> = {
   ethereum: "ethereum",
   eth: "ethereum",
@@ -127,6 +140,39 @@ const CHAIN_ALIASES: Record<string, string> = {
   matic: "polygon",
   sepolia: "sepolia",
   "base-sepolia": "base-sepolia",
+  // Coverage expansion 2026-11-22. Bare "op" is the common short name for
+  // OP Mainnet (mirrors the existing "arb" alias). "avalanche" means the
+  // C-Chain (the EVM chain txs live on). Chain IDs follow eip155, matching
+  // the existing "1" / "eip155:1" style for Ethereum.
+  op: "optimism",
+  bsc: "bsc",
+  "bsc mainnet": "bsc",
+  bnb: "bsc",
+  "bnb chain": "bsc",
+  "bnb smart chain": "bsc",
+  binance: "bsc",
+  "binance smart chain": "bsc",
+  "56": "bsc",
+  "eip155:56": "bsc",
+  avalanche: "avalanche",
+  avax: "avalanche",
+  "avalanche c-chain": "avalanche",
+  "avax c-chain": "avalanche",
+  "43114": "avalanche",
+  "eip155:43114": "avalanche",
+  gnosis: "gnosis",
+  "gnosis chain": "gnosis",
+  xdai: "gnosis",
+  "100": "gnosis",
+  "eip155:100": "gnosis",
+  linea: "linea",
+  "linea mainnet": "linea",
+  "59144": "linea",
+  "eip155:59144": "linea",
+  scroll: "scroll",
+  "scroll mainnet": "scroll",
+  "534352": "scroll",
+  "eip155:534352": "scroll",
 };
 
 /** Normalise a raw chain value to its canonical name: trim, lowercase,

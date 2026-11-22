@@ -36,7 +36,8 @@ import { normalizeChain } from "./txLookup";
 
 export const INTENT = "GAS_PRICE_GENERAL";
 
-/** Same chains txLookup serves — every CHAIN_RPCS key. */
+/** GAS keeps its separately tested seven-chain allowlist. Additional TX-only
+ * CHAIN_RPCS entries do not advertise or enable gas coverage here. */
 const SUPPORTED_CHAINS = [
   "ethereum",
   "base",

@@ -224,6 +224,40 @@ describe("handleTx live (real public RPCs, no mocks)", () => {
     },
     30000,
   );
+
+  // Additional chain coverage. Real old tx independently selected from BSC
+  // block 20,000,000 via bsc-dataseed.binance.org on 2026-11-22; both
+  // configured legs were checked with this exact lookup.
+  it(
+    "confirmed old BSC tx returns status confirmed with exact block (2-of-2)",
+    async () => {
+      const out = await handleTx({
+        tx_hash: "0xad5c9b13688627d670985d68a5be0fadd5f0e34d3ff20e35c655ef4bceec7e7c",
+        chain: "bsc",
+      });
+      expect(out.status).toBe("confirmed");
+      expect(out.block_number).toBe(20000000);
+      expect(out.from).toBe("0x67e83034d88c665c661c77f8c9a1a6464224ee9d");
+      expect(out.to).toBe("0x0303d52057efef51eeea9ad36bc788df827f183d");
+      expect(out.value_eth).toBe(0);
+      expect(out.source).toBe("Archive RPC quorum (bsc, 2-of-2)");
+      const rc = out.receipt as Record<string, unknown>;
+      expect(rc.raw_response_sha256).toMatch(SHA256_RE);
+    },
+    30000,
+  );
+
+  it(
+    "unknown hash on avalanche returns 200 not_found (never 502)",
+    async () => {
+      const unknownHash = "0x" + randomBytes(32).toString("hex");
+      const out = await handleTx({ tx_hash: unknownHash, chain: "avalanche" });
+      expect(out.status).toBe("not_found");
+      expect(out.block_number).toBeNull();
+      expect(out.source).toBe("Archive RPC quorum (avalanche, 2-of-2)");
+    },
+    30000,
+  );
 });
 
 // ---------------------------------------------------------------------------

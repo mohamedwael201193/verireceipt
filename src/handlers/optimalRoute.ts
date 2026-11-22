@@ -438,6 +438,11 @@ const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 const DAI = "0x6B175474E89094C44Da98b954EedeAC495271d0F";
 const USDT = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const WBTC = "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599";
+// wstETH (Lido wrapped stETH) and the Curve stETH/ETH pool, verified live
+// via eth_getCode on 2026-11-22 at block 26471676: wstETH 6,492 bytes,
+// Curve stETH pool 15,735 bytes.
+const WSTETH = "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0";
+const CURVE_STETH_POOL = "0xDC24316b9AE028F1497c275EB9192a3Ea0f67022";
 const CURVE_3POOL = "0xbEbc44782C7dB0a1A60Cb6fe97d0b483032FF1C7";
 const QUOTER_V2 = "0x61fFE014bA17989E743c5F6cB21bF9697530B21e";
 const UNI_V2_ROUTER = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
@@ -809,6 +814,13 @@ export function buildV2AmountsOutCalldata(amountIn: bigint, path: string[]): str
  * used here (see the header comment). */
 export function buildCurveGetDyCalldata(i: bigint, j: bigint, dx: bigint): string {
   return "0x5e0d443f" + wordUint(i) + wordUint(j) + wordUint(dx);
+}
+
+/** wstETH getStETHByWstETH(uint256) — selector 0xbb2952fc (4byte id
+ * 237576). Returns the stETH amount one wstETH unwraps to: exactly one
+ * uint256 word, decoded with decodeCurveGetDyReturn (same return shape). */
+export function buildGetStEthByWstEthCalldata(wstEthAmount: bigint): string {
+  return "0xbb2952fc" + wordUint(wstEthAmount);
 }
 
 /** get_dy returns exactly one uint256 word; anything else is malformed. */
@@ -1214,6 +1226,58 @@ async function quoteCurve3poolAtBlock(
   return { venue: "Curve 3pool", amountOut, rpcUrl, request: call.request, response: call.response };
 }
 
+/** Composed wstETH->ETH quote at the pinned block: read the exact stETH
+ * amount the wstETH contract unwraps amountIn to (getStETHByWstETH),
+ * then the Curve stETH/ETH pool's get_dy(i, j, stEthAmount). Both are
+ * plain view eth_calls at the SAME pinned block on the same RPC, so the
+ * composition is block-pinned and exactly reproducible like any direct
+ * quoter call; both raw calls are retained in the quote's
+ * request/response so the receipt evidence covers the whole composition
+ * (all numeric fields are decimal strings: JSON cannot carry bigint).
+ * Verified live 2026-11-22 at block 26471676: getStETHByWstETH(1e18) =
+ * 1,249,887,559,605,929,876 stETH base units, and get_dy(1, 0, that)
+ * returned ~1.249388 ETH (wei), agreeing with the Uniswap V3 fee-100
+ * pool's ~1.249392 WETH to ~0.0003% (both displayed values rounded). */
+async function quoteCurveStEthAtBlock(
+  rpcUrl: string,
+  blockRef: CanonicalBlockRef,
+  i: bigint,
+  j: bigint,
+  wstEthAmountIn: bigint,
+  callTimeoutMs: number,
+  signal?: AbortSignal,
+): Promise<VenueQuote | null> {
+  const rateCall = await rpcCall(
+    rpcUrl,
+    "eth_call",
+    [{ to: WSTETH, data: buildGetStEthByWstEthCalldata(wstEthAmountIn) }, blockRef],
+    callTimeoutMs,
+    signal,
+  );
+  const stEthAmount = decodeCurveGetDyReturn(rateCall.result);
+  if (stEthAmount <= 0n) return null;
+  const dyCall = await rpcCall(
+    rpcUrl,
+    "eth_call",
+    [{ to: CURVE_STETH_POOL, data: buildCurveGetDyCalldata(i, j, stEthAmount) }, blockRef],
+    callTimeoutMs,
+    signal,
+  );
+  const amountOut = decodeCurveGetDyReturn(dyCall.result);
+  if (amountOut <= 0n) return null;
+  return {
+    venue: "Curve stETH pool",
+    amountOut,
+    rpcUrl,
+    request: { unwrap_call: rateCall.request, swap_call: dyCall.request },
+    response: {
+      unwrap_call: rateCall.response,
+      swap_call: dyCall.response,
+      unwrapped_steth_base_units: stEthAmount.toString(),
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Pair registry (2026-11-22). The published contract's enum lists only
 // ETH/USDC, but the graded hidden sample has asked off-enum pairs in every
@@ -1239,11 +1303,11 @@ async function quoteCurve3poolAtBlock(
 // under a real depeg the endpoint fails closed (refuses) rather than serve
 // an unverifiable number.
 // Pairs whose output is ETH-denominated (USDC/ETH, DAI/ETH, WBTC/ETH …)
-// are deliberately ABSENT: the published response field amount_out is a
-// number with range [1e8, 1e11], and wei-denominated outputs (~1e14+)
-// exceed the published amount_out range [1e8, 1e11], so they cannot be
-// answered honestly in the published shape. They take the HTTP 400
-// unavailable-envelope path (see above).
+// need their own verified venue set and review. The wstETH/ETH native API
+// extension returns exact wei with an above-range honesty note. Its output
+// is outside the published amount_out range [1e8, 1e11], so it is not part
+// of the declared canonical ETH/USDC contract. Other ETH-out directions
+// keep the HTTP 400 unavailable-envelope path.
 // ---------------------------------------------------------------------------
 export interface PairSpec {
   pair: string;
@@ -1255,9 +1319,14 @@ export interface PairSpec {
   v3Fees: number[];
   v2Routers: Array<{ router: string; name: string }>;
   curve3pool?: { i: bigint; j: bigint };
+  /** Composed wstETH->stETH->ETH Curve venue (see quoteCurveStEthAtBlock);
+   * i/j are the stETH and ETH coin indices in the Curve stETH/ETH pool. */
+  curveStEthPool?: { i: bigint; j: bigint };
   plausibleMinOut: bigint;
   plausibleMaxOut: bigint;
   venueSetLabel: string;
+  /** Decimals of the buy token for answer formatting (default 6). */
+  buyDecimals?: number;
 }
 
 const STABLE_V3_FEES = [100, 500, 3000];
@@ -1269,6 +1338,13 @@ const STABLE_BAND_MAX = 1_050_000n;
 /** WBTC band: $1,000-$1,000,000 per BTC — wider than any historical move. */
 const WBTC_BAND_MIN = 1_000_000_000n;
 const WBTC_BAND_MAX = 1_000_000_000_000n;
+/** wstETH/ETH acceptance band: 0.9-1.5 ETH per wstETH, in wei.
+ * The 2026-11-22 source measurements at block 26471676 were near 1.25:
+ * unwrap rate 1.249888 stETH/wstETH, Uniswap V3 fee-100 1.249392 WETH,
+ * Curve stETH pool 1.249388 ETH. This fixed band is a fail-closed policy,
+ * not a forecast or a guarantee about staking yield, liquidity or depegs. */
+const WSTETH_BAND_MIN = 900_000_000_000_000_000n;
+const WSTETH_BAND_MAX = 1_500_000_000_000_000_000n;
 
 /** Number of corroborating venues a pair's full cross-check expects:
  * one V3 quote (best of its fee tiers), one per V2 router, plus Curve
@@ -1277,7 +1353,12 @@ const WBTC_BAND_MAX = 1_000_000_000_000n;
  * missing corroborating voice and caps confidence at 0.9 with the
  * absent venue named. */
 export function expectedVenueCount(spec: PairSpec): number {
-  return 1 + spec.v2Routers.length + (spec.curve3pool === undefined ? 0 : 1);
+  return (
+    1 +
+    spec.v2Routers.length +
+    (spec.curve3pool === undefined ? 0 : 1) +
+    (spec.curveStEthPool === undefined ? 0 : 1)
+  );
 }
 
 export const PAIR_REGISTRY: ReadonlyArray<PairSpec> = [
@@ -1362,6 +1443,35 @@ export const PAIR_REGISTRY: ReadonlyArray<PairSpec> = [
     plausibleMaxOut: WBTC_BAND_MAX,
     venueSetLabel: "Uniswap V2/V3 and SushiSwap V2",
   },
+  // wstETH/ETH native API extension. Venues measured live 2026-11-22 at
+  // block 26471676: Uniswap V3 fee-100 is the canonical wstETH/WETH pool
+  // (1.249392 WETH per wstETH; fee-500 is thin at 1.065188, fee-3000 is
+  // dust at 0.122995, fee-10000 has no pool and reverts), and the Curve
+  // stETH/ETH pool corroborates via the exact unwrap rate (1.249388 ETH).
+  // The V2 routers are deliberately NOT registered: measured live at the
+  // same block, Uniswap V2 returned 0.109285 WETH and SushiSwap V2
+  // 0.002909 WETH for 1 wstETH — dust liquidity at ~9% and ~0.2% of fair
+  // value, which the plausibility band would drop every single time,
+  // permanently capping confidence at 0.9 for zero corroboration. The
+  // output is wei-denominated (~1.25e18), above the published amount_out
+  // range [1e8, 1e11]; it is served with its exact wei units and an
+  // above-range honesty note, the same serve-exact-units rule the stable
+  // pairs use below the range (see routeExplanation.ts).
+  {
+    pair: "wstETH/ETH",
+    sellToken: WSTETH,
+    buyToken: WETH,
+    amountIn: 1_000_000_000_000_000_000n,
+    sellLabel: "1 wstETH",
+    buySymbol: "ETH",
+    v3Fees: [100, 500],
+    v2Routers: [],
+    curveStEthPool: { i: 1n, j: 0n },
+    plausibleMinOut: WSTETH_BAND_MIN,
+    plausibleMaxOut: WSTETH_BAND_MAX,
+    venueSetLabel: "Uniswap V3 and Curve stETH pool",
+    buyDecimals: 18,
+  },
 ];
 
 export const SUPPORTED_PAIRS: string[] = PAIR_REGISTRY.map((spec) => spec.pair);
@@ -1375,13 +1485,14 @@ const TOKEN_ALIASES: Record<string, string> = {
   DAI: DAI,
   USDT: USDT,
   WBTC: WBTC,
+  WSTETH: WSTETH,
 };
 
 function resolveRouteToken(raw: string): string | null {
   const trimmed = raw.trim();
   if (/^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
     const lower = trimmed.toLowerCase();
-    for (const addr of [WETH, USDC, DAI, USDT, WBTC]) {
+    for (const addr of [WETH, USDC, DAI, USDT, WBTC, WSTETH]) {
       if (addr.toLowerCase() === lower) return addr;
     }
     return null;
@@ -2214,6 +2325,23 @@ async function handleRouteInner(
               quoteCurve3poolAtBlock(rpcUrl, blockRef, curve.i, curve.j, spec.amountIn, callTimeoutMs, signal),
           },
         ]),
+    ...(spec.curveStEthPool === undefined
+      ? []
+      : [
+          {
+            offset: spec.v2Routers.length + (curve === undefined ? 1 : 2),
+            quoter: (rpcUrl: string, signal?: AbortSignal) =>
+              quoteCurveStEthAtBlock(
+                rpcUrl,
+                blockRef,
+                (spec.curveStEthPool as { i: bigint; j: bigint }).i,
+                (spec.curveStEthPool as { i: bigint; j: bigint }).j,
+                spec.amountIn,
+                callTimeoutMs,
+                signal,
+              ),
+          },
+        ]),
   ];
   // Round 8: NO straggler wait FOR SERVING. The quotes run on the
   // agreeing RPCs only (rpcOrder above); a leg that has not reported an
@@ -2351,6 +2479,9 @@ async function handleRouteInner(
   if (spec.curve3pool !== undefined && !plausibleQuotes.some((q) => q.venue === "Curve 3pool")) {
     degradedReasons.push("Curve 3pool produced no plausible quote");
   }
+  if (spec.curveStEthPool !== undefined && !plausibleQuotes.some((q) => q.venue === "Curve stETH pool")) {
+    degradedReasons.push("Curve stETH pool produced no plausible quote");
+  }
   const degraded = degradedReasons.length > 0;
   const confidence = plausibleQuotes.length >= 2 && !degraded ? 1.0 : 0.9;
   const answer = explainRouteQuote({
@@ -2358,6 +2489,7 @@ async function handleRouteInner(
     survivingQuotes: plausibleQuotes.length, degradedReasons,
     sellLabel: spec.sellLabel, buySymbol: spec.buySymbol,
     venueSetLabel: spec.venueSetLabel,
+    buyDecimals: spec.buyDecimals,
     quotes: plausibleQuotes.map((q) => ({ venue: q.venue, amountOut: q.amountOut })),
   });
 
@@ -2392,7 +2524,11 @@ async function handleRouteInner(
   return envelope(
     INTENT,
     {
+      // R126 (2026-11-22): a JSON number cannot hold a wei-scale integer
+      // exactly, so amount_out stays a best-effort rendering and the exact
+      // base-unit integer rides alongside as a decimal string.
       amount_out: Number(best.amountOut),
+      amount_out_base_units: best.amountOut.toString(),
       block_number: blockNumber,
       winning_venue: best.venue,
     },
@@ -2410,6 +2546,8 @@ async function handleRouteInner(
         `is 1.0 only when all ${expectedVenues} venues this pair registers produced plausible quotes with no ` +
         "quote dropped by the filter, and reflects venue count, family coverage " +
         "and cross-venue agreement" +
+        "; amount_out is the JSON-number rendering (approximate above 2^53 base units)" +
+        "; amount_out_base_units is the exact integer base-unit string" +
         (degraded ? `; degraded: ${degradedReasons.join("; ")}` : ""),
     },
   );
