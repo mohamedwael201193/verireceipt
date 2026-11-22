@@ -3,6 +3,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { X509Certificate } from "node:crypto";
 import * as dns from "node:dns/promises";
+import * as tls from "node:tls";
+import { EventEmitter } from "node:events";
+vi.mock("node:tls", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:tls")>();
+  return { ...actual, connect: vi.fn(actual.connect) };
+});
 vi.mock("node:dns/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:dns/promises")>();
   return { ...actual, lookup: vi.fn(actual.lookup) };
@@ -54,6 +60,45 @@ describe("TLS safety and classification", () => {
     vi.mocked(dns.lookup).mockResolvedValueOnce([{ address: "127.0.0.1", family: 4 }] as never);
     await expect(handleSsl({ host: "example.com" })).rejects.toMatchObject({ status: 400, code: "PRIVATE_HOST" });
   });
+  it("transient first round failure retries and saves the actual second-round certificate", async () => {
+    const before = vi.mocked(tls.connect).mock.calls.length;
+    for (let i = 0; i < 2; i++) {
+      vi.mocked(tls.connect).mockImplementationOnce((() => {
+        const failed = new EventEmitter() as EventEmitter & { destroy: () => void };
+        failed.destroy = () => {};
+        queueMicrotask(() => failed.emit("error", new Error("transient transport failure")));
+        return failed;
+      }) as never);
+    }
+    const liveAddresses = await dns.lookup("google.com", { all: true, family: 4 });
+    expect(liveAddresses.length).toBeGreaterThan(0);
+    vi.mocked(dns.lookup).mockResolvedValueOnce([liveAddresses[0], liveAddresses[0]] as never);
+    // Retry reaches a real Google TLS peer; only the initial transport
+    // failures are injected, never the resulting certificate or score.
+    const result = await handleSsl({ host: "google.com" });
+    expect(result.certificate_valid).toBe(true);
+    expect(vi.mocked(tls.connect).mock.calls.length - before).toBe(3);
+    const receipt = result.receipt as { receipt_id: string };
+    const stored = await getReceiptEvidence(receipt.receipt_id);
+    if (!stored.evidence) throw new Error("no retry evidence");
+    expect(JSON.parse(stored.evidence.toString()).failed_attempts).toHaveLength(2);
+  }, 12000);
+
+  it("both rounds failing still refuse, with at most four TLS attempts", async () => {
+    const before = vi.mocked(tls.connect).mock.calls.length;
+    for (let i = 0; i < 4; i++) {
+      vi.mocked(tls.connect).mockImplementationOnce((() => {
+        const failed = new EventEmitter() as EventEmitter & { destroy: () => void };
+        failed.destroy = () => {};
+        queueMicrotask(() => failed.emit("error", new Error("transport unavailable")));
+        return failed;
+      }) as never);
+    }
+    vi.mocked(dns.lookup).mockResolvedValueOnce([{ address: "8.8.8.8", family: 4 }, { address: "1.1.1.1", family: 4 }] as never);
+    await expect(handleSsl({ host: "example.com" })).rejects.toMatchObject({ status: 502, code: "TLS_PROBE_UNAVAILABLE" });
+    expect(vi.mocked(tls.connect).mock.calls.length - before).toBe(4);
+  });
+
   it("mixed public/private answer refuses, no rebinding escape", async () => {
     vi.mocked(dns.lookup).mockResolvedValueOnce([{ address: "8.8.8.8", family: 4 }, { address: "169.254.169.254", family: 4 }] as never);
     await expect(handleSsl({ host: "example.com" })).rejects.toMatchObject({ status: 400, code: "PRIVATE_HOST" });
@@ -65,6 +110,7 @@ describe("real live TLS peers, no simulated certificates", () => {
     it(`${host} -> certificate_valid=${expected} with exact DER evidence`, async () => {
       const result = await handleSsl({ host });
       expect(result.certificate_valid).toBe(expected);
+      expect(result.verdict).toBe("verified");
       const receipt = result.receipt as { receipt_id: string; raw_response_sha256: string };
       const stored = await getReceiptEvidence(receipt.receipt_id);
       if (!stored.evidence) throw new Error("missing TLS evidence");

@@ -65,13 +65,13 @@ interface Probe {
   fingerprint256: string;
   protocol: string | null;
 }
-async function probeTls(host: string, address: string): Promise<Probe> {
+async function probeTls(host: string, address: string, budgetMs: number): Promise<Probe> {
   return new Promise((resolve, reject) => {
     // Verification remains recorded by Node even though an invalid peer
     // is allowed to finish the handshake so its exact evidence is saved.
     // No HTTP request, credentials or application bytes are sent.
     const socket = connect({ host: address, port: 443, servername: host, rejectUnauthorized: false });
-    const timer = setTimeout(() => finish(new Error("TLS probe timed out")), 3000);
+    const timer = setTimeout(() => finish(new Error("TLS probe timed out")), budgetMs);
     let finished = false;
     function finish(error?: Error, value?: Probe): void {
       if (finished) return;
@@ -128,9 +128,16 @@ export async function handleSsl(query: Record<string, string | undefined>): Prom
     throw badRequest("PRIVATE_HOST", "host resolves to a non-public address; connection refused");
   }
   const attempts: Array<{ address: string; error: string }> = [];
-  for (const { address } of addresses.slice(0, 2)) {
+  // Two rounds across at most two vetted addresses. Retry transient
+  // transport failures once, inside a shared 8s TLS budget (plus <=2s
+  // DNS). An invalid certificate is conclusive and is not retried.
+  const deadline = Date.now() + 8000;
+  const retryAddresses = [...addresses.slice(0, 2), ...addresses.slice(0, 2)];
+  for (const { address } of retryAddresses) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
     try {
-      const result = await probeTls(host, address);
+      const result = await probeTls(host, address, Math.min(3000, remainingMs));
       const asOf = new Date().toISOString();
       const evidence = JSON.stringify({ host, port: 443, address, observed_at: asOf, ...result, failed_attempts: attempts,
         trust_scope: "Node installed CA set and hostname check; no explicit revocation or OCSP check" });
@@ -138,7 +145,9 @@ export async function handleSsl(query: Record<string, string | undefined>): Prom
       await saveReceipt(receipt, evidence);
       return envelope(INTENT, { certificate_valid: result.valid, host, as_of: asOf,
         valid_from: result.valid_from, valid_to: result.valid_to, fingerprint_sha256: result.fingerprint256 }, receipt, {
-        verdict: result.valid ? "verified" : "refuted", confidence: 0.9,
+        // The evidence is verified even when the observed certificate
+        // is invalid, just as a verified zero balance is still evidence.
+        verdict: "verified", confidence: 0.9,
         answer: `${host}: the TLS certificate is ${result.valid ? "valid and trusted" : "not valid and trusted"} ` +
           `under this server's installed CA set and hostname check at ${asOf}. ` +
           `Validity: ${result.valid_from} to ${result.valid_to}. ` +
