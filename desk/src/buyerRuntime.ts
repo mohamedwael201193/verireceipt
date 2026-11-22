@@ -44,7 +44,7 @@ export async function execute(plan:BuyerPlan,options:BuyerExecutionOptions,injec
     // Deliberately never persist authorization, signedMessage, signature or request headers.
     const header=raw.headers['x-payment-response']??null;
     await options.recordBody({status:raw.status,receipt_header:header,body_text:raw.bodyText});
-    try{publicReceipt=decodeReceipt(header,{payer:payer.address,amountUusdc:BUYER.callUusdc}) as unknown as Record<string,unknown>;}catch{/* Invalid receipt remains an uncertain charge, never zero. */}
+    try{const decoded=decodeReceipt(header,{payer:payer.address,amountUusdc:BUYER.callUusdc});publicReceipt={...decoded,payer:String(decoded.payer).toLowerCase(),amount_uusdc:String(decoded.amount_uusdc),miner:String(decoded.miner)};}catch{/* Invalid receipt remains an uncertain charge, never zero. */}
    },
   });
   if(record.policy_hash!==plan.policy_hash||record.task_hash!==plan.task_hash||canonical(record.rule)!==canonical(plan.rule)||canonical(record.params)!==canonical(plan.params)||record.payer!==payer.address.toLowerCase())throw new Error('Gate result binding failed');
@@ -54,7 +54,7 @@ export async function execute(plan:BuyerPlan,options:BuyerExecutionOptions,injec
 }
 export async function followup(plan:BuyerPlan,result:BuyerExecutionResult,signal:AbortSignal,transport:Fetch=fetch):Promise<unknown>{
  validateBuyerPlan(plan,new Date(),true);if(result.plan_hash!==plan.plan_hash||result.plan_id!==plan.id||result.charge.status!=='receipt'||!result.receipt)throw new Error('No bound payment receipt');
- const r=result.receipt;if(!/^0x[0-9a-f]{64}$/.test(String(r.receipt_hash))||!Number.isSafeInteger(r.epoch_id)||!Number.isFinite(r.timestamp)||r.payer!==result.payer||r.amount_uusdc!==BUYER.callUusdc)throw new Error('Invalid stored receipt');
+ const r=result.receipt;if(!/^0x[0-9a-f]{64}$/.test(String(r.receipt_hash))||!Number.isSafeInteger(r.epoch_id)||!Number.isFinite(r.timestamp)||String(r.payer).toLowerCase()!==result.payer.toLowerCase()||String(r.amount_uusdc)!==BUYER.callUusdc)throw new Error('Invalid stored receipt');
  const f=makeBuyerFetch(plan,result.payer,signal,async()=>{throw new Error('Read-only follow-up');},transport,true);
  const d=await checkDelivery(Number(r.epoch_id),String(r.receipt_hash),f),epoch=await checkEpochConsistency({claimedEpoch:Number(r.epoch_id),receiptTimeMs:Number(r.timestamp)*1000},f);
  const prev=d.status==='pending'&&Number(r.epoch_id)>0?await fetchEpochBlock(Number(r.epoch_id)-1,f):null;
