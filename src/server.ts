@@ -39,6 +39,7 @@ import {
 import { installGracefulShutdown } from "./core/shutdown";
 import { maybeMigrateOnBoot } from "./tools/bootMigrate";
 import { registerReceiptRoutes } from "./core/receiptRoutes";
+import { registerAccuracyRoute } from "./core/accuracy";
 import { getJobsSnapshot, getLoopLagSnapshot, startLoopLagSampler } from "./core/loopLag";
 import {
   INTENT_PRIMARY_UPSTREAM,
@@ -295,6 +296,10 @@ export function buildServer(): FastifyInstance {
   // (GET /receipts/:id, /receipts/:id/raw; /api/* aliases). See
   // src/core/receiptRoutes.ts for the contract.
   registerReceiptRoutes(app);
+
+  // S2: serve the daily accuracy document (exact counts over stored
+  // receipts, same contract as scripts/accuracy.mjs — core/accuracy.ts).
+  registerAccuracyRoute(app);
 
   return app;
 }
