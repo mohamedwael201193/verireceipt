@@ -2271,7 +2271,7 @@ export async function handleTvl(
       try {
         await saveReceipt(receipt, evidence);
       } catch {
-        // Persistence must never fail the answer.
+        throw upstreamUnavailable('RECEIPT_PERSIST_FAILED', 'receipt evidence could not be stored; answer unavailable');
       }
       return envelope(
         INTENT,
@@ -2353,7 +2353,7 @@ export async function handleTvl(
     try {
       await saveReceipt(receipt, evidence);
     } catch {
-      // Persistence must never fail the answer.
+      throw upstreamUnavailable('RECEIPT_PERSIST_FAILED', 'receipt evidence could not be stored; answer unavailable');
     }
     return envelope(
       INTENT,
@@ -2408,7 +2408,7 @@ export async function handleTvl(
   try {
     await saveReceipt(receipt, evidence);
   } catch {
-    // Persistence must never fail the answer.
+    throw upstreamUnavailable('RECEIPT_PERSIST_FAILED', 'receipt evidence could not be stored; answer unavailable');
   }
   return envelope(
     INTENT,

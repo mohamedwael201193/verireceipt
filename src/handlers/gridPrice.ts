@@ -648,7 +648,7 @@ export async function handleGridPrice(
   try {
     await saveReceipt(receipt, rawBody);
   } catch {
-    // Persistence must never fail the answer.
+    throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
   const measuredAnswer = isCaisoSystem
     ? "The CAISO day-ahead LMP at the NP15 trading hub (" +

@@ -959,11 +959,12 @@ export async function handleTx(
   const receiptDoc: Receipt = makeReceipt(INTENT, value.rpcUrl, evidence, votes);
   try {
     await saveReceipt(receiptDoc, evidence);
-  } catch (err) {
-    // R2: a failed persist is logged, never silent — the answer still
-    // ships (pre-existing behaviour), but the failure is now visible.
-    console.warn(
-      `verireceipt: failed to persist TX receipt ${receiptDoc.receipt_id}: ${err instanceof Error ? err.message : String(err)}`,
+  } catch {
+    // A valid source observation is not an answer until its evidence is stored.
+    throw new ApiError(
+      502,
+      "RECEIPT_PERSIST_FAILED",
+      "receipt evidence could not be stored; answer unavailable",
     );
   }
 
