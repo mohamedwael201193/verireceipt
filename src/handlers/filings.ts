@@ -173,7 +173,8 @@ function formatUtcDate(dt: Date): string {
 
 /**
  * Parse the requested period into an inclusive [start, end] date range.
- * Accepted forms: "last N months", "YYYY", "YYYY-MM-DD..YYYY-MM-DD".
+ * Accepted forms include "last N months", "YYYY", "YYYY-MM-DD..YYYY-MM-DD",
+ * and an explicit calendar "quarter ending/ended" date.
  * Throws a 400 ApiError for anything else.
  */
 /**
@@ -222,10 +223,57 @@ function yearInRange(y: number): boolean {
   return y >= 1993 && y <= new Date().getUTCFullYear();
 }
 
+/**
+ * An explicit calendar-quarter end determines the inclusive filing-date range.
+ * Do not infer a company fiscal/reporting quarter or accept a non-quarter end.
+ * Fiscal wording is rejected earlier by foldPeriodPhrase.
+ */
+function calendarQuarterEndingPeriod(period: string, label: string): Period | null {
+  const phrase = /^(?:(?:in|during|for|over)\s+)?(?:the\s+)?(?:calendar\s+)?quarter\s+(?:ending|ended)(?:\s+on)?\s+(.+)$/i.exec(period);
+  if (!phrase) return null;
+
+  const endText = phrase[1];
+  let year: number;
+  let month: number;
+  let day: number;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(endText);
+  if (iso) {
+    year = Number(iso[1]);
+    month = Number(iso[2]);
+    day = Number(iso[3]);
+  } else {
+    const monthFirst = /^([a-z]+)\.?\s+(\d{1,2})(st|nd|rd|th)?(?:,\s*|\s+)(\d{4})$/i.exec(endText);
+    const dayFirst = /^(\d{1,2})(st|nd|rd|th)?\s+([a-z]+)\.?(?:,\s*|\s+)(\d{4})$/i.exec(endText);
+    if (!monthFirst && !dayFirst) return null;
+    const months = new Map<string, number>([
+      ['mar', 3], ['march', 3], ['jun', 6], ['june', 6],
+      ['sep', 9], ['sept', 9], ['september', 9], ['dec', 12], ['december', 12],
+    ]);
+    const monthName = (monthFirst ? monthFirst[1] : dayFirst![3]).toLowerCase();
+    const resolvedMonth = months.get(monthName);
+    if (resolvedMonth === undefined) return null;
+    month = resolvedMonth;
+    day = Number(monthFirst ? monthFirst[2] : dayFirst![1]);
+    year = Number(monthFirst ? monthFirst[4] : dayFirst![4]);
+    const ordinal = (monthFirst ? monthFirst[3] : dayFirst![2])?.toLowerCase();
+    if (ordinal && ordinal !== (day === 31 ? 'st' : day === 30 ? 'th' : '')) return null;
+  }
+
+  if (!yearInRange(year)) return null;
+  const end = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  if (!isValidDateString(end)) return null;
+  if (!['03-31', '06-30', '09-30', '12-31'].includes(end.slice(5))) return null;
+  const start = `${year}-${String(month - 2).padStart(2, '0')}-01`;
+  return { start, end, label };
+}
+
 export function parsePeriod(periodRaw: string): Period {
   const label = periodRaw.trim();
   // Round 8: fullwidth digits/punctuation fold (NFKC) before the grammar.
   const period = foldPeriodPhrase(label.normalize('NFKC'));
+
+  const quarter = calendarQuarterEndingPeriod(period, label);
+  if (quarter) return quarter;
 
   // "2023 to 2023", "2021 through 2023", "2023-01-01 to 2023-03-31".
   const toRange = /^(\d{4}(?:-\d{2}-\d{2})?)\s+(?:to|through|thru|until)\s+(\d{4}(?:-\d{2}-\d{2})?)$/i.exec(period);
