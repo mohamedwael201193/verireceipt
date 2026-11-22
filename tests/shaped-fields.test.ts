@@ -160,15 +160,31 @@ describe("reconcile never overrides real verdicts or numbers", () => {
 });
 
 describe("J2 fields-fix r3: format type, type check, proto guards", () => {
-  it("every mapped field has an official format, and type number matches a unit in the yaml mapping", () => {
+  it("every mapped field has an official format; present units are numeric and format decides numeric safety", () => {
     for (const [intent, fields] of Object.entries(OUTPUT_MAPPING)) {
       expect(FIELD_FORMAT[intent], intent).toBeTruthy();
       expect(Object.keys(FIELD_FORMAT[intent]).sort()).toEqual(Object.keys(fields).sort());
       for (const [f, o] of Object.entries(fields)) {
-        expect(isNumericField(intent, f)).toBe(o.unit !== undefined);
+        if (o.unit !== undefined) expect(isNumericField(intent, f), `${intent}.${f}`).toBe(true);
         expect(isNumericField(intent, f)).toBe(FIELD_FORMAT[intent][f].type === "number");
+        if (FIELD_FORMAT[intent][f].type === "number") {
+          const unavailable = reconcileShaped({ intent, result: {}, field_status: { [f]: "unavailable" } }, { [f]: 1 }, { rawVerified: true });
+          expect(unavailable[f], `${intent}.${f}`).toEqual({ value: null, node_status: "unavailable", source: "none" });
+        }
       }
     }
+  });
+  it("unitless FX is numeric and never filled from raw", () => {
+    const intent = "CURRENCY_EXCHANGE_CONVERT";
+    expect(OUTPUT_MAPPING[intent].converted_amount).toEqual({ path: "converted_amount" });
+    expect(FIELD_FORMAT[intent].converted_amount.type).toBe("number");
+    expect(isNumericField(intent, "converted_amount")).toBe(true);
+    for (const status of ["unavailable", "missing", "rejected"] as const) {
+      const result = reconcileShaped({ intent, result: {}, field_status: { converted_amount: status } }, { converted_amount: 123 }, { rawVerified: true });
+      expect(result.converted_amount).toEqual({ value: null, node_status: status, source: "none" });
+    }
+    const result = reconcileShaped({ intent, result: { converted_amount: 124 }, field_status: { converted_amount: "ok" } }, { converted_amount: 123 }, { rawVerified: true });
+    expect(result.converted_amount).toEqual({ value: 124, node_status: "ok", source: "node" });
   });
   it("a string field with a non-string raw value is not filled (J2 Minor 3 / J1 Minor 3)", () => {
     const r = reconcileShaped({
