@@ -36,8 +36,17 @@
 // 502 FX_SOURCES_DISAGREE and says so — never an average into a wrong
 // answer. Exactly one covering source answers at confidence 0.9 with
 // the single source named honestly. Zero covering sources is 422
-// NO_DATA for a well-formed but unknown code; malformed codes are 400.
-// All sources down is 502. No rate is ever invented.
+// NO_DATA for a well-formed but uncovered code (at least one source
+// answered and carried no such pair); malformed codes are 400. ALL
+// sources erroring with none answering at all is 502 FX_SOURCES_DOWN.
+// No rate is ever invented.
+//
+// LIMITATION (named honestly): the straddle rule trusts each source's
+// OWN date label. A source that serves a stale rate under a fresh
+// date label would look "freshest" and win the straddle path alone at
+// 0.9; the same-date disagreement refusal (0.5%) is the guard against
+// two same-dated sources disagreeing, and same-day drift inside the
+// tolerance is the reason the tolerance exists.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -229,27 +238,38 @@ export async function handleFx(
   );
   const quotes: SourceQuote[] = [];
   const failedSources: string[] = [];
+  const erroredSources: string[] = [];
+  const uncoveredSources: string[] = [];
   settled.forEach((outcome, i) => {
     if (outcome?.status === "fulfilled" && outcome.value !== null) {
       quotes.push(outcome.value);
     } else {
       failedSources.push(SOURCES[i].name);
+      if (outcome?.status === "fulfilled") {
+        uncoveredSources.push(SOURCES[i].name); // answered, but no rate for this pair
+      } else {
+        erroredSources.push(SOURCES[i].name); // down, timed out, or bad response
+      }
     }
   });
 
   if (quotes.length === 0) {
-    if (failedSources.length === SOURCES.length) {
-      // Distinguish "no source knows this code" from "sources are down"
-      // only weakly — both are possible per source. The honest combined
-      // answer: no source could provide the rate.
-      throw unprocessable(
-        "NO_DATA",
-        `no rate source could provide ${from}/${to}: every source errored or does not cover the pair (${failedSources.join(", ")})`,
+    if (uncoveredSources.length === 0) {
+      // Every source errored and none answered at all: an upstream
+      // failure, not an unknown pair — 502, matching every other
+      // intent's all-sources-down shape.
+      throw upstreamUnavailable(
+        "FX_SOURCES_DOWN",
+        `every rate source errored for ${from}/${to} (${erroredSources.join(", ")}); refusing to invent a rate`,
       );
     }
+    // At least one source answered and carried no such pair: the
+    // well-formed code is simply not covered. 422 NO_DATA, with any
+    // errored sources named honestly.
     throw unprocessable(
       "NO_DATA",
-      `no rate source covers ${from}/${to} (checked: ${SOURCES.map((s) => s.name).join(", ")})`,
+      `no rate source covers ${from}/${to} (answered without it: ${uncoveredSources.join(", ")}` +
+        (erroredSources.length ? `; errored: ${erroredSources.join(", ")}` : "") + `)`,
     );
   }
 
@@ -259,6 +279,7 @@ export async function handleFx(
   let serving = quotes;
   let degradedReasons: string[] = [];
   let straddledUpdate = false;
+  let straddleDetail = "";
   if (quotes.length >= 2) {
     const sorted = [...quotes].sort((a, b) => a.rate - b.rate);
     const lo = sorted[0].rate;
@@ -276,6 +297,9 @@ export async function handleFx(
       if (rateDayKey(freshest.rateDate) > rateDayKey(stalest.rateDate)) {
         straddledUpdate = true;
         serving = [freshest];
+        straddleDetail =
+          `sources straddled a rate update: ${freshest.source} read ${freshest.rate} dated ` +
+          `${freshest.rateDate}, ${stalest.source} read ${stalest.rate} dated ${stalest.rateDate}`;
         degradedReasons = [
           `sources straddle a rate update for ${from}/${to}: serving the freshest ` +
             `(${freshest.source}=${freshest.rate} dated ${freshest.rateDate}); the stale source read ` +
@@ -352,16 +376,18 @@ export async function handleFx(
     answer:
       `${amount} ${from} = ${converted} ${to} at a rate of ${rate} ${to} per ${from}` +
       ` (${winner.source}, rates dated ${winner.rateDate}` +
-      (quotes.length > 1
-        ? `; cross-checked against ${quotes.length} sources agreeing within 0.5%)`
-        : "; single covering source)") +
+      (straddledUpdate
+        ? `; ${straddleDetail} — the freshest is served; they did NOT agree within 0.5%)`
+        : quotes.length > 1
+          ? `; cross-checked against ${quotes.length} sources agreeing within 0.5%)`
+          : "; single covering source)") +
       ".",
     verdict: "verified",
     confidence,
     source:
       `Keyless public rate APIs (${quotes.map((q) => q.source).join(" + ")}); ` +
       `sources snapshot at different times of day, so a 0.5% pairwise agreement tolerance is applied ` +
-      `and a wider split is refused, never averaged` +
+      `and a wider split on the same snapshot date is refused, never averaged` +
       (degradedReasons.length ? `; degraded: ${degradedReasons.join("; ")}` : ""),
   });
 }

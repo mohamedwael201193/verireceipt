@@ -174,8 +174,17 @@ describe("handleFx answers (stubbed sources)", () => {
     expect(String(result.source)).toContain("degraded");
   });
 
-  it("all sources down -> 422 NO_DATA, never an invented rate", async () => {
+  it("all sources erroring with none answering -> 502 FX_SOURCES_DOWN, never an invented rate (review 35)", async () => {
     stubFxSources({ frankfurter: "ERR", openEr: "ERR", fawaz: "ERR" });
+    await expectApiError(handleFx({ from_currency: "USD", to_currency: "EUR" }), 502, "FX_SOURCES_DOWN");
+  });
+
+  it("sources answering without the pair -> 422 NO_DATA with coverage named (review 35)", async () => {
+    stubFxSources({
+      frankfurter: JSON.stringify({ date: "2026-11-21", rates: { GBP: 0.79 } }),
+      openEr: JSON.stringify({ result: "success", time_last_update_utc: "Sat, 22 Nov 2026 00:02:32 +0000", rates: { GBP: 0.79 } }),
+      fawaz: JSON.stringify({ date: "2026-11-21", usd: { gbp: 0.79 } }),
+    });
     await expectApiError(handleFx({ from_currency: "USD", to_currency: "EUR" }), 422, "NO_DATA");
   });
 
@@ -199,6 +208,32 @@ describe("handleFx answers (stubbed sources)", () => {
     expect(result.confidence).toBe(0.9);
     expect(String(result.source)).toContain("straddle a rate update");
     expect(String(result.source)).toContain("0.9");
+  });
+
+  it("straddle answer text makes NO false agreement claim; agreeing run claims agreement (negative control, review 35)", async () => {
+    stubFxSources({
+      frankfurter: "ERR",
+      openEr: openErBody(0.95, "Sun, 22 Nov 2026 00:02:32 +0000"),
+      fawaz: fawazBody(0.90, "2026-11-21"), // 5.3% split, straddled
+    });
+    const straddled = await handleFx({ from_currency: "USD", to_currency: "EUR" });
+    const straddledAnswer = String(straddled.answer);
+    expect(straddledAnswer).not.toContain("agreeing within 0.5%");
+    expect(straddledAnswer).toContain("straddled a rate update");
+    expect(straddledAnswer).toContain("0.95");
+    expect(straddledAnswer).toContain("2026-11-21"); // the stale date is named too
+    expect(straddledAnswer).toContain("did NOT agree within 0.5%");
+    expect(String(straddled.source)).toContain("on the same snapshot date is refused");
+
+    vi.unstubAllGlobals();
+    stubFxSources({
+      frankfurter: "ERR",
+      openEr: openErBody(0.951, "Sun, 22 Nov 2026 00:02:32 +0000"),
+      fawaz: fawazBody(0.95, "2026-11-21"), // 0.1% split, agreeing
+    });
+    const agreed = await handleFx({ from_currency: "USD", to_currency: "EUR" });
+    expect(String(agreed.answer)).toContain("agreeing within 0.5%");
+    expect(String(agreed.answer)).not.toContain("straddled a rate update");
   });
 
   it("agreement boundary: exactly 0.5% apart serves; just over refuses", async () => {
