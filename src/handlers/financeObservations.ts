@@ -34,7 +34,7 @@ export interface FinanceSourceLists {
     yield: readonly ObservationSource<YieldQuery, YieldValue>[];
 }
 function required(value: string | undefined, name: string): string { const s = value?.trim(); if (!s || s.length > 256 || /[\x00-\x1f]/.test(s))
-    throw badRequest('INVALID_PARAM', `${name} is required and must be at most256 printable characters`); return s; }
+    throw badRequest('INVALID_PARAM', `${name} is required and must be at most 256 printable characters`); return s; }
 function range(n: number, min: number, max: number): void { if (typeof n !== 'number' || !Number.isFinite(n) || n < min || n > max)
     throw new Error('observation outside canonical range'); }
 const key = (...xs: string[]) => JSON.stringify(xs.map(s => s.toLowerCase()));
