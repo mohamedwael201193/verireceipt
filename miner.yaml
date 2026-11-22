@@ -180,11 +180,10 @@ endpoints:
             mainnet. Separately implemented native API extension pairs are not accepted values for this typed
             contract.'
           accepted_fields:
-          - value: ETH/USDC
-            intents:
-            - OPTIMAL_EXECUTION_ROUTE_GENERAL
-            description: Sell exactly 1 ETH for USDC on Ethereum mainnet; amount_out is USDC base units (6 decimals).
-
+            ETH/USDC:
+              intents:
+              - OPTIMAL_EXECUTION_ROUTE_GENERAL
+              description: Sell exactly 1 ETH for USDC on Ethereum mainnet; amount_out is USDC base units (6 decimals).
   - path: /v1/grid-price
     external_path: /v1/grid-price
     method: GET
@@ -317,10 +316,10 @@ endpoints:
           description: Copy the requested indicator without inventing or silently defaulting identity or
             scope.
           accepted_fields:
-          - value: unemployment rate
-            intents:
-            - MACRO_ECONOMIC_INDICATOR_GENERAL
-            description: Supported canonical value.
+            unemployment rate:
+              intents:
+              - MACRO_ECONOMIC_INDICATOR_GENERAL
+              description: Supported canonical value.
         - name: country
           type: string
           intents:
@@ -356,46 +355,46 @@ endpoints:
           description: Copy the requested record_type without inventing or silently defaulting identity
             or scope.
           accepted_fields:
-          - value: A
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: AAAA
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: CNAME
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: MX
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: NS
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: TXT
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: SOA
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: CAA
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: SRV
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: PTR
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
+            A:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            AAAA:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            CNAME:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            MX:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            NS:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            TXT:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            SOA:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            CAA:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            SRV:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            PTR:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
   - path: /v1/fx
     external_path: /v1/fx
     method: GET
