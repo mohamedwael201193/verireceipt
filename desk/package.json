@@ -16,7 +16,8 @@
     "verify": "tsx scripts/verify-ledger.ts",
     "export": "tsx scripts/export-frontend.ts",
     "policy": "tsx scripts/report-policy.ts",
-    "research": "tsx scripts/research-packet.ts"
+    "research": "tsx scripts/research-packet.ts",
+    "benchmark": "tsx scripts/run-benchmark.ts"
   },
   "dependencies": {
     "viem": "2.58.4"

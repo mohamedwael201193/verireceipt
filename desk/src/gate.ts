@@ -108,6 +108,8 @@ export interface ProbeRun {
   question: string;
   intent: string;
   params: Record<string, string>;
+  value_field: string;
+  case_input_hash: string;
   payer: string;
   purchase: PurchaseEvidence;
   signal_hash: string | null;
@@ -666,7 +668,17 @@ export interface ProbeCase {
   question: string;
 }
 
+export function probeInputHash(c: ProbeCase): string {
+  return createHash("sha256").update(canonicalPayloadJson(c)).digest("hex");
+}
+
+export interface FrozenProbeSet {
+  version: string;
+  cases: Array<{ id: string; intent: string; params: Record<string, string>; value_field: string; question: string }>;
+}
+
 export interface ProbeOptions {
+  frozenCaseSet: FrozenProbeSet;
   casesVersion: string;
   casesHash: string;
   ledgerFile: string;
@@ -685,6 +697,17 @@ export interface ProbeOptions {
 export async function runProbe(c0: ProbeCase, payer: Payer, opts: ProbeOptions): Promise<ProbeRun> {
   const nowDate = (opts.now ?? (() => new Date()))();
   const c = structuredClone(c0); // frozen against mutation during awaits
+  // Validate execution parameters against the hash-bound frozen set before
+  // reaching any network request or signature. Caller labels are not proof.
+  const frozen = structuredClone(opts.frozenCaseSet);
+  if (!frozen || createHash("sha256").update(canonicalPayloadJson(frozen)).digest("hex") !== opts.casesHash || frozen.version !== opts.casesVersion) {
+    throw new Error("probe frozen case-set hash/version mismatch");
+  }
+  const matches = frozen.cases.filter((x) => x.id === c.id);
+  const expected = matches[0];
+  if (matches.length !== 1 || probeInputHash(c) !== probeInputHash({ id: expected.id, intent: expected.intent, params: expected.params, valueField: expected.value_field, question: expected.question })) {
+    throw new Error("probe input does not match the frozen case");
+  }
   const base: Omit<ProbeRun, "outcome" | "reasons"> = {
     version: 1 as const,
     kind: "benchmark-probe",
@@ -695,6 +718,8 @@ export async function runProbe(c0: ProbeCase, payer: Payer, opts: ProbeOptions):
     question: c.question,
     intent: c.intent,
     params: c.params,
+    value_field: c.valueField,
+    case_input_hash: probeInputHash(c),
     payer: payer.address.toLowerCase(),
     purchase: {
       routed: "auto", quoted_uusdc: "0", paid_uusdc: null, worst_case_uusdc: null,

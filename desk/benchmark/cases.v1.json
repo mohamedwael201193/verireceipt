@@ -1,0 +1,169 @@
+{
+  "version": "frontier-benchmark-v1",
+  "frozen_at": "2026-11-22T16:45:00Z",
+  "note": "Frozen before any arm answered. Every case asks about a past, immutable state so the reference stays regradable. References were read from the primary public source at freeze time; the same sources are cited per case. The frontier arm receives only the question text (no expected value). A gate HOLD counts as an abstain, never as a correct answer. Graders are bound to versioned primary snapshots in snapshots.v1.json (sha256 per case; revision policy there).",
+  "cases": [
+    {
+      "id": "tx-sepolia-desk-deposit",
+      "intent": "ONCHAIN_TX_LOOKUP_GENERAL",
+      "params": {
+        "tx_hash": "0xe8696cc29652173b1fdce601cfbd5d61649583bf811163d778d412739b78d2d3",
+        "chain": "sepolia"
+      },
+      "value_field": "block_number",
+      "question": "On Ethereum Sepolia, in which block number was transaction 0xe8696cc29652173b1fdce601cfbd5d61649583bf811163d778d412739b78d2d3 included?",
+      "grader": {
+        "type": "exact_number",
+        "expected": 12176453
+      },
+      "reference": {
+        "source": "Ethereum Sepolia public JSON-RPC eth_getTransactionReceipt",
+        "checked_at": "2026-11-22",
+        "detail": "blockNumber 0xb9cc45 = 12176453, status 0x1",
+        "snapshot_sha256": "9104182273ed9bd598f29af7401531815a667507f077c784a42a2e0e3534a4bb"
+      }
+    },
+    {
+      "id": "tx-mainnet-usdc-transfer",
+      "intent": "ONCHAIN_TX_LOOKUP_GENERAL",
+      "params": {
+        "tx_hash": "0x6ed42787fef7f854a1e8c95924a2f68b6ec113f48e141e95fe2dda1393b27005",
+        "chain": "ethereum"
+      },
+      "value_field": "block_number",
+      "question": "On Ethereum mainnet, in which block number was transaction 0x6ed42787fef7f854a1e8c95924a2f68b6ec113f48e141e95fe2dda1393b27005 included?",
+      "grader": {
+        "type": "exact_number",
+        "expected": 26454420
+      },
+      "reference": {
+        "source": "Ethereum mainnet public JSON-RPC eth_getTransactionReceipt",
+        "checked_at": "2026-11-22",
+        "detail": "blockNumber 0x193a994 = 26454420, status 0x1",
+        "snapshot_sha256": "c4bc38f34ca51c789782f9e6b2548bcd92eb755c4c7865bd60cbcc5684ecc617"
+      }
+    },
+    {
+      "id": "filings-aapl-10q-2024",
+      "intent": "REGULATORY_FILING_MONITOR_GENERAL",
+      "params": {
+        "entity": "Form 10-Q filings by Apple Inc. (CIK 320193)",
+        "period": "calendar 2024"
+      },
+      "value_field": "filing_count",
+      "question": "How many Form 10-Q filings did Apple Inc. (CIK 320193) file with the SEC with filing dates in calendar year 2024? Exact form 10-Q only, no amendments.",
+      "grader": {
+        "type": "exact_number",
+        "expected": 3
+      },
+      "reference": {
+        "source": "SEC EDGAR submissions API CIK0000320193",
+        "checked_at": "2026-11-22",
+        "detail": "10-Q filing dates 2024-02-02, 2024-05-03, 2024-08-02",
+        "snapshot_sha256": "a2e533ca74881cb7f7ff5b6e94ccb365ed8353c619917afa69590107c846f287"
+      }
+    },
+    {
+      "id": "filings-aapl-8k-2024",
+      "intent": "REGULATORY_FILING_MONITOR_GENERAL",
+      "params": {
+        "entity": "Form 8-K filings by Apple Inc. (CIK 320193)",
+        "period": "calendar 2024"
+      },
+      "value_field": "filing_count",
+      "question": "How many Form 8-K filings did Apple Inc. (CIK 320193) file with the SEC with filing dates in calendar year 2024? Exact form 8-K only, no amendments.",
+      "grader": {
+        "type": "exact_number",
+        "expected": 9
+      },
+      "reference": {
+        "source": "SEC EDGAR submissions API CIK0000320193",
+        "checked_at": "2026-11-22",
+        "detail": "9 exact 8-K filings dated in 2024",
+        "snapshot_sha256": "1984033d5fe2420f233ff7ca228236e4973001c1410d6f2641410e63c94e3f31"
+      }
+    },
+    {
+      "id": "filings-msft-10q-2024",
+      "intent": "REGULATORY_FILING_MONITOR_GENERAL",
+      "params": {
+        "entity": "Form 10-Q filings by Microsoft Corp (CIK 789019)",
+        "period": "calendar 2024"
+      },
+      "value_field": "filing_count",
+      "question": "How many Form 10-Q filings did Microsoft Corp (CIK 789019) file with the SEC with filing dates in calendar year 2024? Exact form 10-Q only, no amendments.",
+      "grader": {
+        "type": "exact_number",
+        "expected": 3
+      },
+      "reference": {
+        "source": "SEC EDGAR submissions API CIK0000789019",
+        "checked_at": "2026-11-22",
+        "detail": "10-Q filing dates 2024-01-30, 2024-04-25, 2024-10-30",
+        "snapshot_sha256": "52cd0d25635efe3a3b756386efba1e721c29ad9d8d8b3ab02afa523684cf6077"
+      }
+    },
+    {
+      "id": "filings-tsla-10k-2024",
+      "intent": "REGULATORY_FILING_MONITOR_GENERAL",
+      "params": {
+        "entity": "Form 10-K filings by Tesla, Inc. (CIK 1318605)",
+        "period": "calendar 2024"
+      },
+      "value_field": "filing_count",
+      "question": "How many Form 10-K filings did Tesla, Inc. (CIK 1318605) file with the SEC with filing dates in calendar year 2024? Exact form 10-K only, no amendments.",
+      "grader": {
+        "type": "exact_number",
+        "expected": 1
+      },
+      "reference": {
+        "source": "SEC EDGAR submissions API CIK0001318605",
+        "checked_at": "2026-11-22",
+        "detail": "10-K filing date 2024-01-29",
+        "snapshot_sha256": "f06493f7b7c8d37c0ddebff6df8255995a7c62cf9a1fa2a9d1a8e9a6991a27ca"
+      }
+    },
+    {
+      "id": "grid-nyiso-zone-j-rt-20261110",
+      "intent": "GRID_POWER_PRICE_GENERAL",
+      "params": {
+        "node_or_zone": "ZONE_J",
+        "interval_start": "2026-11-10T15:00:00Z"
+      },
+      "value_field": "lmp_usd_per_mwh",
+      "question": "What was the NYISO real-time LBMP in USD per MWh for Zone J (N.Y.C.) at the interval timestamped 2026-11-10T15:00:00Z (10:00:00 US Eastern on 2026-11-10)?",
+      "grader": {
+        "type": "numeric_tolerance",
+        "expected": 36.33,
+        "tolerance_pct": 0
+      },
+      "reference": {
+        "source": "NYISO MIS realtime LBMP CSV 20261110realtime_zone.csv (mis.nyiso.com/public/csv/realtime/)",
+        "checked_at": "2026-11-22",
+        "detail": "row 11/10/2026 10:00:00 EST, N.Y.C. (PTID 61761), LBMP 36.33; past the NYISO MST Att. E 4-business-day revalidation window, so the posted value is final",
+        "snapshot_sha256": "214f8b401077140869bf296852aecda6365cf01e8a68853174627cdf46a9c261"
+      }
+    },
+    {
+      "id": "grid-caiso-np15-dam-20261110",
+      "intent": "GRID_POWER_PRICE_GENERAL",
+      "params": {
+        "node_or_zone": "TH_NP15_GEN-APND",
+        "interval_start": "2026-11-10T08:00:00Z"
+      },
+      "value_field": "lmp_usd_per_mwh",
+      "question": "What was the CAISO day-ahead market LMP in USD per MWh for node TH_NP15_GEN-APND for the interval starting 2026-11-10T08:00:00Z?",
+      "grader": {
+        "type": "numeric_tolerance",
+        "expected": 48.24572,
+        "tolerance_pct": 0.5
+      },
+      "reference": {
+        "source": "CAISO OASIS SingleZip PRC_LMP DAM",
+        "checked_at": "2026-11-22",
+        "detail": "LMP_PRC 48.24572 for the 08:00-09:00 GMT interval",
+        "snapshot_sha256": "da6f606645cef2919bbf2d3d229e248cc76c40547d54ed4fa5be8e3903f5226b"
+      }
+    }
+  ]
+}

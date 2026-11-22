@@ -317,13 +317,15 @@ describe("runGate", () => {
 
 describe("runProbe (benchmark's own verification API)", () => {
   const probeCase = { id: "case-tvl", intent: "TVL_LOOKUP_GENERAL", params: { protocol: "aave-v3" }, valueField: "tvl_usd", question: "What is the current TVL of Aave v3 in USD?" };
-  const probeOpts = (w: ReturnType<typeof workspace>) => ({ casesVersion: "frontier-benchmark-v1", casesHash: "ab".repeat(32), ledgerFile: w.ledgerFile, spend: w.spend });
+  const frozenCaseSet = { version: "frontier-benchmark-v1", cases: [{ id: probeCase.id, intent: probeCase.intent, params: probeCase.params, value_field: probeCase.valueField, question: probeCase.question }] };
+  const probeHash = createHash("sha256").update(canonicalPayloadJson(frozenCaseSet)).digest("hex");
+  const probeOpts = (w: ReturnType<typeof workspace>) => ({ frozenCaseSet, casesVersion: frozenCaseSet.version, casesHash: probeHash, ledgerFile: w.ledgerFile, spend: w.spend });
   it("ANSWERED when the fresh purchase verifies, bound to the case-set hash with no policy", async () => {
     const w = workspace();
     const rec = await runProbe(probeCase, makePayer(), { ...probeOpts(w), f: node().f });
     expect(rec.outcome).toBe("ANSWERED");
     expect(rec.kind).toBe("benchmark-probe");
-    expect(rec.cases_hash).toBe("ab".repeat(32));
+    expect(rec.cases_hash).toBe(probeHash);
     expect(rec.value).toBe(2_000_000_000);
     expect(rec.miner_chain).toBe("passed");
     expect(rec.limits).toBe(PROBE_LIMITS);
@@ -331,6 +333,26 @@ describe("runProbe (benchmark's own verification API)", () => {
     expect("rule" in rec).toBe(false);
     const line = JSON.parse(readFileSync(w.ledgerFile, "utf8").trim().split("\n")[0]) as ProbeRun;
     expect(line.case_id).toBe("case-tvl");
+  });
+  it.each([
+    { intent: "ONCHAIN_TX_LOOKUP_GENERAL" }, { params: { protocol: "other" } },
+    { valueField: "block_number" }, { question: "Another question" },
+  ])("refuses mismatched frozen probe input before any request or signature: %j", async (mutation) => {
+    const w = workspace();
+    const payer = makePayer();
+    const f = vi.fn();
+    await expect(runProbe({ ...probeCase, ...mutation }, payer, { ...probeOpts(w), f })).rejects.toThrow(/does not match the frozen case/);
+    expect(f).not.toHaveBeenCalled();
+    expect(payer.signMessage).not.toHaveBeenCalled();
+  });
+  it("refuses missing or forged frozen-set binding before requests", async () => {
+    const w = workspace();
+    const payer = makePayer();
+    const f = vi.fn();
+    await expect(runProbe(probeCase, payer, { ...probeOpts(w), frozenCaseSet: undefined as never, f })).rejects.toThrow(/hash\/version mismatch/);
+    await expect(runProbe(probeCase, payer, { ...probeOpts(w), casesHash: "0".repeat(64), f })).rejects.toThrow(/hash\/version mismatch/);
+    expect(f).not.toHaveBeenCalled();
+    expect(payer.signMessage).not.toHaveBeenCalled();
   });
   it("ABSTAINs (never PASSes) when verification fails, with worst-case spend recorded", async () => {
     const w = workspace();
@@ -343,8 +365,8 @@ describe("runProbe (benchmark's own verification API)", () => {
   });
   it("ABSTAINs when the verified value is not a finite number", async () => {
     const w = workspace();
-    const rec = await runProbe({ ...probeCase, valueField: "nonexistent_field" }, makePayer(), { ...probeOpts(w), f: node().f });
+    const rec = await runProbe(probeCase, makePayer(), { ...probeOpts(w), f: node({ value: NaN }).f });
     expect(rec.outcome).toBe("ABSTAIN");
-    expect(rec.reasons.join(" ")).toMatch(/engine value equals provider answer|finite/);
+    expect(rec.reasons.join(" ")).toMatch(/engine value equals provider answer|finite|value field/);
   });
 });
