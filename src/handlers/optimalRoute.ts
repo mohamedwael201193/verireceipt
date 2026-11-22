@@ -891,7 +891,7 @@ export function decodeV3QuoteReturn(hex: string): bigint {
  * The ABI layout is exact: first word is the 0x20 offset, second word is the
  * array length, then exactly that many words — no trailing garbage.
  */
-export function decodeV2AmountsOut(hex: string): bigint {
+export function decodeV2AmountsOut(hex: string, expectedLength?: number, expectedAmountIn?: bigint): bigint {
   if (!/^0x[0-9a-fA-F]+$/.test(hex) || hex.length < 2 + 64 * 2) {
     throw new Error(`malformed getAmountsOut return data: ${hex.slice(0, 40)}`);
   }
@@ -902,6 +902,12 @@ export function decodeV2AmountsOut(hex: string): bigint {
   const length = Number(readWord(hex, 1));
   if (length < 2 || hex.length !== 2 + 64 * (2 + length)) {
     throw new Error(`malformed getAmountsOut return data (length ${length})`);
+  }
+  if (expectedLength !== undefined && length !== expectedLength) {
+    throw new Error("getAmountsOut returned an array length that differs from the requested path");
+  }
+  if (expectedAmountIn !== undefined && readWord(hex, 2) !== expectedAmountIn) {
+    throw new Error("getAmountsOut returned a different input amount");
   }
   return readWord(hex, 1 + length);
 }
@@ -1272,7 +1278,7 @@ async function quoteV2AtBlock(
   }
   let amountOut: bigint;
   try {
-    amountOut = decodeV2AmountsOut(call.result);
+    amountOut = decodeV2AmountsOut(call.result, path.length, amountIn);
   } catch (err) {
     if (diag !== undefined) diag.rpcError = true;
     throw err;
@@ -1361,6 +1367,11 @@ export interface PairSpec {
    * on-chain metadata. Registry pairs leave both unset. */
   generic?: true;
   buyDecimals?: number;
+  /** 2-hop connectors for generic pairs with no direct pool: an extra
+   * getAmountsOut([sell, connector, buy]) venue per V2 router per
+   * connector. Skipped when a side IS the connector (the "hop" would be
+   * the direct pair). */
+  v2HopConnectors?: Array<{ token: string; symbol: string }>;
 }
 
 const STABLE_V3_FEES = [100, 500, 3000];
@@ -1380,7 +1391,12 @@ const WBTC_BAND_MAX = 1_000_000_000_000n;
  * missing corroborating voice and caps confidence at 0.9 with the
  * absent venue named. */
 export function expectedVenueCount(spec: PairSpec): number {
-  return 1 + spec.v2Routers.length + (spec.curve3pool === undefined ? 0 : 1);
+  return (
+    1 +
+    spec.v2Routers.length +
+    spec.v2Routers.length * (spec.v2HopConnectors?.length ?? 0) +
+    (spec.curve3pool === undefined ? 0 : 1)
+  );
 }
 
 export const PAIR_REGISTRY: ReadonlyArray<PairSpec> = [
@@ -2121,9 +2137,19 @@ export function buildGenericSpec(
     v2Routers: V2_VENUES,
     plausibleMinOut: 0n,
     plausibleMaxOut: unitPriceCap < uint256Max ? unitPriceCap : uint256Max,
-    venueSetLabel: "Uniswap V3 (fees 100/500/3000/10000), Uniswap V2 and SushiSwap V2",
+    venueSetLabel:
+      sell.address.toLowerCase() === WETH.toLowerCase() || buy.address.toLowerCase() === WETH.toLowerCase()
+        ? "Uniswap V3 direct (fees 100/500/3000/10000), Uniswap V2 and SushiSwap V2 direct"
+        : "Uniswap V3 direct (fees 100/500/3000/10000), Uniswap V2 and SushiSwap V2 direct and via WETH",
     generic: true,
     buyDecimals: buy.decimals,
+    // 2-hop via WETH covers pairs with no direct pool but real liquidity
+    // on both legs (e.g. SHIB/LINK). Not useful when a side IS WETH.
+    v2HopConnectors:
+      sell.address.toLowerCase() === WETH.toLowerCase() ||
+      buy.address.toLowerCase() === WETH.toLowerCase()
+        ? []
+        : [{ token: WETH, symbol: "WETH" }],
   };
 }
 
@@ -2138,12 +2164,16 @@ async function refuseGenericNoLiquidity(
   ctx: RouteRequestContext,
 ): Promise<ApiError> {
   const cappedRaw = rawPair.length > 80 ? rawPair.slice(0, 80) + "…" : rawPair;
+  const connectors = spec.v2HopConnectors ?? [];
+  const searchedRoutes = connectors.length === 0
+    ? "direct routes"
+    : `direct routes and routes via ${connectors.map(hop => hop.symbol).join(", ")}`;
   const summary =
     `No route found for selling ${spec.sellLabel} for ${spec.buySymbol} on Ethereum mainnet: ` +
     `every verified venue call (${spec.venueSetLabel}, block-pinned eth_call quotes attested by ` +
     `a 2-of-3 RPC quorum) answered at block ${blockNumber} and none returned a pool quote with a ` +
-    `positive output through the tested direct routes. This is not proof that the tokens lack ` +
-    `liquidity elsewhere: pools, fee tiers and multi-hop routes outside this search were not ` +
+    `positive output through the tested ${searchedRoutes}. This is not proof that the tokens lack ` +
+    `liquidity elsewhere: pools, fee tiers and other multi-hop routes outside this search were not ` +
     `tested, and a revert can also reflect an unsupported token or quoter limitation. ` +
     `This service does not invent quotes it cannot verify.`;
   const receiptEvidence = JSON.stringify({
@@ -2608,6 +2638,26 @@ async function handleRouteInner(
       quoter: (rpcUrl: string, signal?: AbortSignal) =>
         quoteV2AtBlock(rpcUrl, blockRef, venue.router, venue.name, spec.amountIn, [spec.sellToken, spec.buyToken], callTimeoutMs, signal, genericDiag),
     })),
+    // Generic 2-hop venues: one per V2 router per connector, named so the
+    // route is visible in the answer and the receipt evidence (the exact
+    // getAmountsOut calldata carries the 3-token path).
+    ...spec.v2Routers.flatMap((venue, index) =>
+      (spec.v2HopConnectors ?? []).map((hop) => ({
+        offset: index + 1,
+        quoter: (rpcUrl: string, signal?: AbortSignal) =>
+          quoteV2AtBlock(
+            rpcUrl,
+            blockRef,
+            venue.router,
+            `${venue.name} via ${hop.symbol}`,
+            spec.amountIn,
+            [spec.sellToken, hop.token, spec.buyToken],
+            callTimeoutMs,
+            signal,
+            genericDiag,
+          ),
+      })),
+    ),
     ...(curve === undefined
       ? []
       : [

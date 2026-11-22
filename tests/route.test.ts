@@ -518,6 +518,150 @@ describe("generic ERC-20 pair resolution (2026-11-22)", () => {
     }
   });
 
+  it("no direct pool but WETH-hop liquidity -> 200 via the named hop route, honest 0.9 (2 of 5 venues)", async () => {
+    // SHIB/LINK has no direct pool: V3 and both direct V2 calls revert,
+    // but both routers quote the SHIB -> WETH -> LINK hop.
+    const calls: Array<{ to: string; data: string; blockRef: unknown }> = [];
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        failV3: true, failUni: true, failSushi: true,
+        v3AmountOut: 0n, v2AmountOut: 0n, capturedCalls: calls,
+        uniHopAmountOut: 25n, sushiHopAmountOut: 24n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "SHIB/LINK" }, [a.url, b.url]);
+      expect(result.amount_out).toBe(25);
+      expect(result.winning_venue).toBe("Uniswap V2 via WETH");
+      expect(result.confidence).toBe(0.9);
+      const answer = result.answer as string;
+      expect(answer).toContain("Uniswap V2 via WETH");
+      expect(answer).toContain("SushiSwap V2 via WETH");
+      expect(result.source).toContain("fewer than 5 venues produced plausible quotes (2 of 5)");
+      const sell = GENERIC_TOKENS.find(t => t.symbol === "SHIB")!.address;
+      const buy = GENERIC_TOKENS.find(t => t.symbol === "LINK")!.address;
+      const expected = buildV2AmountsOutCalldata(10n ** 18n, [sell, WETH, buy]);
+      const hops = calls.filter(c => c.data.startsWith("0xd06ca61f") && BigInt("0x" + c.data.slice(138, 202)) === 3n);
+      expect(hops.length).toBeGreaterThanOrEqual(2);
+      expect(new Set(hops.map(c => c.to))).toEqual(new Set([
+        "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+        "0xd9e1ce17f2641f24ae83637ab66a2cca9c378b9f",
+      ]));
+      for (const hop of hops) {
+        expect(hop.data).toBe(expected);
+        expect(hop.blockRef).toEqual({ blockHash: HASH, requireCanonical: true });
+      }
+      const receipt = result.receipt as { receipt_id: string; raw_response_sha256: string };
+      const stored = await getReceiptEvidence(receipt.receipt_id);
+      expect(stored.found).toBe(true);
+      expect(stored.sha256).toBe(receipt.raw_response_sha256);
+      const evidence = JSON.parse(stored.evidence!.toString("utf8"));
+      expect(evidence.request.params).toEqual([
+        { to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D", data: expected },
+        { blockHash: HASH, requireCanonical: true },
+      ]);
+      expect(decodeV2AmountsOut(evidence.response.result, 3, 10n ** 18n)).toBe(25n);
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("a hop quote that beats every direct quote wins and is named as the route", async () => {
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        v3AmountOut: 100n, v2AmountOut: 100n,
+        uniHopAmountOut: 103n, sushiHopAmountOut: 103n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "SHIB/USDC" }, [a.url, b.url]);
+      expect(result.amount_out).toBe(103);
+      expect(result.winning_venue).toBe("Uniswap V2 via WETH");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("no direct pool and no hop liquidity -> 400 NO_ROUTE (every call answered, nothing quoted)", async () => {
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        failV3: true, failUni: true, failSushi: true, failHop: true,
+        v3AmountOut: 0n, v2AmountOut: 0n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const body = await expectUnavailable(
+        handleRouteWithRpcs({ pair: "SHIB/LINK" }, [a.url, b.url]),
+        "NO_ROUTE",
+      );
+      expect(String(body.summary)).toContain("not proof that the tokens lack");
+      expect(String(body.summary)).toContain("tested direct routes and routes via WETH");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it.each([{ hopReturnLength: 2 }, { hopWrongInput: true }])("rejects a hop response that does not bind to its request: %j", async (overrides) => {
+    const mk = () => startStubRpc({
+      blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+      v3AmountOut: 0n, v2AmountOut: 0n,
+      failV3: true, failUni: true, failSushi: true,
+      uniHopAmountOut: 25n, sushiHopAmountOut: 24n, ...overrides,
+    });
+    const a = await mk(); const b = await mk();
+    try {
+      await expect(handleRouteWithRpcs({ pair: "SHIB/LINK" }, [a.url, b.url])).rejects.toMatchObject({ status: 502, code: "ALL_QUOTERS_FAILED" });
+    } finally { await a.close(); await b.close(); }
+  });
+
+  it.each(["SHIB/WETH", "WETH/SHIB"])("%s refusal reports only direct routes when there is no distinct connector", async (pair) => {
+    const calls: Array<{ to: string; data: string; blockRef: unknown }> = [];
+    const mk = () => startStubRpc({
+      blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+      v3AmountOut: 0n, v2AmountOut: 0n, capturedCalls: calls,
+      uniHopAmountOut: 25n, sushiHopAmountOut: 24n,
+    });
+    const a = await mk(); const b = await mk();
+    try {
+      const body = await expectUnavailable(handleRouteWithRpcs({ pair }, [a.url, b.url]), "NO_ROUTE");
+      expect(String(body.summary)).toContain("positive output through the tested direct routes.");
+      expect(String(body.summary)).not.toContain("WETH-hop");
+      expect(String(body.summary)).not.toContain("routes via WETH");
+      const v2Calls = calls.filter(call => call.data.startsWith("0xd06ca61f"));
+      expect(v2Calls.length).toBeGreaterThan(0);
+      for (const call of v2Calls) expect(BigInt("0x" + call.data.slice(138, 202))).toBe(2n);
+    } finally { await a.close(); await b.close(); }
+  });
+
+  it("a WETH-side pair registers NO hop venues (the hop would be the direct pair)", async () => {
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        v3AmountOut: 570_000_000_000_000n, v2AmountOut: 569_000_000_000_000n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "USDC/ETH" }, [a.url, b.url]);
+      const answer = result.answer as string;
+      expect(answer).not.toContain("via WETH");
+      // 3 venues (V3 tiers + 2 direct routers), never 5.
+      expect(result.source).not.toContain("of 5");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
   it("every venue reverting (no pool) -> 400 NO_ROUTE unavailable envelope with a receipt, not a 502", async () => {
     const mk = () =>
       startStubRpc({
@@ -843,6 +987,13 @@ interface StubRpcOptions {
   infrastructureMentionsRevert?: boolean;
   malformedV2?: boolean;
   capturedCalls?: Array<{ to: string; data: string; blockRef: unknown }>;
+  /** 2-hop getAmountsOut (3-token path) outputs per router; default is
+   * the same as the direct v2AmountOut. */
+  uniHopAmountOut?: bigint;
+  sushiHopAmountOut?: bigint;
+  failHop?: boolean;
+  hopReturnLength?: number;
+  hopWrongInput?: boolean;
   /** When true, eth_call never responds (hangs until the client's CALL_TIMEOUT_MS). */
   hangCalls?: boolean;
   /** When true, eth_blockNumber never responds (hangs until the quorum timeout). */
@@ -967,6 +1118,20 @@ function startStubRpc(options: StubRpcOptions): Promise<{
             if (options.failV2) return replyError(-32000, "execution reverted: stub RPC V2 router");
             const isSushi =
               to === "0xd9e1ce17f2641f24ae83637ab66a2cca9c378b9f";
+            // getAmountsOut(uint,address[]): the path length word sits at
+            // chars [138, 202); 2 = direct pair, 3 = one-hop route.
+            const pathLen = Number(BigInt("0x" + data.slice(138, 202)));
+            const requestedAmountIn = BigInt("0x" + data.slice(10, 74));
+            if (pathLen === 3) {
+              if (options.failHop) return replyError(-32000, "execution reverted: stub RPC: no hop pair");
+              const hopOut = isSushi
+                ? (options.sushiHopAmountOut ?? options.v2AmountOut)
+                : (options.uniHopAmountOut ?? options.v2AmountOut);
+              const len = options.hopReturnLength ?? 3;
+              const input = options.hopWrongInput ? requestedAmountIn + 1n : requestedAmountIn;
+              const amounts = [input, ...(len === 3 ? [1_000_000n] : []), hopOut];
+              return reply("0x" + word(0x20n) + word(BigInt(len)) + amounts.map(word).join(""));
+            }
             if (isSushi && options.failSushi)
               return replyError(-32000, "execution reverted: stub RPC Sushi router");
             if (!isSushi && options.failUni)
@@ -979,7 +1144,7 @@ function startStubRpc(options: StubRpcOptions): Promise<{
               "0x" +
                 word(0x20n) +
                 word(2n) +
-                word(1000000000000000000n) +
+                word(requestedAmountIn) +
                 word(amountOut),
             );
           }
