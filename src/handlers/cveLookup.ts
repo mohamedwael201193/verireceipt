@@ -1,6 +1,10 @@
 // CVE_LOOKUP_CVSS: real CVSS v3 assessments from NVD and the CVE record.
 // Exact source bodies are saved, with assessor/version/vector disclosed.
 // No CVSS v2/v4 substitution, no averaging of different assessments.
+// NVD keyless access is limited to 5 requests per rolling 30 seconds.
+// HTTP 429 is a failed source, not a zero score: the published CVE record
+// remains the fallback. A shared per-CVE short-TTL cache/rate budget is
+// an explicit follow-up before sustained high-volume traffic.
 // https://devnode.telegraphprotocol.com/engine/v1/intents/CVE_LOOKUP_CVSS
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
@@ -137,7 +141,7 @@ export async function handleCve(query: Record<string, string | undefined>): Prom
     cvss_version: chosen.version, vector: chosen.vector, as_of: asOf }, receipt, {
     answer: `${id}: ${chosen.score}/10 (${cvssSeverity(chosen.score)}), CVSS ${chosen.version}, ${chosen.assessor}. ` +
       `Vector: ${chosen.vector}. Published assessments: ${assessmentText}. ` +
-      `${winner.description.slice(0, 1800)} ` +
+      `${winner.description.slice(0, 1800)}${winner.description.length > 1800 ? " [description truncated at 1800 characters; full text in receipt]" : ""} ` +
       (candidates.length === 1 ? "Only one usable CVSS v3 assessment was available; coverage is degraded. " : "") +
       "This is a published base severity score, not a prediction of exploitation or your environment's risk.",
     verdict: "verified", confidence: candidates.length === 2 && scores[0] === scores[1] ? 1 : 0.9,

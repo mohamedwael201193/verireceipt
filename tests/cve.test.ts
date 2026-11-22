@@ -95,6 +95,16 @@ describe("CVE handler failure and evidence paths", () => {
     ]);
   });
 
+  it("marks a sliced description while preserving the full source in its receipt", async () => {
+    const record = JSON.parse(nvd);
+    const english = record.vulnerabilities[0].cve.descriptions.find((d: { lang: string }) => d.lang === "en");
+    english.value = english.value.repeat(12);
+    sources(JSON.stringify(record), null);
+    const result = await handleCve({ cve_id: "CVE-2021-44228" });
+    expect(String(result.answer)).toContain("description truncated at 1800 characters; full text in receipt");
+    const saved = await getReceiptEvidence((result.receipt as { receipt_id: string }).receipt_id);
+    expect(saved.evidence?.toString()).toContain(english.value);
+  });
   it("all sources down is unavailable, never score zero", async () => {
     sources(null, null);
     await expect(handleCve({ cve_id: "CVE-2021-44228" })).rejects.toMatchObject({ status: 502, code: "CVE_SOURCES_DOWN" });
