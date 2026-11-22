@@ -4,14 +4,16 @@
 // NVD keyless access is limited to 5 requests per rolling 30 seconds.
 // HTTP 429 is a failed source, not a zero score: the published CVE record
 // remains the fallback. A shared per-CVE short-TTL cache/rate budget is
-// an explicit follow-up before sustained high-volume traffic.
+// enforced per process below. This is NOT an aggregate egress budget across
+// overlapping deployments. NVD activation requires a single-egress-owner check.
 // https://devnode.telegraphprotocol.com/engine/v1/intents/CVE_LOOKUP_CVSS
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+import { PublicBodyCache, StartBudget, readPublicBody } from "../core/publicSource";
 export const INTENT = "CVE_LOOKUP_CVSS";
 interface Assessment { score: number; version: string; vector: string; assessor: string }
-interface SourceRecord { url: string; raw: string; assessment: Assessment | null; description: string; published: string | null; references: string[] }
+interface SourceRecord { url: string; raw: string; assessment: Assessment | null; description: string; published: string | null; references: string[]; fetchedAt?: string }
 type Obj = Record<string, any>;
 function assessment(data: Obj | undefined, assessor: string): Assessment | null {
   if (!data || !["3.0", "3.1"].includes(data.version) || typeof data.baseScore !== "number" ||
@@ -23,7 +25,7 @@ export function parseNvdCve(id: string, url: string, raw: string): SourceRecord 
   const json = JSON.parse(raw) as Obj;
   if (!Array.isArray(json.vulnerabilities)) throw new Error("malformed NVD result");
   const cve = json.vulnerabilities.find((v: Obj) => v.cve?.id === id)?.cve;
-  if (!cve) return { url, raw, assessment: null, description: "", published: null, references: [] };
+  if (!cve) throw new Error("NVD record does not match requested CVE ID");
   if (cve.vulnStatus === "Rejected") throw new Error("NVD record is rejected");
   let selected: Assessment | null = null;
   for (const key of ["cvssMetricV31", "cvssMetricV30"]) {
@@ -65,14 +67,33 @@ export function parseMitreCve(id: string, url: string, raw: string): SourceRecor
     published: typeof json.cveMetadata.datePublished === "string" ? json.cveMetadata.datePublished : null,
     references: Array.isArray(cna.references) ? cna.references.map((r: Obj) => r.url).filter((s: unknown) => typeof s === "string") : [] };
 }
+let sourceCache = new PublicBodyCache(128, 60_000);
+let nvdBudget = new StartBudget(5, 30_001);
+let nextNvdStart = 0;
+let nvdStoppedUntil = 0;
+/** Tests reset only. Production state lives for the process lifetime. */
+export function resetCveTransportForTests(): void {
+  sourceCache = new PublicBodyCache(128, 60_000); nvdBudget = new StartBudget(5, 30_001);
+  nextNvdStart = 0; nvdStoppedUntil = 0;
+}
 async function fetchRecord(url: string, parse: (raw: string) => SourceRecord): Promise<SourceRecord> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 3500);
-  try {
-    const response = await fetch(url, { signal: controller.signal, redirect: "error" });
-    if (!response.ok) throw new Error(`upstream HTTP ${response.status}`);
-    return parse(await response.text());
-  } finally { clearTimeout(timer); }
+  const body = await sourceCache.get(url, async () => {
+    if (url.startsWith('https://services.nvd.nist.gov/')) {
+      const now = Date.now();
+      if (now < nvdStoppedUntil || now < nextNvdStart || !nvdBudget.take()) throw new Error('NVD shared process budget unavailable');
+      nextNvdStart = now + 6001;
+    }
+    try {
+      const value = await readPublicBody(url, 1_000_000, 3500);
+      // Do not cache a wrong-ID, rejected or malformed body.
+      parse(value.raw);
+      return value;
+    } catch (error) {
+      if (url.startsWith('https://services.nvd.nist.gov/') && /HTTP (403|429)/.test(String(error))) nvdStoppedUntil = Date.now() + 30 * 60_000;
+      throw error;
+    }
+  });
+  return { ...parse(body.raw), fetchedAt: body.fetchedAt };
 }
 // Wait for both assessments when healthy. Once one usable v3 score is
 // available, a hung second source gets only 800ms grace, not its full
@@ -131,9 +152,10 @@ export async function handleCve(query: Record<string, string | undefined>): Prom
   const chosen = winner.assessment;
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({ cve_id: id, as_of: asOf, selected: chosen,
-    sources: records.map((r) => ({ url: r.url, assessment: r.assessment, raw_body: r.raw })),
+    sources: records.map((r) => ({ url: r.url, assessment: r.assessment, raw_body: r.raw, fetched_at: r.fetchedAt })),
     unavailable_sources: outcomes.flatMap((r, i) => r?.status !== "fulfilled" ? [i === 0 ? nvd : mitre] : []) });
   const receipt = makeReceipt(INTENT, winner.url, evidence, `${candidates.length}/2 published CVSS v3 assessments; source agreement, not independent scoring`);
+  receipt.fetched_at = winner.fetchedAt ?? asOf;
   await saveReceipt(receipt, evidence);
   const assessmentText = candidates.map((c) => `${c.assessment.assessor}: CVSS ${c.assessment.version} ${c.assessment.score}`).join("; ");
   return envelope(INTENT, { cve_id: id, cvss_score: chosen.score, severity: cvssSeverity(chosen.score),
@@ -143,8 +165,8 @@ export async function handleCve(query: Record<string, string | undefined>): Prom
       `Vector: ${chosen.vector}. Published assessments: ${assessmentText}. ` +
       `${winner.description.slice(0, 1800)}${winner.description.length > 1800 ? " [description truncated at 1800 characters; full text in receipt]" : ""} ` +
       (candidates.length === 1 ? "Only one usable CVSS v3 assessment was available; coverage is degraded. " : "") +
-      "This is a published base severity score, not a prediction of exploitation or your environment's risk.",
+      "This is a published base severity score, not a prediction of exploitation or your environment's risk. This product uses data from the NVD API but is not endorsed or certified by the NVD.",
     verdict: "verified", confidence: candidates.length === 2 && scores[0] === scores[1] ? 1 : 0.9,
-    source: `${candidates.map((r) => r.url).join(" + ")}; NVD primary when available, CVE record fallback; selected assessment is not an average; observed ${asOf}`,
+    source: `${candidates.map((r) => r.url).join(" + ")}; NVD primary when available, CVE record fallback; selected assessment is not an average; source fetched ${winner.fetchedAt ?? asOf}; checked ${asOf}`,
   });
 }

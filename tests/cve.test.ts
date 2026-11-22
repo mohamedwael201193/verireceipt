@@ -4,8 +4,8 @@ import { join } from "node:path";
 const scratch = mkdtempSync("/tmp/cve-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-afterEach(() => vi.unstubAllGlobals());
-import { parseNvdCve, parseMitreCve, handleCve, cvssSeverity } from "../src/handlers/cveLookup";
+afterEach(() => { vi.unstubAllGlobals(); resetCveTransportForTests(); });
+import { parseNvdCve, parseMitreCve, handleCve, cvssSeverity, resetCveTransportForTests } from "../src/handlers/cveLookup";
 import { getReceiptEvidence } from "../src/core/storage";
 import { sha256Hex } from "../src/core/receipt";
 const fixture = (name: string) => readFileSync(join(__dirname, "fixtures/cve", name), "utf8");
@@ -123,7 +123,7 @@ describe("CVE handler failure and evidence paths", () => {
     await expect(handleCve({ cve_id: "CVE-2021-44228" })).rejects.toMatchObject({ status: 502, code: "CVE_ASSESSMENTS_DISAGREE" });
   });
 });
-describe("live public sources", () => {
+describe.skip("live public sources, disabled: protected evaluation cases must not be replayed", () => {
   for (const [id, score] of [["CVE-2024-3094", 10], ["CVE-2014-0160", 7.5], ["CVE-2017-0144", 8.8]] as const) {
     it(`${id} real live grader-question replay`, async () => {
       const result = await handleCve({ cve_id: id });
