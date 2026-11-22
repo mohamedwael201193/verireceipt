@@ -4,17 +4,15 @@ protocol: generic
 id: 774921
 slug: verireceipt
 name: VeriReceipt Deterministic Oracle
-description: >-
-  Zero-LLM deterministic provider with a SHA-256 receipt on every answer
-  (raw_response_sha256: 64 lowercase hex characters, no 0x prefix, over the
-  exact evidence bytes served at /receipts/{receipt_id}/raw): EVM
-  transaction lookups (archive-RPC quorum), SEC
-  EDGAR filing counts by company, form type and period, DeFi TVL
-  (DeFiLlama), block-pinned 1 ETH -> USDC execution quotes on Ethereum
-  mainnet, wholesale grid power prices (CAISO, NYISO, Elering), and Ethereum
-  beacon-chain validator effective balances (2-of-4 beacon API quorum). It
-  refuses (400/422/502/504) rather than guessing.
-  Additional receipt-backed endpoints provide named-chain gas and balances, explicit-chain ERC20 supply, World Bank unemployment, DNS record observations, dated currency conversion, TLS certificate validity and DNS response status. Declared source, scope and freshness limits apply.
+description: 'Zero-LLM deterministic provider with a SHA-256 receipt on every answer (raw_response_sha256:
+  64 lowercase hex characters, no 0x prefix, over the exact evidence bytes served at /receipts/{receipt_id}/raw):
+  seven named EVM transaction chains, SEC EDGAR filing counts by company, exact form and inclusive filing-date
+  period, DeFiLlama protocol or chain TVL, a canonical fixed-size Ethereum mainnet ETH/USDC execution quote,
+  supported CAISO/NYISO/Elering grid prices, and finalized-root Ethereum validator effective balances. Unsupported,
+  ambiguous or unavailable evidence is refused rather than guessed. Additional receipt-backed endpoints provide
+  named-chain gas and balances, explicit-chain ERC20 supply, World Bank unemployment, DNS record observations,
+  dated currency conversion, TLS certificate validity and DNS response status. Declared source, scope and
+  freshness limits apply.'
 base_url: https://verireceipt.onrender.com
 
 auth:
@@ -79,165 +77,168 @@ endpoints:
   - path: /v1/tx
     external_path: /v1/tx
     method: GET
-    description: >-
-      Looks up one EVM transaction by hash on a named chain with a 2-of-N
-      archive-RPC quorum and returns tx_hash, status (confirmed, reverted,
-      pending, not_found), from, to, block_number, value_eth and a SHA-256
-      receipt. Use for questions such as "In which block was transaction
-      0x... included?".
+    description: Looks up one complete EVM transaction hash on an explicitly named supported chain using a public
+      archive-capable RPC quorum. Returns tx_hash, status (confirmed, reverted, pending or not_found), from,
+      to, block_number, value_eth and a SHA-256 receipt. A quorum is required; an unavailable or conflicting
+      source set is not a not_found answer. This is an observation, not a transaction submission.
     intents:
-      - ONCHAIN_TX_LOOKUP_GENERAL
+    - ONCHAIN_TX_LOOKUP_GENERAL
     params:
       query:
         required:
-          - name: tx_hash
-            type: string
-            intents: ["ONCHAIN_TX_LOOKUP_GENERAL"]
-            description: Complete 0x-prefixed 64-hex-character transaction hash.
-          - name: chain
-            type: string
-            intents: ["ONCHAIN_TX_LOOKUP_GENERAL"]
-            description: >-
-              EVM chain name, lower case: ethereum, base, arbitrum, optimism,
-              polygon, sepolia or base-sepolia. Ethereum mainnet may also be
-              written eth or mainnet.
+        - name: tx_hash
+          type: string
+          intents:
+          - ONCHAIN_TX_LOOKUP_GENERAL
+          description: Complete 0x-prefixed 64-hex-character transaction hash.
+        - name: chain
+          type: string
+          intents:
+          - ONCHAIN_TX_LOOKUP_GENERAL
+          description: 'Supported canonical chain names: ethereum, base, arbitrum, optimism, polygon, sepolia
+            and base-sepolia. Ethereum aliases eth and mainnet are accepted. State the chain explicitly; do
+            not infer another chain from a transaction hash.'
 
   - path: /v1/filings
     external_path: /v1/filings
     method: GET
-    description: >-
-      Counts a company's filings on SEC EDGAR (data.sec.gov submissions,
-      by filing date) in a period, optionally of one exact EDGAR form type,
-      and returns entity, form_type, filing_count, the filing titles newest first,
-      their URLs and a SHA-256 receipt. Use for questions such as "How many
-      Form 10-Q filings by Tesla, Inc. (CIK 1318605) in calendar 2023 are on
-      SEC EDGAR?". SEC EDGAR only: an unknown or ambiguous company or form
-      is refused (422), never answered from another source or with an
-      unfiltered count.
+    description: Counts one company's SEC EDGAR submissions by inclusive filing_date, optionally restricted
+      to one exact form type. Supports calendar years, explicit calendar quarters, valid quarter-ending dates
+      and explicit date ranges, not company fiscal periods. Returns entity, form_type, filing_count, newest-first
+      filing titles and URLs, and a SHA-256 receipt. Unknown or ambiguous company/form and unsupported periods
+      are refused, not replaced with an unfiltered count or another source.
     intents:
-      - REGULATORY_FILING_MONITOR_GENERAL
+    - REGULATORY_FILING_MONITOR_GENERAL
     params:
       query:
         required:
-          - name: entity
-            type: string
-            intents: ["REGULATORY_FILING_MONITOR_GENERAL"]
-            description: >-
-              The subject of the question verbatim, including any SEC form
-              type and CIK, e.g. "Form 10-Q filings by Tesla, Inc. (CIK
-              1318605)", "Tesla, Inc.", "TSLA", "1318605".
-          - name: period
-            type: string
-            intents: ["REGULATORY_FILING_MONITOR_GENERAL"]
-            description: Search period such as last 12 months, 2026, calendar 2023, or YYYY-MM-DD..YYYY-MM-DD. Calendar years only; fiscal-year periods are rejected.
+        - name: entity
+          type: string
+          intents:
+          - REGULATORY_FILING_MONITOR_GENERAL
+          description: The subject of the question verbatim, including any SEC form type and CIK, e.g. "Form
+            10-Q filings by Tesla, Inc. (CIK 1318605)", "Tesla, Inc.", "TSLA", "1318605".
+        - name: period
+          type: string
+          intents:
+          - REGULATORY_FILING_MONITOR_GENERAL
+          description: 'An inclusive filing-date period: last N months, a calendar year, an explicit calendar
+            Q1/Q2/Q3/Q4 with year, a valid quarter ending YYYY-MM-DD (March 31, June 30, September 30 or December
+            31), YYYY-MM-DD..YYYY-MM-DD, or a supported year/date range using to or through. Bare Q1-Q4 without
+            calendar qualification and company fiscal-year or fiscal-quarter requests are rejected.'
         optional:
-          - name: form_type
-            type: string
-            intents: ["REGULATORY_FILING_MONITOR_GENERAL"]
-            description: One SEC EDGAR form type exactly as asked, e.g. 10-K, 10-Q, 8-K, 144/A, 4/A. Exact match (10-K counts originals only; 10-K/A counts amendments only). Omit to count all forms.
+        - name: form_type
+          type: string
+          intents:
+          - REGULATORY_FILING_MONITOR_GENERAL
+          description: One exact SEC EDGAR form type as asked, including slash amendments, e.g. 10-K, 10-Q,
+            8-K, 144/A or 4/A. 10-K excludes 10-K/A and amendments are not folded into originals. A form embedded
+            in entity is retained; conflicting form specifications are rejected. Omit only when the question
+            asks for all forms.
 
   - path: /v1/tvl
     external_path: /v1/tvl
     method: GET
-    description: >-
-      Returns the current total value locked of a DeFi protocol or chain
-      from DeFiLlama's keyless API: protocol_or_chain, tvl_usd,
-      chain_tvl_usd, as_of and a SHA-256 receipt. Use for questions such as
-      "What is the total value locked in Aave V3, in US dollars?".
+    description: Returns current DeFiLlama TVL in USD for one resolvable protocol, catalog parent aggregate
+      or chain. Version-qualified names remain version-qualified; catalog parent relationships are not replaced
+      by guessed slug substitutions. Returns protocol_or_chain, tvl_usd, as_of and a SHA-256 receipt. chain_tvl_usd
+      is an optional nullable breakdown, not a second required total. Unknown or ambiguous identities are refused.
     intents:
-      - TVL_LOOKUP_GENERAL
+    - TVL_LOOKUP_GENERAL
     params:
       query:
         required:
-          - name: protocol
-            type: string
-            intents: ["TVL_LOOKUP_GENERAL"]
-            description: >-
-              DeFi protocol name or DeFiLlama slug, keeping the version when
-              one is named (Aave V3 or aave-v3, Uniswap V3 or uniswap-v3,
-              Lido), or a chain name (ethereum). At most 512 characters.
+        - name: protocol
+          type: string
+          intents:
+          - TVL_LOOKUP_GENERAL
+          description: Protocol name or DeFiLlama slug, preserving any requested version, catalog parent name,
+            or supported chain name. Use the complete identity from the question, at most 512 characters. A
+            protocol parent aggregate is not interchangeable with one child version; a missing optional chain
+            breakdown does not mean the total is missing.
 
   - path: /v1/route
     external_path: /v1/route
     method: GET
-    description: >-
-      Returns a block-pinned Ethereum mainnet execution quote for selling
-      exactly 1 ETH for USDC, the best quote across Uniswap V2/V3, SushiSwap V2,
-      as amount_out in USDC base units (6 decimals) with a SHA-256 receipt.
+    description: The typed intent contract quotes exactly 1 ETH sold for USDC on Ethereum mainnet, with block-pinned
+      public RPC evidence and amount_out in USDC base units (6 decimals). Compares implemented Uniswap V2/V3
+      and SushiSwap V2 venues. The API separately implements native ETH/USDT, DAI/USDC, USDT/USDC, DAI/USDT
+      and WBTC/USDC extensions, each selling one whole input token with output in its actual buy-token base
+      units. Those extensions are outside this typed canonical contract and its accepted_fields; native amounts
+      are never inflated into the canonical range or relabelled as another token. Quotes are gross, not gas-adjusted;
+      no cross-chain, arbitrary-size or arbitrary-pair routing is promised.
     intents:
-      - OPTIMAL_EXECUTION_ROUTE_GENERAL
+    - OPTIMAL_EXECUTION_ROUTE_GENERAL
     params:
       query:
         required:
-          - name: pair
-            type: string
-            intents: ["OPTIMAL_EXECUTION_ROUTE_GENERAL"]
-            description: The swap to route. Only ETH/USDC (sell exactly 1 ETH for USDC on Ethereum mainnet).
-            accepted_fields:
-              ETH/USDC:
-                intents: ["OPTIMAL_EXECUTION_ROUTE_GENERAL"]
-                description: Sell exactly 1 ETH for USDC on Ethereum mainnet.
+        - name: pair
+          type: string
+          intents:
+          - OPTIMAL_EXECUTION_ROUTE_GENERAL
+          description: 'Typed canonical intent pair: ETH/USDC only, selling exactly 1 ETH for USDC on Ethereum
+            mainnet. Separately implemented native API extension pairs are not accepted values for this typed
+            contract.'
+          accepted_fields:
+          - value: ETH/USDC
+            intents:
+            - OPTIMAL_EXECUTION_ROUTE_GENERAL
+            description: Sell exactly 1 ETH for USDC on Ethereum mainnet; amount_out is USDC base units (6 decimals).
 
   - path: /v1/grid-price
     external_path: /v1/grid-price
     method: GET
-    description: >-
-      Returns the wholesale electricity price lmp_usd_per_mwh for one
-      pricing node or zone and one finished settlement interval, from
-      official public feeds: CAISO OASIS day-ahead hourly LMP, NYISO
-      real-time 5-minute zonal LBMP, and the Elering dashboard API
-      15-minute prices (EUR/MWh converted to USD with the open.er-api.com
-      EUR rate). Returns node_or_zone, market, interval_start, currency and
-      a SHA-256 receipt. Any other node or zone is refused (422). Use for
-      questions such as "What is the CAISO day-ahead LMP for settlement
-      interval 2026-09-13T14:00:00Z?".
+    description: Returns lmp_usd_per_mwh for a supported pricing node or zone and a finished UTC interval from
+      CAISO OASIS day-ahead hourly LMP, NYISO real-time 5-minute zonal LBMP, or Elering cached published price
+      rows converted from EUR/MWh with the recorded EUR/USD source. Returns node_or_zone, market, interval_start,
+      currency, checked_at and receipt timestamps, not a separate freshness/finality field. Normal valid cache
+      rows, including eligible provisional rows, use verdict=verified and confidence=1 without a provisional
+      label. An unconfirmed post-close row after failed revalidation or unavailable historical re-fetch instead
+      carries the unverified-cached-price warning in the answer. Elering is cache-only; absent evidence is not
+      interpolated or invented. A finished interval is not a promise of final settlement.
     intents:
-      - GRID_POWER_PRICE_GENERAL
+    - GRID_POWER_PRICE_GENERAL
     params:
       query:
         required:
-          - name: node_or_zone
-            type: string
-            intents: ["GRID_POWER_PRICE_GENERAL"]
-            description: >-
-              Exactly one of: CAISO hubs TH_NP15_GEN-APND, TH_SP15_GEN-APND,
-              TH_ZP26_GEN-APND (short names NP15, SP15, ZP26 also accepted),
-              or CAISO when no CAISO node is named (answered for the NP15
-              trading hub TH_NP15_GEN-APND, as the answer states); NYISO
-              zones ZONE_A to ZONE_K (NYISO names such as N.Y.C. also
-              accepted); Elering zones EE, FI, LV, LT.
-          - name: interval_start
-            type: string
-            intents: ["GRID_POWER_PRICE_GENERAL"]
-            description: >-
-              Start of the settlement interval, ISO-8601 UTC, e.g.
-              2026-09-13T14:00:00Z.
+        - name: node_or_zone
+          type: string
+          intents:
+          - GRID_POWER_PRICE_GENERAL
+          description: CAISO hubs TH_NP15_GEN-APND, TH_SP15_GEN-APND or TH_ZP26_GEN-APND (NP15, SP15, ZP26 aliases);
+            bare CAISO explicitly selects NP15. NYISO zones ZONE_A..ZONE_K or supported NYISO names, including
+            WEST and N.Y.C.; source-qualified NYISO WEST is accepted. Elering zones EE, FI, LV, LT, also source-qualified
+            as Elering EE, Elering FI, Elering LV or Elering LT. Other market/zone combinations are refused.
+        - name: interval_start
+          type: string
+          intents:
+          - GRID_POWER_PRICE_GENERAL
+          description: 'Exact finished settlement-interval start in ISO-8601 UTC with Z or +00:00, aligned to
+            the selected market: CAISO 60 minutes, NYISO 5 minutes, Elering 15-minute accepted keys. An aligned
+            key is not proof that a source row exists; do not shift an absent interval or infer a current/historical
+            price.'
 
   - path: /v1/validator
     external_path: /v1/validator
     method: GET
-    description: >-
-      Returns the effective balance in gwei of one Ethereum beacon-chain
-      validator at the finalized state, read from four independently
-      operated public beacon APIs (2-of-4 quorum): answered only when at
-      least two sources agree on effective_balance and status; fewer than
-      two agreeing sources, or any source that disagrees, fails closed
-      (502, no answer). Returns validator_index, effective_balance, status
-      and a SHA-256 receipt. Use for questions such as "What is the
-      effective balance of Ethereum validator index 1, in gwei?".
+    description: Returns effective_balance in gwei and status for one Ethereum beacon validator, bound to an
+      agreed finalized_state_root. At least two configured public beacon sources must agree on the finalized
+      root and at least two validator responses must agree on effective_balance/status for that root. Any returned
+      dissent or found-versus-404 conflict fails closed; unavailable legs do not become votes. Verified answers
+      may be reused only for the same validator and agreed finalized root, with their original receipt. This
+      is effective balance, not APY, reward income, uptime or slashing history.
     intents:
-      - VALIDATOR_PERFORMANCE_VERIFY_GENERAL
+    - VALIDATOR_PERFORMANCE_VERIFY_GENERAL
     params:
       query:
         required:
-          - name: validator_index
-            type: string
-            intents: ["VALIDATOR_PERFORMANCE_VERIFY_GENERAL"]
-            description: >-
-              Ethereum beacon-chain validator index as a canonical decimal
-              digit string (0, or a non-negative integer with no sign and no
-              leading zeros), e.g. 1, at most 1000000000 (the official
-              intent max). The handler rejects any other shape.
+        - name: validator_index
+          type: string
+          intents:
+          - VALIDATOR_PERFORMANCE_VERIFY_GENERAL
+          description: Ethereum beacon-chain validator index as a canonical decimal digit string (0, or a non-negative
+            integer with no sign and no leading zeros), e.g. 1, at most 1000000000 (the official intent max).
+            The handler rejects any other shape.
 
   - path: /v1/gas-price
     external_path: /v1/gas-price
