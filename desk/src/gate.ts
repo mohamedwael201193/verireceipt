@@ -12,7 +12,7 @@
 import { appendFileSync, closeSync, existsSync, openSync, readFileSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { DESK_DAILY_CAP_UUSDC, ENGINE_URL, MAX_WINDOW_SECONDS, VERIRECEIPT_ONCHAIN_MINER_IDS } from "./constants.js";
-import { escrowAskAuto, type Fetch, type Payer, type RawResponse } from "./client.js";
+import { escrowAskAuto, type Fetch, type Payer, type RawResponse, type SignNotice } from "./client.js";
 import { EscrowRefusal } from "./escrow.js";
 import { gateTask, policyObjectHash, ruleHolds, type GatePolicy, type GateTask } from "./gatePolicy.js";
 import { caisoHour, nyisoInterval } from "./missions.js";
@@ -287,6 +287,8 @@ export interface GateOptions {
   f?: Fetch;
   onRawResponse?: (raw: RawResponse) => void | Promise<void>;
   secUserAgent?: string;
+  /** Additional durable authority, awaited before any signature. Never replaces the local cap. */
+  durableBeforeSign?: (notice: SignNotice) => Promise<void>;
 }
 
 /** Resolve a task's params: fixed, then dynamic (computed from `now`), then operator overrides. */
@@ -456,7 +458,7 @@ interface VerifiedCore {
 async function executeVerifiedPurchase(
   input: { intent: string; params: Record<string, string>; valueField: string; kind: string },
   payer: Payer,
-  opts: { spend: SpendLedger; now?: () => Date; f?: Fetch; onRawResponse?: (raw: RawResponse) => void | Promise<void>; secUserAgent?: string },
+  opts: { spend: SpendLedger; now?: () => Date; f?: Fetch; onRawResponse?: (raw: RawResponse) => void | Promise<void>; secUserAgent?: string; durableBeforeSign?: (notice: SignNotice) => Promise<void> },
 ): Promise<VerifiedCore> {
   const nowDate = (opts.now ?? (() => new Date()))();
   const f = opts.f ?? fetch;
@@ -495,10 +497,11 @@ async function executeVerifiedPurchase(
       spentTodayUusdc: spentPre,
       dailyCapUusdc: DESK_DAILY_CAP_UUSDC,
       f,
-      onBeforeSign: ({ amountUusdc, authorization }) => {
+      onBeforeSign: async ({ amountUusdc, authorization }) => {
         reserveSpend(opts.spend, input.kind, amountUusdc, authorization.nonce, DESK_DAILY_CAP_UUSDC, nowDate);
         reservedUusdc = amountUusdc.toString();
         reservedNonce = authorization.nonce;
+        await opts.durableBeforeSign?.({ amountUusdc, authorization });
       },
       onRawResponse: opts.onRawResponse,
     });
@@ -741,6 +744,8 @@ export interface ProbeOptions {
   f?: Fetch;
   onRawResponse?: (raw: RawResponse) => void | Promise<void>;
   secUserAgent?: string;
+  /** Additional durable authority, awaited before any signature. Never replaces the local cap. */
+  durableBeforeSign?: (notice: SignNotice) => Promise<void>;
 }
 
 /**

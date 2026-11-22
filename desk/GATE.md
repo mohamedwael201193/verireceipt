@@ -101,7 +101,7 @@ deep-copied before awaits, so a callback cannot change its rule mid-run.
 4. **Break it** - ask for a venue whose verified value cannot satisfy the
    precommitted floor (`--set protocol=…`) and the outcome is HOLD naming
    the rule; tamper with any evidence and the failed checks are named.
-5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (480 tests across 30 files,
+5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (483 tests across 31 files,
    no network, no key); the gate flow is covered with mocked nodes including
    tamper cases.
 
@@ -266,3 +266,11 @@ Legacy root-only TX observations preserve and compare the root, not only
 their effective confirmed status. Different roots fail agreement. A mixed
 legacy-root/status-only pair also abstains under the strict observation
 comparison rather than treating missing root evidence as equality.
+
+## Optional durable pre-sign authority
+
+A hosted caller can supply durableBeforeSign. The client awaits this hook
+before invoking a signer; an async rejection refuses the purchase. It does
+not replace the existing local reservation/cap. The hook receives an isolated
+copy of the authorization, so it cannot change the message being authorized.
+No hosted service is enabled merely by adding this hook.
