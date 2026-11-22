@@ -60,6 +60,8 @@ function seed(): void {
     ["rcpt_HHHHHHHHHHHHHHHHHHHHHHHHHH", "UNPARSED", "u", "h".repeat(64), iso(NOW - 1000), blob, 1, "  legacy value  "],
     ["rcpt_IIIIIIIIIIIIIIIIIIIIIIIIII", "UNPARSED", "u", "i".repeat(64), iso(NOW - 1000), blob, 1, null],
     ["rcpt_JJJJJJJJJJJJJJJJJJJJJJJJJJ", "UNPARSED", "u", "j".repeat(64), iso(NOW - 1000), blob, 1, ""],
+    // refused-pair receipt (optimalRoute NO_ROUTE): counted as refused, not as unparsed
+    ["rcpt_LLLLLLLLLLLLLLLLLLLLLLLLLL", "OPTIMAL_EXECUTION_ROUTE_GENERAL", "u", "l".repeat(64), iso(NOW - 1000), blob, 1, "no upstream quorum: no venue was queried for a refused pair"],
     // a bad timestamp is counted, never grouped
     ["rcpt_KKKKKKKKKKKKKKKKKKKKKKKKKK", "BADT", "u", "k".repeat(64), "not-a-timestamp", blob, 1, "1/1"],
   ];
@@ -90,14 +92,22 @@ describe("scripts/accuracy.mjs", () => {
 
     expect(doc.source).toEqual({ backend: "sqlite", table: "miner_receipts" });
     expect(doc.totals).toEqual({
-      receipts: 9, // BOUNDARY_OUT is outside the window, BADT skipped
-      with_evidence: 8,
+      receipts: 10, // BOUNDARY_OUT is outside the window, BADT skipped
+      answered: 9,
+      refused: 1,
+      with_evidence: 9,
       missing_evidence: 1,
-      quorum_strings_parsed: 5, // 2/2, 2/3, unsafe k/n, 1/1 (EMPTY), 1/1 (BOUNDARY_IN)
+      multi_source_receipts: 3, // 2/2, 2/3, unsafe k/n
+      multi_source_votes_agreeing: (2n + 2n + 9007199254740993n).toString(),
+      multi_source_votes_cast: (2n + 3n + 9007199254740993n).toString(),
+      single_source_receipts: 2, // 1/1 (EMPTY), 1/1 (BOUNDARY_IN)
       quorum_strings_unparsed: 4, // legacy label, spaces, null, empty
-      quorum_votes_agreeing: (2n + 2n + 9007199254740993n + 1n + 1n).toString(),
-      quorum_votes_cast: (2n + 3n + 9007199254740993n + 1n + 1n).toString(),
     });
+    // No cross-kind quorum sums anywhere in the document.
+    expect(JSON.stringify(doc)).not.toContain("quorum_votes_agreeing");
+    expect(JSON.stringify(doc)).not.toContain("quorum_votes_cast");
+    expect(doc.notes).toContain("serve-time vote tally");
+    expect(doc.notes).toContain("not a correctness rate");
     expect(doc.rows_skipped_bad_fetched_at).toBe(1);
 
     const intents = Object.values(doc.days as Record<string, { intents: Record<string, unknown> }>).flatMap((d) => Object.keys(d.intents));
@@ -113,8 +123,8 @@ describe("scripts/accuracy.mjs", () => {
 
     // Exact unsafe integers (would collapse to ...992 under Number).
     const unsafeBucket = Object.values(allDays).map((d) => d.intents.UNSAFE).find(Boolean) as unknown as Record<string, unknown>;
-    expect(unsafeBucket.quorum_votes_agreeing).toBe("9007199254740993");
-    expect(unsafeBucket.quorum_votes_cast).toBe("9007199254740993");
+    expect(unsafeBucket.multi_source_votes_agreeing).toBe("9007199254740993");
+    expect(unsafeBucket.multi_source_votes_cast).toBe("9007199254740993");
 
     // Verbatim retention: spaces kept, null distinct from "".
     expect(doc.unparsed_quorum_strings).toEqual(
@@ -136,7 +146,7 @@ describe("scripts/accuracy.mjs", () => {
     expect(r.status).toBe(0);
     const doc = JSON.parse(r.stdout);
     expect(doc.source.backend).toBe("sqlite");
-    expect(doc.totals.receipts).toBe(9);
+    expect(doc.totals.receipts).toBe(10);
   });
 
   it("fails loudly (exit 1) when the store does not exist — never emits an empty-looking file", async () => {

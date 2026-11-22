@@ -77,12 +77,17 @@ describe("GET /accuracy.json", () => {
       expect(res.statusCode).toBe(200);
       const doc = res.json();
       expect(doc.source.backend).toBe("sqlite");
-      expect(doc.totals).toMatchObject({
+      expect(doc.totals).toEqual({
         receipts: 4,
+        answered: 4,
+        refused: 0,
         with_evidence: 3,
         missing_evidence: 1,
-        quorum_votes_agreeing: (1n + 9007199254740993n).toString(),
-        quorum_votes_cast: (1n + 9007199254740993n).toString(),
+        multi_source_receipts: 1,
+        multi_source_votes_agreeing: "9007199254740993",
+        multi_source_votes_cast: "9007199254740993",
+        single_source_receipts: 1,
+        quorum_strings_unparsed: 2,
       });
       // UTC day of the offset timestamp is Nov 21, not Nov 22 (the other
       // seed rows use the current instant, so Nov 22 legitimately exists).
