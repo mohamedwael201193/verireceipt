@@ -236,7 +236,8 @@ export async function handleDns(
   const nxdomain = serving.status === 3;
   const recordsText =
     hasRecord && serving.records.length > 0
-      ? `: ${serving.records.slice(0, 10).join(", ")}`
+      ? `: ${serving.records.slice(0, 10).join(", ")}` +
+        (serving.records.length > 10 ? ` (10 of ${serving.records.length} shown)` : "")
       : nxdomain
         ? " (NXDOMAIN — the name itself does not exist)"
         : "";
@@ -245,7 +246,7 @@ export async function handleDns(
     recordsText +
     ` according to ${verdicts.map((v) => v.resolver).join(" + ")} (all answering resolvers agree on existence). ` +
     "Resolver evidence: " + verdicts.map((v) =>
-      `${v.resolver} [DNS status ${v.status}]: ${v.records.length ? v.records.slice(0, 10).join(", ") : "no matching records"}`,
+      `${v.resolver} [DNS status ${v.status}]: ${v.records.length ? v.records.slice(0, 10).join(", ") + (v.records.length > 10 ? ` (10 of ${v.records.length} shown)` : "") : "no matching records"}`,
     ).join("; ") + "." +
     (typeRaw === "MX" && serving.records.includes("0 .") ? " Null MX explicitly indicates this domain accepts no email." : "");
 
@@ -290,7 +291,7 @@ export async function handleDns(
 
   return envelope(INTENT, fields, receiptDoc, {
     answer,
-    verdict: hasRecord ? "verified" : "refuted",
+    verdict: hasRecord ? "verified" : "not_found",
     confidence,
     source:
       `Keyless public DNS-over-HTTPS resolvers (${verdicts.map((v) => v.resolver).join(" + ")}); ` +

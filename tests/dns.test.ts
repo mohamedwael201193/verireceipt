@@ -165,7 +165,7 @@ describe("handleDns stubbed resolvers", () => {
     const result = await handleDns({ name: "example.com", record_type: "AAAA" });
     expect(result.has_record).toBe(false);
     expect(result.confidence).toBe(1.0);
-    expect(result.verdict).toBe("refuted");
+    expect(result.verdict).toBe("not_found");
   });
 
   it("NXDOMAIN from all resolvers -> has_record 0 with NXDOMAIN named in the answer", async () => {
@@ -248,6 +248,16 @@ describe("handleDns stubbed resolvers", () => {
       expect(result.record_type).toBe(type);
       expect(result.records).toEqual(["record-data"]);
     }
+  });
+
+  it("truncated answer says 10 of N shown while structured records stay complete", async () => {
+    const records = Array.from({ length: 12 }, (_, i) => `192.0.2.${i + 1}`);
+    const body = dohBody(1, records);
+    stubResolvers({ google: body, cloudflare: body, adguard: body });
+    const result = await handleDns({ name: "example.com", record_type: "A" });
+    expect(result.records).toEqual(records);
+    expect(String(result.answer)).toContain("10 of 12 shown");
+    expect(String(result.answer)).not.toContain("192.0.2.12");
   });
 
   it("null MX is an existing DNS record but explicitly means no email delivery", async () => {
