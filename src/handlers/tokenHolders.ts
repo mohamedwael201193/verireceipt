@@ -27,7 +27,7 @@ import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { normalizeChain } from "./txLookup";
-import { ADDRESS_RE, TOKEN_CONTRACTS, isNativeSymbol, tokenContractFor } from "./tokenContracts";
+import { ADDRESS_RE, TOKEN_CONTRACTS, isNativeSymbol, labeledTokenContract, tokenContractFor } from "./tokenContracts";
 
 export const INTENT = "TOKEN_HOLDER_COUNT_GENERAL";
 
@@ -127,8 +127,11 @@ export async function handleTokenHolders(
     );
   }
 
+  const labeled = labeledTokenContract(chain, tokenRaw);
+  tokenRaw = labeled?.contract ?? tokenRaw;
+
   let contract: string;
-  let requestedSymbol: string | null = null;
+  let requestedSymbol: string | null = labeled?.requestedSymbol ?? null;
   if (ADDRESS_RE.test(tokenRaw)) {
     contract = tokenRaw;
   } else if (isNativeSymbol(chain, tokenRaw)) {

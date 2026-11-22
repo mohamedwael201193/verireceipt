@@ -89,7 +89,47 @@ describe("validation", () => {
   });
 });
 
+describe("display-label validation", () => {
+  it.each([
+    `USDC (${TOKEN_CONTRACTS.ethereum.DAI})`,
+    `ETH (${TOKEN_CONTRACTS.ethereum.WETH})`,
+  ])("rejects a contradictory label: %s", async (token) => {
+    await expectApiError(handleTokenHolders({ token, chain: "ethereum" }), 400, "TOKEN_CONTRACT_MISMATCH");
+  });
+
+  it.each([
+    `USDC (${USDC_ETH.slice(0, -1)})`,
+    `USDC (${USDC_ETH}) (${USDC_ETH})`,
+    `USDC (${USDC_ETH}) trailing`,
+  ])("does not mine an address from malformed input: %s", async (token) => {
+    await expectApiError(handleTokenHolders({ token, chain: "ethereum" }), 422, "UNSUPPORTED_TOKEN");
+  });
+
+  it("keeps the chain contradiction guard for display tokens", async () => {
+    await expectApiError(handleTokenHolders({ token: `USDC (${USDC_ETH}) on optimism`, chain: "ethereum" }), 400, "CHAIN_MISMATCH");
+  });
+});
+
 describe("stubbed indexer", () => {
+  it.each([
+    { token: `USDC (${USDC_ETH}) on Ethereum` },
+    { token: `USDC (${USDC_ETH})`, chain: "ethereum" },
+    { token: `USD Coin ( ${USDC_ETH} ) on ethereum` },
+  ])("accepts display token input with receipt: %j", async (query) => {
+    const body = indexerBody(9618845, "USDC");
+    let seen = "";
+    setTokenHoldersFetchForTests(async (url) => { seen = url; return body; });
+    const out = await handleTokenHolders(query);
+    expect(seen).toBe(`https://eth.blockscout.com/api/v2/tokens/${USDC_ETH}`);
+    expect(out.token).toBe(USDC_ETH);
+    expect(out.token_symbol).toBe("USDC");
+    expect(out.holders_count).toBe(9618845);
+    const receipt = out.receipt as { receipt_id: string; raw_response_sha256: string };
+    const evidence = await getReceiptEvidence(receipt.receipt_id);
+    const { sha256Hex } = await import("../src/core/receipt");
+    expect(sha256Hex(evidence.evidence!)).toBe(receipt.raw_response_sha256);
+  });
+
   it("returns the count with a receipt over the exact upstream bytes", async () => {
     const body = indexerBody(9618845, "USDC");
     let seenUrl = "";
@@ -121,10 +161,10 @@ describe("stubbed indexer", () => {
     expect(out.holders_count).toBe(671778);
   });
 
-  it("422 when the indexer symbol contradicts the requested symbol", async () => {
+  it.each(["USDC", `USDC (${USDC_ETH})`])("422 when the indexer contradicts the requested symbol: %s", async (token) => {
     setTokenHoldersFetchForTests(async () => indexerBody(100, "USDT"));
     await expectApiError(
-      handleTokenHolders({ token: "USDC", chain: "ethereum" }),
+      handleTokenHolders({ token, chain: "ethereum" }),
       422,
       "TOKEN_SYMBOL_MISMATCH",
     );
@@ -156,14 +196,14 @@ describe("stubbed indexer", () => {
 
 describe("LIVE keyless indexers", () => {
   it("ethereum USDC holder count is real and large", async () => {
-    const out = await handleTokenHolders({ token: "USDC", chain: "ethereum" });
+    const out = await handleTokenHolders({ token: `USDC (${USDC_ETH})`, chain: "ethereum" });
     expect(out.holders_count).toBeGreaterThan(1_000_000);
     expect(out.token_symbol).toBe("USDC");
     expect(out.verdict).toBe("verified");
   }, 30000);
 
   it("optimism USDC holder count is real", async () => {
-    const out = await handleTokenHolders({ token: "USDC", chain: "optimism" });
+    const out = await handleTokenHolders({ token: `USDC (${USDC_OP}) on optimism` });
     expect(out.holders_count).toBeGreaterThan(100_000);
     expect(out.token_symbol).toBe("USDC");
   }, 30000);

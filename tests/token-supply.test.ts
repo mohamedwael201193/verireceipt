@@ -57,13 +57,15 @@ interface Behavior {
   results: Record<string, string>;
 }
 
-function stubSupplyFetch(table: Record<string, Behavior>): void {
+function stubSupplyFetch(table: Record<string, Behavior>, seenContracts?: string[]): void {
   const fetchStub = async (url: unknown, init?: { body?: unknown }) => {
     const u = String(url);
     const behavior = table[u];
     if (!behavior) throw new Error(`unexpected fetch to ${u}`);
     const body = JSON.parse(String(init?.body ?? "{}")) as { method: string; params: unknown[] };
-    const data = (body.params[0] as { data: string }).data;
+    const call = body.params[0] as { data: string; to: string };
+    seenContracts?.push(call.to);
+    const data = call.data;
     const result = behavior.results[data.slice(0, 10)];
     if (result === undefined) throw new Error("leg failure");
     return { ok: true, status: 200, text: async () => rpcResult(result) } as Response;
@@ -117,7 +119,59 @@ describe("handleTokenSupply validation (no network use)", () => {
   });
 });
 
+describe("display-label input validation", () => {
+  it("does not silently choose a network for a chainless symbol", async () => {
+    await expectApiError(handleTokenSupply({ token: "USDC" }), 400, "MISSING_PARAM");
+  });
+
+  it.each([
+    `USDC (${TOKEN_CONTRACTS.ethereum.DAI}) on ethereum`,
+    `ETH (${TOKEN_CONTRACTS.ethereum.WETH}) on ethereum`,
+  ])("rejects contradictory label and address: %s", async (token) => {
+    await expectApiError(handleTokenSupply({ token }), 400, "TOKEN_CONTRACT_MISMATCH");
+  });
+
+  it.each([
+    `USDC (${USDC_ETH.slice(0, -1)})`,
+    `USDC (${USDC_ETH}) (${USDC_ETH})`,
+    `USDC (${USDC_ETH}) trailing`,
+  ])("rejects malformed or multiple display addresses: %s", async (token) => {
+    await expectApiError(handleTokenSupply({ token, chain: "ethereum" }), 422, "UNSUPPORTED_TOKEN");
+  });
+
+  it("still rejects a contradictory chain before reading the explicit address", async () => {
+    await expectApiError(handleTokenSupply({ token: `USDC (${USDC_ETH}) on base`, chain: "ethereum" }), 400, "CHAIN_MISMATCH");
+  });
+});
+
 describe("handleTokenSupply quorum (stubbed fetch)", () => {
+  it.each([
+    { token: `USDC (${USDC_ETH}) on Ethereum` },
+    { token: `USDC (${USDC_ETH})`, chain: "ethereum" },
+    { token: `USD Coin ( ${USDC_ETH} ) on ethereum` },
+  ])("accepts the complete display token shape: %j", async (query) => {
+    const seen: string[] = [];
+    stubSupplyFetch(Object.fromEntries(ETH.map((url) => [url, supplyBehavior(41000000123456n, 6, "USDC")])), seen);
+    const out = await handleTokenSupply(query);
+    expect(out.total_supply).toBe(41000000.123456);
+    expect(out.token_symbol).toBe("USDC");
+    expect(out.chain).toBe("ethereum");
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((address) => address === USDC_ETH)).toBe(true);
+    const receipt = out.receipt as { receipt_id: string; raw_response_sha256: string };
+    const evidence = await getReceiptEvidence(receipt.receipt_id);
+    expect(sha256Hex(evidence.evidence!)).toBe(receipt.raw_response_sha256);
+  });
+
+  it("uses an explicit address rather than guessing from an unrecognized label", async () => {
+    const address = TOKEN_CONTRACTS.ethereum.DAI;
+    const seen: string[] = [];
+    stubSupplyFetch(Object.fromEntries(ETH.map((url) => [url, supplyBehavior(123000000n, 6, "DAI")])), seen);
+    const out = await handleTokenSupply({ token: `Dai Stablecoin (${address}) on ethereum` });
+    expect(out.token_symbol).toBe("DAI");
+    expect(seen.every((to) => to === address)).toBe(true);
+  });
+
   it("answers USDC supply from an agreeing 3-of-3 with decimals applied", async () => {
     const supply = 41000000123456n; // 41,000,000.123456 USDC at 6 decimals
     stubSupplyFetch({
@@ -175,7 +229,7 @@ describe("handleTokenSupply LIVE (real RPCs, no stub)", () => {
   it(
     "answers the live USDC total supply on ethereum with a verifiable receipt",
     async () => {
-      const res = await handleTokenSupply({ token: "USDC on ethereum" });
+      const res = await handleTokenSupply({ token: `USDC (${USDC_ETH}) on ethereum` });
       expect(res.token_symbol).toBe("USDC");
       expect(res.chain).toBe("ethereum");
       // USDC supply is tens of billions; assert a sane positive range.
