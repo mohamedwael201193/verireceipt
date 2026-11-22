@@ -13,7 +13,7 @@ export interface WeatherSourceLists {
     past: readonly ObservationSource<PastWeatherQuery, DailyObservation>[];
 }
 function location(s: string | undefined): string { const v = s?.trim(); if (!v || v.length > 256 || /[\x00-\x1f]/.test(v))
-    throw badRequest('INVALID_LOCATION', 'location is required, at most256 printable characters'); return v; }
+    throw badRequest('INVALID_LOCATION', 'location is required, at most 256 printable characters'); return v; }
 /** Identity helper for reviewed source adapters. No fuzzy city/station match. */
 export function weatherIdentity(q: CurrentWeatherQuery | PastWeatherQuery): string { return JSON.stringify('date' in q ? [q.location.trim().toLowerCase(), q.date] : [q.location.trim().toLowerCase()]); }
 function number(n: number, min: number, max: number): void { if (typeof n !== 'number' || !Number.isFinite(n) || n < min || n > max)
