@@ -110,7 +110,11 @@ export class BuyerStore {
    this.db.prepare('UPDATE buyer_payer SET active_job=NULL,blocked_until=0 WHERE id=1 AND active_job=?').run(id);
   });
  }
- uncertain(id:string):void {this.db.prepare("UPDATE buyer_jobs SET state='uncertain' WHERE id=? AND state IN ('reserved','signing')").run(id);}
+ uncertain(id:string,result?:{plan_hash:string;[key:string]:unknown}):void {
+  if(!result){this.db.prepare("UPDATE buyer_jobs SET state='uncertain' WHERE id=? AND state IN ('reserved','signing')").run(id);return;}
+  const text=JSON.stringify(result);if(Buffer.byteLength(text)>BUYER.maxResultBytes)throw new Error('Evidence result exceeds bound');
+  const r=this.db.prepare("UPDATE buyer_jobs SET state='uncertain',result=? WHERE id=? AND plan_hash=? AND state IN ('reserved','signing')").run(text,id,result.plan_hash);if(r.changes!==1)throw new BuyerStoreError('STATE_CHANGED');
+ }
  read(id:string,owner:string):{id:string;state:BuyerState;plan:BuyerPlan;expires_at:string;result:unknown;followups:unknown[]}|null {
   let row:Row;try{row=this.row(id,owner);}catch(error){if(error instanceof BuyerStoreError)return null;throw error;}
   const now=this.clock(),expires=row.reserved_at===null?row.expires_at:row.reserved_at+BUYER.payloadHours*3600000;
@@ -118,16 +122,23 @@ export class BuyerStore {
   const payer=this.db.prepare('SELECT active_job,blocked_until FROM buyer_payer WHERE id=1').get() as {active_job:string;blocked_until:number};
   const stale=['reserved','signing'].includes(row.state)&&(payer.active_job!==id||payer.blocked_until<=now);
   const followups=this.db.prepare('SELECT data FROM buyer_followups WHERE job_id=? ORDER BY observed_at DESC LIMIT 10').all(id) as {data:string}[];
-  return {id,state:stale?'uncertain':row.state,plan:JSON.parse(row.plan),expires_at:new Date(expires).toISOString(),result:row.state==='complete'&&row.result?JSON.parse(row.result):null,followups:followups.map(x=>JSON.parse(x.data))};
+  return {id,state:stale?'uncertain':row.state,plan:JSON.parse(row.plan),expires_at:new Date(expires).toISOString(),result:row.result?JSON.parse(row.result):null,followups:followups.map(x=>JSON.parse(x.data))};
  }
- addFollowup(id:string,owner:string,data:unknown):void {
+ evidence(id:string,owner:string):unknown {
+  const job=this.read(id,owner);if(!job)return null;const row=this.row(id,owner);return {...job,public_response_headers:row.headers?JSON.parse(row.headers):null,paid_response:row.paid_body?JSON.parse(row.paid_body):null};
+ }
+ finishFollowup(id:string,owner:string,token:number,data:unknown):void {
+  if(!this.read(id,owner))throw new BuyerStoreError('NOT_FOUND');const text=JSON.stringify(data);if(Buffer.byteLength(text)>32000)throw new Error('Follow-up exceeds bound');
+  const r=this.db.prepare('UPDATE buyer_followups SET data=? WHERE job_id=? AND observed_at=?').run(text,id,token);if(r.changes!==1)throw new BuyerStoreError('STATE_CHANGED');
+ }
+ addFollowup(id:string,owner:string,data:unknown):number {
   const text=JSON.stringify(data);if(Buffer.byteLength(text)>32000)throw new Error('Follow-up exceeds bound');
-  this.immediate(()=>{
+  return this.immediate(()=>{
    const found=this.read(id,owner);if(!found||found.state!=='complete')throw new BuyerStoreError('NOT_FOUND');
    const now=this.clock(),last=this.db.prepare('SELECT max(observed_at) at FROM buyer_followups WHERE job_id=?').get(id) as {at:number|null};
    if(last.at!==null&&now-last.at<60000)throw new BuyerStoreError('RATE_LIMIT');
    this.db.prepare('INSERT INTO buyer_followups(job_id,observed_at,data) VALUES(?,?,?)').run(id,now,text);
-   this.db.prepare('DELETE FROM buyer_followups WHERE job_id=? AND rowid NOT IN (SELECT rowid FROM buyer_followups WHERE job_id=? ORDER BY observed_at DESC LIMIT 10)').run(id,id);
+   this.db.prepare('DELETE FROM buyer_followups WHERE job_id=? AND rowid NOT IN (SELECT rowid FROM buyer_followups WHERE job_id=? ORDER BY observed_at DESC LIMIT 10)').run(id,id);return now;
   });
  }
  private purgeInside(now:number):void {

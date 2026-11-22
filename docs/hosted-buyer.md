@@ -139,3 +139,43 @@ owner-bound result/evidence reads and rate-limited read-only follow-up. No
 startup job replay or paid retry. Abort work on shutdown and retain uncertain
 exposure; arrange startup/hourly payload cleanup. Routes and the UI are not yet
 mounted in this increment and need their own independent review.
+
+## Additive HTTP wiring (still disabled)
+
+`registerBuyer` is now mounted additively by the server but immediately returns
+unless `BUYER_ENABLED=1`. It loads no buyer key, database or runtime while off.
+When on, startup checks the runtime's configuration, requires a private canonical
+absolute persistent database path (`BUYER_DATABASE_PATH`), pins the runtime payer
+to the authority, then performs store/scratch cleanup and repeats it hourly.
+This code was tested offline, not against a deployed volume or funded payer.
+
+The UI's same-origin `/api` rewrite maps to these server routes:
+
+- `GET /v1/buyer/session`: secure HttpOnly SameSite=Strict host cookie and terms.
+- `POST /v1/buyer/plans`: CIK/year only, stores a trusted preview, no purchase.
+- `POST /v1/buyer/plans/:id/buy`: only `plan_hash`, exact approved origin/session,
+  loads the server plan by ID, reserves atomically, and starts it at most once.
+- `GET /v1/buyer/jobs/:id`: owner-bound check summary, no raw primary payload.
+- `GET /v1/buyer/jobs/:id/evidence`: owner-bound full evidence download, including
+  captured public response header/body. No request authorization is included.
+- `POST /v1/buyer/jobs/:id/delivery`: owner-bound read-only check; claims its
+  one-minute cooldown durably before reading, so concurrent requests cannot
+  bypass the fetch limit. It cannot launch a purchase or signature.
+
+Reads never start or retry work. No automatic startup replay exists. Uncertain
+results remain readable as HOLD with unknown charge exposure, without releasing
+the payer lease early. A bound node receipt is still not final settlement.
+Shutdown aborts active work and waits for its closeout, retaining unresolved
+reservations. Validation rejects mismatched result plan/policy/task/payer/rule,
+unknown-charge PASS, missing checks and false PASS before making results visible.
+Hourly cleanup failure is logged without revealing private payloads or secrets;
+per-read 24-hour denial and per-reservation purge still apply. These mechanisms
+are not forensic erasure, and backup/snapshot policies need deployment review.
+
+Named offline API tests use real local SQLite and injected synthetic no-payment
+results. They cover preview-versus-buy separation, secure sessions, origin and
+owner checks, rejection of client plan objects/rehashed terms, repeated and
+concurrent starts, recovery GETs, unknown outcomes, response hooks, false PASS,
+full evidence versus summary, followup cooldown, startup/hourly cleanup,
+expiration and shutdown abort. Synthetic test results are not experiment data.
+The UI is not implemented by this increment. No hosted purchase has been run.
