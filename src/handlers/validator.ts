@@ -1,9 +1,9 @@
-// GET /v1/validator — effective_balance (gwei) of an Ethereum validator.
+// GET /v1/validator, finalized validator data with canonical effective_balance in gwei.
 //
-// Zero-LLM. Calls the standard beacon API on FOUR independently operated
-// keyless public beacon sources (A9 r2: was three) and answers only
-// when at least TWO agree on effective_balance AND status (2-of-N,
-// N = BEACON_SOURCES.length). A single-source answer is NEVER served
+// Zero-LLM. Calls the standard beacon API on FOUR configured
+// keyless public beacon sources and answers only when at least TWO agree
+// on every returned validator field at the same finalized state root.
+// The quorum size is2-of-N, where N = BEACON_SOURCES.length. A single-source answer is NEVER served
 // as verified: fewer than two agreeing sources fails closed with 502
 // QUORUM_UNREACHABLE (no answer, no receipt), and any source that
 // answered with a DIFFERENT value than the agreeing pair — or returned
@@ -91,12 +91,11 @@
 // serves it as a JSON string ("32000000000"); the handler parses it to
 // a safe integer and refuses a leg whose value is not a digit string.
 //
-// Only effective_balance + status are compared across legs. The beacon
-// `balance` field is deliberately NOT compared: two nodes at different
-// head slots legitimately report different current balances, while
-// effective_balance only moves on activation/exit (32 ETH cap) and is
-// stable across heads. Comparing `balance` would 502 on ordinary
-// head-slot drift.
+// All returned validator fields are compared at the same finalized root.
+// Balance and epochs retain the beacon API's exact uint64 decimal strings.
+// The canonical effective_balance field remains a number in gwei.
+// BLS-pubkey lookup is a native-API extension, not a change to the canonical
+// integer-index intent declaration.
 //
 // Receipt: the receipt hashes the EXACT raw body bytes of the winning
 // leg (the first-arrived leg of the agreeing group) and stores
@@ -313,6 +312,18 @@ export interface ValidatorDeps {
 // integer literal in the intent's JSON schema, `validator_index:
 // integer`; J1/J2 round 2). "0" itself is valid.
 const VALIDATOR_INDEX_RE = /^(0|[1-9][0-9]*)$/;
+export const VALIDATOR_PUBKEY_RE = /^0x[0-9a-fA-F]{96}$/;
+const UINT64_MAX = (1n << 64n) - 1n;
+type ValidatorIdentifier = number | string;
+
+function exactUint64(value: unknown, field: string): string {
+  if (typeof value !== "string" || !/^\d{1,20}$/.test(value)) {
+    throw new Error(`malformed beacon response: ${field} is not a uint64 decimal string`);
+  }
+  const parsed = BigInt(value);
+  if (parsed > UINT64_MAX) throw new Error(`malformed beacon response: ${field} exceeds uint64`);
+  return parsed.toString();
+}
 
 // ---------------------------------------------------------------------------
 // A9 r2: verified-result cache, finalized-root cache, per-host pacing.
@@ -347,7 +358,7 @@ let chainsafeBucket: TokenBucket = {
 /** Per-host 429 cooldown (all sources). */
 const hostCooldownUntilMs = new Map<string, number>();
 
-function verifiedCacheKey(index: number, root: string): string {
+function verifiedCacheKey(index: ValidatorIdentifier, root: string): string {
   return `${index}:${root.toLowerCase()}`;
 }
 
@@ -362,7 +373,7 @@ function rememberVerified(key: string, entry: VerifiedCacheEntry): void {
   }
 }
 
-function takeVerified(index: number, root: string): VerifiedCacheEntry | undefined {
+function takeVerified(index: ValidatorIdentifier, root: string): VerifiedCacheEntry | undefined {
   const key = verifiedCacheKey(index, root);
   const hit = verifiedCache.get(key);
   if (hit === undefined) return undefined;
@@ -513,6 +524,14 @@ export function parseStateRootResponse(rawBody: string, sourceUrl: string): {
 }
 
 interface ValidatorLeg {
+  index: number;
+  pubkey: string;
+  balance: string;
+  slashed: boolean;
+  activationEligibilityEpoch: string;
+  activationEpoch: string;
+  exitEpoch: string;
+  withdrawableEpoch: string;
   /** Effective balance in gwei, as a number (0 is a real 0). */
   effectiveBalance: number;
   /** Beacon status string, e.g. "active_ongoing", "withdrawal_done". */
@@ -554,7 +573,7 @@ export interface ParseValidatorOptions {
 export function parseValidatorResponse(
   rawBody: string,
   sourceUrl: string,
-  expectedIndex: number,
+  expectedIndex: ValidatorIdentifier,
   opts: ParseValidatorOptions = {},
 ): ValidatorLeg {
   let parsed: unknown;
@@ -609,7 +628,11 @@ export function parseValidatorResponse(
   }
   const dataObj = data as Record<string, unknown>;
   // F1: bind the evidence to the validator that was asked for.
-  if (dataObj.index !== String(expectedIndex)) {
+  if (typeof dataObj.index !== "string" || !VALIDATOR_INDEX_RE.test(dataObj.index) ||
+      !Number.isSafeInteger(Number(dataObj.index))) {
+    throw new Error(`malformed beacon response from ${sourceUrl}: data.index does not match requested validator (missing or unsafe canonical index)`);
+  }
+  if (typeof expectedIndex === "number" && dataObj.index !== String(expectedIndex)) {
     throw new Error(
       `malformed beacon response from ${sourceUrl}: data.index ${JSON.stringify(dataObj.index)} does not match requested validator ${expectedIndex}`,
     );
@@ -640,7 +663,27 @@ export function parseValidatorResponse(
       `malformed beacon response from ${sourceUrl}: effective_balance is not a safe non-negative integer`,
     );
   }
-  return { effectiveBalance, status, rawBody, sourceUrl };
+  const validatorObj = validator as Record<string, unknown>;
+  const pubkey = validatorObj.pubkey;
+  if (typeof pubkey !== "string" || !VALIDATOR_PUBKEY_RE.test(pubkey)) {
+    throw new Error(`malformed beacon response from ${sourceUrl}: pubkey is not a bytes48 hex key`);
+  }
+  if (typeof expectedIndex === "string" && pubkey.toLowerCase() !== expectedIndex.toLowerCase()) {
+    throw new Error(`malformed beacon response from ${sourceUrl}: pubkey does not match requested validator`);
+  }
+  if (typeof validatorObj.slashed !== "boolean") {
+    throw new Error(`malformed beacon response from ${sourceUrl}: slashed is not a boolean`);
+  }
+  const balance = exactUint64(dataObj.balance, "balance");
+  return {
+    index: Number(dataObj.index), pubkey: pubkey.toLowerCase(), balance,
+    slashed: validatorObj.slashed,
+    activationEligibilityEpoch: exactUint64(validatorObj.activation_eligibility_epoch, "activation_eligibility_epoch"),
+    activationEpoch: exactUint64(validatorObj.activation_epoch, "activation_epoch"),
+    exitEpoch: exactUint64(validatorObj.exit_epoch, "exit_epoch"),
+    withdrawableEpoch: exactUint64(validatorObj.withdrawable_epoch, "withdrawable_epoch"),
+    effectiveBalance, status, rawBody, sourceUrl,
+  };
 }
 
 /** Read the HTTP status a fetch leg failed with, if it failed on a non-200. */
@@ -830,7 +873,7 @@ interface FetchSourceOpts {
  */
 async function fetchValidatorFromSource(
   base: string,
-  index: number,
+  index: ValidatorIdentifier,
   fetchImpl: typeof fetch,
   timeoutMs: number,
   deadlineAt: number,
@@ -975,7 +1018,7 @@ export async function handleValidator(
   // devnode schema 2026-11-21: param min 0, max 1000000000).
   // miner.yaml declares this as MAX_PARAM_VALUE (machine-enforced).
   const VALIDATOR_INDEX_MAX = 1_000_000_000;
-  const VALIDATOR_QUERY_KEYS = new Set(["validator_index"]);
+  const VALIDATOR_QUERY_KEYS = new Set(["validator_index", "validator_pubkey"]);
   // `index` is not a declared param (YAML and the official intent both
   // name only validator_index). An undeclared key is 400 UNKNOWN_PARAM,
   // never served as an alias.
@@ -983,29 +1026,33 @@ export async function handleValidator(
     if (!VALIDATOR_QUERY_KEYS.has(key)) {
       throw badRequest(
         "UNKNOWN_PARAM",
-        `Query parameter "${key}" is not supported; /v1/validator takes validator_index`,
+        `Query parameter "${key}" is not supported; /v1/validator takes validator_index or native validator_pubkey`,
       );
     }
   }
   const rawIndex = query.validator_index;
-  if (rawIndex === undefined || !VALIDATOR_INDEX_RE.test(rawIndex)) {
-    throw badRequest(
-      "INVALID_VALIDATOR_INDEX",
-      "validator_index is required and must be a non-negative integer (e.g. 1)",
-    );
+  const rawPubkey = query.validator_pubkey;
+  if (rawIndex !== undefined && rawPubkey !== undefined) {
+    throw badRequest("AMBIGUOUS_VALIDATOR_ID", "Supply either validator_index or validator_pubkey, not both");
   }
-  const index = Number(rawIndex);
-  if (!Number.isSafeInteger(index)) {
-    throw badRequest(
-      "INVALID_VALIDATOR_INDEX",
-      "validator_index must be a non-negative integer (e.g. 1)",
-    );
-  }
-  if (index > VALIDATOR_INDEX_MAX) {
-    throw badRequest(
-      "MAX_PARAM_VALUE",
-      "validator_index must be at most 1000000000",
-    );
+  const pubkeyInput = rawPubkey ?? (rawIndex !== undefined && VALIDATOR_PUBKEY_RE.test(rawIndex) ? rawIndex : undefined);
+  let index: ValidatorIdentifier;
+  if (pubkeyInput !== undefined) {
+    if (!VALIDATOR_PUBKEY_RE.test(pubkeyInput)) {
+      throw badRequest("INVALID_VALIDATOR_PUBKEY", "validator_pubkey must be a 0x-prefixed 48-byte BLS public key");
+    }
+    index = pubkeyInput.toLowerCase();
+  } else {
+    if (rawIndex === undefined || !VALIDATOR_INDEX_RE.test(rawIndex)) {
+      throw badRequest("INVALID_VALIDATOR_INDEX", "validator_index is required and must be a non-negative integer (e.g. 1)");
+    }
+    index = Number(rawIndex);
+    if (!Number.isSafeInteger(index)) {
+      throw badRequest("INVALID_VALIDATOR_INDEX", "validator_index must be a non-negative integer (e.g. 1)");
+    }
+    if (index > VALIDATOR_INDEX_MAX) {
+      throw badRequest("MAX_PARAM_VALUE", "validator_index must be at most 1000000000");
+    }
   }
 
   const fetchImpl = deps.fetchImpl ?? fetch;
@@ -1044,6 +1091,10 @@ export async function handleValidator(
   let requestSettled = false;
   const requestDone = (): boolean => requestSettled;
   const same = (a: ValidatorLeg, b: ValidatorLeg): boolean =>
+    a.index === b.index && a.pubkey === b.pubkey && a.balance === b.balance &&
+    a.slashed === b.slashed && a.activationEligibilityEpoch === b.activationEligibilityEpoch &&
+    a.activationEpoch === b.activationEpoch && a.exitEpoch === b.exitEpoch &&
+    a.withdrawableEpoch === b.withdrawableEpoch &&
     a.effectiveBalance === b.effectiveBalance && a.status === b.status;
 
   /** Largest group of answers that agree, in arrival order (empty if none). */
@@ -1211,12 +1262,24 @@ export async function handleValidator(
     );
   }
   const answer =
-    `Validator ${index} has an effective balance of ${leg.effectiveBalance} gwei ` +
-    `(status ${leg.status}), verified by ${votes} at finalized state root ${agreedRoot}.`;
+    `Validator ${leg.index} (${leg.pubkey}) has an effective balance of ${leg.effectiveBalance} gwei ` +
+    `and balance ${leg.balance} gwei; status ${leg.status}; slashed ${leg.slashed}; ` +
+    `activation eligibility epoch ${leg.activationEligibilityEpoch}; activation epoch ${leg.activationEpoch}; ` +
+    `exit epoch ${leg.exitEpoch}; withdrawable epoch ${leg.withdrawableEpoch}. ` +
+    `Epoch 18446744073709551615 is the beacon far-future sentinel, not a scheduled date. ` +
+    `Verified by ${votes} at finalized state root ${agreedRoot}.`;
   const result = envelope(
     INTENT,
     {
-      validator_index: index,
+      validator_index: leg.index,
+      validator_pubkey: leg.pubkey,
+      balance: leg.balance,
+      balance_unit: "gwei",
+      slashed: leg.slashed,
+      activation_eligibility_epoch: leg.activationEligibilityEpoch,
+      activation_epoch: leg.activationEpoch,
+      exit_epoch: leg.exitEpoch,
+      withdrawable_epoch: leg.withdrawableEpoch,
       effective_balance: leg.effectiveBalance,
       status: leg.status,
       finalized_state_root: agreedRoot,
@@ -1227,7 +1290,7 @@ export async function handleValidator(
   rememberVerified(verifiedCacheKey(index, agreedRoot), {
     envelope: result,
     root: agreedRoot,
-    index,
+    index: leg.index,
   });
   return result;
 }
