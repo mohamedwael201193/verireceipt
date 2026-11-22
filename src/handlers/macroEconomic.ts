@@ -11,7 +11,8 @@
 //
 // Intent contract (https://devnode.telegraphprotocol.com/engine/v1/intents/MACRO_ECONOMIC_INDICATOR_GENERAL,
 // read 2026-11-22): inputs indicator (enum, ONLY "unemployment rate"
-// allowed), country (string), year (integer 1960..2100); scored output
+// allowed), country (string), optional year (integer 1960..2100; absent
+// means latest nonempty published year); scored output
 // `rate_pct` (percent, 6 decimals). The contract itself names the
 // source: "World Bank SL.UEM.TOTL.ZS". Other statistics named in the
 // intent description (policy rate, CPI, GDP) have no schema entry yet,
@@ -177,8 +178,8 @@ export async function handleMacro(
   const indicatorRaw = query.indicator?.trim().toLowerCase().replace(/\s+/g, " ");
   const countryRaw = query.country?.trim();
   const yearRaw = query.year?.trim();
-  if (!indicatorRaw || !countryRaw || !yearRaw) {
-    throw badRequest("MISSING_PARAM", "indicator, country and year are required query parameters");
+  if (!indicatorRaw || !countryRaw) {
+    throw badRequest("MISSING_PARAM", "indicator and country are required query parameters");
   }
   if (indicatorRaw !== SUPPORTED_INDICATOR) {
     throw unprocessable(
@@ -186,11 +187,11 @@ export async function handleMacro(
       `unsupported indicator: ${query.indicator}; this miner serves "${SUPPORTED_INDICATOR}" (World Bank ${INDICATOR_ID})`,
     );
   }
-  if (!/^\d{4}$/.test(yearRaw)) {
+  if (yearRaw !== undefined && !/^\d{4}$/.test(yearRaw)) {
     throw badRequest("INVALID_YEAR", "year must be a 4-digit calendar year (1960-2100)");
   }
-  const year = Number(yearRaw);
-  if (year < 1960 || year > 2100) {
+  const requestedYear = yearRaw === undefined ? undefined : Number(yearRaw);
+  if (requestedYear !== undefined && (requestedYear < 1960 || requestedYear > 2100)) {
     throw badRequest("INVALID_YEAR", "year must be between 1960 and 2100");
   }
 
@@ -213,7 +214,11 @@ export async function handleMacro(
   }
 
   const iso = country.iso2Code || country.id;
-  const url = `${WB_BASE}/country/${encodeURIComponent(iso)}/indicator/${INDICATOR_ID}?date=${year}&format=json&per_page=100`;
+  // Official MRNEV selects published, nonempty data. Never guess that
+  // the current calendar year already has an annual observation.
+  // https://datahelpdesk.worldbank.org/knowledgebase/articles/898581-api-basic-call-structures
+  const selector = requestedYear === undefined ? "mrnev=1" : `date=${requestedYear}`;
+  const url = `${WB_BASE}/country/${encodeURIComponent(iso)}/indicator/${INDICATOR_ID}?${selector}&format=json&per_page=100`;
   let rawText: string;
   try {
     rawText = await fetchText(url);
@@ -230,16 +235,24 @@ export async function handleMacro(
     // WB answers [meta, null] for a series with no rows at all.
     throw unprocessable(
       "NO_DATA",
-      `World Bank has no ${INDICATOR_ID} data for ${country.name} in ${year}`,
+      `World Bank has no ${INDICATOR_ID} data for ${country.name}${requestedYear === undefined ? "" : ` in ${requestedYear}`}`,
     );
   }
+  if (!Array.isArray(parsed[1])) {
+    throw upstreamUnavailable("WORLD_BANK_UNAVAILABLE", "World Bank indicator API returned an unexpected row shape");
+  }
   const rows = parsed[1] as Array<Record<string, unknown>>;
-  const row = rows.find((r) => String(r?.date) === String(year));
+  const row = requestedYear === undefined
+    ? rows.filter((r) => /^\d{4}$/.test(String(r?.date)) && Number(r.date) >= 1960 &&
+        Number(r.date) <= 2100 && r.value !== null && r.value !== undefined)
+        .sort((a, b) => Number(b.date) - Number(a.date))[0]
+    : rows.find((r) => String(r?.date) === String(requestedYear));
+  const year = requestedYear ?? (row ? Number(row.date) : undefined);
   const value = row?.value;
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw unprocessable(
       "NO_DATA",
-      `World Bank has no published value for ${country.name} in ${year}`,
+      `World Bank has no published value for ${country.name}${year === undefined ? "" : ` in ${year}`}`,
     );
   }
   if (value < 0 || value > 100) {
@@ -258,6 +271,7 @@ export async function handleMacro(
     country: country.name,
     country_iso3: country.iso3 || country.id,
     year,
+    year_resolution: requestedYear === undefined ? "latest_published_nonempty" : "requested_year",
     as_of: asOf,
   };
 
@@ -271,7 +285,7 @@ export async function handleMacro(
   }
 
   return envelope(INTENT, fields, receiptDoc, {
-    answer: `${country.name} unemployment rate in ${year}: ${ratePct}% of the total labour force (World Bank ${INDICATOR_ID}).`,
+    answer: `${country.name} ${requestedYear === undefined ? "latest published " : ""}unemployment rate in ${year}: ${ratePct}% of the total labour force (World Bank ${INDICATOR_ID}).`,
     verdict: "verified",
     confidence: 1.0,
     source: "World Bank API (api.worldbank.org, authoritative publisher)",
