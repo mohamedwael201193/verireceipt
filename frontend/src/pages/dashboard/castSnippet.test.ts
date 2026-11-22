@@ -57,7 +57,7 @@ describe("registration cast snippet", () => {
   });
 
   it("approves exactly the live quoteMinerBond amount in Sepolia Test USDC", () => {
-    expect(S).toContain('"quoteMinerBond(uint256)(uint256,uint256)" 6');
+    expect(S).toContain('"quoteMinerBond(uint256)(uint256,uint256)" 14');
     expect(S).toContain('cast send "$USDC" "approve(address,uint256)" "$DIAMOND" "$BOND"');
     expect(S).not.toMatch(/MACHINA/);
   });
@@ -89,6 +89,9 @@ describe("registration cast snippet", () => {
       "OPTIMAL_EXECUTION_ROUTE_GENERAL",
       "GRID_POWER_PRICE_GENERAL",
       "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
+      "GAS_PRICE_GENERAL", "WALLET_BALANCE_CHECK_GENERAL", "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL",
+      "MACRO_ECONOMIC_INDICATOR_GENERAL", "DNS_RECORD_LOOKUP_GENERAL",
+      "CURRENCY_EXCHANGE_CONVERT", "SSL_VERIFICATION_CERT", "EMAIL_SECURITY_GENERAL",
     ]);
   });
 

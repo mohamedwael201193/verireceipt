@@ -12,7 +12,7 @@
 //   ERCOT has no keyless feed). Supported grid markets: CAISO, NYISO,
 //   Elering (EE, FI, LV, LT).
 // - Miner identity: id 774921, slug verireceipt (see ../config).
-// - Bond is $1.50 Test USDC (on-chain minerBond(6160) = quoteMinerBond(6),
+// - Bond is $2.15 Test USDC (on-chain minerBond(6174) = quoteMinerBond(14),
 //   lib/minerBond.ts). No sponsored-balance figure.
 // - M12 curtailment numbers (ERCOT $118.40 vs $65) were fabricated and
 //   are NOT reproduced: the desk grid items show live LMP with no
@@ -213,7 +213,7 @@ export interface SprintStep {
  * Default step is the first milestone, not a live progress claim.
  */
 export const SPRINT_STEPS: SprintStep[] = [
-  { label: "01 Star & Setup", cols: [0], g1: "// day 01 · Nov 20 — star bounties + Render deploy", g2: "// gate: /health 200 OK · persistent storage active · intent handlers live (six served today)" },
+  { label: "01 Star & Setup", cols: [0], g1: "// day 01 · Nov 20 — star bounties + Render deploy", g2: "// gate: /health 200 OK · persistent storage active · intent declarations checked against current miner.yaml" },
   { label: "02 Registration Check", cols: [1], g1: "// internal target · Nov 21 — verify registration and activation", g2: `// gate: ${MINER_BOND_USD_TEXT} Test USDC bond · activation_status: active` },
   { label: "03 Harden & Traps", cols: [2], g1: "// days 03–04 · Nov 22–23 — 22-case suite · 12 runnable + 10 unsupported-chain skips", g2: "// gate: 12/12 runnable pass · 10 explicit skips · 0% 503 · public Update #1 posted" },
   { label: "04 Mission Desk", cols: [3], g1: "// days 05–06 · Nov 24–25 — purposeful paid mission runs", g2: "// gate: different inputs, useful outputs and matched receipts in the Desk ledger" },

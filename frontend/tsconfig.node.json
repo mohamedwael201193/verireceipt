@@ -1,1 +1,1 @@
-{"compilerOptions":{"allowSyntheticDefaultImports":true,"module":"ESNext","moduleResolution":"bundler","noEmit":true,"skipLibCheck":true,"strict":true},"include":["vite.config.ts"]}
+{"compilerOptions":{"allowSyntheticDefaultImports":true,"module":"ESNext","moduleResolution":"bundler","noEmit":true,"skipLibCheck":true,"strict":true,"target":"ES2022"},"include":["vite.config.ts"]}

@@ -1,33 +1,18 @@
 /**
- * Live miner registration status (P-C2 leftover (c)).
- *
- * Current Sepolia registration: registrationId 6160, created by
- * updateMiner(6152, ...) in tx 0x93a5f833…1a8e (block 12183278), yamlHash
- * 0xa97b1cb8…a06a at miner.yaml pin 70d7a15e. Earlier registrations:
- * 6150 (registerMiner tx 0x918ef2e6…20e2, rejected by the node) and
- * 6152 (updateMiner of 6150, tx 0x775fcc05…07cb); both are now
- * superseded/deregistered. This module reads the live node for 6160 only and
- * never reports "active" unless that live read says so. Hardcoded
- * identifiers are the confirmed transaction facts; the activation flag is
- * never hardcoded.
- *
- * Node shape (GET /api/miners/{registrationId}, 2026-11-21):
- *   200 {"miner":{"registration_id":6160,"activation_status":"active",
- *        "yaml_hash":"a97b…","rejection_reason":null,...}}
- *   404 {"error":"miner registration not found"} while the node has not
- *        seen the event yet (it trails Sepolia by ~10-15 minutes).
- * The path takes a registrationId, not the miner.yaml routing id (774921).
+ * Current Sepolia registration6174: confirmed updateMiner of6171, block12190478.
+ * Node activation stays live-read and requires the exact id, status and YAML hash.
+ * Historical serving IDs are retained for old paid receipts, never rewritten.
  */
 import { useLiveQuery, type LiveQueryResult } from "./hooks";
 
-export const SEPOLIA_REGISTRATION_ID = 6160;
-export const SEPOLIA_PREVIOUS_REGISTRATION_ID = 6152;
+export const SEPOLIA_REGISTRATION_ID = 6174;
+export const SEPOLIA_PREVIOUS_REGISTRATION_ID = 6171;
 export const SEPOLIA_REGISTER_TX =
-  "0x93a5f833726da803d39396e208c5404889e0b64dbeb78519914fe1d18e3c1a8e";
-export const SEPOLIA_REGISTER_BLOCK = 12183278;
+  "0x8466bb0a2937ec86056ed89d389559c43d73e18802fdfe0d077c1c32736c4c3e";
+export const SEPOLIA_REGISTER_BLOCK = 12190478;
 export const SEPOLIA_YAML_HASH =
-  "0xa97b1cb87dbaaba87cf4b15e284352407a4a72c06cc568c47bfe3980e5cba06a";
-export const SEPOLIA_YAML_PIN = "70d7a15ec1fa61569e4a003fd21b8af46a97cfa9";
+  "0x7e6ba1228d6c171535fdc82f31d220acf4695dc5d9319530cb206be36f0ea9c7";
+export const SEPOLIA_YAML_PIN = "f1a260701d3bc532019d4576404f40a09958b34c";
 /**
  * Every registration id that has answered paid calls for slug "verireceipt".
  * Telegraph receipts name the registration that served the call, so committed
@@ -35,7 +20,7 @@ export const SEPOLIA_YAML_PIN = "70d7a15ec1fa61569e4a003fd21b8af46a97cfa9";
  * rewritten. The current registration is always included.
  */
 export const SEPOLIA_SERVING_REGISTRATION_IDS: readonly number[] = Array.from(
-  new Set([6152, SEPOLIA_REGISTRATION_ID]), // pin:keep (historical ids)
+  new Set([6152, 6160, SEPOLIA_REGISTRATION_ID]), // pin:keep (historical ids)
 );
 export const SEPOLIA_EXPLORER_TX = `https://sepolia.etherscan.io/tx/${SEPOLIA_REGISTER_TX}`;
 export const TELEGRAPH_NODE_BASE = "https://devnode.telegraphprotocol.com";
@@ -61,11 +46,11 @@ export interface MinerRegistrationStatus {
   yamlHash: string;
   yamlPin: string;
   explorerTx: string;
-  /** Live Telegraph node read for /api/miners/6160. */
+  /** Live Telegraph node read for /api/miners/6174. */
   nodeByRegistrationId: NodeListing;
   /**
-   * True only when the live node body for 6160 says activation_status
-   * "active" AND carries registration_id 6160 AND the pinned yaml_hash
+   * True only when the live node body for 6174 says activation_status
+   * "active" AND carries registration_id 6174 AND the pinned yaml_hash
    * (all three required; no boolean fallbacks). Pending ingestion (404)
    * is not active.
    */
@@ -100,7 +85,7 @@ interface ActiveRead {
  *   - activation_status is the string "active" (no boolean `active` /
  *     `is_active` fallback — the node's documented field is the string);
  *   - registration_id is present and equals the id that was asked for;
- *   - for 6160, yaml_hash is present and equals the pinned miner.yaml
+ *   - for 6174, yaml_hash is present and equals the pinned miner.yaml
  *     hash (a missing hash is NOT a pass).
  * Anything else is reported as listed-but-not-active with the reason.
  */
