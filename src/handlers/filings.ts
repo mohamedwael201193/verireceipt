@@ -275,6 +275,17 @@ export function parsePeriod(periodRaw: string): Period {
   const quarter = calendarQuarterEndingPeriod(period, label);
   if (quarter) return quarter;
 
+  // A numbered quarter is unambiguous only with an explicit calendar
+  // qualifier. Never infer a company's fiscal quarter from Q1..Q4 alone.
+  const numberedQuarter = /^(?:(?:in|during|for|over)\s+)?(?:the\s+)?calendar\s+(?:q([1-4])|quarter\s+([1-4]))(?:\s+of)?\s+(\d{4})$/i.exec(period);
+  if (numberedQuarter && yearInRange(Number(numberedQuarter[3]))) {
+    const year = Number(numberedQuarter[3]);
+    const number = Number(numberedQuarter[1] ?? numberedQuarter[2]);
+    const start = new Date(Date.UTC(year, (number - 1) * 3, 1)).toISOString().slice(0, 10);
+    const end = new Date(Date.UTC(year, number * 3, 0)).toISOString().slice(0, 10);
+    return { start, end, label };
+  }
+
   // "2023 to 2023", "2021 through 2023", "2023-01-01 to 2023-03-31".
   const toRange = /^(\d{4}(?:-\d{2}-\d{2})?)\s+(?:to|through|thru|until)\s+(\d{4}(?:-\d{2}-\d{2})?)$/i.exec(period);
   if (toRange) {
