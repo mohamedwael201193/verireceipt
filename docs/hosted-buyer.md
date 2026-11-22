@@ -59,3 +59,44 @@ not a competing global budget. Unknown signed exposure stays reserved.
 These retention and authority rules are implementation requirements until the
 corresponding service increment has passed review. This document is not an
 instruction to turn the service on.
+
+## Durable authority implementation (offline only)
+
+`src/buyer/store.ts` now implements a synchronous SQLite WAL/FULL authority.
+This does not validate any hosting setup. Startup must separately require an
+absolute persistent database path on a single host, complete CLI/research payer
+exclusions and the explicit dedicated-payer/single-host deployment contract.
+No independently purchasing process may share that payer without this authority.
+The schema pins the payer to the database; changing it fails startup.
+
+Only trusted server-created plans are inserted. Starting a purchase takes a plan
+ID, owner-session hash and previously shown plan hash. It cannot take a client
+plan object. An IMMEDIATE transaction reserves the full call ceiling, UTC-day
+exposure, retained-payload headroom and single-payer lease before execution.
+Duplicate starts return the same job, including after a crash, without a retry.
+A second durable transition checks exact terms, payer, unique nonce, live lease,
+plan expiry and signing-day budget before permitting the signer to be called.
+Signing intent is not proof that a signature or payment happened.
+
+A reservation or uncertain outcome is never refunded by this authority. When a
+lease times out, a later *different* explicit plan may start, but the old plan
+cannot start again. The 180-second lease exceeds the accepted 120-second
+maximum authorization validity and the planned 90-second execution bound.
+Headers must persist before a paid body. Terminal result writes cannot overwrite
+previous results, and follow-up records cannot start purchases. Actual charge and
+settlement remain separate facts for the runtime to establish.
+
+Payload access ends exactly 24 hours after reservation even if cleanup is late.
+Cleanup removes input, result, headers, paid body, followups and owner/network
+hashes, retaining only non-payload budget/idempotency facts until 48 hours after
+signing intent or reservation. Unknown IDs never buy, including after deletion.
+Healthy-service hourly cleanup and startup catch-up must be wired by the runtime.
+Plan creation itself also cleans up. There are owner/network preview rate caps,
+a global pending-plan bound, bounded result/body/header bytes, bounded followups,
+and worst-case storage headroom before each reservation. These limits can reduce
+the theoretical 200-call daily allowance.
+
+Real local SQLite tests cover two connections, simultaneous workers, owner and
+hash binding, crash/uncertainty, stale leases, unique nonces, 200-call cap and UTC
+rollover, 24/48-hour boundaries, payload capacity and follow-up limits. They use
+no network and no signer. No PostgreSQL or deployed-runtime test is claimed.
