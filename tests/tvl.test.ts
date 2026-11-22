@@ -1527,12 +1527,20 @@ describe('parseProtocolReading / parseChainReading round-3 (B4)', () => {
   it('negative latest + positive exactly 7 days before -> falls back (bound is inclusive)', () => {
     const latest = LATEST_S;
     const edge = latest - 7 * 86400;
-    expect(
-      parseChainReading([
-        { date: edge, tvl: 15000000000 },
-        { date: latest, tvl: -5 },
-      ]),
-    ).toEqual({ tvlUsd: 15000000000, asOf: new Date(edge * 1000).toISOString() });
+    // Earlier timeout controls consume wall time after LATEST_S was set.
+    // Pin this exact-boundary control instead of silently testing an
+    // observation seven days plus the elapsed suite time old.
+    const executionClock = vi.spyOn(Date, 'now').mockReturnValue(latest * 1000);
+    try {
+      expect(
+        parseChainReading([
+          { date: edge, tvl: 15000000000 },
+          { date: latest, tvl: -5 },
+        ]),
+      ).toEqual({ tvlUsd: 15000000000, asOf: new Date(edge * 1000).toISOString() });
+    } finally {
+      executionClock.mockRestore();
+    }
   });
 
   it('empty history -> 502 (protocol and chain)', () => {

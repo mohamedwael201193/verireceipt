@@ -698,13 +698,14 @@ function usablePoint(
  *     (LATEST_MAX_AGE_S, round 4 / B2a) — a dead feed's last point,
  *     however ancient, is never served as a current verified TVL; it
  *     throws a 502 ApiError. Boundary is inclusive: exactly 7 days old
- *     is served, 7 days + 1s is a 502. (The B4 7-day bound below
- *     constrains fallback-vs-latest only; this bound constrains the
- *     latest point itself against now.)
+ *     is served, 7 days + 1s is a 502. The selected positive fallback
+ *     must also be within 7 days of now, as well as within 7 days of
+ *     the latest point. Two separate windows must not add up to 14 days.
  *   - a positive latest point is served as-is;
  *   - a zero/negative latest point falls back to the most recent positive
  *     point within 7 days of the latest point's date (FALLBACK_MAX_AGE_S)
- *     — a positive point older than that is stale, never "verified";
+ *     and within 7 days of now (LATEST_MAX_AGE_S). A positive point
+ *     older than either bound is never "verified";
  *   - a latest point of exactly $0 with no positive point in the bound
  *     is a genuine zero and is reported as tvl_usd 0 with its true
  *     as_of (a dead chain is reported dead, not revived with a
@@ -749,7 +750,12 @@ export function parseProtocolReading(payload: ProtocolPayload): ProtocolReading 
       asOf: new Date(latest.date * 1000).toISOString(),
     };
   }
-  const earliestDate = latest.date - FALLBACK_MAX_AGE_S;
+  // Intersect both windows: a fresh latest point must not revive a
+  // positive observation that is itself more than 7 days old.
+  const earliestDate = Math.max(
+    latest.date - FALLBACK_MAX_AGE_S,
+    Math.floor(Date.now() / 1000) - LATEST_MAX_AGE_S,
+  );
   for (let i = latestIdx - 1; i >= 0; i--) {
     const point = usablePoint(history[i]?.totalLiquidityUSD, history[i]?.date);
     if (point !== null && point.tvl > 0 && point.date >= earliestDate) {
@@ -846,8 +852,9 @@ export interface ChainReading {
  * as parseProtocolReading: the latest point must be no older than 7 days
  * from NOW (LATEST_MAX_AGE_S, round 4 / B2a), or it is a 502; a positive
  * latest point is served; a zero or negative latest point falls back only
- * to a positive point within 7 days of the latest point's date; a latest
- * point of exactly $0 with no positive point in the bound is reported as
+ * to a positive point within 7 days of the latest point's date and within
+ * 7 days of now; a latest point of exactly $0 with no positive point in
+ * both bounds is reported as
  * tvl_usd 0 with its true as_of; otherwise it throws a 502 ApiError
  * (malformed upstream response, never a guess).
  */
@@ -882,7 +889,12 @@ export function parseChainReading(
   if (latest.tvl > 0) {
     return { tvlUsd: latest.tvl, asOf: new Date(latest.date * 1000).toISOString() };
   }
-  const earliestDate = latest.date - FALLBACK_MAX_AGE_S;
+  // As on the protocol path, the chosen observation itself must be
+  // within the absolute freshness bound, not just close to the latest.
+  const earliestDate = Math.max(
+    latest.date - FALLBACK_MAX_AGE_S,
+    Math.floor(Date.now() / 1000) - LATEST_MAX_AGE_S,
+  );
   for (let i = latestIdx - 1; i >= 0; i--) {
     const point = usablePoint(history[i]?.tvl, history[i]?.date);
     if (point !== null && point.tvl > 0 && point.date >= earliestDate) {
