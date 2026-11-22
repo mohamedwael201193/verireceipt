@@ -1202,12 +1202,16 @@ describe("GRID round-2 J2: refusal-matrix gaps (M6)", () => {
     expect(res.interval_start).toBe(interval);
   });
 
-  it("lowercase zone is unsupported (zone names are case-sensitive)", async () => {
-    await expectApiError(
-      handleGridPrice({ node_or_zone: "ee", interval_start: pastIso(2) }),
-      422,
-      "UNSUPPORTED_ZONE",
-    );
+  it("lowercase Elering zone resolves to the same canonical cached source row", async () => {
+    const interval = pastIso(2);
+    saveGridPrice("EE", interval, 42.42, "Elering EE");
+    const canonical = await handleGridPrice({ node_or_zone: "EE", interval_start: interval });
+    const lower = await handleGridPrice({ node_or_zone: "ee", interval_start: interval });
+    for (const key of ["node_or_zone", "market", "interval_start", "currency", "lmp_usd_per_mwh"]) {
+      expect(lower[key]).toEqual(canonical[key]);
+    }
+    expect(lower.node_or_zone).toBe("EE");
+    expect(lower.lmp_usd_per_mwh).toBe(42.42);
   });
 
   it("legacy row with empty ingested_at -> 502 GRID_CACHE_STALE (freshness unprovable)", async () => {
@@ -2967,12 +2971,15 @@ describe("GRID A4-FIX F7: whitespace-tolerant CAISO system + hub spellings", () 
     expect(res2.node_or_zone).toBe("TH_SP15_GEN-APND");
   });
 
-  it("case stays significant for single hubs (control): lowercase hub still 422", async () => {
-    await expectApiError(
-      handleGridPrice({ node_or_zone: " th_np15_gen-apnd", interval_start: INTERVAL }),
-      422,
-      "UNSUPPORTED_ZONE",
-    );
+  it("lowercase single hub resolves to the canonical CAISO hub without changing its source row", async () => {
+    seedHubs();
+    const result = await handleGridPrice({ node_or_zone: " th_np15_gen-apnd", interval_start: INTERVAL });
+    expect(result.node_or_zone).toBe("TH_NP15_GEN-APND");
+    expect(result.lmp_usd_per_mwh).toBe(38.09);
+    const canonical = await handleGridPrice({ node_or_zone: "TH_NP15_GEN-APND", interval_start: INTERVAL });
+    expect(result.market).toBe(canonical.market);
+    expect(result.currency).toBe(canonical.currency);
+    expect(result.interval_start).toBe(INTERVAL);
   });
 });
 
