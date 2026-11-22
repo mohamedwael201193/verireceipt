@@ -1,8 +1,9 @@
 // Escrow-paid Engine asks (escrow-inference.md "Putting It Together"),
 // with the Desk's spend policy enforced before anything is signed.
 import { randomUUID } from "node:crypto";
-import { DESK_MAX_CALL_UUSDC, ENGINE_URL, NODE_URL } from "./constants.js";
+import { DESK_MAX_CALL_UUSDC, ENGINE_URL, NODE_URL, ONE_CALL_UUSDC } from "./constants.js";
 import {
+  assertBudget,
   buildAuthorization,
   decodeReceipt,
   encodePayment,
@@ -67,30 +68,32 @@ export interface RawResponse {
   signedMessage: string;
 }
 
+interface AskTarget {
+  url: string;
+  /** The exact resource string the node's 402 template must name. */
+  resource: string;
+  /** The exact body sent both times (challenge probe and paid call). */
+  body: string;
+  /** Ids the receipt may name; omitted for an auto-routed ask (network picks the provider). */
+  expectMiners?: readonly string[];
+}
+
 /**
- * Direct canonical ask to one miner, paid from escrow:
+ * Shared escrow-paid ask flow, per using/escrow-inference.md (Steps 2-4):
  * 1) POST without payment -> 402 challenge; 2) check + sign the escrow
  * template; 3) POST the same body with X-PAYMENT; 4) decode the receipt.
  * Refuses before signing if the quote exceeds one flat call, the daily cap,
  * or the escrow's `available` balance.
  */
-export async function escrowAskMiner(
-  minerId: string,
-  requestBody: Record<string, unknown>,
-  payer: Payer,
-  opts: AskOptions,
-): Promise<PaidAsk> {
+async function escrowPaidAsk(target: AskTarget, payer: Payer, opts: AskOptions): Promise<PaidAsk> {
   const f = opts.f ?? fetch;
-  const url = `${ENGINE_URL}/v1/ask/${minerId}`;
-  const resource = `/v1/ask/${minerId}`;
-  const body = JSON.stringify(requestBody);
   const json = { "Content-Type": "application/json" };
 
-  const first = await f(url, { method: "POST", headers: json, body });
+  const first = await f(target.url, { method: "POST", headers: json, body: target.body });
   if (first.status !== 402) {
     throw new EscrowRefusal(`expected a 402 challenge, got HTTP ${first.status}: ${(await first.text()).slice(0, 300)}`);
   }
-  const challenge = parseEscrowChallenge(await first.json(), resource);
+  const challenge = parseEscrowChallenge(await first.json(), target.resource);
 
   if (challenge.amountUusdc > DESK_MAX_CALL_UUSDC) {
     throw new EscrowRefusal(`quote ${challenge.amountUusdc} μUSDC exceeds the Desk per-call cap ${DESK_MAX_CALL_UUSDC}`);
@@ -110,7 +113,7 @@ export async function escrowAskMiner(
   const signature = await payer.signMessage(signedMessage);
   const payment = encodePayment(challenge.accept.network, signature, authorization);
 
-  const paid = await f(url, { method: "POST", headers: { ...json, "X-PAYMENT": payment }, body });
+  const paid = await f(target.url, { method: "POST", headers: { ...json, "X-PAYMENT": payment }, body: target.body });
   const text = await paid.text();
   await opts.onRawResponse?.({
     status: paid.status,
@@ -131,8 +134,67 @@ export async function escrowAskMiner(
   }
   const receipt = decodeReceipt(paid.headers.get("x-payment-response"), {
     payer: authorization.from,
-    miners: opts.minerIds ?? [minerId],
+    miners: target.expectMiners,
     amountUusdc: authorization.value,
   });
   return { status: paid.status, body: parsed, receipt, authorization, quotedUusdc: challenge.amountUusdc, signedMessage };
+}
+
+/**
+ * Direct canonical ask to one miner, paid from escrow. The receipt must name
+ * one of `opts.minerIds` (or the called id), binding payment to that miner.
+ */
+export function escrowAskMiner(
+  minerId: string,
+  requestBody: Record<string, unknown>,
+  payer: Payer,
+  opts: AskOptions,
+): Promise<PaidAsk> {
+  return escrowPaidAsk(
+    {
+      url: `${ENGINE_URL}/v1/ask/${minerId}`,
+      resource: `/v1/ask/${minerId}`,
+      body: JSON.stringify(requestBody),
+      expectMiners: opts.minerIds ?? [minerId],
+    },
+    payer,
+    opts,
+  );
+}
+
+export interface AutoAskOptions extends AskOptions {
+  /**
+   * Bounded spend for the routed call, sent as max_budget_usdc. Defaults to
+   * one flat call and may never exceed the Desk per-call cap.
+   */
+  maxBudgetUusdc?: bigint;
+}
+
+/**
+ * Auto-routed canonical ask, paid from escrow: POST /engine/v1/ask with no
+ * miner id, so the network's ranked routing picks the provider
+ * (using/engine-ask.md). The app never picks or hardcodes a miner; the
+ * receipt names whichever on-chain registration served it, and the caller
+ * records that id as evidence. A max_budget_usdc line bounds the spend and
+ * the same Desk per-call/daily/balance refusals apply before anything is signed.
+ */
+export async function escrowAskAuto(
+  requestBody: Record<string, unknown>,
+  payer: Payer,
+  opts: AutoAskOptions,
+): Promise<PaidAsk> {
+  const budget = opts.maxBudgetUusdc ?? ONE_CALL_UUSDC;
+  if (budget > DESK_MAX_CALL_UUSDC) {
+    throw new EscrowRefusal(`max_budget_usdc ${budget} exceeds the Desk per-call cap ${DESK_MAX_CALL_UUSDC}`);
+  }
+  assertBudget(budget);
+  return escrowPaidAsk(
+    {
+      url: `${ENGINE_URL}/v1/ask`,
+      resource: "/v1/ask",
+      body: JSON.stringify({ ...requestBody, max_budget_usdc: Number(budget) }),
+    },
+    payer,
+    opts,
+  );
 }
