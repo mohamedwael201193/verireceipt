@@ -409,6 +409,7 @@ function startStubRpc(options: StubRpcOptions): Promise<{
 describe("stubbed RPCs: failover provenance + block-hash quorum", () => {
   it(
     "single-RPC failover: RPC A blockNumber-only, RPC B full quotes -> upstream is B, confidence 0.9",
+    { timeout: 15000 },
     async () => {
       const blockNumber = FRESH_BLOCK;
       const blockHash = "0x" + "ab".repeat(32);
@@ -441,11 +442,11 @@ describe("stubbed RPCs: failover provenance + block-hash quorum", () => {
         await stubB.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "all-healthy stubs: both RPCs serve full quotes -> confidence 1.0, upstream is the first (agreeing) RPC",
+    { timeout: 15000 },
     async () => {
       const blockNumber = FRESH_BLOCK;
       const v3AmountOut = 1739203982n;
@@ -482,11 +483,11 @@ describe("stubbed RPCs: failover provenance + block-hash quorum", () => {
         await stubB.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "block-hash disagreement at the same height -> 502 QUORUM_UNREACHABLE (no fork passes quorum)",
+    { timeout: 15000 },
     async () => {
       const blockNumber = FRESH_BLOCK;
       const stubA = await startStubRpc({
@@ -512,11 +513,11 @@ describe("stubbed RPCs: failover provenance + block-hash quorum", () => {
         await stubB.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "block-number disagreement -> 502 QUORUM_UNREACHABLE",
+    { timeout: 15000 },
     async () => {
       const blockHash = "0x" + "ab".repeat(32);
       const stubA = await startStubRpc({
@@ -542,11 +543,11 @@ describe("stubbed RPCs: failover provenance + block-hash quorum", () => {
         await stubB.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "mirror single-RPC failover: RPC A full quotes, RPC B blockNumber-only -> upstream is A, confidence 0.9",
+    { timeout: 15000 },
     async () => {
       const blockNumber = FRESH_BLOCK;
       const blockHash = "0x" + "ab".repeat(32);
@@ -579,11 +580,11 @@ describe("stubbed RPCs: failover provenance + block-hash quorum", () => {
         await stubB.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "hung venue fails over within ~4.0s (CALL_TIMEOUT_MS 4000, A7 hedged parallel): RPC A hangs on eth_call, RPC B serves",
+    { timeout: 15000 },
     async () => {
       const blockNumber = FRESH_BLOCK;
       const blockHash = "0x" + "ab".repeat(32);
@@ -619,11 +620,11 @@ describe("stubbed RPCs: failover provenance + block-hash quorum", () => {
         await stubB.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "hung third quorum leg (round 4, Part B): the 2-agree quorum answers at agreement time, NOT after the quorum budget — wall < 6000 ms, correct result, confidence 1.0",
+    { timeout: 30000 },
     async () => {
       const blockNumber = FRESH_BLOCK;
       const blockHash = "0x" + "ab".repeat(32);
@@ -672,11 +673,11 @@ describe("stubbed RPCs: failover provenance + block-hash quorum", () => {
         await stubC.close();
       }
     },
-    { timeout: 30000 },
   );
 
   it(
     "absurd V2 quote (2^256 - 1) is dropped as implausible; normal V3 wins",
+    { timeout: 15000 },
     async () => {
       const blockNumber = FRESH_BLOCK;
       const blockHash = "0x" + "ab".repeat(32);
@@ -706,11 +707,11 @@ describe("stubbed RPCs: failover provenance + block-hash quorum", () => {
         await stubB.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "all venues absurd -> 502 ALL_QUOTERS_FAILED",
+    { timeout: 15000 },
     async () => {
       const blockNumber = FRESH_BLOCK;
       const blockHash = "0x" + "ab".repeat(32);
@@ -737,11 +738,11 @@ describe("stubbed RPCs: failover provenance + block-hash quorum", () => {
         await stubB.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "normal quotes unaffected by the plausibility bounds (1.74e9 vs 1.73e9)",
+    { timeout: 15000 },
     async () => {
       const blockNumber = FRESH_BLOCK;
       const blockHash = "0x" + "ab".repeat(32);
@@ -770,11 +771,11 @@ describe("stubbed RPCs: failover provenance + block-hash quorum", () => {
         await stubB.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "V3 family outage: V3 reverts on every RPC, V2 normal -> V2 wins, confidence 0.9",
+    { timeout: 15000 },
     async () => {
       const blockNumber = FRESH_BLOCK;
       const blockHash = "0x" + "ab".repeat(32);
@@ -805,11 +806,11 @@ describe("stubbed RPCs: failover provenance + block-hash quorum", () => {
         await stubB.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "V2 family outage: V2 reverts on every RPC, V3 normal -> V3 wins, confidence 0.9",
+    { timeout: 15000 },
     async () => {
       const blockNumber = FRESH_BLOCK;
       const blockHash = "0x" + "ab".repeat(32);
@@ -840,7 +841,6 @@ describe("stubbed RPCs: failover provenance + block-hash quorum", () => {
         await stubB.close();
       }
     },
-    { timeout: 15000 },
   );
 });
 
@@ -984,6 +984,7 @@ describe("stubbed RPCs: plausibility filter end-to-end (round 4, J2 attacks)", (
 
   it(
     "B1 trio: V3=9e11, Uni=8e11, Sushi=1.74e9 -> the sane 1.74e9 wins, never 9e11",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({
         v3: 900000000000n,
@@ -1001,11 +1002,11 @@ describe("stubbed RPCs: plausibility filter end-to-end (round 4, J2 attacks)", (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "B1 cap-1 trio: 999999999999 / 9e11 / 8e11 -> 502 ALL_QUOTERS_FAILED (all above the cap)",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({
         v3: 999999999999n,
@@ -1021,11 +1022,11 @@ describe("stubbed RPCs: plausibility filter end-to-end (round 4, J2 attacks)", (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "B1 single absurd quote: only Uni quoting 9e11 -> 502, never a 200",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({ v3: 1740000000n, uni: 900000000000n, failV3: true, failSushi: true });
       try {
@@ -1037,11 +1038,11 @@ describe("stubbed RPCs: plausibility filter end-to-end (round 4, J2 attacks)", (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "B1 cap boundary (round 5 — FIXES the test that pinned the bug): every venue at 99,999,999,999 (the old 1e11 - 1 boundary) is now dropped entirely -> 502. The round-4 version of this test asserted confidence 1.0 for the 99,999,999,999 winner — that assertion PINNED the round-4 defect (an absurd unanimous value winning at full confidence) and was therefore wrong, not merely stale. Under the tightened 1e10 cap the value is dropped by the cap stage, so no winner exists at any confidence.",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({ v3: 99_999_999_999n, v2: 99_999_999_999n });
       try {
@@ -1053,11 +1054,11 @@ describe("stubbed RPCs: plausibility filter end-to-end (round 4, J2 attacks)", (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "B1 cap boundary (round 5): every venue at 1e10 - 1 is kept (winner 9999999999 at 1.0) — the unanimous-absurd residual (A2), bounded by the cap at <=~5.7x the live reference",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({ v3: 9_999_999_999n, v2: 9_999_999_999n });
       try {
@@ -1074,11 +1075,11 @@ describe("stubbed RPCs: plausibility filter end-to-end (round 4, J2 attacks)", (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "B1 cap boundary (round 5): every venue at exactly 1e10 is dropped -> 502",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({ v3: 10_000_000_000n, v2: 10_000_000_000n });
       try {
@@ -1090,11 +1091,11 @@ describe("stubbed RPCs: plausibility filter end-to-end (round 4, J2 attacks)", (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "B3: V3=5e9 dropped by the median rule + V2 normal -> correct winner, confidence 0.9 (V3 family out post-filter)",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({ v3: 5000000000n, v2: 1740000000n });
       try {
@@ -1108,11 +1109,11 @@ describe("stubbed RPCs: plausibility filter end-to-end (round 4, J2 attacks)", (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "B3 mirror: V2 family fully dropped (Uni reverts, Sushi 5e9 dropped as implausible) + V3 normal -> V3 wins, confidence 0.9",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({
         v3: 1740000000n,
@@ -1130,11 +1131,11 @@ describe("stubbed RPCs: plausibility filter end-to-end (round 4, J2 attacks)", (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "B6: V3=1.9e9 (wrong high, plausible) vs Uni 1.74e9 / Sushi 1.73e9 -> the agreeing 1.74e9 wins, confidence 0.9",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({
         v3: 1900000000n,
@@ -1152,11 +1153,11 @@ describe("stubbed RPCs: plausibility filter end-to-end (round 4, J2 attacks)", (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "B6 boundary: V3 at exactly +5% of the median (1827000000) is kept and wins at 1.0",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({
         v3: 1827000000n,
@@ -1173,11 +1174,11 @@ describe("stubbed RPCs: plausibility filter end-to-end (round 4, J2 attacks)", (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "B6 boundary: V3 at +5% + 1 (1827000001) is dropped -> agreeing 1.74e9 wins at 0.9",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({
         v3: 1827000001n,
@@ -1194,7 +1195,6 @@ describe("stubbed RPCs: plausibility filter end-to-end (round 4, J2 attacks)", (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 });
 
@@ -1226,6 +1226,7 @@ describe("round 5: any dropped quote caps confidence at 0.9 (J1 B1 + J2 B1)", ()
 
   it(
     "A1 (J1 reproduction): V3=99e9, Uni=99e9, Sushi=1.74e9 -> sane 1.74e9 wins at 0.9, never 1.0 (round 4 scored 99e9 at 1.0)",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({
         v3: 99_000_000_000n,
@@ -1243,11 +1244,11 @@ describe("round 5: any dropped quote caps confidence at 0.9 (J1 B1 + J2 B1)", ()
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "A3: V3=50e9, Uni=50e9, Sushi=1.74e9 (28.7x) -> sane 1.74e9 wins at 0.9, never 1.0",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({
         v3: 50_000_000_000n,
@@ -1265,11 +1266,11 @@ describe("round 5: any dropped quote caps confidence at 0.9 (J1 B1 + J2 B1)", ()
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "A4 (J2 reproduction): V3=9e10, Uni=8.8e10, Sushi=1.74e9 (~52x) -> sane 1.74e9 wins at 0.9, never 1.0",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({
         v3: 90_000_000_000n,
@@ -1287,11 +1288,11 @@ describe("round 5: any dropped quote caps confidence at 0.9 (J1 B1 + J2 B1)", ()
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "wrong-low majority (J2 reproduction): V3=1.05e8, Uni=1.1e8, Sushi=1.74e9 -> winner 1.1e8 ($110 for 1 ETH, 16x too low) at 0.9, never 1.0 — refutes the round-4 claim that a wrong-low quote 'can only win degraded at 0.9' was already enforced; round 4 scored it 1.0",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({
         v3: 105_000_000n,
@@ -1309,11 +1310,11 @@ describe("round 5: any dropped quote caps confidence at 0.9 (J1 B1 + J2 B1)", ()
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "two quotes only, both absurd and agreeing under the cap (J2 variant, sub-cap values): V3=9e9, Uni=8.8e9, Sushi absent -> winner 9e9 at 0.9, never 1.0 (a missing venue is a missing corroborating voice)",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({
         v3: 9_000_000_000n,
@@ -1331,11 +1332,11 @@ describe("round 5: any dropped quote caps confidence at 0.9 (J1 B1 + J2 B1)", ()
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "two quotes only, both absurd and agreeing at the literal J2 values: V3=9e10, Uni=8.8e10, Sushi absent -> 502 (the tightened 1e10 cap drops both; the attack no longer wins at any confidence)",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({
         v3: 90_000_000_000n,
@@ -1351,11 +1352,11 @@ describe("round 5: any dropped quote caps confidence at 0.9 (J1 B1 + J2 B1)", ()
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "clean 3-quote live-like run (fresh live values measured this round, block 26,455,162) -> winner 1,755,251,736 at 1.0: no drops, all three venues plausible",
+    { timeout: 15000 },
     async () => {
       const [a, b] = await twoStubs({
         v3: 1_755_251_736n,
@@ -1373,7 +1374,6 @@ describe("round 5: any dropped quote caps confidence at 0.9 (J1 B1 + J2 B1)", ()
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
@@ -1427,6 +1427,7 @@ describe("round 6: quorum-block freshness bound (J2 B1)", () => {
 
   it(
     "B1 (J2 exact case): quorum block 26,000,000 (~63 days / ~455k blocks old) with sane quotes -> 502 STALE_BLOCK_PIN, never 200 at 1.0",
+    { timeout: 15000 },
     async () => {
       const ss = await stubs({
         blockNumber: 26_000_000,
@@ -1445,11 +1446,11 @@ describe("round 6: quorum-block freshness bound (J2 B1)", () => {
         await closeAll(ss);
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "ROUND 7 FLIP (J2 round-6 BLOCKER B1): same block number 26,000,000 with a FRESH timestamp -> 502 STALE_BLOCK_PIN. The round-6 version of this test asserted 200 at 1.0 ('the trigger is the age, not the block number') — that assertion PINNED the bypass: a forged-fresh timestamp on a 63-day-old block sailed through the age bound because the timestamp is an unauthenticated JSON field. Round 7 refuses it via the height anchor (26,000,000 is ~455k blocks below the expected height, ~45x outside the ±10,000 tolerance), whatever timestamp the legs claim.",
+    { timeout: 15000 },
     async () => {
       const ss = await stubs({
         blockNumber: 26_000_000,
@@ -1468,7 +1469,6 @@ describe("round 6: quorum-block freshness bound (J2 B1)", () => {
         await closeAll(ss);
       }
     },
-    { timeout: 15000 },
   );
 
   it("boundary (pure function, exact): age exactly MAX_BLOCK_AGE_SEC is served, +1s is refused", () => {
@@ -1483,6 +1483,7 @@ describe("round 6: quorum-block freshness bound (J2 B1)", () => {
 
   it(
     "boundary (stub integration, ±1s margins so a wall-second tick cannot flake it): 1799s old -> 200, 1801s old -> 502 STALE_BLOCK_PIN",
+    { timeout: 15000 },
     async () => {
       const fresh = await stubs({ blockNumber: FRESH_BLOCK, blockTimestampSec: nowSec() - 1799 });
       try {
@@ -1507,11 +1508,11 @@ describe("round 6: quorum-block freshness bound (J2 B1)", () => {
         await closeAll(stale);
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "header-fetch failure (round 6, failure mode d): every header omits the timestamp -> the legs cannot vote -> 502 QUORUM_UNREACHABLE, never a served pin of unprovable age",
+    { timeout: 15000 },
     async () => {
       const ss = await stubs({ blockNumber: FRESH_BLOCK, omitBlockTimestamp: true });
       try {
@@ -1525,11 +1526,11 @@ describe("round 6: quorum-block freshness bound (J2 B1)", () => {
         await closeAll(ss);
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "timestamp disagreement (same number+hash, fresh vs 63-day-old timestamp) -> no quorum -> 502 QUORUM_UNREACHABLE (a liar's fresh timestamp for a stale pin is excluded, not trusted)",
+    { timeout: 15000 },
     async () => {
       const a = await startStubRpc({
         blockNumber: FRESH_BLOCK,
@@ -1556,11 +1557,11 @@ describe("round 6: quorum-block freshness bound (J2 B1)", () => {
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "3 stubs, one liar timestamp (A+B fresh agree, C reports a 63-day-old timestamp for the same block+hash) -> 200 at 1.0 (the liar is excluded by the number+hash+timestamp triple) — round 7 strengthens it: the liar must also never serve the winning quote (upstream is A or B, never C)",
+    { timeout: 15000 },
     async () => {
       const mk = (timestampSec: number) =>
         startStubRpc({
@@ -1594,11 +1595,11 @@ describe("round 6: quorum-block freshness bound (J2 B1)", () => {
         await c.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "A1 below-cap shape (J1 O3, dedicated test): V3=9e9, Uni=9e9, Sushi=1.74e9 -> wrong winner 9e9 at 0.9, sane 1.74e9 dropped (the disclosed A1 residual, below the cap)",
+    { timeout: 15000 },
     async () => {
       const ss = await stubs({
         blockNumber: FRESH_BLOCK,
@@ -1619,7 +1620,6 @@ describe("round 6: quorum-block freshness bound (J2 B1)", () => {
         await closeAll(ss);
       }
     },
-    { timeout: 15000 },
   );
 });
 
@@ -1636,6 +1636,7 @@ describe("stubbed RPCs: quorum latency (round 4, Part B)", () => {
 
   it(
     "early-fail: 2 legs fail fast on blockNumber -> 502 QUORUM_UNREACHABLE without waiting for the 3rd leg",
+    { timeout: 15000 },
     async () => {
       const stubA = await startStubRpc({ ...base, failBlock: true });
       const stubB = await startStubRpc({ ...base, failBlock: true });
@@ -1652,11 +1653,11 @@ describe("stubbed RPCs: quorum latency (round 4, Part B)", () => {
         await stubC.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "hung quorum leg + hung venue, still a success: wall < 6000 ms, correct winner, confidence 0.9 — ROUND 8 BEHAVIOUR CHANGE (J2 F1, was: 1.0): the hung leg no longer serves quotes (no-header-no-quotes), so only ONE RPC serves a quote here (the hung venue serves nothing, the hung leg is excluded) and the pre-existing '>= 2 RPCs served a quote' rule caps confidence at 0.9. NOT a weakening: the old 1.0 was bought with the exact mechanism (unknown legs serve quotes) that let erroring/malformed/hung liars WIN at 1.0 — liar-resistance is the reason. A hung leg ALONE (venues healthy) still earns 1.0 from the two agreeing legs; the 0.9 here is the old rule firing on a single serving RPC.",
+    { timeout: 30000 },
     async () => {
       const stubA = await startStubRpc(base);
       const stubB = await startStubRpc({ ...base, hangCalls: true });
@@ -1679,11 +1680,11 @@ describe("stubbed RPCs: quorum latency (round 4, Part B)", () => {
         await stubC.close();
       }
     },
-    { timeout: 30000 },
   );
 
   it(
     "all-hung blockNumber: 502 QUORUM_UNREACHABLE in ~one 4.0 s timeout (wall 3500–6000 ms), not ~10 s",
+    { timeout: 30000 },
     async () => {
       const stubA = await startStubRpc({ ...base, hangBlockNumber: true });
       const stubB = await startStubRpc({ ...base, hangBlockNumber: true });
@@ -1703,11 +1704,11 @@ describe("stubbed RPCs: quorum latency (round 4, Part B)", () => {
         await stubC.close();
       }
     },
-    { timeout: 30000 },
   );
 
   it(
     "all-slow 5.22 s blockNumber: TRUE behaviour — every 5.22 s leg times out at 4.0 s, run 502s in ~4.0 s (the old 'no-race preserves 5.22 s quotes' claim was false)",
+    { timeout: 30000 },
     async () => {
       const stubA = await startStubRpc({ ...base, blockDelayMs: 5220 });
       const stubB = await startStubRpc({ ...base, blockDelayMs: 5220 });
@@ -1727,11 +1728,11 @@ describe("stubbed RPCs: quorum latency (round 4, Part B)", () => {
         await stubC.close();
       }
     },
-    { timeout: 30000 },
   );
 
   it(
     "all-hung eth_call (A7: hedged parallel, ~4.0 s): 502 ALL_QUOTERS_FAILED after one parallel timeout round — the round-9 ~9.0 s figure (2 sequential 4.5 s venue failovers) is superseded by the hedged tryVenue + 4000 ms timeout",
+    { timeout: 30000 },
     async () => {
       const stubA = await startStubRpc({ ...base, hangCalls: true });
       const stubB = await startStubRpc({ ...base, hangCalls: true });
@@ -1750,7 +1751,6 @@ describe("stubbed RPCs: quorum latency (round 4, Part B)", () => {
         await stubC.close();
       }
     },
-    { timeout: 30000 },
   );
 });
 
@@ -1813,6 +1813,7 @@ describe("refusal matrix + adversarial pairs (round 4)", () => {
 describe("live: real mainnet RPCs + real quoter contracts", () => {
   it(
     'pair "ETH/USDC" returns a positive integer amount_out with a receipt',
+    { timeout: 60000 },
     async () => {
       const result = await handleRoute({ pair: "ETH/USDC" });
       expect(typeof result.amount_out).toBe("number");
@@ -1841,7 +1842,6 @@ describe("live: real mainnet RPCs + real quoter contracts", () => {
           `upstream=${receipt.upstream_url} votes=${receipt.quorum_votes}`,
       );
     },
-    { timeout: 60000 },
   );
 });
 
@@ -1898,6 +1898,7 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
 
   it(
     "J2 exact forged-fresh case (round 7, dedicated): 2 legs agree on (block 26,000,000, old hash, timestamp = now) -> 502 STALE_BLOCK_PIN, never 200 at 1.0",
+    { timeout: 15000 },
     async () => {
       const mk = () =>
         startStubRpc({
@@ -1919,11 +1920,11 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "ROUND 8 BEHAVIOUR CHANGE (J2 F3, was: served at 1.0): forged-fresh with a SMALL lag (5,000 blocks behind, inside the ±10,000 anchor past side) -> 502 STALE_BLOCK_PIN. The round-7 expectation PINNED a forgery as correct; the round-8 number-vs-timestamp cross-check refuses it — a pin 5,000 blocks behind claims 'now' for a number implying 'now − 60,000 s', a ~60,000 s discrepancy vs a ~924 s tolerance 3 h after the checkpoint (0.03 × 10,800 + 600). NOT a weakening: the old 200 was a 16.7 h-stale 'verified at 1.0' quote, off by several percent of ETH movement; the anchor alone could not see it because the number lies inside its tolerance.",
+    { timeout: 15000 },
     async () => {
       const block = expectedBlockHeight(nowSec()) - 5_000;
       const mk = () =>
@@ -1946,11 +1947,11 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "honest fresh pin (expected live height, fresh timestamp) -> 200 at 1.0 (unchanged behaviour)",
+    { timeout: 15000 },
     async () => {
       const mk = () =>
         startStubRpc({
@@ -1972,11 +1973,11 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "stale-side anchor (stub integration, round 8): a CONSISTENT 100-block-old pin (block expected − 100, timestamp now − 1200 s, number and timestamp agreeing) is served — the cross-check passes it because the discrepancy is ~0 s — while expected − 10,001 with a FRESH timestamp is refused (anchor past side + cross-check). NOTE: the round-7 served side (expected − 10,000 with a fresh timestamp) can no longer be served by ANY design that checks number-vs-timestamp consistency: a 33 h-old number with a fresh timestamp is exactly the forgery the cross-check exists to refuse, and a consistent timestamp for it (now − 120,000 s) is refused by the 1800 s age bound. The exact −10,000 boundary stays pinned by the pure-function test above.",
+    { timeout: 15000 },
     async () => {
       const now = nowSec();
       const expected = expectedBlockHeight(now);
@@ -2013,11 +2014,11 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
         await refused2.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "ROUND 8 BEHAVIOUR CHANGE (J2 F3, was: expected + 10,000 served): future height (stub integration): expected + 12 served, expected + 13 refused — a block ahead of wall-clock height cannot exist; only checkpoint-timestamp error of seconds plus handler clock lag could explain a few blocks ahead, and 12 blocks (~144 s) covers that with ~2x margin. The old +10,000 served expectation PINNED a non-existent future block as correct.",
+    { timeout: 15000 },
     async () => {
       const now = nowSec();
       const expected = expectedBlockHeight(now);
@@ -2054,7 +2055,6 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
         await refused2.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it("future-skew bound (pure function, exact): now+60 served, +120 served, +121 refused, +10y refused", () => {
@@ -2070,6 +2070,7 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
 
   it(
     "future-skew (stub integration): now+60 served at 1.0 (existing pin, kept), now+10y -> 502 STALE_BLOCK_PIN (J2's exact case); boundary via ±5 s margins so a wall-second tick cannot flake it (+115 served, +125 refused — the exact 120/121 boundary is pinned by the pure-function test above)",
+    { timeout: 15000 },
     async () => {
       // A7-fix drive-by hardening (J1's recommendation for this exact
       // flake): ONE captured `now` for the whole test. The old code
@@ -2133,11 +2134,11 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
         await skewed125b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "Minor X, liar-first (J2 exact shape): leg0 reports the quorum's number+hash but a 63-day-old timestamp and a HIGHER quote (1,745,000,000); legs 1-2 agree fresh -> the liar's quote never wins, the winning quote's upstream is an AGREEING leg, confidence 1.0 (the two agreeing RPCs still serve all three venues with nothing dropped, no missing family, >=2 RPCs — every round-5 ground for 1.0 is met, so 1.0 is what the code yields; it is NOT degraded to 0.9)",
+    { timeout: 15000 },
     async () => {
       const mk = (timestampSec: number, v3: bigint) =>
         startStubRpc({
@@ -2169,11 +2170,11 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "Minor X, liar-last +5% boundary: the liar's quotes (V3 1,827,000,000 AND Sushi 1,827,000,000 — each exactly +5% of the 1,740,000,000 median, in-band, would win if served) do NOT win — the agreeing legs' 1,740,000,000 wins from an agreeing upstream at confidence 1.0 (round 8, no-header-no-quotes: the liar never enters the quote order because it has not reported an agreeing header when the order is built, so its quotes are never requested — the round-7 straggler wait + post-quote drop + retry are gone. The Sushi quote is the sharp edge: venue rotation starts Sushi on the THIRD RPC, and the liar's header is systematically still in flight when the quorum resolves — the round-7 worker proved the triple filter ALONE lets it win at 1,827,000,000. This test FAILS if unknown legs are let back into the quote order (mutant f).)",
+    { timeout: 15000 },
     async () => {
       const mk = (timestampSec: number, v3: bigint, sushi: bigint) =>
         startStubRpc({
@@ -2207,11 +2208,11 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
         await liar.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "Minor X, DELAYED liar (header 500 ms late): the liar's blockNumber answers 500 ms after the agreeing pair resolves the quorum, so it is 'unknown' when the quote order is built — under round 8 no-header-no-quotes it serves nothing, so its 1,827,000,000 quote must STILL not win (and the run still scores 1.0: the two agreeing legs serve all three venues with nothing dropped). Round 7 needed the straggler wait + post-quote drop + retry here; round 8 needs none of them, and the liar cannot win at ANY header delay (see the round-8 delay sweep below, 500 ms → 6 s).",
+    { timeout: 15000 },
     async () => {
       const mk = (timestampSec: number, v3: bigint, sushi: bigint, blockDelayMs?: number) =>
         startStubRpc({
@@ -2246,11 +2247,11 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
         await liar.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "J1 O1 (a): non-hex-string timestamp on every leg -> the legs cannot vote -> 502 QUORUM_UNREACHABLE, never a served pin of unprovable age",
+    { timeout: 15000 },
     async () => {
       const mk = () =>
         startStubRpc({
@@ -2272,11 +2273,11 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "J1 O1 (b): timestamp 0x0 (zero) on every leg -> 502 QUORUM_UNREACHABLE",
+    { timeout: 15000 },
     async () => {
       const mk = () =>
         startStubRpc({
@@ -2298,11 +2299,11 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "J1 O1 (c): negative timestamp ('-1', fails the hex check) on every leg -> 502 QUORUM_UNREACHABLE",
+    { timeout: 15000 },
     async () => {
       const mk = () =>
         startStubRpc({
@@ -2324,11 +2325,11 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "J1 O1 (d) FIXED round 8 (J2 F1a): ONE leg with a malformed (non-hex) timestamp + two healthy legs -> 200, and the malformed leg NEVER serves a quote. The round-7 version of this test was BLIND: it gave the malformed leg the SAME amounts as the healthy legs and asserted only 200, so a malformed-leg win was invisible. Here the malformed leg quotes HIGH (1,827,000,000 on every venue — the winning value if served), and the test asserts the healthy 1,740,000,000 wins from a HEALTHY upstream. Round 8 no-header-no-quotes: the malformed leg never reports a header (its header is recorded as 'garbage' failure evidence), so it never enters the quote order.",
+    { timeout: 15000 },
     async () => {
       const bad = await startStubRpc({
         blockNumber: FRESH_BLOCK,
@@ -2366,7 +2367,6 @@ describe("round 7: height anchor + future skew + timestamp-agreeing quote path (
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 });
 
@@ -2374,7 +2374,7 @@ describe("round 8: no-header-no-quotes + asymmetric anchor + number-vs-timestamp
   const HASH = "0x" + "ab".repeat(32);
   const nowSec = () => Math.floor(Date.now() / 1000);
 
-  it("F1b: a leg whose eth_blockNumber ERRORS immediately, quoting HIGH (1,827,000,000) -> it never serves a quote: healthy 1,740,000,000 wins from a healthy upstream at 1.0", async () => {
+  it("F1b: a leg whose eth_blockNumber ERRORS immediately, quoting HIGH (1,827,000,000) -> it never serves a quote: healthy 1,740,000,000 wins from a healthy upstream at 1.0", { timeout: 15000 }, async () => {
     const bad = await startStubRpc({
       blockNumber: FRESH_BLOCK,
       blockHash: HASH,
@@ -2410,9 +2410,9 @@ describe("round 8: no-header-no-quotes + asymmetric anchor + number-vs-timestamp
       await a.close();
       await b.close();
     }
-  }, { timeout: 15000 });
+  });
 
-  it("F1c: a leg HUNG on eth_blockNumber, quoting HIGH (1,827,000,000) -> it never serves a quote: healthy 1,740,000,000 wins from a healthy upstream at 1.0, wall < 2000 ms (round 7: 4,501 ms — the straggler wait is gone)", async () => {
+  it("F1c: a leg HUNG on eth_blockNumber, quoting HIGH (1,827,000,000) -> it never serves a quote: healthy 1,740,000,000 wins from a healthy upstream at 1.0, wall < 2000 ms (round 7: 4,501 ms — the straggler wait is gone)", { timeout: 30000 }, async () => {
     const hung = await startStubRpc({
       blockNumber: FRESH_BLOCK,
       blockHash: HASH,
@@ -2452,9 +2452,9 @@ describe("round 8: no-header-no-quotes + asymmetric anchor + number-vs-timestamp
       await a.close();
       await b.close();
     }
-  }, { timeout: 30000 });
+  });
 
-  it("F4 headline: hung leg ALONE (venues healthy) -> wall < 2000 ms at 1.0 (round 7: ~4,600 ms — the straggler wait taxed even this shape). The hung leg serves nothing, and the two agreeing legs serve all three venues.", async () => {
+  it("F4 headline: hung leg ALONE (venues healthy) -> wall < 2000 ms at 1.0 (round 7: ~4,600 ms — the straggler wait taxed even this shape). The hung leg serves nothing, and the two agreeing legs serve all three venues.", { timeout: 30000 }, async () => {
     const a = await startStubRpc({
       blockNumber: FRESH_BLOCK,
       blockHash: HASH,
@@ -2495,9 +2495,9 @@ describe("round 8: no-header-no-quotes + asymmetric anchor + number-vs-timestamp
       await b.close();
       await c.close();
     }
-  }, { timeout: 30000 });
+  });
 
-  it("F2 sweep: a timestamp liar delaying ONLY its header by 500 / 4490 / 5000 / 6000 ms NEVER wins — healthy 1,740,000,000 from a healthy upstream at every delay, wall < 3000 ms even at 6 s delay (no wait to outrun; round 7 cliff was between 4490 ms caught and 4520 ms WON)", async () => {
+  it("F2 sweep: a timestamp liar delaying ONLY its header by 500 / 4490 / 5000 / 6000 ms NEVER wins — healthy 1,740,000,000 from a healthy upstream at every delay, wall < 3000 ms even at 6 s delay (no wait to outrun; round 7 cliff was between 4490 ms caught and 4520 ms WON)", { timeout: 60000 }, async () => {
     for (const delayMs of [500, 4490, 5000, 6000]) {
       const fresh = nowSec();
       const mk = (timestampSec: number, v3: bigint, sushi: bigint, blockDelayMs?: number) =>
@@ -2565,9 +2565,9 @@ describe("round 8: no-header-no-quotes + asymmetric anchor + number-vs-timestamp
       await b2.close();
       await liar2.close();
     }
-  }, { timeout: 60000 });
+  });
 
-  it("F3: two COLLUDING legs, 9,000 blocks behind (30 h stale) with a fresh timestamp -> 502 STALE_BLOCK_PIN (round 7: served at 1.0)", async () => {
+  it("F3: two COLLUDING legs, 9,000 blocks behind (30 h stale) with a fresh timestamp -> 502 STALE_BLOCK_PIN (round 7: served at 1.0)", { timeout: 15000 }, async () => {
     const block = expectedBlockHeight(nowSec()) - 9_000;
     const mk = () =>
       startStubRpc({
@@ -2588,9 +2588,9 @@ describe("round 8: no-header-no-quotes + asymmetric anchor + number-vs-timestamp
       await a.close();
       await b.close();
     }
-  }, { timeout: 15000 });
+  });
 
-  it("F3: a pin 9,999 blocks AHEAD of expected height (a block that does not exist yet) with a fresh timestamp -> 502 STALE_BLOCK_PIN (round 7: served)", async () => {
+  it("F3: a pin 9,999 blocks AHEAD of expected height (a block that does not exist yet) with a fresh timestamp -> 502 STALE_BLOCK_PIN (round 7: served)", { timeout: 15000 }, async () => {
     const block = expectedBlockHeight(nowSec()) + 9_999;
     const mk = () =>
       startStubRpc({
@@ -2611,7 +2611,7 @@ describe("round 8: no-header-no-quotes + asymmetric anchor + number-vs-timestamp
       await a.close();
       await b.close();
     }
-  }, { timeout: 15000 });
+  });
 
   it("F3 cross-check (pure function, exact boundaries): the number-implied timestamp, the drift-scaled tolerance, and the age-bound low side", () => {
     // Fixed now: 1 h after the checkpoint (elapsed 3600 s -> tolerance 708 s).
@@ -2685,7 +2685,7 @@ describe("round 8: no-header-no-quotes + asymmetric anchor + number-vs-timestamp
     expect(ageSec).toBeLessThanOrEqual(46 * 86400);
   });
 
-  it("F4 slow-quote shape (J2 G4, A7): hung leg + 1.5 s-slow quotes -> wall < 8000 ms, correct winner at 0.9. The wall is dominated by the 1.5 s slow quotes plus the straggler grace for the hung leg (A7-fix, J2 F2/F3: the hung venue's loser is aborted on the fast win, so the venue phase no longer costs a 4.0 s parallel timeout round) — the envelope for slow-quote shapes is ~2.5 s, and the suite's 6000 ms bound is scoped to fast-quorum shapes (see JUDGE.md §5).", async () => {
+  it("F4 slow-quote shape (J2 G4, A7): hung leg + 1.5 s-slow quotes -> wall < 8000 ms, correct winner at 0.9. The wall is dominated by the 1.5 s slow quotes plus the straggler grace for the hung leg (A7-fix, J2 F2/F3: the hung venue's loser is aborted on the fast win, so the venue phase no longer costs a 4.0 s parallel timeout round) — the envelope for slow-quote shapes is ~2.5 s, and the suite's 6000 ms bound is scoped to fast-quorum shapes (see JUDGE.md §5).", { timeout: 30000 }, async () => {
     const a = await startStubRpc({
       blockNumber: FRESH_BLOCK,
       blockHash: HASH,
@@ -2731,7 +2731,7 @@ describe("round 8: no-header-no-quotes + asymmetric anchor + number-vs-timestamp
       await b.close();
       await c.close();
     }
-  }, { timeout: 30000 });
+  });
 });
 
 describe("round 9: latency re-baseline — all-hung wall ~9 s, phase-additive envelope (J2 round-8 FAIL, doc-only, no handler change)", () => {
@@ -2740,6 +2740,7 @@ describe("round 9: latency re-baseline — all-hung wall ~9 s, phase-additive en
 
   it(
     "W1 slow+slow (round 9 shape, A7 timeouts): slow quorum 3.5 s + slow quotes 3.5 s -> 200 at 1.0, wall < 10000 ms. Round 9 measured 8,040 / 8,011 ms at 4.0 s delays; A7 drops the per-RPC timeouts to 4000 ms, so the delays move to 3.5 s (a 4.0 s delay vs a 4.0 s timeout is racy). The wall is the SUM of the two phases, not one phase — the ~6.0–6.5 s envelope holds only with a fast quorum.",
+    { timeout: 30000 },
     async () => {
       const ts = nowSec();
       const mk = () =>
@@ -2773,11 +2774,11 @@ describe("round 9: latency re-baseline — all-hung wall ~9 s, phase-additive en
         await c.close();
       }
     },
-    { timeout: 30000 },
   );
 
   it(
     "W2 slow-quorum + hung venue (round 9 shape, A7): quorum 1.5 s + hung leg first in rpcOrder + fast quotes -> 200 at 0.9, wall < 7000 ms. Round 9 measured 6,038 / 6,014 ms with a 4.5 s sequential failover; A7 hedged the failover (one 4.0 s parallel timeout round), so the wall was ~1.5 s quorum + ~4.0 s venue ≈ 5.5 s. A7-fix (J2 F3) aborts the hung loser on the fast win, so the venue phase is now ~fast-quote time and the wall is ~1.5 s quorum + 1.0 s straggler grace (J2 F2, hung 3rd leg) ≈ 2.5 s. This fast-quote shape legitimately exceeds 6,000 ms, so the 6,000 ms bound is SCOPED to fast-quorum shapes — the bound is not relaxed: no existing <6000 ms test is a slow-quorum shape, and this test pins the slow-quorum shape separately.",
+    { timeout: 30000 },
     async () => {
       const ts = nowSec();
       const a = await startStubRpc({
@@ -2826,11 +2827,11 @@ describe("round 9: latency re-baseline — all-hung wall ~9 s, phase-additive en
         await c.close();
       }
     },
-    { timeout: 30000 },
   );
 
   it(
     "W3 slow quorum + hang-failover + slow quotes (round 9 shape, A7): quorum 3.5 s + hung leg first in rpcOrder + 3.5 s quotes -> 200 at 0.9, wall < 14000 ms. Round 9 measured 12,550 / 12,512 ms at 4.0 s delays with a 4.5 s sequential failover (4.0 s quorum + 4.5 s failover + 4.0 s quotes); A7 moves the delays to 3.5 s (4000 ms timeouts) and hedges the failover (one 4.0 s parallel round), so the wall was ~3.5 s quorum + ~4.0 s venue ≈ 7.5 s. A7-fix (J2 F2/F3): the straggler grace after the 3.5 s quorum is deadline-aware — it shrinks to ~450 ms so the venue phase keeps its full 4.0 s budget inside the 8 s deadline — and the hung loser is aborted on the slow win, so the wall is now ~3.5 s quorum + ~0.45 s grace + ~3.5 s quotes ≈ 7.45 s, inside the 8 s deadline.",
+    { timeout: 30000 },
     async () => {
       const ts = nowSec();
       const a = await startStubRpc({
@@ -2880,11 +2881,11 @@ describe("round 9: latency re-baseline — all-hung wall ~9 s, phase-additive en
         await c.close();
       }
     },
-    { timeout: 30000 },
   );
 
   it(
     "all-hung eth_call wall PINNED at ~4 s (A7, round 11): 502 ALL_QUOTERS_FAILED with wall >= 3000 ms and < 8000 ms. The round-9 ~9.0 s pin (2 sequential 4.5 s venue failovers) is SUPERSEDED: tryVenue now fires both RPCs hedged in parallel with a 4000 ms per-RPC timeout, so the wall is one parallel timeout round (~4.0 s), and the 8 s total deadline caps it even if the phases stack.",
+    { timeout: 30000 },
     async () => {
       const ts = nowSec();
       const mk = () =>
@@ -2915,7 +2916,6 @@ describe("round 9: latency re-baseline — all-hung wall ~9 s, phase-additive en
         await c.close();
       }
     },
-    { timeout: 30000 },
   );
 
   it("future-skew +119 served (round 9, pure-function boundary): a timestamp 119 s ahead of now is served — the boundary-adjacent value the suite had not pinned (the existing pure-function test pins +60 / +120 served and +121 refused; the exact 120/121 boundary stays there)", () => {
@@ -3038,6 +3038,7 @@ describe("round 11 (A7 ROUTE gate): ±1 block tolerance + min pin, 8 s deadline,
 
   it(
     "±1 integration: legs at N and N+1 (parentHash-bound) -> 200, block_number is the MIN (N), confidence 1.0 (A7-fix, J2 F1: the higher leg agrees with the pin under quorumBlocksAgree, so BOTH legs serve quotes — the A7 version's 0.9 pinned the exact-match gate that disenfranchised the higher leg; that gate was the defect), upstream is the min leg (lowest-index win in the healthy case)",
+    { timeout: 15000 },
     async () => {
       const n = FRESH_BLOCK;
       const ts = nowSec();
@@ -3074,11 +3075,11 @@ describe("round 11 (A7 ROUTE gate): ±1 block tolerance + min pin, 8 s deadline,
         await high.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "±1 integration, higher leg FIRST in rpcOrder: pin is still the MIN (N), never the max — order must not move the pin. Upstream is the HIGH leg here: tryVenue takes the first success and the first RPC in rpcOrder serves first (A7-fix, J2 F3) — the PIN is order-independent, the serving RPC is not.",
+    { timeout: 15000 },
     async () => {
       const n = FRESH_BLOCK;
       const ts = nowSec();
@@ -3110,11 +3111,11 @@ describe("round 11 (A7 ROUTE gate): ±1 block tolerance + min pin, 8 s deadline,
         await high.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "±1 integration, third leg at N: two legs agree exactly at N, one trails at N+1 -> 200 at 1.0 (the ±1 case degrades only when the pin has a single attesting leg)",
+    { timeout: 15000 },
     async () => {
       const n = FRESH_BLOCK;
       const ts = nowSec();
@@ -3145,11 +3146,11 @@ describe("round 11 (A7 ROUTE gate): ±1 block tolerance + min pin, 8 s deadline,
         await c.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "deadline (mechanism, injectable): a 100 ms deadline with 500 ms-slow legs -> 502 ROUTE_DEADLINE in well under 1 s (never a slow 200, never a hang)",
+    { timeout: 15000 },
     async () => {
       // One shared timestamp for both stubs: two fresh nowSec() calls
       // could straddle a wall second and flake the quorum (same
@@ -3179,11 +3180,11 @@ describe("round 11 (A7 ROUTE gate): ±1 block tolerance + min pin, 8 s deadline,
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "hedged failover (A7, A7-fix J2 F3): first RPC hangs on eth_call, second serves fast -> 200 with wall < 5000 ms. A7-fix: the hung loser is ABORTED on the fast win, so the wall is now ~winner time + 50 ms (well under 5000 ms), not the A7 max(one 4.0 s timeout, fast success) ≈ 4.0 s — the 5000 ms bound is kept as the regression ceiling, and the A7-fix describe below pins the tight wall.",
+    { timeout: 15000 },
     async () => {
       const blockNumber = FRESH_BLOCK;
       const blockHash = HASH;
@@ -3225,11 +3226,11 @@ describe("round 11 (A7 ROUTE gate): ±1 block tolerance + min pin, 8 s deadline,
         await fast.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "receipt persistence (A7): a stubbed success writes its receipt to the DB with the ACTUAL winning rpcUrl as upstream_url, and the stored evidence re-hashes to raw_response_sha256",
+    { timeout: 15000 },
     async () => {
       const blockNumber = FRESH_BLOCK;
       const blockHash = HASH;
@@ -3274,7 +3275,6 @@ describe("round 11 (A7 ROUTE gate): ±1 block tolerance + min pin, 8 s deadline,
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 });
 
@@ -3290,6 +3290,7 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
 
   it(
     "F1 (J2 P1): min leg FAILS on eth_call, healthy higher leg at N+1 (parentHash-bound) serves -> 200 at the MIN pin N, upstream is the higher leg, confidence 0.9 (only 1 RPC served quotes)",
+    { timeout: 15000 },
     async () => {
       const n = FRESH_BLOCK;
       const ts = nowSec();
@@ -3323,11 +3324,11 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
         await high.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "F1 (J2 P1b): min leg HANGS on eth_call, healthy higher leg serves -> 200 at the MIN pin N, fast (no ~4 s hung-loser tax: the loser is aborted on the win), upstream is the higher leg",
+    { timeout: 15000 },
     async () => {
       const n = FRESH_BLOCK;
       const ts = nowSec();
@@ -3374,11 +3375,11 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
         await high.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "F1 mirror: two legs at N+1 FAIL on eth_call, healthy leg at N+2 (parentHash-bound) serves -> 200 at the MIN pin N+1, upstream is the higher leg. The winner is Uniswap V2 (1.73e9), not V3: each venue tries at most 2 RPCs (MAX_VENUE_RPCS) and V3's rotated pair is the two failing legs, so the healthy leg serves V2 — a pre-existing rotation property, not an F1 gap: the run still succeeds off a real quote from the agreeing higher leg.",
+    { timeout: 15000 },
     async () => {
       const n = FRESH_BLOCK;
       const ts = nowSec();
@@ -3420,11 +3421,11 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
         await high.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "F2 (J2 P3): pin is arrival-order independent — the same three legs (N slow-or-fast, two at N+1) pin the MIN (N) in BOTH arrival orders, at confidence 1.0. Without the straggler grace the slow-min-leg order pinned N+1.",
+    { timeout: 30000 },
     async () => {
       const n = FRESH_BLOCK;
       const ts = nowSec();
@@ -3487,11 +3488,11 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
         await high2b.close();
       }
     },
-    { timeout: 30000 },
   );
 
   it(
     "F3 (J2 P5b/P5c): one fast winner + one hung loser -> wall near the winner's time in BOTH orders (hung first AND hung second), upstream is the fast RPC. The hung loser's socket is aborted on the win — the wall is ~winner time + 50 ms, not winner + 4 s. The bound is < 4000 ms (see the F1 P1b comment): the buggy behaviour pays the hung loser's full 4000 ms timeout (J2 measured 4097/4188 ms), so < 4000 ms excludes it by construction while leaving headroom for loaded-VM timer lag; the logged walls are the actual evidence of 'near the winner's time'.",
+    { timeout: 30000 },
     async () => {
       const blockNumber = FRESH_BLOCK;
       const blockHash = HASH;
@@ -3538,11 +3539,11 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
         }
       }
     },
-    { timeout: 30000 },
   );
 
   it(
     "F4 (J2 P4): deadline exceeded -> 502 ROUTE_DEADLINE AND no receipt row is persisted for that request, even after the in-flight work would have finished. The deadline aborts the inner handler; the receipt must never be saved after the request failed.",
+    { timeout: 15000 },
     async () => {
       const mk = () =>
         startStubRpc({
@@ -3575,11 +3576,11 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
         await b.close();
       }
     },
-    { timeout: 15000 },
   );
 
   it(
     "F5 slow-but-legal: 3 s quorum + 3 s quotes -> 200 with the receipt persisted, wall inside the 8 s deadline. The venue calls use the remaining budget (deadline − elapsed − 50 ms reserve), so the slow path still fits with room to persist.",
+    { timeout: 30000 },
     async () => {
       const ts = nowSec();
       const mk = () =>
@@ -3617,11 +3618,11 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
         await c.close();
       }
     },
-    { timeout: 30000 },
   );
 
   it(
     "F5 over-budget: 1 s quorum + 3.5 s quotes cannot fit quorum + quotes + persist inside an injected 4 s deadline -> fails closed with a 502 and NO receipt row. The venue timeout is the remaining budget (4000 − 1000 − 50 = 2950 ms < 3500 ms — pinned purely by the venueCallTimeoutMsForDeadline test above), so the calls time out cleanly instead of racing the deadline and persisting a phantom receipt. WHICH 502 fires is load-dependent and deliberately NOT pinned here: the venue timeout fires exactly ROUTE_PERSIST_RESERVE_MS (50 ms) before the deadline by construction, and loaded-VM timer lag (observed ~800 ms) swamps that gap — under moderate load it is ALL_QUOTERS_FAILED (observed at 4013 ms in run 3), under heavy load the quorum itself slips past the deadline and it is ROUTE_DEADLINE (observed at 4783 ms in run 4). The load-independent invariants are: a 502 (never a slow 200), no receipt row, wall bounded. (The 8 s production shape is the same arithmetic with a 3.9 s quorum; the injected 4 s deadline makes it deterministic — a 3.9 s stub delay races the 4.0 s quorum timeout under load.) The wall bound is deadline + 1000 ms, not the deadline itself: on a loaded VM the timers that enforce the budget can fire ~500 ms late in wall time (observed 4211 ms for a 3750 ms nominal wall), so the wall pin allows load lag.",
+    { timeout: 30000 },
     async () => {
       const ts = nowSec();
       const mk = () =>
@@ -3665,11 +3666,11 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
         await c.close();
       }
     },
-    { timeout: 30000 },
   );
 
   it(
     "F6 integration (J2 P10 shape): Δ=1 with an implausible timestamp — higher block at N+1, parentHash-bound, but timestamp EARLIER than the lower block's -> the legs do NOT agree, no quorum forms, 502 QUORUM_UNREACHABLE (never a 200 at conf 0.9 off the absurd leg)",
+    { timeout: 15000 },
     async () => {
       const n = FRESH_BLOCK;
       const ts = nowSec();
@@ -3699,6 +3700,5 @@ describe("round 11 fix (A7-fix, J2 F1–F6): agreeing higher leg serves, determi
         await high.close();
       }
     },
-    { timeout: 15000 },
   );
 });
