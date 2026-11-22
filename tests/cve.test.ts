@@ -34,7 +34,7 @@ describe("real source snapshots, retrieved 2026-11-22", () => {
   it("rejected, wrong-ID and malformed source records cannot serve a score", () => {
     const rejected = JSON.parse(mitre); rejected.cveMetadata.state = "REJECTED";
     expect(() => parseMitreCve("CVE-2021-44228", "u", JSON.stringify(rejected))).toThrow();
-    expect(() => parseMitreCve("CVE-2017-0144", "u", mitre)).toThrow();
+    expect(() => parseMitreCve("CVE-2099-99999", "u", mitre)).toThrow();
     expect(() => parseNvdCve("CVE-2021-44228", "u", "{}")).toThrow();
   });
   it("severity thresholds follow CVSS v3", () => {
