@@ -8,16 +8,22 @@ export function explainRouteQuote(input: {
   sellLabel?: string;
   buySymbol?: string;
   venueSetLabel?: string;
+  /** Buy-token decimals; defaults to 6 (the registry's USDC/USDT scale).
+   * Generic pairs pass the on-chain/directory decimals so the human
+   * rendering matches the exact base units. */
+  buyDecimals?: number;
   quotes?: ReadonlyArray<{ venue: string; amountOut: bigint }>;
 }): string {
   const { blockNumber, venue, amountOut, survivingQuotes, degradedReasons } = input;
   const sellLabel = input.sellLabel ?? "1 ETH";
   const buySymbol = input.buySymbol ?? "USDC";
   const venueSet = input.venueSetLabel ?? "Uniswap V2/V3 and SushiSwap V2";
+  const dec = input.buyDecimals ?? 6;
+  const base = 10n ** BigInt(dec);
   const format = (value: bigint): string => {
-    const whole = value / 1_000_000n;
-    const fraction = (value % 1_000_000n).toString().padStart(6, "0");
-    return `${whole}.${fraction}`;
+    const whole = value / base;
+    const fraction = (value % base).toString().padStart(dec, "0");
+    return dec === 0 ? whole.toString() : `${whole}.${fraction}`;
   };
   const perVenue =
     input.quotes === undefined || input.quotes.length === 0
@@ -30,7 +36,7 @@ export function explainRouteQuote(input: {
         ".";
   return `For selling exactly ${sellLabel} for ${buySymbol} on Ethereum mainnet, ${venue} has the highest gross output ` +
     `among the ${survivingQuotes} venue quote${survivingQuotes === 1 ? "" : "s"} that survived this service's plausibility filters ` +
-    `at block ${blockNumber}: ${format(amountOut)} ${buySymbol} (${amountOut} base units, 6 decimals).` +
+    `at block ${blockNumber}: ${format(amountOut)} ${buySymbol} (${amountOut} base units, ${dec} decimals).` +
     perVenue +
     ` This compares the supported ${venueSet} venue quotes that were available at that block, ` +
     `not every pool, aggregator or split route. Gas costs are not deducted, so this is not a best-net-execution claim. ` +
@@ -38,10 +44,16 @@ export function explainRouteQuote(input: {
     `A transaction would need a fresh quote, gas estimate, an explicit minimum amount out and an execution/protection choice; ` +
     `this endpoint does not submit a swap.` +
     (amountOut < 100_000_000n
-      ? ` Honesty note: ${amountOut} ${buySymbol} base units (6 decimals) is below the published ` +
+      ? ` Honesty note: ${amountOut} ${buySymbol} base units (${dec} decimals) is below the published ` +
         `amount_out range [1e8, 1e11]; that range was written for ETH/USDC-scale outputs, and this ` +
-        `stable-pair quote is served with its exact ${buySymbol} units stated above rather than ` +
+        `${input.buyDecimals === undefined ? "stable-pair quote" : "quote"} is served with its exact ${buySymbol} units stated above rather than ` +
         `inflated to fit the range.`
+      : "") +
+    (input.buyDecimals !== undefined && amountOut > 100_000_000_000n
+      ? ` Honesty note: ${amountOut} ${buySymbol} base units (${dec} decimals) is above the published ` +
+        `amount_out range [1e8, 1e11]; that range was written for ETH/USDC-scale outputs, and this ` +
+        `quote is served with its exact ${buySymbol} units stated above rather than deflated to fit ` +
+        `the range.`
       : "") +
     (degradedReasons.length ? ` Coverage is degraded: ${degradedReasons.join("; ")}.` : "");
 }

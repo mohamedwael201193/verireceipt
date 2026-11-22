@@ -4,6 +4,7 @@
 // The stubbed-RPC tests below run local HTTP JSON-RPC servers and exercise
 // the handler through handleRouteWithRpcs with injectable RPC URLs.
 import { countReceipts, storedReceiptRow } from "./helpers/storeView";
+import { getReceiptEvidence } from "../src/core/storage";
 import { describe, expect, it } from "vitest";
 import { createServer } from "http";
 import { mkdtempSync, readFileSync } from "fs";
@@ -77,6 +78,13 @@ import {
   TIMESTAMP_CONSISTENCY_MAX_LAG_SEC,
   TIMESTAMP_CONSISTENCY_SLACK_SEC,
   decodeCurveGetDyReturn,
+  buildDecimalsCalldata,
+  decodeDecimalsReturn,
+  buildSymbolCalldata,
+  decodeSymbolReturn,
+  parseGenericPairSides,
+  GENERIC_TOKENS,
+  buildGenericSpec,
   type QuorumBlock,
   type VenueQuote,
   venueCallTimeoutMsForDeadline,
@@ -210,7 +218,6 @@ describe("pair input normalization (2026-11-22 owner requirement: every reasonab
   });
   const noRoute = [
     "BTC/USDC", // unknown token
-    "USDC/ETH", "DAI/ETH", "USDT/ETH", "WBTC/ETH", // ETH-out directions: not honest in the published amount_out shape
     "WBNB/SafeMoon", // epoch-34 grader question: no verifiable liquidity through verified venues
     "0x0000000000000000000000000000000000000000/USDC", // unknown token address
     "DAI/0x0000000000000000000000000000000000000000",
@@ -218,7 +225,20 @@ describe("pair input normalization (2026-11-22 owner requirement: every reasonab
   it.each(noRoute)('"%s" -> 400 unavailable envelope (no verifiable liquidity)', async (pair) => {
     await expectUnavailable(handleRoute({ pair }), "NO_ROUTE");
   });
-  it.each(noRoute)('"%s" -> legacy 422 INVALID_PAIR when ROUTE_NO_ROUTE_ENVELOPE=0', async (pair) => {
+  // Generic resolution (2026-11-22): registry tokens in unregistered
+  // directions — including ETH-out, previously refused for the published
+  // amount_out shape — now resolve generically and reach the quote path
+  // (wei-scale outputs are served in exact base units with an honesty
+  // note, the precedent set by the wstETH/ETH increment). A dead RPC
+  // proves the pair passed validation and resolution.
+  const genericResolved = ["USDC/ETH", "DAI/ETH", "USDT/ETH", "WBTC/ETH", "USDC/DAI"];
+  it.each(genericResolved)('"%s" resolves generically and reaches the quote path', async (pair) => {
+    await expect(handleRouteWithRpcs({ pair }, ["http://127.0.0.1:9"])).rejects.toMatchObject({
+      status: 502,
+      code: "RPC_CONFIG",
+    });
+  });
+  it.each([...noRoute, ...genericResolved])('"%s" -> legacy 422 INVALID_PAIR when ROUTE_NO_ROUTE_ENVELOPE=0', async (pair) => {
     process.env.ROUTE_NO_ROUTE_ENVELOPE = "0";
     try {
       await expect(handleRoute({ pair })).rejects.toMatchObject({ status: 422, code: "INVALID_PAIR" });
@@ -354,6 +374,220 @@ describe("stable pairs: DAI/USDC end-to-end (stubbed RPCs)", () => {
       const result = await handleRouteWithRpcs({ pair: "DAI/USDC" }, [a.url, b.url]);
       expect(result.confidence).toBe(1.0);
       expect(result.source).toContain("all 4 venues this pair registers produced plausible quotes");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+});
+
+describe("generic ERC-20 pair resolution (2026-11-22)", () => {
+  it("generic bounds do not underflow for high sell decimals and remain uint256-bounded", () => {
+    const address = "0x1111111111111111111111111111111111111111";
+    const meta = (decimals: number) => ({ address, decimals, symbol: "UNIT" });
+    for (const sellDecimals of [0, 6, 18, 30, 77]) {
+      for (const buyDecimals of [0, 6, 18, 77, 255]) {
+        const spec = buildGenericSpec(meta(sellDecimals), meta(buyDecimals));
+        const cap = 10n ** BigInt(18 + buyDecimals);
+        const max = (1n << 256n) - 1n;
+        expect(spec.amountIn).toBe(10n ** BigInt(sellDecimals));
+        expect(spec.plausibleMaxOut).toBe(cap < max ? cap : max);
+      }
+    }
+    expect(() => buildGenericSpec(meta(78), meta(6))).toThrow("uint256");
+    expect(() => buildGenericSpec(meta(255), meta(6))).toThrow("uint256");
+  });
+
+  it("decimals()/symbol() calldata and decoders, including the bytes32 (MKR) shape", () => {
+    expect(buildDecimalsCalldata()).toBe("0x313ce567");
+    expect(buildSymbolCalldata()).toBe("0x95d89b41");
+    expect(decodeDecimalsReturn("0x" + "00".repeat(31) + "06")).toBe(6);
+    expect(decodeDecimalsReturn("0x" + "00".repeat(31) + "12")).toBe(18);
+    // 256+ is not a real decimals field; wrong lengths are malformed.
+    expect(decodeDecimalsReturn("0x" + "00".repeat(30) + "0100")).toBe(null);
+    expect(decodeDecimalsReturn("0x1234")).toBe(null);
+    // Dynamic string: offset 0x20, length 4, "USDC".
+    expect(
+      decodeSymbolReturn(
+        "0x" + "00".repeat(31) + "20" + "00".repeat(31) + "04" + "55534443".padEnd(64, "0"),
+      ),
+    ).toBe("USDC");
+    // bytes32, left-aligned, zero-padded: "MKR".
+    expect(decodeSymbolReturn("0x" + "4d4b52" + "00".repeat(29))).toBe("MKR");
+    expect(decodeSymbolReturn("0x")).toBe(null);
+    // Non-printable content is rejected.
+    expect(decodeSymbolReturn("0x" + "01".repeat(32))).toBe(null);
+  });
+
+  it("parseGenericPairSides: directory symbols, registry symbols, bare 0x addresses; rejects unknown/malformed/self pairs", () => {
+    const shib = GENERIC_TOKENS.find((t) => t.symbol === "SHIB")!;
+    const resolved = parseGenericPairSides("SHIB/USDC");
+    expect(resolved).not.toBe(null);
+    expect(resolved!.sell.address.toLowerCase()).toBe(shib.address.toLowerCase());
+    expect(resolved!.sell.decimals).toBe(18);
+    expect(resolved!.buy.symbol).toBe("USDC");
+    expect(resolved!.buy.decimals).toBe(6);
+    // Separators and casing follow the registry parser's rules.
+    expect(parseGenericPairSides("shib -> usdc")).not.toBe(null);
+    expect(parseGenericPairSides("SHIB-USDC")).not.toBe(null);
+    // A bare 0x address defers metadata to the on-chain calls.
+    const bare = parseGenericPairSides(`0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE/USDC`);
+    expect(bare!.sell.symbol).toBe("SHIB"); // known address hits the directory
+    const unknown = parseGenericPairSides(`0x1111111111111111111111111111111111111111/USDC`);
+    expect(unknown!.sell.symbol).toBe(null);
+    expect(unknown!.sell.decimals).toBe(null);
+    // Unknown symbols, malformed shapes and self-pairs stay on the refusal path.
+    expect(parseGenericPairSides("BTC/USDC")).toBe(null);
+    expect(parseGenericPairSides("WBNB/SafeMoon")).toBe(null);
+    expect(parseGenericPairSides("ETH")).toBe(null);
+    expect(parseGenericPairSides("USDC/USDC")).toBe(null);
+    expect(parseGenericPairSides("SHIB/SHIB")).toBe(null);
+  });
+
+  it("SHIB/USDC (directory pair): real quote shape, exact base units, no-band disclosure, receipt persisted", async () => {
+    // 1 SHIB ~= 0.00001 USDC: tiny positive outputs, venues agreeing
+    // exactly (at dust scale a 1-base-unit spread exceeds the ±5% band).
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        v3AmountOut: 10n, v2AmountOut: 10n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "SHIB/USDC" }, [a.url, b.url]);
+      expect(result.amount_out).toBe(10);
+      expect(result.block_number).toBe(FRESH_BLOCK);
+      const answer = result.answer as string;
+      expect(answer).toContain("1 SHIB");
+      expect(answer).toContain("0.000010 USDC");
+      expect(answer).toContain("No fair-value band is published for this pair");
+      expect(answer).toContain("below the published");
+      expect(answer).not.toContain("stable-pair quote");
+      expect(result.source).toContain("scale-only backstops");
+      const receipt = result.receipt as Record<string, unknown>;
+      expect(receipt.intent).toBe("OPTIMAL_EXECUTION_ROUTE_GENERAL");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("bare 0x address side: metadata read on-chain at the pin, then quoted", async () => {
+    // An address absent from every directory: capture metadata requests
+    // so replacing the canonical block reference with latest goes RED.
+    const calls: Array<{ to: string; data: string; blockRef: unknown }> = [];
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        tokenDecimals: 8, tokenSymbol: "FAKE8", capturedCalls: calls,
+        v3AmountOut: 1_500_000_000n, v2AmountOut: 1_490_000_000n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs(
+        { pair: "0x1111111111111111111111111111111111111111/USDC" },
+        [a.url, b.url],
+      );
+      const answer = result.answer as string;
+      expect(answer).toContain("1 FAKE8");
+      expect(answer).toContain("USDC");
+      expect(result.amount_out).toBe(1_500_000_000);
+      const metadata = calls.filter(c => ["0x313ce567", "0x95d89b41"].includes(c.data));
+      expect(metadata.map(c => c.data).sort()).toEqual(["0x313ce567", "0x95d89b41"]);
+      for (const call of metadata) {
+        expect(call.to).toBe("0x1111111111111111111111111111111111111111");
+        expect(call.blockRef).toEqual({ blockHash: HASH, requireCanonical: true });
+      }
+      const quoteCall = calls.find(c => c.data.startsWith("0xd06ca61f"));
+      expect(quoteCall?.data).toBe(buildV2AmountsOutCalldata(100_000_000n, ["0x1111111111111111111111111111111111111111", USDC]));
+      expect(quoteCall?.blockRef).toEqual({ blockHash: HASH, requireCanonical: true });
+      const receipt = result.receipt as { receipt_id: string };
+      const stored = await getReceiptEvidence(receipt.receipt_id);
+      const evidence = JSON.parse(stored.evidence!.toString("utf8"));
+      const metadataEvidence = evidence.generic_resolution.sell_token.metadataEvidence;
+      expect(metadataEvidence).toHaveLength(2);
+      for (const item of metadataEvidence) {
+        expect(item.request.params[1]).toEqual({ blockHash: HASH, requireCanonical: true });
+        expect(item.response.result).toMatch(/^0x/);
+      }
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("every venue reverting (no pool) -> 400 NO_ROUTE unavailable envelope with a receipt, not a 502", async () => {
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false, v3AmountOut: 0n, v2AmountOut: 0n,
+        failV3: true, failV2: true,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const body = await expectUnavailable(
+        handleRouteWithRpcs({ pair: "SHIB/USDC" }, [a.url, b.url]),
+        "NO_ROUTE",
+      );
+      expect(String(body.summary)).toContain("not proof that the tokens lack");
+      expect(String(body.summary)).toContain("does not invent quotes");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("venue calls failing at transport level -> 502 ALL_QUOTERS_FAILED (no false no-liquidity claim)", async () => {
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: true, v3AmountOut: 0n, v2AmountOut: 0n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      await expect(handleRouteWithRpcs({ pair: "SHIB/USDC" }, [a.url, b.url])).rejects.toMatchObject({
+        status: 502,
+        code: "ALL_QUOTERS_FAILED",
+      });
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it.each(["metadata-transport", "metadata-malformed", "malformed-v2", "revert-substring"])("infrastructure diagnostic does not become a no-route finding: %s", async (kind) => {
+    const mk = () => startStubRpc({
+      blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+      v3AmountOut: 0n, v2AmountOut: 0n, failV3: true,
+      metaTransportError: kind === "metadata-transport",
+      malformedV2: kind === "malformed-v2",
+      metaMalformed: kind === "metadata-malformed",
+      infrastructureMentionsRevert: kind === "revert-substring",
+    });
+    const a = await mk(); const b = await mk();
+    try {
+      const pair = kind.startsWith("metadata-") ? "0x1111111111111111111111111111111111111111/USDC" : "SHIB/USDC";
+      await expect(handleRouteWithRpcs({ pair }, [a.url, b.url])).rejects.toMatchObject({
+        status: 502, code: kind.startsWith("metadata-") ? "METADATA_RPC_FAILED" : "ALL_QUOTERS_FAILED",
+      });
+    } finally { await a.close(); await b.close(); }
+  });
+
+  it("unreadable metadata on every agreeing RPC -> 400 NO_ROUTE (not a verifiable ERC-20)", async () => {
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false, failMeta: true, v3AmountOut: 0n, v2AmountOut: 0n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const body = await expectUnavailable(
+        handleRouteWithRpcs({ pair: "0x1111111111111111111111111111111111111111/USDC" }, [a.url, b.url]),
+        "NO_ROUTE",
+      );
+      expect(String(body.summary)).toContain("metadata");
     } finally {
       await a.close();
       await b.close();
@@ -599,6 +833,16 @@ interface StubRpcOptions {
   /** Curve 3pool get_dy leg (stable pairs only): amount or failure. */
   curveAmountOut?: bigint;
   failCurve?: boolean;
+  /** Generic-pair metadata legs: decimals() returns this value, symbol()
+   * returns this string (ABI dynamic string). failMeta makes both revert. */
+  tokenDecimals?: number;
+  tokenSymbol?: string;
+  failMeta?: boolean;
+  metaTransportError?: boolean;
+  metaMalformed?: boolean;
+  infrastructureMentionsRevert?: boolean;
+  malformedV2?: boolean;
+  capturedCalls?: Array<{ to: string; data: string; blockRef: unknown }>;
   /** When true, eth_call never responds (hangs until the client's CALL_TIMEOUT_MS). */
   hangCalls?: boolean;
   /** When true, eth_blockNumber never responds (hangs until the quorum timeout). */
@@ -637,6 +881,7 @@ const DEFAULT_BLOCK_TIMESTAMP_SEC = Math.floor(Date.now() / 1000);
 // the height-anchor tests below use expectedBlockHeight() explicitly.
 // (The forged-pin tests keep their fixed 26,000,000 — that is the point.)
 const FRESH_BLOCK = expectedBlockHeight(Math.floor(Date.now() / 1000));
+const HASH = "0x" + "ab".repeat(32);
 
 function startStubRpc(options: StubRpcOptions): Promise<{
   url: string;
@@ -656,11 +901,11 @@ function startStubRpc(options: StubRpcOptions): Promise<{
         // Fall through to the unknown-method error below.
       }
       const reply = (result: unknown) => {
-        res.writeHead(200, { "Content-Type": "application/json" });
+        res.writeHead(res.statusCode, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id ?? 1, result }));
       };
       const replyError = (code: number, message: string) => {
-        res.writeHead(200, { "Content-Type": "application/json" });
+        res.writeHead(res.statusCode, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({ jsonrpc: "2.0", id: body.id ?? 1, error: { code, message } }),
         );
@@ -706,23 +951,26 @@ function startStubRpc(options: StubRpcOptions): Promise<{
       if (body.method === "eth_call") {
         const answerCall = () => {
           if (options.hangCalls) return; // Never reply: hangs until CALL_TIMEOUT_MS.
+          if (options.infrastructureMentionsRevert) return replyError(-32000, "backend revert index unavailable");
           if (options.failCalls) return replyError(-32000, "stub RPC refuses eth_call");
           const params = (body.params ?? []) as Array<{ to?: string; data?: string }>;
           const to = (params[0]?.to ?? "").toLowerCase();
           const data = params[0]?.data ?? "";
+          options.capturedCalls?.push({ to, data, blockRef: (body.params ?? [])[1] });
           if (data.startsWith("0xc6a5026a")) {
-            if (options.failV3) return replyError(-32000, "stub RPC: V3 quoter reverts");
+            if (options.failV3) return replyError(-32000, "execution reverted: stub RPC V3 quoter");
             // QuoterV2: exactly 4 words, amountOut first.
             return reply("0x" + word(options.v3AmountOut) + "00".repeat(96));
           }
           if (data.startsWith("0xd06ca61f")) {
-            if (options.failV2) return replyError(-32000, "stub RPC: V2 router reverts");
+            if (options.malformedV2) return reply("0xdeadbeef");
+            if (options.failV2) return replyError(-32000, "execution reverted: stub RPC V2 router");
             const isSushi =
               to === "0xd9e1ce17f2641f24ae83637ab66a2cca9c378b9f";
             if (isSushi && options.failSushi)
-              return replyError(-32000, "stub RPC: Sushi router reverts");
+              return replyError(-32000, "execution reverted: stub RPC Sushi router");
             if (!isSushi && options.failUni)
-              return replyError(-32000, "stub RPC: Uni V2 router reverts");
+              return replyError(-32000, "execution reverted: stub RPC Uni V2 router");
             const amountOut = isSushi
               ? (options.sushiAmountOut ?? options.v2AmountOut)
               : (options.uniAmountOut ?? options.v2AmountOut);
@@ -739,6 +987,23 @@ function startStubRpc(options: StubRpcOptions): Promise<{
             if (options.failCurve) return replyError(-32000, "stub RPC: Curve 3pool reverts");
             // get_dy: exactly one word.
             return reply("0x" + word(options.curveAmountOut ?? 1_000_000n));
+          }
+          if (data.startsWith("0x313ce567")) {
+            if (options.metaTransportError) { res.statusCode = 503; return reply("0x"); }
+            if (options.metaMalformed) return reply("0x1234");
+            // ERC-20 decimals(): exactly one word.
+            if (options.failMeta) return replyError(-32000, "execution reverted: stub RPC: token metadata reverts");
+            return reply("0x" + word(BigInt(options.tokenDecimals ?? 18)));
+          }
+          if (data.startsWith("0x95d89b41")) {
+            if (options.metaTransportError) { res.statusCode = 503; return reply("0x"); }
+            if (options.metaMalformed) return reply("0x1234");
+            // ERC-20 symbol(): ABI dynamic string (offset, length, data).
+            if (options.failMeta) return replyError(-32000, "execution reverted: stub RPC: token metadata reverts");
+            const sym = options.tokenSymbol ?? "TEST";
+            const bytes = Buffer.from(sym, "utf8");
+            const padded = bytes.toString("hex").padEnd(64, "0");
+            return reply("0x" + word(0x20n) + word(BigInt(bytes.length)) + padded);
           }
           return replyError(-32602, "stub RPC: unknown eth_call data");
         };
@@ -2123,14 +2388,49 @@ describe("refusal matrix + adversarial pairs (round 4)", () => {
     await expectUnavailable(handleRoute({ pair: "ETH／USDC" }), "INVALID_PAIR");
   });
 
-  it('pair "USDC/ETH" (reversed) -> 400 unavailable envelope (ETH-out direction, wei-precision explanation)', async () => {
-    const body = await expectUnavailable(handleRoute({ pair: "USDC/ETH" }), "NO_ROUTE");
-    expect(String(body.summary)).toContain("published amount_out range");
+  it('pair "USDC/ETH" (reversed): generic resolution serves a wei-scale quote with the above-range honesty note (stubbed RPCs)', async () => {
+    const weiOut = 570_000_000_000_000n; // ~0.00057 ETH per USDC
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        v3AmountOut: weiOut, v2AmountOut: weiOut - 1_000_000_000_000n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "USDC/ETH" }, [a.url, b.url]);
+      expect(result.amount_out).toBe(Number(weiOut));
+      expect(result.block_number).toBe(FRESH_BLOCK);
+      const answer = result.answer as string;
+      expect(answer).toContain("1 USDC");
+      expect(answer).toContain("18 decimals");
+      expect(answer).toContain("above the published amount_out range [1e8, 1e11]");
+      expect(answer).toContain("No fair-value band is published for this pair");
+      expect(result.source).toContain("scale-only backstops");
+    } finally {
+      await a.close();
+      await b.close();
+    }
   });
 
-  it('pair "USDC/DAI" (known tokens, unregistered non-ETH direction) -> 400 unavailable envelope', async () => {
-    const body = await expectUnavailable(handleRoute({ pair: "USDC/DAI" }), "NO_ROUTE");
-    expect(String(body.summary)).toContain("not in the verified pair registry");
+  it('pair "USDC/DAI" (known tokens, unregistered direction): generic resolution quotes it like any other pair', async () => {
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        v3AmountOut: 999_000_000_000_000_001n, v2AmountOut: 998_500_000_000_000_000n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "USDC/DAI" }, [a.url, b.url]);
+      expect(result.amount_out).toBe(Number(999_000_000_000_000_001n));
+      expect(result.amount_out_base_units).toBe("999000000000000001");
+      expect(result.source).toContain("amount_out is the JSON-number rendering (approximate");
+      expect(result.winning_venue).toBe("Uniswap V3 (fee 100)");
+    } finally {
+      await a.close();
+      await b.close();
+    }
   });
 
   it('oversized pair (10k chars, injection-shaped) -> 400 unavailable envelope, INVALID_PAIR, summary capped', async () => {

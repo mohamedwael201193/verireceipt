@@ -811,6 +811,60 @@ export function buildCurveGetDyCalldata(i: bigint, j: bigint, dx: bigint): strin
   return "0x5e0d443f" + wordUint(i) + wordUint(j) + wordUint(dx);
 }
 
+/** ERC-20 decimals() — selector 0x313ce567. Exactly one word; a value
+ * above 255 is not a real decimals field and is rejected. */
+export function buildDecimalsCalldata(): string {
+  return "0x313ce567";
+}
+
+export function decodeDecimalsReturn(hex: string): number | null {
+  if (!/^0x[0-9a-fA-F]+$/.test(hex) || hex.length !== 2 + 64) return null;
+  const value = readWord(hex, 0);
+  if (value > 255n) return null;
+  return Number(value);
+}
+
+/** ERC-20 symbol() — selector 0x95d89b41. Standard tokens return an ABI
+ * dynamic string; pre-standard tokens (e.g. MKR
+ * 0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2, verified live 2026-11-22)
+ * return a left-aligned zero-padded bytes32. Both decode here; anything
+ * else (wrong length, non-printable or empty content, > 32 chars) is
+ * rejected as unreadable metadata. */
+export function buildSymbolCalldata(): string {
+  return "0x95d89b41";
+}
+
+export function decodeSymbolReturn(hex: string): string | null {
+  if (!/^0x[0-9a-fA-F]+$/.test(hex)) return null;
+  const sanitize = (s: string): string | null => {
+    if (s.length < 1 || s.length > 32) return null;
+    if (!/^[\x20-\x7e]+$/.test(s)) return null;
+    return s;
+  };
+  // Dynamic string: offset word 0x20, length word, then exactly the data.
+  if (hex.length >= 2 + 128 && readWord(hex, 0) === 0x20n) {
+    const len = Number(readWord(hex, 1));
+    if (len < 1 || len > 32) return null;
+    if (hex.length < 2 + 128 + len * 2) return null;
+    let s = "";
+    for (let i = 0; i < len; i++) {
+      s += String.fromCharCode(Number.parseInt(hex.slice(2 + 128 + i * 2, 2 + 128 + i * 2 + 2), 16));
+    }
+    return sanitize(s);
+  }
+  // bytes32: exactly one word, left-aligned, zero-padded.
+  if (hex.length === 2 + 64) {
+    let s = "";
+    for (let i = 0; i < 32; i++) {
+      const b = Number.parseInt(hex.slice(2 + i * 2, 2 + i * 2 + 2), 16);
+      if (b === 0) break;
+      s += String.fromCharCode(b);
+    }
+    return sanitize(s);
+  }
+  return null;
+}
+
 /** get_dy returns exactly one uint256 word; anything else is malformed. */
 export function decodeCurveGetDyReturn(hex: string): bigint {
   if (!/^0x[0-9a-fA-F]+$/.test(hex) || hex.length !== 2 + 64) {
@@ -928,6 +982,10 @@ function postJsonRpc(
         res.on("end", () => {
           cleanupAbortListener();
           try {
+            if (res.statusCode === undefined || res.statusCode < 200 || res.statusCode >= 300) {
+              reject(new Error(`JSON-RPC HTTP ${String(res.statusCode)} from ${url}`));
+              return;
+            }
             resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>);
           } catch (err) {
             reject(new Error(`unparseable JSON-RPC response from ${url}: ${String(err)}`));
@@ -959,6 +1017,15 @@ function postJsonRpc(
   });
 }
 
+/** Only a structured JSON-RPC response can report a contract revert.
+ * A URL, HTTP failure, timeout or arbitrary exception mentioning revert
+ * must never turn infrastructure failure into a liquidity finding. */
+class RpcResponseError extends Error {
+  constructor(url: string, method: string, readonly rpcCode: number | undefined, readonly rpcMessage: string) {
+    super(`JSON-RPC error from ${url} (${method}): code ${String(rpcCode)} ${rpcMessage}`);
+  }
+}
+
 /** Raw JSON-RPC call; the caller validates the shape of `result`. */
 async function rpcCallRaw(
   url: string,
@@ -975,9 +1042,7 @@ async function rpcCallRaw(
   const response = await postJsonRpc(url, request, timeoutMs, signal);
   if (response.error !== undefined) {
     const err = response.error as { code?: number; message?: string };
-    throw new Error(
-      `JSON-RPC error from ${url} (${method}): code ${String(err.code)} ${err.message ?? ""}`,
-    );
+    throw new RpcResponseError(url, method, err.code, err.message ?? "");
   }
   return { request, response, result: response.result };
 }
@@ -1125,6 +1190,21 @@ export function filterPlausibleQuotes(
 // Canonicality is checked by the upstream at call time, not forever after.
 type CanonicalBlockRef = Readonly<{ blockHash: string; requireCanonical: true }>;
 
+/** Generic-pair diagnostics: an explicit contract revert gives no usable
+ * quote through this call. It does not prove that no pool exists.
+ * A transport or malformed response proves nothing about liquidity. The generic no-quote
+ * path refuses with NO_ROUTE only when no transport failure was seen. */
+export interface QuoteDiag {
+  rpcError: boolean;
+}
+
+function isExecutionRevert(reason: unknown): boolean {
+  return reason instanceof RpcResponseError && (
+    reason.rpcCode === 3 ||
+    ((reason.rpcCode === -32000 || reason.rpcCode === -32015) && /^execution reverted(?:\b|:)/i.test(reason.rpcMessage))
+  );
+}
+
 async function quoteV3AtBlock(
   rpcUrl: string,
   blockRef: CanonicalBlockRef,
@@ -1134,6 +1214,7 @@ async function quoteV3AtBlock(
   fees: number[],
   callTimeoutMs: number,
   signal?: AbortSignal,
+  diag?: QuoteDiag,
 ): Promise<VenueQuote | null> {
   const attempts = await Promise.allSettled(
     fees.map(async (fee) => {
@@ -1157,6 +1238,9 @@ async function quoteV3AtBlock(
   const ok: VenueQuote[] = [];
   for (const attempt of attempts) {
     if (attempt.status === "fulfilled" && attempt.value.amountOut > 0n) ok.push(attempt.value);
+    if (attempt.status === "rejected" && diag !== undefined && !isExecutionRevert(attempt.reason)) {
+      diag.rpcError = true;
+    }
   }
   return pickBestQuote(ok);
 }
@@ -1170,16 +1254,29 @@ async function quoteV2AtBlock(
   path: string[],
   callTimeoutMs: number,
   signal?: AbortSignal,
+  diag?: QuoteDiag,
 ): Promise<VenueQuote | null> {
   const data = buildV2AmountsOutCalldata(amountIn, path);
-  const call = await rpcCall(
-    rpcUrl,
-    "eth_call",
-    [{ to: router, data }, blockRef],
-    callTimeoutMs,
-    signal,
-  );
-  const amountOut = decodeV2AmountsOut(call.result);
+  let call;
+  try {
+    call = await rpcCall(
+      rpcUrl,
+      "eth_call",
+      [{ to: router, data }, blockRef],
+      callTimeoutMs,
+      signal,
+    );
+  } catch (err) {
+    if (diag !== undefined && !isExecutionRevert(err)) diag.rpcError = true;
+    throw err;
+  }
+  let amountOut: bigint;
+  try {
+    amountOut = decodeV2AmountsOut(call.result);
+  } catch (err) {
+    if (diag !== undefined) diag.rpcError = true;
+    throw err;
+  }
   if (amountOut <= 0n) return null;
   return { venue: venueName, amountOut, rpcUrl, request: call.request, response: call.response };
 }
@@ -1258,6 +1355,12 @@ export interface PairSpec {
   plausibleMinOut: bigint;
   plausibleMaxOut: bigint;
   venueSetLabel: string;
+  /** Generic-resolution pairs (outside the verified registry): no
+   * fair-value band exists, the plausible bounds are scale-only
+   * backstops, and the buy token's decimals come from the directory or
+   * on-chain metadata. Registry pairs leave both unset. */
+  generic?: true;
+  buyDecimals?: number;
 }
 
 const STABLE_V3_FEES = [100, 500, 3000];
@@ -1365,6 +1468,110 @@ export const PAIR_REGISTRY: ReadonlyArray<PairSpec> = [
 ];
 
 export const SUPPORTED_PAIRS: string[] = PAIR_REGISTRY.map((spec) => spec.pair);
+
+// ---------------------------------------------------------------------------
+// Generic pair resolution (2026-11-22, scope: resolve any verifiable ERC-20
+// pair on Ethereum mainnet; refuse honestly only when no real liquidity
+// exists or metadata is unreadable). A pair
+// outside the verified registry is resolved generically: directory symbols
+// (below) and any 0x address, whose decimals()/symbol() are read on-chain
+// at the pinned block. Generic pairs quote through the same block-pinned
+// Uniswap V3 fee tiers and both V2 routers as the registry; they have NO
+// fair-value band, so the plausibility bounds are scale-only backstops
+// (output capped at a 1e18:1 whole-token price ratio) and selection relies on
+// the relative median/agreement filters — disclosed in the answer/source.
+// Directory entries verified live 2026-11-22 (~block 26,471,700) via
+// eth_getCode (non-empty bytecode), decimals() and symbol(); MKR returns
+// its symbol as bytes32, the rest as dynamic strings.
+// ---------------------------------------------------------------------------
+export interface GenericTokenMeta {
+  address: string;
+  symbol: string;
+  decimals: number;
+  metadataEvidence?: Array<{ rpcUrl: string; request: Record<string, unknown>; response: Record<string, unknown> }>;
+}
+
+export const GENERIC_TOKENS: ReadonlyArray<GenericTokenMeta> = [
+  { address: "0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE", symbol: "SHIB", decimals: 18 },
+  { address: "0x514910771AF9Ca656af840dff83E8264EcF986CA", symbol: "LINK", decimals: 18 },
+  { address: "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984", symbol: "UNI", decimals: 18 },
+  { address: "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9", symbol: "AAVE", decimals: 18 },
+  { address: "0x6982508145454Ce325dDbE47a25d4ec3d2311933", symbol: "PEPE", decimals: 18 },
+  { address: "0xD533a949740bb3306d119CC777fa900bA034cd52", symbol: "CRV", decimals: 18 },
+  { address: "0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2", symbol: "MKR", decimals: 18 },
+  { address: "0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32", symbol: "LDO", decimals: 18 },
+];
+
+/** Metadata for the registry tokens, needed when a registry token is one
+ * side of a GENERIC pair (e.g. SHIB/USDC). */
+const KNOWN_TOKEN_META: ReadonlyArray<GenericTokenMeta> = [
+  { address: WETH, symbol: "WETH", decimals: 18 },
+  { address: USDC, symbol: "USDC", decimals: 6 },
+  { address: DAI, symbol: "DAI", decimals: 18 },
+  { address: USDT, symbol: "USDT", decimals: 6 },
+  { address: WBTC, symbol: "WBTC", decimals: 8 },
+];
+
+/** One generically-resolved side. decimals/symbol are present when the
+ * side came from a directory; a bare 0x address carries nulls and is
+ * filled from on-chain metadata at the pinned block. */
+export interface GenericPairSide {
+  address: string;
+  symbol: string | null;
+  decimals: number | null;
+}
+
+/** Generic-side counterpart of the pair parser, with the exact same
+ * trimming/control/separator rules as classifyPair. Returns null when
+ * either side is malformed, an unknown symbol, or the same token twice;
+ * such pairs stay on the existing no-route/malformed refusal path. */
+export function parseGenericPairSides(
+  raw: string,
+): { sell: GenericPairSide; buy: GenericPairSide } | null {
+  const trimmed = raw.replace(/^[ \t]+|[ \t]+$/g, "");
+  if (/[\x00-\x1f]/.test(trimmed)) return null;
+  const normalized = trimmed.replace(/->/g, "/");
+  const sides = normalized.includes("/")
+    ? normalized.split("/")
+    : normalized.includes("-")
+      ? normalized.split("-")
+      : [normalized];
+  if (sides.length !== 2) return null;
+  const sellRaw = sides[0].trim();
+  const buyRaw = sides[1].trim();
+  if (!PAIR_SIDE_RE.test(sellRaw) || !PAIR_SIDE_RE.test(buyRaw)) return null;
+  const one = (sideRaw: string): GenericPairSide | null => {
+    if (/^0x[0-9a-fA-F]{40}$/.test(sideRaw)) {
+      const lower = sideRaw.toLowerCase();
+      const known = [...KNOWN_TOKEN_META, ...GENERIC_TOKENS].find(
+        (t) => t.address.toLowerCase() === lower,
+      );
+      if (known !== undefined) {
+        return { address: known.address, symbol: known.symbol, decimals: known.decimals };
+      }
+      return { address: sideRaw, symbol: null, decimals: null };
+    }
+    const upper = sideRaw.toUpperCase();
+    const registryAddress = TOKEN_ALIASES[upper];
+    if (registryAddress !== undefined) {
+      const meta = KNOWN_TOKEN_META.find(
+        (t) => t.address.toLowerCase() === registryAddress.toLowerCase(),
+      );
+      return meta === undefined
+        ? null
+        : { address: meta.address, symbol: meta.symbol, decimals: meta.decimals };
+    }
+    const generic = GENERIC_TOKENS.find((t) => t.symbol.toUpperCase() === upper);
+    return generic === undefined
+      ? null
+      : { address: generic.address, symbol: generic.symbol, decimals: generic.decimals };
+  };
+  const sell = one(sellRaw);
+  const buy = one(buyRaw);
+  if (sell === null || buy === null) return null;
+  if (sell.address.toLowerCase() === buy.address.toLowerCase()) return null;
+  return { sell, buy };
+}
 
 /** Symbols and 0x addresses both resolve to the same token. "ETH" and
  * "WETH" are the same leg for routing purposes. */
@@ -1825,6 +2032,170 @@ async function saveRouteReceipt(receipt: Receipt, evidence: string, ctx: RouteRe
   }
 }
 
+/** Read ERC-20 decimals()/symbol() for an address that is not in any
+ * directory, at the SAME pinned block as the quotes, failing over across
+ * the quorum-agreeing RPCs in order. If every attempt fails, diagnostics
+ * distinguish infrastructure/malformed responses (502) from explicit
+ * contract reverts or empty metadata (a scoped metadata limitation). */
+async function fetchErc20Meta(
+  rpcUrls: string[],
+  blockRef: CanonicalBlockRef,
+  address: string,
+  callTimeoutMs: number,
+  signal?: AbortSignal,
+  diag?: QuoteDiag,
+): Promise<GenericTokenMeta | null> {
+  for (const rpcUrl of rpcUrls) {
+    try {
+      const [decCall, symCall] = await Promise.all([
+        rpcCall(rpcUrl, "eth_call", [{ to: address, data: buildDecimalsCalldata() }, blockRef], callTimeoutMs, signal),
+        rpcCall(rpcUrl, "eth_call", [{ to: address, data: buildSymbolCalldata() }, blockRef], callTimeoutMs, signal),
+      ]);
+      const decimals = decodeDecimalsReturn(decCall.result);
+      const symbol = decodeSymbolReturn(symCall.result);
+      if ((decimals === null || symbol === null) && !(decCall.result === "0x" && symCall.result === "0x")) {
+        if (diag !== undefined) diag.rpcError = true;
+      }
+      if (decimals !== null && symbol !== null) return {
+        address, symbol, decimals,
+        metadataEvidence: [
+          { rpcUrl, request: decCall.request, response: decCall.response },
+          { rpcUrl, request: symCall.request, response: symCall.response },
+        ],
+      };
+    } catch (error) {
+      if (diag !== undefined && !isExecutionRevert(error)) diag.rpcError = true;
+      // Retry within the agreeing set. Infrastructure errors are not
+      // evidence of missing ERC-20 metadata if every attempt fails.
+    }
+  }
+  return null;
+}
+
+/** Fill any directory-missing metadata for a generically resolved pair. */
+async function resolveGenericSides(
+  rpcOrder: string[],
+  blockRef: CanonicalBlockRef,
+  sides: { sell: GenericPairSide; buy: GenericPairSide },
+  callTimeoutMs: number,
+  signal?: AbortSignal,
+  diag?: QuoteDiag,
+): Promise<{ sell: GenericTokenMeta; buy: GenericTokenMeta } | null> {
+  const fill = (side: GenericPairSide): Promise<GenericTokenMeta | null> =>
+    side.symbol !== null && side.decimals !== null
+      ? Promise.resolve({ address: side.address, symbol: side.symbol, decimals: side.decimals })
+      : fetchErc20Meta(rpcOrder, blockRef, side.address, callTimeoutMs, signal, diag);
+  const [sell, buy] = await Promise.all([fill(sides.sell), fill(sides.buy)]);
+  if (sell === null || buy === null) return null;
+  return { sell, buy };
+}
+
+/** Synthetic PairSpec for a generic pair. Exactly 1 unit of the sell
+ * token, all four V3 fee tiers plus both V2 routers, and SCALE-ONLY
+ * plausibility backstops: no floor (a real quote can be dust-tiny in
+ * base units — 1 SHIB is ~10 USDC base units) and a cap at a 1e18:1
+ * unit-price ratio, computed in whole-token terms so decimal asymmetry
+ * cannot filter a real quote (1 USDC is ~1e5 SHIB: in base units that
+ * ratio is 1e17, which a base-unit cap would wrongly drop). No
+ * fair-value band exists for an arbitrary pair, so selection relies on
+ * the relative median/agreement filters, disclosed in answer/source. */
+export function buildGenericSpec(
+  sell: GenericTokenMeta,
+  buy: GenericTokenMeta,
+): PairSpec {
+  // A single ERC-20 amount must fit uint256, regardless of metadata.
+  if (sell.decimals > 77) {
+    throw unprocessable("AMOUNT_UNREPRESENTABLE", "one whole sell token exceeds the uint256 amount limit; no liquidity conclusion was made");
+  }
+  const amountIn = 10n ** BigInt(sell.decimals);
+  const uint256Max = (1n << 256n) - 1n;
+  const unitPriceCap = 10n ** BigInt(18 + buy.decimals);
+  return {
+    pair: `${sell.symbol}/${buy.symbol}`,
+    sellToken: sell.address,
+    buyToken: buy.address,
+    amountIn,
+    sellLabel: `1 ${sell.symbol}`,
+    buySymbol: buy.symbol,
+    v3Fees: [100, 500, 3000, 10000],
+    v2Routers: V2_VENUES,
+    plausibleMinOut: 0n,
+    plausibleMaxOut: unitPriceCap < uint256Max ? unitPriceCap : uint256Max,
+    venueSetLabel: "Uniswap V3 (fees 100/500/3000/10000), Uniswap V2 and SushiSwap V2",
+    generic: true,
+    buyDecimals: buy.decimals,
+  };
+}
+
+/** Receipted refusal for a generically resolved pair whose venue calls
+ * ALL answered at the pinned block without any pool quoting a positive
+ * output. This is a limited route-search result, not proof of globally
+ * absent liquidity. Transport failures stay a 502. */
+async function refuseGenericNoLiquidity(
+  rawPair: string,
+  spec: PairSpec,
+  blockNumber: number,
+  ctx: RouteRequestContext,
+): Promise<ApiError> {
+  const cappedRaw = rawPair.length > 80 ? rawPair.slice(0, 80) + "…" : rawPair;
+  const summary =
+    `No route found for selling ${spec.sellLabel} for ${spec.buySymbol} on Ethereum mainnet: ` +
+    `every verified venue call (${spec.venueSetLabel}, block-pinned eth_call quotes attested by ` +
+    `a 2-of-3 RPC quorum) answered at block ${blockNumber} and none returned a pool quote with a ` +
+    `positive output through the tested direct routes. This is not proof that the tokens lack ` +
+    `liquidity elsewhere: pools, fee tiers and multi-hop routes outside this search were not ` +
+    `tested, and a revert can also reflect an unsupported token or quoter limitation. ` +
+    `This service does not invent quotes it cannot verify.`;
+  const receiptEvidence = JSON.stringify({
+    pair_raw: cappedRaw,
+    pair_raw_length: rawPair.length,
+    resolution: "no-liquidity",
+    sell_token: spec.sellToken,
+    buy_token: spec.buyToken,
+    block_number: blockNumber,
+    verified_venues: `${spec.venueSetLabel} (block-pinned eth_call quotes)`,
+  });
+  const receipt = makeReceipt(
+    INTENT,
+    `verireceipt venue set (every venue call answered at block ${blockNumber}; no pool quoted the pair)`,
+    receiptEvidence,
+    "venue calls answered on the quorum-agreeing RPCs; every quoter reverted or returned zero",
+  );
+  await saveRouteReceipt(receipt, receiptEvidence, ctx);
+  return routeUnavailable("NO_ROUTE", `no route found for pair "${cappedRaw}"`, summary, receipt);
+}
+
+/** Receipted refusal for a generic pair whose token metadata could not
+ * be read at the pinned block from any agreeing RPC. */
+async function refuseGenericMetadata(
+  rawPair: string,
+  sides: { sell: GenericPairSide; buy: GenericPairSide },
+  ctx: RouteRequestContext,
+): Promise<ApiError> {
+  const cappedRaw = rawPair.length > 80 ? rawPair.slice(0, 80) + "…" : rawPair;
+  const summary =
+    `No route found for pair "${cappedRaw}": at least one token address did not return readable ` +
+    `ERC-20 metadata (decimals()/symbol()) at the pinned Ethereum block through this service's ` +
+    `agreeing RPCs, so this service cannot determine the units needed for a quote. ` +
+    `This is a metadata limitation, not proof that the address is not an ERC-20 or lacks liquidity. ` +
+    `This service does not invent quotes it cannot verify.`;
+  const receiptEvidence = JSON.stringify({
+    pair_raw: cappedRaw,
+    pair_raw_length: rawPair.length,
+    resolution: "metadata-unreadable",
+    sell_token: sides.sell.address,
+    buy_token: sides.buy.address,
+  });
+  const receipt = makeReceipt(
+    INTENT,
+    "verireceipt generic resolution (token metadata unreadable at the pinned block)",
+    receiptEvidence,
+    "no venue was queried: token metadata unreadable",
+  );
+  await saveRouteReceipt(receipt, receiptEvidence, ctx);
+  return routeUnavailable("NO_ROUTE", `no route found for pair "${cappedRaw}"`, summary, receipt);
+}
+
 /** The receipted refusal path:
  * every refused pair — well-formed with no verifiable liquidity, or
  * malformed — is answered with the HTTP 400 unavailable envelope
@@ -1897,18 +2268,28 @@ async function handleRouteInner(
   // downstream values and receipts. A refused unregistered/malformed pair
   // uses the HTTP400 unavailable envelope only after its evidence is saved.
   const resolution = classifyPair(pair);
-  if (resolution.kind !== "registered") {
+  let spec: PairSpec | undefined;
+  let genericSides: { sell: GenericPairSide; buy: GenericPairSide } | null = null;
+  if (resolution.kind === "registered") {
+    spec = resolution.spec;
+  } else {
     if (!noRouteEnvelopeEnabled()) {
       throw unprocessable(
         "INVALID_PAIR",
         `unsupported pair "${pair}"; supported pairs: ${SUPPORTED_PAIRS.join(", ")}`,
       );
     }
-    // Refusals throw AFTER the receipt is minted and persisted (the
-    // same phantom-receipt guard as the quote path applies).
-    throw await refusePair(pair, resolution, ctx);
+    // Generic resolution (2026-11-22): a well-formed pair outside the
+    // verified registry first resolves through the generic directory and
+    // on-chain metadata; only pairs that cannot resolve keep the
+    // receipted refusal path.
+    genericSides = parseGenericPairSides(pair);
+    if (genericSides === null) {
+      // Refusals throw AFTER the receipt is minted and persisted (the
+      // same phantom-receipt guard as the quote path applies).
+      throw await refusePair(pair, resolution, ctx);
+    }
   }
-  const spec = resolution.spec;
   if (rpcUrls.length < 2) {
     throw upstreamUnavailable(
       "RPC_CONFIG",
@@ -2190,6 +2571,28 @@ async function handleRouteInner(
     );
   }
   const callTimeoutMs = venueCallTimeoutMs(ctx);
+  // Generic pairs: fill any directory-missing metadata at the pinned
+  // block (same quorum-agreeing RPCs, same canonical hash), then build
+  // the synthetic spec. Unreadable metadata is an honest refusal, never
+  // an invented quote.
+  let genericMeta: { sell: GenericTokenMeta; buy: GenericTokenMeta } | null = null;
+  if (genericSides !== null) {
+    const metadataDiag: QuoteDiag = { rpcError: false };
+    genericMeta = await resolveGenericSides(rpcOrder, blockRef, genericSides, callTimeoutMs, ctx.signal, metadataDiag);
+    if (genericMeta === null) {
+      if (metadataDiag.rpcError) {
+        throw upstreamUnavailable("METADATA_RPC_FAILED", "token metadata could not be verified because RPC requests failed; no liquidity conclusion was made");
+      }
+      throw await refuseGenericMetadata(pair, genericSides, ctx);
+    }
+    spec = buildGenericSpec(genericMeta.sell, genericMeta.buy);
+  }
+  if (spec === undefined) {
+    // Unreachable: classification assigns spec or throws; the guard keeps
+    // the invariant explicit instead of relying on a non-null assertion.
+    throw upstreamUnavailable("INTERNAL", "pair resolution produced no spec");
+  }
+  const genericDiag: QuoteDiag = { rpcError: false };
   const curve = spec.curve3pool;
   const venueAttempts: Array<{
     offset: number;
@@ -2198,12 +2601,12 @@ async function handleRouteInner(
     {
       offset: 0,
       quoter: (rpcUrl, signal) =>
-        quoteV3AtBlock(rpcUrl, blockRef, spec.sellToken, spec.buyToken, spec.amountIn, spec.v3Fees, callTimeoutMs, signal),
+        quoteV3AtBlock(rpcUrl, blockRef, spec.sellToken, spec.buyToken, spec.amountIn, spec.v3Fees, callTimeoutMs, signal, genericDiag),
     },
     ...spec.v2Routers.map((venue, index) => ({
       offset: index + 1,
       quoter: (rpcUrl: string, signal?: AbortSignal) =>
-        quoteV2AtBlock(rpcUrl, blockRef, venue.router, venue.name, spec.amountIn, [spec.sellToken, spec.buyToken], callTimeoutMs, signal),
+        quoteV2AtBlock(rpcUrl, blockRef, venue.router, venue.name, spec.amountIn, [spec.sellToken, spec.buyToken], callTimeoutMs, signal, genericDiag),
     })),
     ...(curve === undefined
       ? []
@@ -2246,6 +2649,12 @@ async function handleRouteInner(
     }
   });
   if (quotes.length === 0) {
+    // Generic pairs: when every venue call ANSWERED (all reverts/zero,
+    // no transport failure), zero quotes is a proven no-liquidity
+    // finding — refuse honestly with a receipt instead of a 502.
+    if (spec.generic === true && !genericDiag.rpcError) {
+      throw await refuseGenericNoLiquidity(pair, spec, blockNumber, ctx);
+    }
     throw upstreamUnavailable(
       "ALL_QUOTERS_FAILED",
       `all quoters failed at Ethereum block ${blockNumber}; no quote returned`,
@@ -2353,13 +2762,23 @@ async function handleRouteInner(
   }
   const degraded = degradedReasons.length > 0;
   const confidence = plausibleQuotes.length >= 2 && !degraded ? 1.0 : 0.9;
-  const answer = explainRouteQuote({
+  let answer = explainRouteQuote({
     blockNumber, venue: best.venue, amountOut: best.amountOut,
     survivingQuotes: plausibleQuotes.length, degradedReasons,
     sellLabel: spec.sellLabel, buySymbol: spec.buySymbol,
     venueSetLabel: spec.venueSetLabel,
+    buyDecimals: spec.buyDecimals,
     quotes: plausibleQuotes.map((q) => ({ venue: q.venue, amountOut: q.amountOut })),
   });
+  if (spec.generic === true) {
+    answer +=
+      ` No fair-value band is published for this pair: quote selection used relative ` +
+      `cross-venue agreement only (median rule and ±5% agreement band), with scale-only ` +
+      `plausibility bounds [${spec.plausibleMinOut}, ${spec.plausibleMaxOut}] ${spec.buySymbol} ` +
+      `base units as the absurdity backstop, and the token metadata (symbol/decimals) came ` +
+      `from this service's verified directory or the contracts' own decimals()/symbol() ` +
+      `calls at the pinned block.`;
+  }
 
   // 4. Receipt over the exact winning quoter call, pinned to the block.
   const receiptEvidence = JSON.stringify({
@@ -2372,6 +2791,15 @@ async function handleRouteInner(
     amount_in_label: spec.sellLabel,
     request: best.request,
     response: best.response,
+    ...(genericMeta === null
+      ? {}
+      : {
+          generic_resolution: {
+            sell_token: genericMeta.sell,
+            buy_token: genericMeta.buy,
+            metadata_source: "verified directory or on-chain decimals()/symbol() at the pinned block",
+          },
+        }),
   });
   const receipt = makeReceipt(INTENT, winningRpc, receiptEvidence, votes);
 
@@ -2393,6 +2821,7 @@ async function handleRouteInner(
     INTENT,
     {
       amount_out: Number(best.amountOut),
+      amount_out_base_units: best.amountOut.toString(),
       block_number: blockNumber,
       winning_venue: best.venue,
     },
@@ -2406,10 +2835,16 @@ async function handleRouteInner(
         "(quorum-pinned); each venue quote comes from a single RPC — quorum attests " +
         "block number+hash agreement only; the winner is the max quote within ±5% " +
         `of the cross-venue median after this pair's plausibility band ` +
-        `[${spec.plausibleMinOut}, ${spec.plausibleMaxOut}] ${spec.buySymbol} base units, and confidence ` +
+        `[${spec.plausibleMinOut}, ${spec.plausibleMaxOut}] ${spec.buySymbol} base units` +
+        (spec.generic === true
+          ? " (scale-only backstops: no fair-value band exists for this pair; selection relied on relative agreement alone)"
+          : "") +
+        ", and confidence " +
         `is 1.0 only when all ${expectedVenues} venues this pair registers produced plausible quotes with no ` +
         "quote dropped by the filter, and reflects venue count, family coverage " +
         "and cross-venue agreement" +
+        "; amount_out is the JSON-number rendering (approximate above 2^53 base units)" +
+        "; amount_out_base_units is the exact integer base-unit string" +
         (degraded ? `; degraded: ${degradedReasons.join("; ")}` : ""),
     },
   );
