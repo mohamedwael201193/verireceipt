@@ -237,3 +237,70 @@ unreadable-storage checks, protect the whole screen, not only the alert wording.
 
 A present empty recovery value is malformed, not an absent record. Only a null
 storage result enters the no-record state; empty strings keep recovery on HOLD.
+
+
+## Closed one-shot purchasing gate (offline increment)
+
+HTTP buyer registration now requires `BUYER_OPERATOR_ACCESS_HASH` (SHA-256 of a
+64-character lowercase-hex high-entropy operator token) and
+`BUYER_OPERATOR_ACCESS_EXPIRES_AT` (ISO timestamp). Initial access expires within
+one hour. These are not configured by this work. No token or payer key was
+created. The token must later be collected/filled through an approved secret
+route, never chat, a URL, source control or a browser storage field. The UI sends
+it once over same-origin POST and clears its in-memory input after success.
+
+GET session no longer mints public cookies. POST session requires exact origin
+and the operator token, pins an authorized owner session in SQLite, and returns
+the existing Secure/HttpOnly/SameSite=Strict cookie. All buyer routes, including
+the directly reachable backend, require an authorized owner session. Incorrect,
+missing and expired access is refused. At most ten owner sessions can be enrolled;
+there is no enrollment after purchase, close or expiry. Existing authorized owner
+reads last through their job's 24-hour retention, independently of the shorter
+purchasing access expiry.
+
+One-shot mode is immutable for a payer authority. After an authorized free preview,
+a separately authorized operator may run the local `scripts/arm-buyer.cjs` command
+against the existing canonical private database with the exact payer, plan ID,
+plan hash and expiry. It loads no runtime, wallet or signer and has no network.
+There is no HTTP arm/reset route. It arms only an existing authorized-owner plan,
+with an exact 10,000-micro test-USDC lifetime ceiling and expiry bounded by both
+plan and access windows. Plan creation is not arming; an unarmed buy is refused.
+
+Reservation consumes the latch in the same IMMEDIATE transaction as shared budget
+and payer lease. A pre-sign checkpoint rechecks that the exact consumed latch,
+payer-bound database, plan/owner/hash, amount and expiry still agree. Repeated
+same-plan requests remain idempotent reads of the existing execution. No new plan,
+success, not-signed result, uncertainty, timeout, restart, changed configuration,
+48-hour purge or manual close can restore the single use. Four simultaneous real
+SQLite workers are covered. Permanent spent/disarmed state remains after normal
+payload/tombstone expiry; plan/owner bindings are removed after 48 hours. Never
+replace/restore the authority or use another database to evade this control.
+
+Purchase closure is not `BUYER_ENABLED=0`, which still removes all routes.
+Use the local close command, or restart with `BUYER_ENABLED=1` and
+`BUYER_READ_ONLY=1` and the same database/payer/access-hash/access-expiry values.
+Read-only startup permanently closes purchasing and does not call runtime key
+configuration. It needs no payer private key. Owner-bound job/evidence and
+read-only delivery follow-ups remain mounted until normal retention expiry.
+It cannot revoke signatures or refund exposure. Do not interrupt active work
+unnecessarily; close first and let the existing bounded execution reconcile.
+The access configuration is immutable even after expiry to preserve restarts.
+
+The lower-level generic store tests still exercise the broader shared daily
+budget mechanics on isolated databases without a one-shot row. Every HTTP buyer
+registration must install/preserve one-shot mode before serving requests; there
+is no production HTTP opt-out. The joined browser rehearsal now performs a
+synthetic operator bootstrap and local arm before its throw-only signer run.
+This is still offline code only, not a grant to arm a real payer or activate a host.
+
+
+Local operator command syntax after an independently approved actual preview:
+`node scripts/arm-buyer.cjs status|close|arm DATABASE PAYER [PLAN_ID PLAN_HASH EXPIRES_ISO]`.
+Use the exact reviewed canonical private database, not a new file. The command
+refuses missing/symlink/nonprivate paths and does not create an authority. The
+expiry also caps the authorization's `valid_before`; leave sufficient approved
+window for the existing 100-second authorization lifetime, or the pre-sign check
+will deliberately HOLD and the single reservation remains consumed. Re-arming a
+replacement is never an automatic fix. Initial deployment with a used generic
+payer authority is refused. Read-only restart uses the same persisted access
+configuration even when its purchase window has expired.

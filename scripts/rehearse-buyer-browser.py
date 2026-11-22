@@ -69,9 +69,13 @@ try:
  call('Page.enable');call('Fetch.enable',{'patterns':[{'urlPattern':'*','requestStage':'Request'}]})
  call('Emulation.setDeviceMetricsOverride',{'width':1440,'height':1100,'deviceScaleFactor':1,'mobile':False})
  call('Page.navigate',{'url':BASE+'/buyer'})
- wait('!!document.querySelector(".buyer-empty") && !document.querySelector(".buyer-card button").disabled')
+ wait('!!document.querySelector("input[type=password]") && !!document.querySelector(".buyer-empty")')
+ evaluate('(()=>{const input=document.querySelector("input[type=password]");const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set;setter.call(input,"'+('d'*64)+'");input.dispatchEvent(new Event("input",{bubbles:true}));})()')
+ wait('![...document.querySelectorAll("button")].find(b=>b.textContent==="Authorize operator session").disabled')
+ click('Authorize operator session');wait('!document.querySelector("input[type=password]")')
  click('Prepare free preview');wait('!!document.querySelector(".buyer-primary")')
  assert evaluate('document.querySelector(".buyer-primary").textContent')=='Buy once for 0.01 test USDC'
+ json.load(urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8771/bridge',data=json.dumps({'command':'arm'}).encode(),headers={'Content-Type':'application/json'})))
  click('Buy once for 0.01 test USDC');wait('!!document.querySelector("#buyer-result")')
  wait('document.querySelector("#buyer-result").textContent.includes("uncertain")')
  cookies=call('Network.getCookies',{'urls':[BASE+'/buyer']})['cookies']
@@ -97,6 +101,10 @@ try:
  height=evaluate('Math.ceil(document.documentElement.scrollHeight)')
  shot=call('Page.captureScreenshot',{'format':'png','captureBeyondViewport':True,'clip':{'x':0,'y':0,'width':1440,'height':height,'scale':1}})
  (OUT/'joined-rehearsal.png').write_bytes(base64.b64decode(shot['data']))
+ call('Emulation.setDeviceMetricsOverride',{'width':390,'height':1100,'deviceScaleFactor':1,'mobile':True})
+ height=evaluate('Math.ceil(document.documentElement.scrollHeight)')
+ shot=call('Page.captureScreenshot',{'format':'png','captureBeyondViewport':True,'clip':{'x':0,'y':0,'width':390,'height':height,'scale':1}})
+ (OUT/'joined-rehearsal-mobile.png').write_bytes(base64.b64decode(shot['data']))
  print('PASS: real browser cookie/session -> routes -> SQLite checkpoint -> real ranked runtime -> deliberate no-sign HOLD -> refresh GET -> evidence. Zero signatures, zero paid transport calls.')
  print('Artifacts:',OUT)
 finally:
