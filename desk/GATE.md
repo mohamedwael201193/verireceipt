@@ -101,7 +101,7 @@ deep-copied before awaits, so a callback cannot change its rule mid-run.
 4. **Break it** - ask for a venue whose verified value cannot satisfy the
    precommitted floor (`--set protocol=…`) and the outcome is HOLD naming
    the rule; tamper with any evidence and the failed checks are named.
-5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (495 tests across 32 files,
+5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (499 tests across 32 files,
    no network, no key); the gate flow is covered with mocked nodes including
    tamper cases.
 
