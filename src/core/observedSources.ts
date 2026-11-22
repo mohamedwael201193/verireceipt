@@ -39,6 +39,7 @@ function timestamp(x: string): number { const n = Date.parse(x); if (!Number.isF
     throw new Error('invalid source timestamp'); return n; }
 function approved(a: SourceApproval): boolean {
     try {
+        // ownerRiskAcceptance is checked for presence only; its authenticity is established out-of-band on the trusted channel. A passing approved() is never citable as proof of approval.
         return ((a.commercialUse === true && a.redistribution === true) || (a.ownerRiskAcceptance?.scope === 'testnet-hackathon' && !!a.ownerRiskAcceptance.sourceMessageId && Number.isFinite(Date.parse(a.ownerRiskAcceptance.acceptedAt)))) && new URL(a.termsUrl).protocol === 'https:' && Number.isFinite(Date.parse(a.checkedAt));
     }
     catch {
