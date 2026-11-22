@@ -562,6 +562,16 @@ export function resolveTvlTarget(
       confidence: 0.95, parentId: id,
     };
   }
+  // Exact historical name verified in the live catalog on 2026-11-22:
+  // sky-lending.previousNames includes MakerDAO. This identifies that
+  // CDP protocol, not all children of parent#maker or the whole Sky ecosystem.
+  // https://api.llama.fi/protocols
+  const legacySlug = canonical === 'makerdao' ? 'sky-lending' : undefined;
+  if (legacySlug) {
+    const matches = protocols.filter((p) => p.slug === legacySlug && !isTvlLessPlaceholder(p));
+    if (matches.length !== 1) return null;
+    return { kind: 'protocol', slug: matches[0].slug, displayName: matches[0].name, confidence: 0.9 };
+  }
   // (5) Exact protocol symbol. TVL-less placeholders are skipped
   // unconditionally: they carry no reading, so they must never win a
   // symbol match (B1). Largest TVL wins among symbol matches (M2).

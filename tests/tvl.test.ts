@@ -4619,3 +4619,21 @@ describe('TVL process memory safety', () => {
     expect(fills).toBe(1);
   });
 });
+
+
+describe('verified MakerDAO legacy identity', () => {
+  const sky = { slug: 'sky-lending', name: 'Sky Lending', symbol: 'SKY', tvl: 2682107078.861777, category: 'CDP', parentProtocol: 'parent#maker' };
+  it.each(['MakerDAO', 'Maker DAO', ' makerdao '])('resolves %s to the source-identified former protocol', (query) => {
+    expect(resolveTvlTarget(query, [sky], [])).toMatchObject({ kind: 'protocol', slug: 'sky-lending', displayName: 'Sky Lending' });
+  });
+  it('does not substitute a sibling or invent a total if the target disappears', () => {
+    expect(resolveTvlTarget('MakerDAO', [{ ...sky, slug: 'sky-money', name: 'Sky Money' }], [])).toBeNull();
+  });
+  it('does not turn the parent Maker request into its largest child', () => {
+    expect(resolveTvlTarget('Maker', [sky], [])).toMatchObject({ slug: 'maker', parentId: 'parent#maker' });
+  });
+  it('preserves exact current-name and version scope', () => {
+    expect(resolveTvlTarget('sky-lending', [sky], [])).toMatchObject({ slug: 'sky-lending', confidence: 1 });
+    expect(resolveTvlTarget('MakerDAO V3', [sky], [])).toBeNull();
+  });
+});
