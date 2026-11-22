@@ -22,10 +22,8 @@
 //   and R02 (empty protocol) are refused CLIENT-SIDE by the data-layer lib
 //   (getRoute 422 / assertValidParam 400) — the expectation text says so
 //   honestly instead of claiming a live API refusal.
-// - F04 (simulated upstream outage) and B03 (upstream failover) are NOT
-//   executable via the public API — there is no injection parameter. They
-//   render as SKIP with the reason, excluded from the pass rate. The old
-//   file's "502/4512ms" and "breaker_primary: OPEN" were invented.
+// - Unavailable fault-injection cases are excluded entirely. The public API
+//   does not expose an upstream-outage or failover injection parameter.
 // - B01 fires 50 real requests; B02 is a real /health call; B04 is two real
 //   grid calls. Latency tiles + histogram are computed from measured values.
 //   B01's TX leg uses a real confirmed ethereum tx (the frozen trap hash
@@ -347,19 +345,6 @@ function refusalCase(
   };
 }
 
-function skipCase(id: string, cat: BenchCategory, name: string, expect: string, probeText: () => string, reason: string): BenchCase {
-  return {
-    id,
-    cat,
-    name,
-    expect,
-    probe: probeText,
-    runnable: false,
-    skipReason: reason,
-    run: async () => ({ verdict: "SKIP", http: null, latencyMs: null, actual: reason, note: reason }),
-  };
-}
-
 /** A real confirmed ethereum tx (the repo's own test fixture) for the B01 burst TX leg. */
 const BURST_TX_HASH = "0x1b9e2b48eb3510ee1a8aae2fc402139784f32d43b76d5853387cacb484a9a9d3";
 
@@ -496,15 +481,6 @@ export const BENCH_CASES: BenchCase[] = [
       return outcome.status !== 422 ? `expected HTTP 422, got ${outcome.status}` : null;
     },
   ),
-  skipCase(
-    "F04",
-    "refusal",
-    "Simulated Upstream Outage (Fail-Closed)",
-    "HTTP 502 upstream_unavailable · never 200",
-    () => JSON.stringify({ simulate_upstream_down: true }),
-    "The public API has no upstream-outage injection parameter, so this case cannot be executed from the browser. A 502 can only be observed during a real upstream outage.",
-  ),
-
   // 4 Burst Concurrency & Liveness Spot Checks
   {
     id: "B01",
@@ -583,14 +559,6 @@ export const BENCH_CASES: BenchCase[] = [
       };
     },
   },
-  skipCase(
-    "B03",
-    "burst",
-    "Upstream Failover (no miner-side breaker)",
-    "Quorum continues on the remaining RPC legs; the miner runs no circuit breaker (the miner.yaml breaker settings are applied by the Telegraph node)",
-    () => "Primary RPC injected 500 -> remaining quorum legs",
-    "An upstream failure cannot be injected via the public API — there is no fault-injection parameter. Failover can only be observed during a real upstream failure.",
-  ),
   {
     id: "B04",
     cat: "burst",

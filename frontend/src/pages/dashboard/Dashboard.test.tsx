@@ -212,11 +212,11 @@ describe("Dashboard page", () => {
     render(<Dashboard />);
     const benchTab = screen.getAllByRole("button", { name: "03 Benchmarks" })[0];
     fireEvent.click(benchTab);
-    fireEvent.click(screen.getByRole("button", { name: /Run 24-Case Adversarial Suite/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Run 22-Case Adversarial Suite/ }));
     // 12 runnable (T11/T12 on base + 4 regressions + 3 refusals + 3 burst);
-    // T01–T10 are honest SKIP (base-sepolia-only), F04/B03 are SKIP.
+    // T01–T10 are honest SKIP (base-sepolia-only). No injection placeholders.
     expect(await screen.findByText("12 / 12", {}, { timeout: 20000 })).toBeTruthy();
-    expect(screen.getByText(/12 skipped \(not executable via public API\)/)).toBeTruthy();
+    expect(screen.getByText(/10 skipped \(not executable via public API\)/)).toBeTruthy();
     // T11's expanded row shows the probe actually executed (chain base).
     fireEvent.click(screen.getByText("T11"));
     expect(await screen.findByText(/"chain":"base"/, {}, { timeout: 5000 })).toBeTruthy();
@@ -231,10 +231,10 @@ describe("Dashboard page", () => {
     render(<Dashboard />);
     const benchTab = screen.getAllByRole("button", { name: "03 Benchmarks" })[0];
     fireEvent.click(benchTab);
-    fireEvent.click(screen.getByRole("button", { name: /Run 24-Case Adversarial Suite/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Run 22-Case Adversarial Suite/ }));
     expect(await screen.findByText("Cancel suite", {}, { timeout: 5000 })).toBeTruthy();
     fireEvent.click(screen.getByText("Cancel suite"));
-    await waitFor(() => expect(screen.getByRole("button", { name: /Run 24-Case/ })).toBeEnabled(), { timeout: 5000 });
+    await waitFor(() => expect(screen.getByRole("button", { name: /Run 22-Case/ })).toBeEnabled(), { timeout: 5000 });
   }, 30000);
 
   it("ledger filters actually filter rows", () => {
@@ -454,7 +454,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     // wearing no green badge.
     const benchTab = screen.getAllByRole("button", { name: "03 Benchmarks" })[0];
     fireEvent.click(benchTab);
-    fireEvent.click(screen.getByRole("button", { name: /Run 24-Case Adversarial Suite/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Run 22-Case Adversarial Suite/ }));
     expect(await screen.findByText("0 / 12", {}, { timeout: 60000 })).toBeTruthy();
     const f01Row = screen.getByText("F01").closest("tr");
     const f01Http = [...(f01Row?.querySelectorAll(".badge") ?? [])].find((b) => b.textContent === "200");
@@ -570,7 +570,7 @@ describe("J2 R3 — HTTP-200 refusals are never displayed as verified", () => {
     expect(answeredCard?.textContent).toContain("4 / 6");
     // Benchmarks: a PASS with http 200 keeps its green badge (T11).
     fireEvent.click(screen.getAllByRole("button", { name: "03 Benchmarks" })[0]);
-    fireEvent.click(screen.getByRole("button", { name: /Run 24-Case Adversarial Suite/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Run 22-Case Adversarial Suite/ }));
     expect(await screen.findByText("12 / 12", {}, { timeout: 20000 })).toBeTruthy();
     const t11Row = screen.getByText("T11").closest("tr");
     const t11Http = [...(t11Row?.querySelectorAll(".badge") ?? [])].find((b) => b.textContent === "200");

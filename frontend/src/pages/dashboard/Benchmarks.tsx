@@ -2,10 +2,10 @@
 //
 // Replaces the simulated runBenchmarkSuite (DESIGN-SPEC §6 D-07/D-08/D-09):
 // rows go QUEUED → RUNNING → PASS/FAIL/SKIP only when the live call settles,
-// the progress bar is completed/24, and every tile + the histogram are
-// computed from measured values. Nothing passes on a timer. Two cases are
-// SKIP (F04, B03) because the public API has no fault-injection parameter —
-// see benchmarks.ts. The suite runs sequentially to stay gentle on the miner.
+// the progress bar uses the actual case count, and every tile + the histogram are
+// computed from measured values. Nothing passes on a timer. Unsupported
+// chain cases remain honest SKIPs. Unavailable injection cases are omitted.
+// The suite runs sequentially to stay gentle on the miner.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BENCH_CASES, BENCH_RUNNABLE_COUNT, BENCH_SKIPPED_COUNT, BENCH_TOTAL_COUNT, catLabel, type BenchResult } from "./benchmarks";
@@ -211,7 +211,7 @@ export default function Benchmarks({ onRecord, showToast }: BenchmarksProps) {
           <div className="kpi-sub">
             {hasRun
               ? `${failed} failed · ${BENCH_SKIPPED_COUNT} skipped (not executable via public API)`
-              : `${BENCH_RUNNABLE_COUNT} runnable · ${BENCH_SKIPPED_COUNT} skipped (T01–T10 base-sepolia, F04, B03)`}
+              : `${BENCH_RUNNABLE_COUNT} runnable · ${BENCH_SKIPPED_COUNT} skipped (T01–T10 base-sepolia)`}
           </div>
         </div>
         <div className="card" style={{ padding: "16px 18px" }}>
