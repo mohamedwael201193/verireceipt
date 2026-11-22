@@ -3625,7 +3625,7 @@ describe('bundled seed file (A5)', () => {
     expect(out.tvl_usd).toBe(15121752429);
   });
 
-  it('the COMMITTED seed file resolves the 3 keys and holds exactly 5 fields per protocol', () => {
+  it('the COMMITTED seed file resolves the 3 keys and retains scalar fields plus exact parent IDs', () => {
     const seed = JSON.parse(
       readFileSync(
         resolve(process.cwd(), 'src', 'handlers', 'tvl-protocols-seed.json'),
@@ -3640,13 +3640,10 @@ describe('bundled seed file (A5)', () => {
     expect(seed.protocols.length).toBeGreaterThan(9000);
     expect(seed.chains.length).toBeGreaterThan(400);
     for (const entry of seed.protocols) {
-      expect(Object.keys(entry).sort()).toEqual([
-        'category',
-        'name',
-        'slug',
-        'symbol',
-        'tvl',
+      expect(Object.keys(entry).filter((k) => k !== 'parentProtocol').sort()).toEqual([
+        'category', 'name', 'slug', 'symbol', 'tvl',
       ]);
+      if (entry.parentProtocol !== undefined) expect(entry.parentProtocol).toMatch(/^parent#[A-Za-z0-9][A-Za-z0-9._-]*$/);
     }
     const bySlug = new Map(seed.protocols.map((p) => [p.slug as string, p]));
     expect(bySlug.get('aave-v3')).toBeDefined();
@@ -4456,6 +4453,99 @@ describe('atomic disk writes (A5-fix, J2 N1)', () => {
         'tvl',
       ]);
     });
+  });
+});
+
+
+describe('catalog parent protocol resolution (epoch-35 Curve Finance regression)', () => {
+  // Exact source rows and response body fetched 2026-11-22; no invented total.
+  const parents = JSON.parse(readFileSync(resolve(process.cwd(), 'tests/fixtures/tvl/parent-protocols.json'), 'utf8'));
+  const total = readFileSync(resolve(process.cwd(), 'tests/fixtures/tvl/curve-finance-tvl.txt'), 'utf8');
+  const curve = parents.filter((p: { parentProtocol: string }) => p.parentProtocol === 'parent#curve-finance');
+  const transport = (calls: string[]) => (async (url: string | URL | Request) => {
+    const u = String(url); calls.push(u);
+    return u === 'https://api.llama.fi/tvl/curve-finance'
+      ? new Response(total) : new Response('unavailable in recorded transport', { status: 503 });
+  }) as typeof fetch;
+
+  for (const input of ['Curve Finance', 'curve-finance', 'CurveFinance', '  CURVE  FINANCE  ']) {
+    it(`resolves ${input} to the real catalog parent, never Curve DEX`, () => {
+      expect(resolveTvlTarget(input, parents, [])).toMatchObject({
+        kind: 'protocol', slug: 'curve-finance', parentId: 'parent#curve-finance',
+      });
+    });
+  }
+  it('keeps explicit children and versions separate from parent aggregates', () => {
+    for (const [q, slug] of [['Curve DEX', 'curve-dex'], ['Aave V3', 'aave-v3'], ['Uniswap V3', 'uniswap-v3']]) {
+      expect(resolveTvlTarget(q, parents, [])).toMatchObject({ kind: 'protocol', slug });
+      expect(resolveTvlTarget(q, parents, [])).not.toHaveProperty('parentId');
+    }
+  });
+  it('keeps exact dotted and mixed-case catalog IDs without inventing aliases', () => {
+    const catalog = [{ slug: 'test-child', name: 'Test Child', tvl: 1, parentProtocol: 'parent#stake.link' }];
+    expect(resolveTvlTarget('stake.link', catalog, [])).toMatchObject({ slug: 'stake.link', parentId: 'parent#stake.link' });
+    expect(resolveTvlTarget('stake link', catalog, [])).toBeNull();
+    expect(resolveTvlTarget('Edge', [{ ...catalog[0], parentProtocol: 'parent#Edge' }], [])).toMatchObject({ slug: 'Edge', parentId: 'parent#Edge' });
+  });
+  it('refuses ambiguous canonical parent identities rather than choosing list order', () => {
+    const catalog = [
+      { slug: 'first-child', name: 'First Child', tvl: 1, parentProtocol: 'parent#sample-v3' },
+      { slug: 'second-child', name: 'Second Child', tvl: 1, parentProtocol: 'parent#sample3' },
+    ];
+    expect(resolveTvlTarget('sample3', catalog, [])).toBeNull();
+    expect(resolveTvlTarget('sample3', [...catalog].reverse(), [])).toBeNull();
+  });
+  it('retains exact parent IDs through stripping without keeping bulky fields', () => {
+    const stripped = stripProtocolEntries(parents);
+    expect(stripped.find((p) => p.slug === 'curve-dex')?.parentProtocol).toBe('parent#curve-finance');
+    expect(resolveTvlTarget('Curve Finance', stripped, [])).toMatchObject({ slug: 'curve-finance' });
+    expect(stripProtocolEntry({ ...curve[0], parentProtocol: 'parent#../invalid' })).not.toHaveProperty('parentProtocol');
+    expect(resolveTvlTarget('Nonexistent Finance', stripped, [])).toBeNull();
+  });
+  it('reads the authoritative parent total, with a receipt and no child-total cross-check', async () => {
+    __seedTvlCachesForTests(parents, CHAINS_FIXTURE);
+    const calls: string[] = [];
+    const out = await handleTvl({ protocol: 'Curve Finance' }, { fetchImpl: transport(calls) });
+    expect(out.protocol_or_chain).toBe('curve-finance');
+    expect(out.tvl_usd).toBe(Number(total));
+    expect(out.tvl_usd).not.toBe(curve.find((p: { slug: string }) => p.slug === 'curve-dex').tvl);
+    expect(out.answer).toContain('Parent protocol aggregate');
+    expect(out.answer).toContain('no timestamp or catalog parent-total cross-check');
+    expect(out.receipt).toMatchObject({ upstream_url: 'https://api.llama.fi/tvl/curve-finance' });
+    expect(calls).not.toContain('https://api.llama.fi/tvl/curve-dex');
+    expect(calls).not.toContain('https://api.llama.fi/protocols');
+    await __awaitTvlProtocolFillForTests();
+  });
+  it('preserves parent metadata in a persisted disk cache', async () => {
+    await __seedTvlDiskCacheForTests(parents, CHAINS_FIXTURE, Date.now());
+    __clearTvlCachesForTests();
+    const out = await handleTvl({ protocol: 'Curve Finance' }, { fetchImpl: transport([]) });
+    expect(out.protocol_or_chain).toBe('curve-finance');
+    expect(out.tvl_usd).toBe(Number(total));
+    await __awaitTvlProtocolFillForTests();
+  });
+  for (const mode of ['memory', 'disk']) {
+    it(`upgrades old stripped ${mode} catalog metadata without a list download`, async () => {
+      const old = parents.map(({ parentProtocol: _, ...p }: { parentProtocol: string }) => p);
+      if (mode === 'memory') __seedTvlCachesForTests(old, CHAINS_FIXTURE);
+      else { await __seedTvlDiskCacheForTests(old, CHAINS_FIXTURE, Date.now()); __clearTvlCachesForTests(); }
+      const path = join(prevTvlTestDir as string, 'parent-seed.json');
+      writeFileSync(path, JSON.stringify({ fetched_at: Date.now(), protocols: parents, chains: CHAINS_FIXTURE }));
+      __setTvlSeedPathForTests(path); __setTvlSeedEnabledForTests(true);
+      const calls: string[] = [];
+      const out = await handleTvl({ protocol: 'Curve Finance' }, { fetchImpl: transport(calls) });
+      expect(out.protocol_or_chain).toBe('curve-finance');
+      expect(out.tvl_usd).toBe(Number(total));
+      expect(calls).not.toContain('https://api.llama.fi/protocols');
+      await __awaitTvlProtocolFillForTests();
+    });
+  }
+  it('does not revive expired parent metadata from a bundled seed', async () => {
+    __seedTvlCachesForTests(parents.map(({ parentProtocol: _, ...p }: { parentProtocol: string }) => p), CHAINS_FIXTURE);
+    const path = join(prevTvlTestDir as string, 'old-parent-seed.json');
+    writeFileSync(path, JSON.stringify({ fetched_at: Date.now() - 25*3600_000, protocols: parents, chains: CHAINS_FIXTURE }));
+    __setTvlSeedPathForTests(path); __setTvlSeedEnabledForTests(true);
+    await expect(handleTvl({ protocol: 'Curve Finance' }, { fetchImpl: transport([]) })).rejects.toMatchObject({ code: 'PROTOCOL_NOT_FOUND' });
   });
 });
 

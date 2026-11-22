@@ -170,6 +170,8 @@ export interface TvlDeps {
 interface ProtocolEntry {
   slug: string;
   name: string;
+  /** Exact catalog relationship, e.g. parent#curve-finance. Never inferred. */
+  parentProtocol?: string | null;
   symbol?: string | null;
   /** Current TVL from the /protocols list (null when the entry has none). */
   tvl?: number | null;
@@ -179,7 +181,7 @@ interface ProtocolEntry {
    * Raw-list-only per-chain split (A5-fix, 2026-11-20): the live
    * /protocols entry carries `chainTvls` (current per-chain TVL). It is
    * NEVER stored — stripProtocolEntry drops it (the stripped form stays
-   * exactly the five fields above) — it is only read, before stripping,
+   * the five scalar fields plus the exact parent ID) — it is only read, before stripping,
    * to derive the lists chain-split map (dominant chain TVL per slug).
    * Entries served from disk/seed therefore carry no chainTvls; the
    * background /protocol fill covers those slugs instead.
@@ -326,7 +328,7 @@ const LATEST_MAX_AGE_S = 7 * 24 * 60 * 60;
 // ---------------------------------------------------------------------------
 
 export type TvlTarget =
-  | { kind: 'protocol'; slug: string; displayName: string; confidence: number }
+  | { kind: 'protocol'; slug: string; displayName: string; confidence: number; parentId?: string }
   | { kind: 'chain'; chain: string; displayName: string; confidence: number };
 
 /**
@@ -543,6 +545,21 @@ export function resolveTvlTarget(
       slug: canonicalMatch.slug,
       displayName: canonicalMatch.name,
       confidence: 0.9,
+    };
+  }
+  // Exact catalog parent identity, before symbol/prefix approximations.
+  // /protocols lists children, not their aggregate rows. Never substitute
+  // the largest child for a parent or derive a sum: read the parent endpoint.
+  const parentIds = [...new Set(protocols.map((p) => validParentId(p.parentProtocol)))];
+  const parentMatches = parentIds.filter((id): id is string =>
+    id !== null && canonicalKey(id.slice('parent#'.length)) === canonical);
+  if (parentMatches.length > 1) return null; // ambiguous source IDs, never list-order selection
+  if (parentMatches.length === 1) {
+    const id = parentMatches[0];
+    const slug = id.slice('parent#'.length);
+    return {
+      kind: 'protocol', slug, displayName: slug.replace(/-/g, ' '),
+      confidence: 0.95, parentId: id,
     };
   }
   // (5) Exact protocol symbol. TVL-less placeholders are skipped
@@ -909,10 +926,10 @@ function isChainList(data: unknown): data is ChainEntry[] {
 }
 
 /**
- * Strip a /protocols list entry to exactly the five fields the resolver
+ * Strip a /protocols list entry to the scalar fields and exact parent metadata the resolver
  * reads (A5, 2026-11-20): { slug, name, symbol, tvl, category }. The live
  * /protocols body is ~9.66 MB with ~54 keys per entry (description,
- * methodology, chainTvls, tokenBreakdowns, logo, ...); only these five
+ * methodology, chainTvls, tokenBreakdowns, logo, ...); only these scalar fields and parent IDs
  * are ever read, so the full body is NEVER stored or served — the disk
  * cache, the in-memory cache and the committed seed all hold the stripped
  * form (~0.96 MB for 9,080 entries). Missing symbol/category become null;
@@ -921,6 +938,12 @@ function isChainList(data: unknown): data is ChainEntry[] {
  * the tvl key, so this only bites malformed input, never a real entry).
  * Exported for tests.
  */
+/** Accept only exact, source-issued parent IDs with a safe endpoint slug. */
+function validParentId(value: unknown): string | null {
+  return typeof value === 'string' && /^parent#[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)
+    ? value : null;
+}
+
 export function stripProtocolEntry(p: ProtocolEntry): ProtocolEntry {
   return {
     slug: p.slug,
@@ -928,6 +951,7 @@ export function stripProtocolEntry(p: ProtocolEntry): ProtocolEntry {
     symbol: typeof p.symbol === 'string' ? p.symbol : null,
     tvl: typeof p.tvl === 'number' ? p.tvl : null,
     category: typeof p.category === 'string' ? p.category : null,
+    ...(validParentId(p.parentProtocol) ? { parentProtocol: p.parentProtocol } : {}),
   };
 }
 
@@ -1350,7 +1374,7 @@ interface SeedLists {
  * null when seed loading is disabled (test hook), no candidate exists, or
  * the file is malformed (bad JSON, missing fetched_at, either list
  * failing validation). Never throws. The protocol entries are re-stripped
- * on load, so the served shape is the stripped five-field form even if
+ * on load, so the served shape is the stripped scalar/parent form even if
  * the file ever gains extra keys.
  */
 async function readSeedLists(): Promise<SeedLists | null> {
@@ -1383,6 +1407,30 @@ async function readSeedLists(): Promise<SeedLists | null> {
     }
   }
   return null;
+}
+
+/**
+ * Old disk/memory caches stripped parentProtocol. Upgrade only relationship
+ * metadata from the fresh bundled catalog, matched by exact child slug.
+ * Numeric TVLs and fetchedAt are NEVER replaced or refreshed by this merge.
+ * No network catalog download runs on the request path. Once upgraded,
+ * memory retains the metadata; the next regular refresh persists it too.
+ */
+async function withParentMetadata(protocols: ProtocolEntry[]): Promise<ProtocolEntry[]> {
+  if (protocols.some((p) => validParentId(p.parentProtocol) !== null)) return protocols;
+  const seed = await readSeedLists();
+  if (!seed || Date.now() - seed.protocols.fetchedAt < 0 ||
+      Date.now() - seed.protocols.fetchedAt >= LISTS_TTL_MS) return protocols;
+  const parents = new Map(seed.protocols.data.flatMap((p) => {
+    const id = validParentId(p.parentProtocol);
+    return id === null ? [] : [[p.slug, id] as const];
+  }));
+  const merged = protocols.map((p) => {
+    const parent = parents.get(p.slug);
+    return parent ? { ...p, parentProtocol: parent } : p;
+  });
+  if (protocolsCache?.data === protocols) protocolsCache.data = merged;
+  return merged;
 }
 
 // ---------------------------------------------------------------------------
@@ -1525,7 +1573,7 @@ async function loadOneList<T>(
   validateList: (data: unknown) => data is T[],
   forceRefresh = false,
   // A5: optional transform applied to a freshly downloaded list BEFORE it
-  // is cached/persisted/returned (protocols: strip to the five fields).
+  // is cached/persisted/returned (protocols: strip to scalar fields and parent IDs).
   transform?: (data: T[]) => T[],
   // A5-fix: optional callback with the validated RAW list, before the
   // transform — the caller derives side state the stripped form cannot
@@ -2069,7 +2117,8 @@ export async function handleTvl(
   // budget of 2x the per-fetch cap (REQUEST_WALL_BUDGET_MS, ~9 s worst
   // case — A5-fix2, J2-R2 F1; the old "~5 s / single fetch" claim is
   // withdrawn). A5: loadListsFromCache is async (async disk/seed reads).
-  const { protocols, chains } = await loadListsFromCache(fetchImpl);
+  const { protocols: cachedProtocols, chains } = await loadListsFromCache(fetchImpl);
+  const protocols = await withParentMetadata(cachedProtocols);
   const target = resolveTvlTarget(protocol, protocols, chains);
   if (target === null) {
     throw unprocessable(
@@ -2159,7 +2208,10 @@ export async function handleTvl(
       const tvlUsd = parseTvlValue(rawBody);
       // F2: a /tvl value wildly at odds with the lists is stale-suspect
       // — do NOT serve it as verified; fall through to the fallback.
-      if (tvlValueAgreesWithLists(tvlUsd, listsTvl)) {
+      // Parent rows have no catalog numeric TVL. The authoritative parent
+      // /tvl response is the total, not the largest child or a synthetic sum.
+      // The receipt makes this missing independent list cross-check explicit.
+      if (target.parentId || tvlValueAgreesWithLists(tvlUsd, listsTvl)) {
         primaryTvlUsd = tvlUsd;
         primaryRawBody = rawBody;
       }
@@ -2180,6 +2232,14 @@ export async function handleTvl(
         upstream_url: tvlUrl,
         protocol: target.slug,
         tvl_response: rawBody,
+        ...(target.parentId ? { resolution: {
+          parent_id: target.parentId,
+          catalog_children: protocols.filter((p) => p.parentProtocol === target.parentId)
+            .map((p) => p.slug).sort(),
+          scope: 'source-provided parent protocol aggregate, not a child or synthetic sum',
+          list_total_cross_check: 'unavailable: catalog contains children, not parent totals',
+          timestamp_basis: 'fetch time; upstream bare-number response has no timestamp',
+        } } : {}),
         reading: {
           tvl_usd: tvlUsd,
           chain_tvl_usd: chainTvlUsd,
@@ -2202,7 +2262,9 @@ export async function handleTvl(
         },
         receipt,
         {
-          answer: formatAnswer(target.displayName, tvlUsd, asOf),
+          answer: formatAnswer(target.displayName, tvlUsd, asOf) + (target.parentId
+            ? ' Parent protocol aggregate from its own endpoint, not a child total; observed at fetch time (upstream supplies no timestamp or catalog parent-total cross-check).'
+            : ''),
           verdict: 'verified',
           confidence: target.confidence,
           source: `DeFiLlama API (${tvlUrl})`,

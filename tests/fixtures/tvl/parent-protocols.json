@@ -1,0 +1,58 @@
+[
+  {
+    "slug": "aave-v3",
+    "name": "Aave V3",
+    "symbol": "AAVE",
+    "tvl": 15134993618.65509,
+    "category": "Lending",
+    "parentProtocol": "parent#aave"
+  },
+  {
+    "slug": "uniswap-v3",
+    "name": "Uniswap V3",
+    "symbol": "UNI",
+    "tvl": 1222519432.4603655,
+    "category": "Dexs",
+    "parentProtocol": "parent#uniswap"
+  },
+  {
+    "slug": "uniswap-v4",
+    "name": "Uniswap V4",
+    "symbol": "UNI",
+    "tvl": 999176273.6826307,
+    "category": "Dexs",
+    "parentProtocol": "parent#uniswap"
+  },
+  {
+    "slug": "curve-dex",
+    "name": "Curve DEX",
+    "symbol": "CRV",
+    "tvl": 988762449.7708603,
+    "category": "Dexs",
+    "parentProtocol": "parent#curve-finance"
+  },
+  {
+    "slug": "curve-llamalend",
+    "name": "Curve LlamaLend",
+    "symbol": "CRV",
+    "tvl": 86680298.24962504,
+    "category": "Lending",
+    "parentProtocol": "parent#curve-finance"
+  },
+  {
+    "slug": "crvusd",
+    "name": "crvUSD",
+    "symbol": "CRV",
+    "tvl": 65150255.476141654,
+    "category": "CDP",
+    "parentProtocol": "parent#curve-finance"
+  },
+  {
+    "slug": "curve-llamalend-v2",
+    "name": "Curve LlamaLend V2",
+    "symbol": "CRV",
+    "tvl": 27440757.06011412,
+    "category": "Lending",
+    "parentProtocol": "parent#curve-finance"
+  }
+]
