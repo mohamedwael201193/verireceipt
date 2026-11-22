@@ -234,3 +234,6 @@ blocks new previews. Only a successful check finding no saved record may show
 "Nothing purchased"; a user clearing a completed record may also restore that tab's
 empty state. The independent review's two negative controls, plus pending-hash and
 unreadable-storage checks, protect the whole screen, not only the alert wording.
+
+A present empty recovery value is malformed, not an absent record. Only a null
+storage result enters the no-record state; empty strings keep recovery on HOLD.

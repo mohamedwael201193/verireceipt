@@ -13,7 +13,7 @@ export default function Buyer() {
     async function read(s: Saved) { setJob(null); await verifyBuyerPreview(s.plan); const j = await api('jobs/' + s.plan.id); validateBuyerJob(j, s); await verifyBuyerPreview(j.plan); setJob(j); }
     useEffect(() => { let cancelled = false; setBusy(true); void (async () => { try {
         const raw = sessionStorage.getItem(KEY);
-        if (!raw) {
+        if (raw === null) {
             setRecovery('empty');
             return;
         }

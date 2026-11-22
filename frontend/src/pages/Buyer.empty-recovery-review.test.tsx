@@ -1,0 +1,3 @@
+import {render,screen,cleanup} from '@testing-library/react';import {it,expect,vi,afterEach} from 'vitest';import Buyer from './Buyer';
+afterEach(()=>{cleanup();sessionStorage.clear();vi.unstubAllGlobals()});
+it('present but empty recovery storage is malformed, not proof that no purchase exists',async()=>{sessionStorage.setItem('vr-ranked-filing-buyer-v1','');const fetch=vi.fn();vi.stubGlobal('fetch',fetch);render(<Buyer/>);expect(sessionStorage.getItem('vr-ranked-filing-buyer-v1')).toBe('');expect(screen.queryByText('Nothing purchased')).toBeNull();expect(screen.getByRole('button',{name:'Prepare free preview'})).toBeDisabled();expect(fetch).not.toHaveBeenCalled()});
