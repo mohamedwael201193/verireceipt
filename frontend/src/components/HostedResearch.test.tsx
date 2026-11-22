@@ -39,10 +39,35 @@ describe('hosted browser job boundary, test-only HTTP responses and no real purc
 it('recovers the original submission across reload even when the edited question changes',async()=>{
  const f=setup(async()=>{throw new Error('response lost');});await ready();fireEvent.click(screen.getByRole('button',{name:/Run once/}));await screen.findByText(/may have reached the payer/);
  const first=f.mock.calls.find(c=>c[1]?.method==='POST')!;cleanup();render(<HostedResearch inputJson={input.replace('2024','2023')}/>);
+ expect(screen.getByText('Original question: CIK 1318605, exact 10-Q, calendar 2024, minimum 3.')).toBeInTheDocument();
+ expect(screen.getByText(/prepared question has changed/)).toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'Recover this same submission'}));await waitFor(()=>expect(f.mock.calls.filter(c=>c[1]?.method==='POST')).toHaveLength(2));
  const last=f.mock.calls.filter(c=>c[1]?.method==='POST')[1];expect(last[1]?.body).toBe(input);expect(new Headers(last[1]?.headers).get('Idempotency-Key')).toBe(new Headers(first[1]?.headers).get('Idempotency-Key'));
 });
 it('does not POST when durable browser recovery storage is unavailable',async()=>{
  const f=setup(async()=>json({}));await ready();const spy=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new Error('storage blocked');});
  fireEvent.click(screen.getByRole('button',{name:/Run once/}));await screen.findByText(/browser recovery storage is unavailable/);expect(f.mock.calls.filter(c=>c[1]?.method==='POST')).toHaveLength(0);spy.mockRestore();
+});
+
+function completedReport(change:Record<string,unknown>={}){
+ return {version:'research-run-v1',plan:{version:'research-packet-v1',cik:'1318605',year:2024,form:'10-Q',minimum_count:3,network:'eip155:11155111',...change},
+  plan_hash:'a'.repeat(64),result:{status:'SUPPORTED',reason:'Controlled test response, not a real paid run.',observed_count:3,checks:[{name:'test-only source check',ok:true}]},
+  verification_checks:[{name:'test-only signal check',ok:true}],delivery:{status:'pending'}};
+}
+it('shows a completed report only for the original submitted question',async()=>{
+ const f=setup(async url=>url.endsWith('/jobs')?json({job_id:id,network:'eip155:11155111'},202):json({job_id:id,state:'complete',result:completedReport()}));
+ await ready();fireEvent.click(screen.getByRole('button',{name:/Run once/}));await screen.findByText(/Server-reported result: SUPPORTED/);
+ expect(screen.getByText('Original question: CIK 1318605, exact 10-Q, calendar 2024, minimum 3.')).toBeInTheDocument();
+ expect(f.mock.calls.filter(c=>c[1]?.method==='POST')).toHaveLength(1);
+});
+it.each([{cik:'320193'},{year:2023},{form:'10-K'},{minimum_count:4}])('withholds a different question report without a paid retry %j',async change=>{
+ const f=setup(async url=>url.endsWith('/jobs')?json({job_id:id,network:'eip155:11155111'},202):json({job_id:id,state:'complete',result:completedReport(change)}));
+ await ready();fireEvent.click(screen.getByRole('button',{name:/Run once/}));await screen.findByText(/may have reached the payer/);
+ expect(screen.queryByText(/Server-reported result:/)).not.toBeInTheDocument();expect(screen.queryByRole('button',{name:/Download real report/})).not.toBeInTheDocument();
+ expect(f.mock.calls.filter(c=>c[1]?.method==='POST')).toHaveLength(1);expect(screen.getByRole('button',{name:'Check this same job'})).toBeInTheDocument();
+});
+it('holds malformed saved input before any recovery POST',async()=>{
+ sessionStorage.setItem('vr-hosted-research-recovery-v1',JSON.stringify({requestId:id,input:'{}',jobId:null}));
+ const f=setup(async()=>json({}));await screen.findByText(/saved recovery record is unavailable or invalid/);
+ expect(screen.queryByRole('button',{name:/Recover this same submission/})).not.toBeInTheDocument();expect(f).not.toHaveBeenCalled();
 });

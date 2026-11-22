@@ -1,6 +1,7 @@
 import { useEffect,useRef,useState } from 'react';
 import { API_BASE } from '../config';
 import { inspectResearchReport,type InspectedResearchReport } from '../lib/researchReport';
+import { assertResearchReportMatchesInput,inspectResearchInput } from '../lib/researchBinding';
 interface Job { id:string; state:string; raw:unknown; report:InspectedResearchReport|null }
 async function readJson(response:Response):Promise<Record<string,unknown>> {
   if(!response.body) throw new Error('No response');
@@ -15,6 +16,7 @@ function readRecovery():Recovery|null {
   const raw=sessionStorage.getItem(RECOVERY_KEY);if(!raw)return null;
   const value=JSON.parse(raw) as Recovery;
   if(!value||typeof value.requestId!=='string'||!/^[0-9a-f-]{36}$/.test(value.requestId)||typeof value.input!=='string'||value.input.length>2048||(value.jobId!==null&&(typeof value.jobId!=='string'||!/^[0-9a-f-]{36}$/.test(value.jobId))))throw new Error('Recovery record invalid');
+  inspectResearchInput(value.input);
   return value;
 }
 export default function HostedResearch({ inputJson }:{inputJson:string}) {
@@ -41,12 +43,14 @@ export default function HostedResearch({ inputJson }:{inputJson:string}) {
     const response=await fetch(`${API_BASE}/v1/research/jobs/${id}`,{signal,cache:'no-store',credentials:'same-origin'});if(!response.ok)throw new Error('Job unavailable');
     const found=await readJson(response);if(found.job_id!==id||!['reserved','signed','complete','uncertain'].includes(String(found.state)))throw new Error('Invalid job');
     const report=found.state==='complete'?inspectResearchReport(JSON.stringify(found.result)):null;
+    if(report)assertResearchReportMatchesInput({report,inputJson:recovery.current?.input??inputJson});
     setJob({id,state:String(found.state),raw:found.result,report});return found.state==='complete'||found.state==='uncertain';
   }
   async function submit(signal:AbortSignal){
     if(recoveryBlocked.current)throw new Error('Recovery unavailable');
     if(!requestId.current)requestId.current=crypto.randomUUID();
     const saved=recovery.current??{requestId:requestId.current,input:inputJson,jobId:null};
+    inspectResearchInput(saved.input);
     // Persist the exact original body and ID before any chargeable POST. A storage
     // failure blocks submission, rather than losing the only recovery handle.
     try{sessionStorage.setItem(RECOVERY_KEY,JSON.stringify(saved));}catch{recoveryBlocked.current=true;submitted.current=true;throw new Error('Recovery storage unavailable');}
@@ -66,9 +70,14 @@ export default function HostedResearch({ inputJson }:{inputJson:string}) {
   }
   function download(){if(!job?.raw)return;const url=URL.createObjectURL(new Blob([JSON.stringify(job.raw,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`research-${job.id}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   const safe=job?.report&&job.report.status!=='HOLD'&&job.report.count!==null&&job.report.checks.every(c=>c.ok);
+  const originalQuestion=recovery.current?inspectResearchInput(recovery.current.input):null;
+  let preparedQuestionChanged=false;
+  if(originalQuestion){try{assertResearchReportMatchesInput({report:originalQuestion,inputJson});}catch{preparedQuestionChanged=true;}}
   return <div className="rp-hosted">
     <div className="rp-eyebrow">OPTIONAL / REAL SPONSORED TESTNET REQUEST</div>
-    <h3>Run this exact question without a wallet</h3>
+    <h3>{originalQuestion?'Recover the original submission':'Run this exact question without a wallet'}</h3>
+    {originalQuestion&&<p>Original question: CIK {originalQuestion.cik}, exact {originalQuestion.form}, calendar {originalQuestion.year}, minimum {originalQuestion.minimum_count}.</p>}
+    {preparedQuestionChanged&&<p className="rp-muted">The prepared question has changed. Recovery still belongs to the original question above and cannot start a purchase for the edited question.</p>}
     <p>The operator pays one real $0.01 test-USDC request on Ethereum Sepolia. This is a related-party purchase, not independent adoption or ranked routing. Your browser never receives a signing key. No real money is spent.</p>
     <details className="rp-details"><summary>Safety limits and stored data</summary><p className="rp-muted">One active hosted purchase at a time. Safety limits: 10 submissions per session per minute, 100 per shared network per minute, $100 test USDC per UTC day across the service, and a 1 test-USDC payer reserve. Shared proxies can group visitors. There is no separate per-visitor daily cap. A 512 MB/day stored-output budget can also pause new submissions. The CLI has its own lower cap.</p>
     <p className="rp-muted">Submission creates a server-side job and stores this question, hashed session/network identifiers and paid evidence for reconciliation. A cookie controls access to your report for 24 hours; download the finished report. Stored reconciliation records do not currently auto-expire. The retention policy is undecided and must be approved before this service is enabled. This tab stores its original question and submission ID until the tab closes, allowing reload recovery; the 24-hour access cookie can expire earlier. Do not put secrets in the question.</p></details>
