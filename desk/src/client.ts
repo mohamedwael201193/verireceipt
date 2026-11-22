@@ -58,6 +58,17 @@ export interface AskOptions {
   minerIds?: readonly string[];
   /** Called with the raw served response BEFORE any check, so evidence is never lost. */
   onRawResponse?: (raw: RawResponse) => void | Promise<void>;
+  /**
+   * Called with the quote and the filled authorization AFTER the challenge
+   * checks but BEFORE the message is signed, so the caller can journal the
+   * spend reservation. A throw aborts the purchase before any signature.
+   */
+  onBeforeSign?: (notice: SignNotice) => void;
+}
+
+export interface SignNotice {
+  amountUusdc: bigint;
+  authorization: Authorization;
 }
 
 export interface RawResponse {
@@ -110,6 +121,7 @@ async function escrowPaidAsk(target: AskTarget, payer: Payer, opts: AskOptions):
   const nonce = (opts.nonce ?? (() => `vr-desk-${randomUUID()}`))();
   const authorization = buildAuthorization(challenge, payer.address, now, nonce);
   const signedMessage = fillTemplate(challenge.accept.extra.message, authorization);
+  opts.onBeforeSign?.({ amountUusdc: challenge.amountUusdc, authorization });
   const signature = await payer.signMessage(signedMessage);
   const payment = encodePayment(challenge.accept.network, signature, authorization);
 

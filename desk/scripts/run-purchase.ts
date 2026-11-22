@@ -12,10 +12,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { privateKeyToAccount } from "viem/accounts";
 import { runDesk } from "../src/agent.js";
+import { spendLedgerFromFiles } from "../src/gate.js";
 import { normalizePrivateKey, readSecret } from "../src/secrets.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const ledgerFile = join(here, "..", "ledger", "purchases.jsonl");
+const ledgerDir = process.env.DESK_LEDGER_DIR ?? join(here, "..", "ledger");
+const ledgerFile = join(ledgerDir, "purchases.jsonl");
 const secrets = process.env.DESK_SECRETS_FILE;
 const expected = (process.env.DESK_PAYER_ADDRESS ?? "0xf76e6b0920e9332ff4410f6dd53f01722abc71a3").toLowerCase();
 const minerIds = (process.env.DESK_MINER_IDS ?? "774921,6160,6152").split(",").map((s) => s.trim()).filter(Boolean);
@@ -36,6 +38,14 @@ const records = await runDesk(
     onRawResponse: (task, raw) => {
       if (evidenceDir) writeFileSync(join(evidenceDir, `${task.id}-${Date.now()}.json`), JSON.stringify(raw, null, 2));
     },
+    // Join the shared daily cap: same reservations journal and lock as the
+    // gate and benchmark CLIs, across all three ledgers.
+    spend: spendLedgerFromFiles({
+      reservationsFile: join(ledgerDir, "reservations.jsonl"),
+      lockFile: join(ledgerDir, "spend.lock"),
+      purchasesFile: ledgerFile,
+      runLedgerFiles: [join(ledgerDir, "gate-runs.jsonl"), join(ledgerDir, "benchmark-runs.jsonl")],
+    }),
   },
 );
 console.log(JSON.stringify(records.map((r) => ({ task: r.task_id, verdict: r.verdict, receipt_hash: r.telegraph_receipt.receipt_hash, epoch: r.telegraph_receipt.epoch_id, rcpt: r.miner_receipt?.receipt_id, value: r.value, recovered: r.recovered_fields ? Object.fromEntries(Object.entries(r.recovered_fields).filter(([, f]) => f.source === "raw").map(([k, f]) => [k, f.value])) : null })), null, 2));

@@ -665,12 +665,15 @@ export async function fetchEpochBlock(epochId: number, f: Fetch = fetch): Promis
   if (!res.ok) return { status: "error", detail: `HTTP ${res.status} ${text.slice(0, 200)}` };
   const j = JSON.parse(text) as { deliveries_root?: string; epoch_id?: number; body?: { window_from?: string; window_to?: string; epoch_id?: number }; window_from?: string; window_to?: string };
   const body = (j.body ?? j) as { window_from?: string; window_to?: string; epoch_id?: number };
+  if ((j.epoch_id !== undefined && j.epoch_id !== epochId) || (body.epoch_id !== undefined && body.epoch_id !== epochId)) {
+    return { status: "error", detail: "block epoch identity does not match requested epoch" };
+  }
   const windowFromMs = parseTimeMs(body.window_from);
   const windowToMs = parseTimeMs(body.window_to);
   return {
     status: "recorded",
     detail: "block recorded",
-    epoch_id: typeof j.epoch_id === "number" ? j.epoch_id : typeof body.epoch_id === "number" ? body.epoch_id : epochId,
+    epoch_id: typeof j.epoch_id === "number" ? j.epoch_id : typeof body.epoch_id === "number" ? body.epoch_id : undefined,
     windowFromMs: windowFromMs ?? undefined,
     windowToMs: windowToMs ?? undefined,
     deliveriesRoot: j.deliveries_root,
@@ -691,15 +694,20 @@ export async function epochBlockRecorded(epochId: number, f: Fetch = fetch): Pro
   return "error";
 }
 
-/** Latest recorded epoch in [0, hi], assuming recorded epochs form a prefix (no holes). */
-export async function findLatestRecordedEpoch(hi: number, f: Fetch = fetch): Promise<number | null> {
-  if (hi < 0) return null;
+/** Latest recorded epoch in [0, hi], assuming recorded epochs form a prefix (no holes).
+ *  A probe error is propagated, never treated as "not recorded" (fail closed). */
+export async function findLatestRecordedEpoch(
+  hi: number,
+  f: Fetch = fetch,
+): Promise<{ epoch: number | null; error: string | null }> {
+  if (hi < 0) return { epoch: null, error: null };
   let lo = 0;
   let high = hi;
   let ans: number | null = null;
   while (lo <= high) {
     const mid = Math.floor((lo + high) / 2);
     const st = await epochBlockRecorded(mid, f);
+    if (st === "error") return { epoch: null, error: `epoch ${mid} probe failed` };
     if (st === "recorded") {
       ans = mid;
       lo = mid + 1;
@@ -707,7 +715,7 @@ export async function findLatestRecordedEpoch(hi: number, f: Fetch = fetch): Pro
       high = mid - 1;
     }
   }
-  return ans;
+  return { epoch: ans, error: null };
 }
 
 /**
@@ -736,24 +744,35 @@ export async function checkEpochConsistency(
   if (claimed.status === "error") {
     return { ok: false, failures: [`epoch block ${claimed.detail}`] };
   }
-  const latest = await findLatestRecordedEpoch(input.claimedEpoch - 1, f);
+  const latestRes = await findLatestRecordedEpoch(input.claimedEpoch - 1, f);
+  if (latestRes.error) return { ok: false, failures: [`recorded-epoch probe failed: ${latestRes.error}`] };
+  const latest = latestRes.epoch;
   if (latest == null) return { ok: true, failures: [] };
-  let e: number | null = latest;
-  while (e != null && e >= 0) {
+  // Walk down from the latest recorded epoch. Any lookup error or gap fails
+  // closed: a failed predecessor fetch must never fall through to success.
+  let latestWindowToMs: number | null = null;
+  for (let e = latest; e >= 0; e--) {
     const b = await fetchEpochBlock(e, f);
-    if (b.status !== "recorded" || b.windowFromMs == null || b.windowToMs == null) break;
+    if (b.status === "error") return { ok: false, failures: [`epoch block ${e} lookup failed: ${b.detail}`] };
+    if (b.status !== "recorded" || b.windowFromMs == null || b.windowToMs == null) {
+      return { ok: false, failures: [`epoch block ${e} unexpectedly ${b.status}: ${b.detail}`] };
+    }
+    if (e === latest) latestWindowToMs = b.windowToMs;
     if (timeInEpochWindow(input.receiptTimeMs, b.windowFromMs, b.windowToMs)) {
       failures.push(`receipt time falls in recorded epoch ${e}, not ${input.claimedEpoch}`);
       return { ok: false, failures, liveEpoch: e };
     }
     if (input.receiptTimeMs >= b.windowToMs) break;
-    e -= 1;
   }
-  const latestBlock = await fetchEpochBlock(latest, f);
-  if (latestBlock.status === "recorded" && latestBlock.windowToMs != null && input.receiptTimeMs >= latestBlock.windowToMs) {
-    if (input.claimedEpoch !== latest + 1) {
-      failures.push(`pending epoch_id must be ${latest + 1} (next after recorded epoch ${latest}), not ${input.claimedEpoch}`);
-    }
+  // Establish the pending claim POSITIVELY: the receipt time is at or after
+  // the latest recorded window's end AND the claimed epoch is the next one.
+  if (latestWindowToMs == null) return { ok: false, failures: ["latest recorded epoch window missing"] };
+  if (input.receiptTimeMs < latestWindowToMs) {
+    failures.push(`receipt time precedes recorded epoch ${latest}'s window end but matches no recorded window`);
+    return { ok: false, failures, liveEpoch: latest };
+  }
+  if (input.claimedEpoch !== latest + 1) {
+    failures.push(`pending epoch_id must be ${latest + 1} (next after recorded epoch ${latest}), not ${input.claimedEpoch}`);
   }
   return { ok: failures.length === 0, failures };
 }
