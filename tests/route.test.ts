@@ -2106,7 +2106,7 @@ describe("refusal matrix + adversarial pairs (round 4)", () => {
 
   it('pair "USDC/ETH" (reversed) -> 400 unavailable envelope (ETH-out direction, wei-precision explanation)', async () => {
     const body = await expectUnavailable(handleRoute({ pair: "USDC/ETH" }), "NO_ROUTE");
-    expect(String(body.summary)).toContain("safe-integer precision");
+    expect(String(body.summary)).toContain("published amount_out range");
   });
 
   it('pair "USDC/DAI" (known tokens, unregistered non-ETH direction) -> 400 unavailable envelope', async () => {

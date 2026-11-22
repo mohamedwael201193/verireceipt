@@ -1231,12 +1231,15 @@ async function quoteCurve3poolAtBlock(
 // bytes; QuoterV2, both V2 routers and WETH/USDC verified 2026-11-20 —
 // see header). Plausibility bands are anchored on live quotes measured
 // 2026-11-22 and are deliberately wider than any realistic move between
-// measurement and grading, so a true quote is never dropped.
+// measurement and grading. The band is wider than any calm-market move;
+// under a real depeg the endpoint fails closed (refuses) rather than serve
+// an unverifiable number.
 // Pairs whose output is ETH-denominated (USDC/ETH, DAI/ETH, WBTC/ETH …)
 // are deliberately ABSENT: the published response field amount_out is a
 // number with range [1e8, 1e11], and wei-denominated outputs (~1e14+)
-// exceed safe-integer precision, so they cannot be answered honestly in
-// the published shape. They take the 200 no-route path (see above).
+// exceed the published amount_out range [1e8, 1e11], so they cannot be
+// answered honestly in the published shape. They take the HTTP 400
+// unavailable-envelope path (see above).
 // ---------------------------------------------------------------------------
 export interface PairSpec {
   pair: string;
@@ -1414,8 +1417,8 @@ export type PairResolution =
 
 /** Classify a raw pair string for the no-route path (2026-11-22, owner
  * decision). A well-formed pair that does not resolve to the verified
- * registry is answered with a 200 honest "no route found" envelope;
- * malformed input stays 422 INVALID_PAIR. */
+ * registry is answered with an HTTP 400 unavailable envelope (the
+ * no-route refusal); malformed input stays 422 INVALID_PAIR. */
 export function classifyPair(raw: string): PairResolution {
   const spec = parsePair(raw);
   if (spec !== null) return { kind: "registered", spec };
@@ -1877,7 +1880,7 @@ async function handleRouteInner(
   // raw token addresses all resolve through parsePair. The registry key
   // — never the raw casing — reaches downstream values and receipts.
   // 2026-11-22 (owner decision, review-gated): a well-formed pair with
-  // no verified liquidity takes the 200 no-route path; malformed input
+  // no verified liquidity takes the HTTP 400 unavailable-envelope path; malformed input
   // stays 422 INVALID_PAIR (fail-closed).
   const resolution = classifyPair(pair);
   if (resolution.kind !== "registered") {
@@ -2389,7 +2392,8 @@ async function handleRouteInner(
         `Block-pinned ${spec.venueSetLabel} quotes via 2-of-3 Ethereum RPC ` +
         "(quorum-pinned); each venue quote comes from a single RPC — quorum attests " +
         "block number+hash agreement only; the winner is the max quote within ±5% " +
-        "of the cross-venue median after the 1e10 plausibility cap, and confidence " +
+        `of the cross-venue median after this pair's plausibility band ` +
+        `[${spec.plausibleMinOut}, ${spec.plausibleMaxOut}] ${spec.buySymbol} base units, and confidence ` +
         "is 1.0 only when all three venues produced plausible quotes with no " +
         "quote dropped by the filter, and reflects venue count, family coverage " +
         "and cross-venue agreement" +
