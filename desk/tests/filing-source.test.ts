@@ -22,6 +22,23 @@ describe('filing primary-source semantics', () => {
   expect(r.status).toBe('verified');expect(r.details.primary_count).toBe(1);
   expect(r.sources[0].sha256).toMatch(/^[a-f0-9]{64}$/);expect(f).toHaveBeenCalledTimes(1);
  });
+ it.each([
+  {urls:['https://www.sec.gov/Archives/edgar/data/111111/000011111119000999/other.htm']},
+  {urls:['https://www.sec.gov/Archives/edgar/data/987654/000098765419999999/nonexistent.htm']},
+  {filings:['SEC Form 8-K (2019-02-03) - Other Corporation (CIK 111111)']},
+  {filings_detail:[{form:'8-K',filing_date:'2019-02-03',cik:111111,accession_number:'0000111111-19-000999',url:'https://www.sec.gov/Archives/edgar/data/111111/other.htm'}]},
+  {filings_detail:[{form:'8-K',filing_date:'2019-02-03',cik:987654,accession_number:'0000987654-19-999999'}]},
+  {urls:'https://example.invalid/not-sec'},
+  {filings_detail:'not an array'},
+  {filings:['SEC Form 8-K (2019-02-03), actual date 2020-01-01']},
+  {filings:['SEC Form SC 13G (2019-02-03)']},
+ ])('rejects adversarial issuer/accession/type/title assertions despite matching count: %j',async(result)=>{
+  const r=await verifyFilingSource(input({result:{filing_count:1,...result}}),opts(fixture()));expect(r.status).toBe('failed');
+ });
+ it('accepts returned assertions only when bound to the independently matched accession',async()=>{
+  const result={filing_count:1,entity:'Example Corp',urls:['https://www.sec.gov/Archives/edgar/data/987654/000098765419000001/0000987654-19-000001-index.htm'],filings:['SEC Form 8-K (2019-02-03) - Example Corp (CIK 987654)'],filings_detail:[{form:'8-K',filing_date:'2019-02-03',cik:987654,accession_number:accession(1)}]};
+  expect((await verifyFilingSource(input({result}),opts(fixture()))).status).toBe('verified');
+ });
  it('rejects a wrong numeric count even when response fields say ok', async () => {
   const r=await verifyFilingSource(input({result:{filing_count:7}}),opts(fixture()));
   expect(r.status).toBe('failed');expect(r.checks.some(x=>!x.ok)).toBe(true);

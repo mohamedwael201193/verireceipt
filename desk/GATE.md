@@ -101,7 +101,7 @@ deep-copied before awaits, so a callback cannot change its rule mid-run.
 4. **Break it** - ask for a venue whose verified value cannot satisfy the
    precommitted floor (`--set protocol=…`) and the outcome is HOLD naming
    the rule; tamper with any evidence and the failed checks are named.
-5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (363 tests across 23 files,
+5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (373 tests across 23 files,
    no network, no key); the gate flow is covered with mocked nodes including
    tamper cases.
 
@@ -166,3 +166,8 @@ Missing source evidence, unsupported query grammar or an absent SEC contact
 User-Agent causes abstention/HOLD. Set `SEC_USER_AGENT` with a contact email;
 the verifier does not infer one. Other intents do not gain source-truth
 verification from this filing-specific check.
+
+Returned filing assertions are also constrained to the independently matched
+issuer and accession rows. SEC-hosted links alone do not establish ownership
+or relevance. Wrong-typed optional arrays, unrecognized/contradictory title
+formats, invented accession links and mismatched issuer/detail rows fail closed.
