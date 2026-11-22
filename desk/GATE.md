@@ -101,7 +101,7 @@ deep-copied before awaits, so a callback cannot change its rule mid-run.
 4. **Break it** - ask for a venue whose verified value cannot satisfy the
    precommitted floor (`--set protocol=…`) and the outcome is HOLD naming
    the rule; tamper with any evidence and the failed checks are named.
-5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (417 tests across 26 files,
+5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (454 tests across 28 files,
    no network, no key); the gate flow is covered with mocked nodes including
    tamper cases.
 
@@ -217,3 +217,29 @@ an explicit end time exactly one hour after the requested start. NYISO
 fall-back pairing requires both complete ascending 12-slot repeated-hour
 blocks, the preceding 00:55 and following 02:00 observations, in that order.
 A lone repeated pair or a partial/reversed hour abstains on either occurrence.
+
+## Chain-bound mined TX checks
+
+TX block queries need an explicit supported chain, either as the structured
+chain parameter or a matching real-builder hash suffix. Conflicting or
+missing chain names, unsupported chains and invalid hashes abstain before
+buying. No mainnet default or cross-chain fallback is used.
+
+After node checks, two distinct configured HTTPS RPC endpoints are queried
+sequentially, without retry: eth_chainId, eth_getTransactionByHash and
+eth_getTransactionReceipt on each. Both chain IDs must match the requested
+chain. Both mined transaction/receipt pairs must bind the requested hash,
+block number, block hash and addresses; the two observations must agree.
+Block numbers must be safe nonnegative integers. Status must be confirmed
+or reverted and match the paid claim. A legacy root-only receipt is accepted
+only for Ethereum mainnet before Byzantium. Pending, missing, errored or
+inconsistent evidence abstains. The supported decision field is block_number,
+not an inferred zero or absence. Optional address/value/L1-fee claims are
+checked too. Numeric native-unit displays are compared at the handler's
+stated JS-number precision; exact string amounts are compared in wei.
+
+The six raw JSON-RPC responses, digests and request/method mapping are
+retained in source_verification. This is independent fetch agreement,
+not a transaction-trie proof, a finality claim, or proof that endpoint
+operators are independent. Reorganizations and correlated RPC errors remain
+limits. A verified reverted transaction's block does not mean it succeeded.

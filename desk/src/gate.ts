@@ -35,6 +35,7 @@ import {
 import type { FieldStatus } from "../../src/core/shapedFields.js";
 import { verifyFilingSource } from "./filingSource.js";
 import { gridContract, verifyGridSource } from "./gridSource.js";
+import { txContract, verifyTxSource } from "./txSource.js";
 import type { SourceVerification } from "./sourceTypes.js";
 
 export const GATE_LIMITS = [
@@ -477,6 +478,11 @@ async function executeVerifiedPurchase(
     catch (error) { return failed([`grid contract: ${error instanceof Error ? error.message : String(error)}`]); }
   }
 
+  if (input.intent === "ONCHAIN_TX_LOOKUP_GENERAL") {
+    try { txContract(input.params); }
+    catch (error) { return failed([`TX contract: ${error instanceof Error ? error.message : String(error)}`]); }
+  }
+
   // The quote+nonce are reserved BEFORE signing (inside onBeforeSign), under
   // the shared lock. If the reservation cannot be journaled, the signature
   // is refused and worst_case stays null (nothing was signed).
@@ -575,6 +581,13 @@ async function executeVerifiedPurchase(
       if (input.valueField !== "lmp_usd_per_mwh") {
         sourceVerification.status = "failed";
         sourceVerification.checks.push({name:"primary source supported grid field",ok:false,detail:"only independently matched LMP is supported"});
+      }
+    }
+    if (node.ok && input.intent === "ONCHAIN_TX_LOOKUP_GENERAL") {
+      sourceVerification = await verifyTxSource({ params: input.params, result: body.result ?? {} }, { f, now: nowDate });
+      if (input.valueField !== "block_number") {
+        sourceVerification.status = "failed";
+        sourceVerification.checks.push({name:"primary source supported TX field",ok:false,detail:"only chain-bound mined block_number is supported"});
       }
     }
     const reasons = [
