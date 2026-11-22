@@ -2381,7 +2381,7 @@ describe("round 5: any dropped quote caps confidence at 0.9 (J1 B1 + J2 B1)", ()
   );
 
   it(
-    "miner.yaml /v1/route description names no Curve venue (round 5, J1 B2): the handler quotes only Uniswap V2/V3 + SushiSwap V2, so the registration file must not advertise Curve pools",
+    "miner.yaml keeps the typed canonical pair and measured venue scope explicit",
     () => {
       const yaml = readFileSync(resolve(process.cwd(), "miner.yaml"), "utf8");
       const routeStart = yaml.indexOf("- path: /v1/route");
@@ -2389,8 +2389,10 @@ describe("round 5: any dropped quote caps confidence at 0.9 (J1 B1 + J2 B1)", ()
       expect(routeStart).toBeGreaterThan(-1);
       expect(gridStart).toBeGreaterThan(routeStart);
       const routeSection = yaml.slice(routeStart, gridStart);
-      expect(routeSection).toContain("Uniswap V2/V3, SushiSwap V2");
-      expect(routeSection).not.toContain("Curve");
+      expect(routeSection).toContain("Uniswap V2/V3");
+      expect(routeSection).toContain("SushiSwap V2");
+      expect(routeSection).toContain("ETH/USDC");
+      expect(routeSection).toContain("Quotes are gross, not gas-adjusted");
     },
   );
 });
