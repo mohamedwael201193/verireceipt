@@ -10,6 +10,7 @@ import { join, resolve } from 'path';
 import { ApiError } from '../src/core/errors';
 import {
   __awaitTvlBackgroundRefreshForTests,
+  __fetchTvlTextForTests,
   __awaitTvlProtocolFillForTests,
   __clearTvlCachesForTests,
   __clearTvlDiskCacheForTests,
@@ -3968,6 +3969,16 @@ describe('handleTvl A5-fix2 (J2-R2)', () => {
   // handler's AbortSignal fires (the J2-R2 A3 shape); later calls answer
   // normally. Counts every /tvl and /protocol call so the tests can prove
   // which path the handler took.
+  // Real Response/ReadableStream semantics, so body timeouts exercise
+  // the same bounded reader as production rather than a text()-only fake.
+  function dripResponse(signal: AbortSignal | undefined | null): Response {
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        signal?.addEventListener('abort', () => controller.error(new Error('aborted')), { once: true });
+      },
+    }));
+  }
+
   function dripTvlFetch(opts: {
     tvlValue?: string;
     tvlDripCalls?: number;
@@ -3975,10 +3986,6 @@ describe('handleTvl A5-fix2 (J2-R2)', () => {
     protocolDrip?: boolean;
   }): { fetchImpl: typeof fetch; counts: { tvl: number; protocol: number } } {
     const counts = { tvl: 0, protocol: 0 };
-    const drip = (signal: AbortSignal | undefined | null) =>
-      new Promise<string>((_, rej) => {
-        signal?.addEventListener('abort', () => rej(new Error('aborted')));
-      });
     const fetchImpl = (async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -3987,22 +3994,14 @@ describe('handleTvl A5-fix2 (J2-R2)', () => {
       if (u === 'https://api.llama.fi/tvl/aave-v3') {
         counts.tvl++;
         if (counts.tvl <= (opts.tvlDripCalls ?? 1)) {
-          return {
-            ok: true,
-            status: 200,
-            text: () => drip(init?.signal as AbortSignal | undefined),
-          } as unknown as Response;
+          return dripResponse(init?.signal);
         }
         return new Response(opts.tvlValue ?? '15121752429', { status: 200 });
       }
       if (u === 'https://api.llama.fi/protocol/aave-v3') {
         counts.protocol++;
         if (opts.protocolDrip) {
-          return {
-            ok: true,
-            status: 200,
-            text: () => drip(init?.signal as AbortSignal | undefined),
-          } as unknown as Response;
+          return dripResponse(init?.signal);
         }
         return new Response(
           opts.protocolBody ?? JSON.stringify(AAVE_PROTOCOL_FIXTURE),
@@ -4062,17 +4061,7 @@ describe('handleTvl A5-fix2 (J2-R2)', () => {
       if (u === 'https://api.llama.fi/tvl/aave-v3') {
         tvlCalls++;
         if (tvlCalls === 1) {
-          return {
-            ok: true,
-            status: 200,
-            text: () =>
-              new Promise<string>((_, rej) => {
-                (init?.signal as AbortSignal | undefined)?.addEventListener(
-                  'abort',
-                  () => rej(new Error('aborted')),
-                );
-              }),
-          } as unknown as Response;
+          return dripResponse(init?.signal);
         }
         return new Response('{"tvl":1}', { status: 200 });
       }
@@ -4618,4 +4607,55 @@ describe('TVL process memory safety', () => {
     await __awaitTvlProtocolFillForTests();
     expect(fills).toBe(1);
   });
+});
+
+
+describe('TVL every-source streaming byte bounds', () => {
+  const sources = [
+    ['https://api.llama.fi/protocols', 16 * 1024 * 1024],
+    ['https://api.llama.fi/v2/chains', 1024 * 1024],
+    ['https://api.llama.fi/v2/historicalChainTvl/Ethereum', 4 * 1024 * 1024],
+    ['https://api.llama.fi/tvl/lido', 4 * 1024],
+  ] as const;
+
+  for (const [url, limit] of sources) {
+    for (const headers of [undefined, { 'content-length': '1', 'content-encoding': 'gzip' }]) {
+      it(`caps ${url} with ${headers ? 'misleading compressed length' : 'no length header'}`, async () => {
+        let produced = 0;
+        let cancelled = false;
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            const bytes = 64 * 1024;
+            if (produced >= limit + 3 * bytes) controller.close();
+            else { produced += bytes; controller.enqueue(new Uint8Array(bytes).fill(32)); }
+          },
+          cancel() { cancelled = true; },
+        });
+        const transport = (async () => new Response(body, { headers })) as typeof fetch;
+        await expect(__fetchTvlTextForTests(url, transport, 5000)).rejects.toMatchObject({
+          status: 502, code: 'DEFILLAMA_RESPONSE_TOO_LARGE',
+        });
+        expect(cancelled).toBe(true);
+        expect(produced).toBeLessThanOrEqual(limit + 2 * 64 * 1024);
+      });
+    }
+
+    it(`cancels a declared oversized ${url} before reading`, async () => {
+      let cancelled = false;
+      const body = new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
+      const transport = (async () => new Response(body, {
+        headers: { 'content-length': String(limit + 1) },
+      })) as typeof fetch;
+      await expect(__fetchTvlTextForTests(url, transport, 5000)).rejects.toMatchObject({
+        code: 'DEFILLAMA_RESPONSE_TOO_LARGE',
+      });
+      expect(cancelled).toBe(true);
+    });
+
+    it(`preserves an under-cap ${url} body exactly`, async () => {
+      const raw = '123.456';
+      const transport = (async () => new Response(raw)) as typeof fetch;
+      expect(await __fetchTvlTextForTests(url, transport, 5000)).toBe(raw);
+    });
+  }
 });
