@@ -14,6 +14,7 @@ description: >-
   mainnet, wholesale grid power prices (CAISO, NYISO, Elering), and Ethereum
   beacon-chain validator effective balances (2-of-4 beacon API quorum). It
   refuses (400/422/502/504) rather than guessing.
+  Additional receipt-backed endpoints provide named-chain gas and balances, explicit-chain ERC20 supply, World Bank unemployment, DNS record observations, dated currency conversion, TLS certificate validity and DNS response status. Declared source, scope and freshness limits apply.
 base_url: https://verireceipt.onrender.com
 
 auth:
@@ -61,6 +62,14 @@ semantics:
     - OPTIMAL_EXECUTION_ROUTE_GENERAL
     - GRID_POWER_PRICE_GENERAL
     - VALIDATOR_PERFORMANCE_VERIFY_GENERAL
+    - GAS_PRICE_GENERAL
+    - WALLET_BALANCE_CHECK_GENERAL
+    - TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL
+    - MACRO_ECONOMIC_INDICATOR_GENERAL
+    - DNS_RECORD_LOOKUP_GENERAL
+    - CURRENCY_EXCHANGE_CONVERT
+    - SSL_VERIFICATION_CERT
+    - EMAIL_SECURITY_GENERAL
   signal_mapping:
     confidence_field: confidence
     label_field: answer
@@ -230,6 +239,228 @@ endpoints:
               leading zeros), e.g. 1, at most 1000000000 (the official
               intent max). The handler rejects any other shape.
 
+  - path: /v1/gas-price
+    external_path: /v1/gas-price
+    method: GET
+    description: Returns current gas_price_gwei on an explicitly named supported EVM chain from public RPC
+      quorum, with stored source evidence.
+    intents:
+    - GAS_PRICE_GENERAL
+    params:
+      query:
+        required:
+        - name: chain
+          type: string
+          intents:
+          - GAS_PRICE_GENERAL
+          description: Copy the requested chain without inventing or silently defaulting identity or scope.
+  - path: /v1/balance
+    external_path: /v1/balance
+    method: GET
+    description: Returns a finalized native or ERC20 balance in whole token units for an explicit address
+      and supported chain. Optional token selects the asset; absent token means the native asset. No transaction
+      is sent.
+    intents:
+    - WALLET_BALANCE_CHECK_GENERAL
+    params:
+      query:
+        required:
+        - name: address
+          type: string
+          intents:
+          - WALLET_BALANCE_CHECK_GENERAL
+          description: Copy the requested address without inventing or silently defaulting identity or scope.
+        - name: chain
+          type: string
+          intents:
+          - WALLET_BALANCE_CHECK_GENERAL
+          description: Copy the requested chain without inventing or silently defaulting identity or scope.
+        optional:
+        - name: token
+          type: string
+          intents:
+          - WALLET_BALANCE_CHECK_GENERAL
+          description: Copy the requested token without inventing or silently defaulting identity or scope.
+  - path: /v1/token-supply
+    external_path: /v1/token-supply
+    method: GET
+    description: Returns ERC20 total_supply in whole tokens from finalized-tag RPC quorum. The token text
+      must preserve explicit chain and contract identity, for example a token followed by on and the named
+      chain. Does not infer a chain for an ambiguous symbol.
+    intents:
+    - TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL
+    params:
+      query:
+        required:
+        - name: token
+          type: string
+          intents:
+          - TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL
+          description: Copy the complete token string, keeping any explicit chain, contract address and
+            display label. Do not invent a chain.
+  - path: /v1/macro
+    external_path: /v1/macro
+    method: GET
+    description: Returns World Bank SL.UEM.TOTL.ZS unemployment rate_pct for a country and optional calendar
+      year. Omitted year uses latest published nonempty annual data; missing explicit-year data is refused.
+      Other economic indicators are not supported.
+    intents:
+    - MACRO_ECONOMIC_INDICATOR_GENERAL
+    params:
+      query:
+        required:
+        - name: indicator
+          type: string
+          intents:
+          - MACRO_ECONOMIC_INDICATOR_GENERAL
+          description: Copy the requested indicator without inventing or silently defaulting identity or
+            scope.
+          accepted_fields:
+          - value: unemployment rate
+            intents:
+            - MACRO_ECONOMIC_INDICATOR_GENERAL
+            description: Supported canonical value.
+        - name: country
+          type: string
+          intents:
+          - MACRO_ECONOMIC_INDICATOR_GENERAL
+          description: Copy the requested country without inventing or silently defaulting identity or scope.
+        optional:
+        - name: year
+          type: integer
+          intents:
+          - MACRO_ECONOMIC_INDICATOR_GENERAL
+          description: Optional explicit calendar year. Preserve the requested year; omit only when no year
+            was requested.
+  - path: /v1/dns
+    external_path: /v1/dns
+    method: GET
+    description: Returns has_record for one DNS name and one of the ten declared record types from recursive
+      resolver observations. Inconclusive failures and existence disagreement are refused, not reported
+      as absence.
+    intents:
+    - DNS_RECORD_LOOKUP_GENERAL
+    params:
+      query:
+        required:
+        - name: name
+          type: string
+          intents:
+          - DNS_RECORD_LOOKUP_GENERAL
+          description: Copy the requested name without inventing or silently defaulting identity or scope.
+        - name: record_type
+          type: string
+          intents:
+          - DNS_RECORD_LOOKUP_GENERAL
+          description: Copy the requested record_type without inventing or silently defaulting identity
+            or scope.
+          accepted_fields:
+          - value: A
+            intents:
+            - DNS_RECORD_LOOKUP_GENERAL
+            description: Supported canonical value.
+          - value: AAAA
+            intents:
+            - DNS_RECORD_LOOKUP_GENERAL
+            description: Supported canonical value.
+          - value: CNAME
+            intents:
+            - DNS_RECORD_LOOKUP_GENERAL
+            description: Supported canonical value.
+          - value: MX
+            intents:
+            - DNS_RECORD_LOOKUP_GENERAL
+            description: Supported canonical value.
+          - value: NS
+            intents:
+            - DNS_RECORD_LOOKUP_GENERAL
+            description: Supported canonical value.
+          - value: TXT
+            intents:
+            - DNS_RECORD_LOOKUP_GENERAL
+            description: Supported canonical value.
+          - value: SOA
+            intents:
+            - DNS_RECORD_LOOKUP_GENERAL
+            description: Supported canonical value.
+          - value: CAA
+            intents:
+            - DNS_RECORD_LOOKUP_GENERAL
+            description: Supported canonical value.
+          - value: SRV
+            intents:
+            - DNS_RECORD_LOOKUP_GENERAL
+            description: Supported canonical value.
+          - value: PTR
+            intents:
+            - DNS_RECORD_LOOKUP_GENERAL
+            description: Supported canonical value.
+  - path: /v1/fx
+    external_path: /v1/fx
+    method: GET
+    description: Returns converted_amount in the requested to_currency using dated daily public rate sources
+      and disclosed agreement or degraded coverage, not a live trading quote.
+    intents:
+    - CURRENCY_EXCHANGE_CONVERT
+    params:
+      query:
+        required:
+        - name: from_currency
+          type: string
+          intents:
+          - CURRENCY_EXCHANGE_CONVERT
+          description: Copy the requested from_currency without inventing or silently defaulting identity
+            or scope.
+        - name: to_currency
+          type: string
+          intents:
+          - CURRENCY_EXCHANGE_CONVERT
+          description: Copy the requested to_currency without inventing or silently defaulting identity
+            or scope.
+        optional:
+        - name: amount
+          type: number
+          intents:
+          - CURRENCY_EXCHANGE_CONVERT
+          description: Copy the requested amount without inventing or silently defaulting identity or scope.
+  - path: /v1/ssl
+    external_path: /v1/ssl
+    method: GET
+    description: Returns certificate_valid from an actual TLS certificate and hostname/trust-store check
+      on an allowed public hostname. Network failure is refused. No revocation or multi-vantage assurance
+      is claimed.
+    intents:
+    - SSL_VERIFICATION_CERT
+    params:
+      query:
+        required:
+        - name: host
+          type: string
+          intents:
+          - SSL_VERIFICATION_CERT
+          description: Copy the requested host without inventing or silently defaulting identity or scope.
+  - path: /v1/email-security
+    external_path: /v1/email-security
+    method: GET
+    description: Returns lookup_ok for a public DNS response status for one domain/name and record type.
+      It does not report record presence, email safety or deliverability; NOERROR can have no matching records.
+    intents:
+    - EMAIL_SECURITY_GENERAL
+    params:
+      query:
+        required:
+        - name: domain
+          type: string
+          intents:
+          - EMAIL_SECURITY_GENERAL
+          description: Copy the requested domain without inventing or silently defaulting identity or scope.
+        - name: record_type
+          type: string
+          intents:
+          - EMAIL_SECURITY_GENERAL
+          description: Copy the requested record_type without inventing or silently defaulting identity
+            or scope.
+
 intent_mapping:
   ONCHAIN_TX_LOOKUP_GENERAL:
     endpoint: /v1/tx
@@ -336,3 +567,102 @@ intent_mapping:
       effective_balance:
         path: effective_balance
         unit: "gwei"
+
+  GAS_PRICE_GENERAL:
+    endpoint: /v1/gas-price
+    input:
+      chain:
+        from: chain
+    output:
+      chain:
+        path: chain
+      gas_price_gwei:
+        path: gas_price_gwei
+        unit: gwei
+      as_of:
+        path: as_of
+  WALLET_BALANCE_CHECK_GENERAL:
+    endpoint: /v1/balance
+    input:
+      address:
+        from: address
+      chain:
+        from: chain
+      token:
+        from: token
+    output:
+      address:
+        path: address
+      chain:
+        path: chain
+      balance:
+        path: balance
+        unit: whole token units
+      token_symbol:
+        path: token_symbol
+      as_of:
+        path: as_of
+  TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL:
+    endpoint: /v1/token-supply
+    input:
+      token:
+        from: token
+        how: Preserve explicit contract, display label and chain context verbatim; do not silently discard
+          a conflicting identity or assume a chain.
+    output:
+      total_supply:
+        path: total_supply
+        unit: whole tokens
+  MACRO_ECONOMIC_INDICATOR_GENERAL:
+    endpoint: /v1/macro
+    input:
+      indicator:
+        from: indicator
+      country:
+        from: country
+      year:
+        from: year
+    output:
+      rate_pct:
+        path: rate_pct
+        unit: percent
+  DNS_RECORD_LOOKUP_GENERAL:
+    endpoint: /v1/dns
+    input:
+      name:
+        from: name
+      record_type:
+        from: record_type
+    output:
+      has_record:
+        path: has_record
+  CURRENCY_EXCHANGE_CONVERT:
+    endpoint: /v1/fx
+    input:
+      from_currency:
+        from: from_currency
+      to_currency:
+        from: to_currency
+      amount:
+        from: amount
+    output:
+      converted_amount:
+        path: converted_amount
+  SSL_VERIFICATION_CERT:
+    endpoint: /v1/ssl
+    input:
+      host:
+        from: host
+    output:
+      certificate_valid:
+        path: certificate_valid
+  EMAIL_SECURITY_GENERAL:
+    endpoint: /v1/email-security
+    input:
+      domain:
+        from: domain
+      record_type:
+        from: record_type
+    output:
+      lookup_ok:
+        path: lookup_ok
