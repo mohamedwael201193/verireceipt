@@ -8,6 +8,7 @@
     "node": ">=20.18.0"
   },
   "scripts": {
+    "judge:verify": "tsx scripts/judge-verify.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "purchase": "tsx scripts/run-purchase.ts",
