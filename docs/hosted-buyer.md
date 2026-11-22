@@ -100,3 +100,42 @@ Real local SQLite tests cover two connections, simultaneous workers, owner and
 hash binding, crash/uncertainty, stale leases, unique nonces, 200-call cap and UTC
 rollover, 24/48-hour boundaries, payload capacity and follow-up limits. They use
 no network and no signer. No PostgreSQL or deployed-runtime test is claimed.
+
+## Server-only runtime and wiring design
+
+The separate buyer runtime bundle uses the existing ranked `runGate`, never the
+old direct research path. Its transport only permits the exact frozen ask body,
+one ranked challenge and one paid submission, the configured payer's node
+ledger, bounded public signal/epoch/delivery reads, known VeriReceipt receipt
+reads and the requested CIK's official SEC submission pages. No arbitrary URL or
+foreign CIK can be fetched. It stops on 403/429, uses bounded bytes/calls, forces
+redirect refusal, propagates aborts and paces SEC reads. A per-run private local
+reservation journal is additional defense, not the shared budget authority.
+Scratch files are removed in `finally`; crashed scratch directories expire at
+24h and need the planned startup/hourly cleanup. Purge means application-level
+row/file removal, not forensic erasure of disks, WALs, backups or snapshots.
+
+Future startup must provide the dedicated address/key, both complete payer
+exclusion arrays, `BUYER_EXCLUSIONS_COMPLETE=yes`,
+`BUYER_SINGLE_HOST_PERSISTENT=yes`, `BUYER_NO_INDEPENDENT_PURCHASER=yes`, a
+canonical private persistent scratch directory and a real SEC contact user-agent.
+These acknowledgements do not independently prove the deployment promises or
+payer-list completeness; the operator must actually satisfy them. No key is
+created, funded or loaded by building this code. Importing/building is inert.
+
+The signer can be invoked once, only after the durable guard commits. The
+returned envelope is bound to the server plan, exact rule, params, payer and
+policy/task hashes. A missing source check can never be presented as PASS. The
+runtime distinguishes not-signed, node-reported receipt amount and uncertain
+maximum exposure. None implies final settlement. No signed request, signed
+message or private key is included in the stored response hooks or envelope.
+Read-only delivery follow-up binds any ranked serving provider's exact receipt
+identity, amount, epoch and proof shape. It has no signer and forbids paid asks.
+It neither walks a Merkle proof nor claims finality.
+
+Next route layer: disabled by default, fixed same-origin UI with private session
+cookie, preview-only server plan creation, explicit buy by stored plan ID/hash,
+owner-bound result/evidence reads and rate-limited read-only follow-up. No
+startup job replay or paid retry. Abort work on shutdown and retain uncertain
+exposure; arrange startup/hourly payload cleanup. Routes and the UI are not yet
+mounted in this increment and need their own independent review.

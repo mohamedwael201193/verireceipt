@@ -8,3 +8,5 @@ buildSync({
   bundle: true, platform: 'node', format: 'cjs', target: 'node20',
   sourcemap: false, legalComments: 'none',
 });
+
+buildSync({entryPoints:[resolve(__dirname,'../desk/src/buyerRuntime.ts')],outfile:resolve(__dirname,'../dist/buyer-runtime.cjs'),bundle:true,platform:'node',format:'cjs',target:'node20',sourcemap:false,legalComments:'none'});
