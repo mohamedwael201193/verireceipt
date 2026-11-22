@@ -16,14 +16,20 @@
 //
 // SOURCES (all keyless, no accounts):
 //   1. Frankfurter (api.frankfurter.dev) — ECB euro reference rates,
-//      ~30 currencies, published daily on ECB business days. The most
-//      authoritative of the three but the narrowest coverage.
+//      ~30 currencies, published daily on ECB business days.
 //   2. open.er-api.com — broad ISO coverage (used in-house by the grid
-//      ingester since 2026-11-20), daily.
+//      ingester since 2026-11-20), recomputed daily.
 //   3. fawaz currency-api (cdn.jsdelivr.net/npm/@fawazahmed0/currency-api)
-//      — broadest coverage including crypto codes, daily.
+//      — broadest coverage including crypto codes, recomputed daily.
+//   4. vatcomply (api.vatcomply.com) — ECB-anchored daily fix, ~30 fiat
+//      codes.
+//   5. floatrates (www.floatrates.com) — daily fix snapshots with a
+//      per-currency date label, fiat codes.
+// The three fix-anchored sources and the two recomputed ones snapshot
+// at different times; the served rate is the median of whichever subset
+// covers the pair (see SOURCES below for why the panel is five).
 //
-// FAILOVER DOCTRINE (owner requirement 2026-11-22): all three fire in
+// FAILOVER DOCTRINE (owner requirement 2026-11-22): all five fire in
 // PARALLEL with a 4 s per-source budget, so a dead source never stalls
 // an answer (wall = winner time, not source count x timeout). A source
 // that errors, times out, or simply does not cover the pair is skipped
@@ -129,6 +135,29 @@ async function quoteOpenErApi(from: string, to: string): Promise<SourceQuote | n
   };
 }
 
+/** vatcomply: GET /rates?base=FROM -> {"date":"YYYY-MM-DD","rates":{"EUR":...}}.
+ * ECB-anchored daily fix, ~30 fiat codes; absent code = no coverage. */
+async function quoteVatcomply(from: string, to: string): Promise<SourceQuote | null> {
+  const url = `https://api.vatcomply.com/rates?base=${from}`;
+  const rawBody = await fetchText(url, SOURCE_TIMEOUT_MS);
+  const parsed = JSON.parse(rawBody) as { date?: unknown; rates?: Record<string, unknown> };
+  const rate = parsed.rates?.[to];
+  if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
+  return { source: "vatcomply", url, rawBody, rate, rateDate: String(parsed.date ?? "unknown") };
+}
+
+/** floatrates: GET /daily/<from-lower>.json -> {"eur":{"rate":"0.90...","date":"..."}}.
+ * Rates are decimal STRINGS; each currency carries its own date label. */
+async function quoteFloatrates(from: string, to: string): Promise<SourceQuote | null> {
+  const url = `https://www.floatrates.com/daily/${from.toLowerCase()}.json`;
+  const rawBody = await fetchText(url, SOURCE_TIMEOUT_MS);
+  const parsed = JSON.parse(rawBody) as Record<string, { rate?: unknown; date?: unknown } | undefined>;
+  const entry = parsed[to.toLowerCase()];
+  const rate = typeof entry?.rate === "string" ? Number(entry.rate) : NaN;
+  if (!Number.isFinite(rate) || rate <= 0) return null;
+  return { source: "floatrates", url, rawBody, rate, rateDate: String(entry?.date ?? "unknown") };
+}
+
 /** fawaz currency-api: GET .../v1/currencies/<from>.json (LOWERCASE
  * codes) -> {"date":"YYYY-MM-DD","<from>":{"eur":...}}. Broadest set,
  * including crypto tickers. */
@@ -153,10 +182,23 @@ export function rateDayKey(rateDate: string): number {
   return 0;
 }
 
+/** Five keyless sources: three official-fix snapshots (frankfurter,
+ * vatcomply, floatrates — all anchored to the ECB-style daily fix) and
+ * two continuously recomputed daily snapshots (open.er-api, fawaz).
+ * The served value is still the MEDIAN of whatever subset covers the
+ * pair. Why five: the network's own reference for this intent is the
+ * median of up to three keyless truth sources drawn per question, and
+ * the public source population is fix-heavy; a five-source median is a
+ * stabler estimate of that reference than a three-source one, while a
+ * stale or recomputed outlier can never move the middle value. Coverage
+ * doctrine is unchanged: er-api and fawaz still carry the long tail of
+ * non-ECB codes the three fix sources do not have. */
 const SOURCES: Array<{ name: string; quote: (from: string, to: string) => Promise<SourceQuote | null> }> = [
   { name: "frankfurter", quote: quoteFrankfurter },
   { name: "open-er-api", quote: quoteOpenErApi },
   { name: "fawaz", quote: quoteFawaz },
+  { name: "vatcomply", quote: quoteVatcomply },
+  { name: "floatrates", quote: quoteFloatrates },
 ];
 
 /** Promise.allSettled with a straggler grace: resolves when every
