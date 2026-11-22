@@ -380,17 +380,19 @@ export function nthFollowingBusinessDay(
   return counted === n ? cur : null;
 }
 
+// Intl construction is expensive. The fixed market zones reuse stateless formatters.
+// Bound other callers too so arbitrary zone names cannot grow retained state.
+const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
 function zonedParts(utcMs: number, timeZone: string): { ymd: Ymd; h: number; min: number; s: number } {
-  const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  });
+  let fmt = zoneFormatters.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    });
+    if (zoneFormatters.size >= 8) zoneFormatters.delete(zoneFormatters.keys().next().value!);
+    zoneFormatters.set(timeZone, fmt);
+  }
   const bag: Record<string, string> = {};
   for (const p of fmt.formatToParts(new Date(utcMs))) {
     if (p.type !== "literal") bag[p.type] = p.value;
