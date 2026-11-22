@@ -10,8 +10,8 @@ process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 beforeEach(() => resetValidatorCachesForTests());
 
-// An independently selected public index0 response captured from our own
-// production receipt. No evaluation question or competitor response was used.
+// Frozen public beacon API record for transport tests. This fixture is not
+// the retained native-acceptance receipt or proof of a production request.
 const fixture = JSON.parse(readFileSync(join(process.cwd(), "tests/fixtures/validator-finalized-record.json"), "utf8"));
 const root = "0x" + "ac".repeat(32);
 const pubkey: string = fixture.data.validator.pubkey;
@@ -77,6 +77,31 @@ describe("complete finalized validator record", () => {
     expect(String(result.answer)).toContain("34302537532 gwei");
     expect(String(result.answer)).toContain("far-future sentinel");
   });
+
+  it("omits the far-future explanation when no returned epoch is the sentinel", async () => {
+    const fetchImpl = transport((b) => {
+      for (const field of ["activation_eligibility_epoch", "activation_epoch", "exit_epoch", "withdrawable_epoch"]) {
+        b.data.validator[field] = "0";
+      }
+    });
+    const result = await handleValidator({ validator_index: "0" }, { fetchImpl });
+    expect(String(result.answer)).not.toContain("far-future sentinel");
+    expect(String(result.answer)).toContain("exit epoch 0; withdrawable epoch 0.");
+    expect(result.balance).toBe(fixture.data.balance);
+  });
+
+  for (const sentinelField of ["activation_eligibility_epoch", "activation_epoch", "exit_epoch", "withdrawable_epoch"] as const) {
+    it(`explains a sentinel returned in ${sentinelField}`, async () => {
+      const fetchImpl = transport((b) => {
+        for (const field of ["activation_eligibility_epoch", "activation_epoch", "exit_epoch", "withdrawable_epoch"]) {
+          b.data.validator[field] = field === sentinelField ? farFuture : "0";
+        }
+      });
+      const result = await handleValidator({ validator_index: "0" }, { fetchImpl });
+      expect(String(result.answer)).toContain("far-future sentinel, not a scheduled date");
+      expect(result[sentinelField]).toBe(farFuture);
+    });
+  }
 
   for (const query of [{ validator_pubkey: pubkey }, { validator_index: pubkey }]) {
     it(`resolves native BLS lookup through ${Object.keys(query)[0]}`, async () => {

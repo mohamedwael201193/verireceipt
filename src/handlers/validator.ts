@@ -3,7 +3,7 @@
 // Zero-LLM. Calls the standard beacon API on FOUR configured
 // keyless public beacon sources and answers only when at least TWO agree
 // on every returned validator field at the same finalized state root.
-// The quorum size is2-of-N, where N = BEACON_SOURCES.length. A single-source answer is NEVER served
+// The quorum size is 2-of-N, where N = BEACON_SOURCES.length. A single-source answer is NEVER served
 // as verified: fewer than two agreeing sources fails closed with 502
 // QUORUM_UNREACHABLE (no answer, no receipt), and any source that
 // answered with a DIFFERENT value than the agreeing pair — or returned
@@ -1261,12 +1261,21 @@ export async function handleValidator(
       "receipt evidence could not be stored; answer unavailable",
     );
   }
+  const hasFarFutureEpoch = [
+    leg.activationEligibilityEpoch,
+    leg.activationEpoch,
+    leg.exitEpoch,
+    leg.withdrawableEpoch,
+  ].includes("18446744073709551615");
+  const sentinelNote = hasFarFutureEpoch
+    ? "Epoch 18446744073709551615 is the beacon far-future sentinel, not a scheduled date. "
+    : "";
   const answer =
     `Validator ${leg.index} (${leg.pubkey}) has an effective balance of ${leg.effectiveBalance} gwei ` +
     `and balance ${leg.balance} gwei; status ${leg.status}; slashed ${leg.slashed}; ` +
     `activation eligibility epoch ${leg.activationEligibilityEpoch}; activation epoch ${leg.activationEpoch}; ` +
     `exit epoch ${leg.exitEpoch}; withdrawable epoch ${leg.withdrawableEpoch}. ` +
-    `Epoch 18446744073709551615 is the beacon far-future sentinel, not a scheduled date. ` +
+    sentinelNote +
     `Verified by ${votes} at finalized state root ${agreedRoot}.`;
   const result = envelope(
     INTENT,
