@@ -17,6 +17,7 @@ import { handleValidator } from "./handlers/validator";
 import { handleGasPrice } from "./handlers/gasPrice";
 import { handleBalance } from "./handlers/walletBalance";
 import { handleTokenSupply } from "./handlers/tokenSupply";
+import { handleFx } from "./handlers/currencyConvert";
 import { handleMacro } from "./handlers/macroEconomic";
 import { handleTokenHolders } from "./handlers/tokenHolders";
 import { ApiError, badRequest, errorBody } from "./core/errors";
@@ -257,6 +258,9 @@ export function buildServer(): FastifyInstance {
   );
   app.get("/v1/macro", async (request) =>
     trackIntent("macro", () => handleMacro(asQuery(request.query))),
+  );
+  app.get("/v1/fx", async (request) =>
+    trackIntent("fx", () => handleFx(asQuery(request.query))),
   );
   app.get("/v1/token-holders", async (request) =>
     trackIntent("token-holders", () => handleTokenHolders(asQuery(request.query))),
