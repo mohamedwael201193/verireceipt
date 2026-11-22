@@ -149,16 +149,15 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     'id: 774921\n' +
     'slug: verireceipt\n' +
     'name: VeriReceipt Deterministic Oracle\n' +
-    'description: >-\n' +
-    '  Zero-LLM deterministic provider with a SHA-256 receipt on every answer\n' +
-    '  (raw_response_sha256: 64 lowercase hex characters, no 0x prefix, over the\n' +
-    '  exact evidence bytes served at /receipts/{receipt_id}/raw): EVM\n' +
-    '  transaction lookups (archive-RPC quorum), SEC\n' +
-    '  EDGAR filing counts by company, form type and period, DeFi TVL\n' +
-    '  (DeFiLlama), block-pinned 1 ETH -> USDC execution quotes on Ethereum\n' +
-    '  mainnet, wholesale grid power prices (CAISO, NYISO, Elering), and Ethereum\n' +
-    '  beacon-chain validator effective balances (2-of-4 beacon API quorum). It\n' +
-    '  refuses (400/422/502/504) rather than guessing.\n' +
+    'description: \'Zero-LLM deterministic provider with a SHA-256 receipt on every answer (raw_response_sha256:\n' +
+    '  64 lowercase hex characters, no 0x prefix, over the exact evidence bytes served at /receipts/{receipt_id}/raw):\n' +
+    '  seven named EVM transaction chains, SEC EDGAR filing counts by company, exact form and inclusive filing-date\n' +
+    '  period, DeFiLlama protocol or chain TVL, a canonical fixed-size Ethereum mainnet ETH/USDC execution quote,\n' +
+    '  supported CAISO/NYISO/Elering grid prices, and finalized-root Ethereum validator effective balances. Unsupported,\n' +
+    '  ambiguous or unavailable evidence is refused rather than guessed. Additional receipt-backed endpoints provide\n' +
+    '  named-chain gas and balances, explicit-chain ERC20 supply, World Bank unemployment, DNS record observations,\n' +
+    '  dated currency conversion, TLS certificate validity and DNS response status. Declared source, scope and\n' +
+    '  freshness limits apply.\'\n' +
     'base_url: https://verireceipt.onrender.com\n' +
     '\n' +
     'auth:\n' +
@@ -206,6 +205,14 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - OPTIMAL_EXECUTION_ROUTE_GENERAL\n' +
     '    - GRID_POWER_PRICE_GENERAL\n' +
     '    - VALIDATOR_PERFORMANCE_VERIFY_GENERAL\n' +
+    '    - GAS_PRICE_GENERAL\n' +
+    '    - WALLET_BALANCE_CHECK_GENERAL\n' +
+    '    - TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL\n' +
+    '    - MACRO_ECONOMIC_INDICATOR_GENERAL\n' +
+    '    - DNS_RECORD_LOOKUP_GENERAL\n' +
+    '    - CURRENCY_EXCHANGE_CONVERT\n' +
+    '    - SSL_VERIFICATION_CERT\n' +
+    '    - EMAIL_SECURITY_GENERAL\n' +
     '  signal_mapping:\n' +
     '    confidence_field: confidence\n' +
     '    label_field: answer\n' +
@@ -215,165 +222,389 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '  - path: /v1/tx\n' +
     '    external_path: /v1/tx\n' +
     '    method: GET\n' +
-    '    description: >-\n' +
-    '      Looks up one EVM transaction by hash on a named chain with a 2-of-N\n' +
-    '      archive-RPC quorum and returns tx_hash, status (confirmed, reverted,\n' +
-    '      pending, not_found), from, to, block_number, value_eth and a SHA-256\n' +
-    '      receipt. Use for questions such as "In which block was transaction\n' +
-    '      0x... included?".\n' +
+    '    description: Looks up one complete EVM transaction hash on an explicitly named supported chain using a public\n' +
+    '      archive-capable RPC quorum. Returns tx_hash, status (confirmed, reverted, pending or not_found), from,\n' +
+    '      to, block_number, value_eth and a SHA-256 receipt. A quorum is required; an unavailable or conflicting\n' +
+    '      source set is not a not_found answer. This is an observation, not a transaction submission.\n' +
     '    intents:\n' +
-    '      - ONCHAIN_TX_LOOKUP_GENERAL\n' +
+    '    - ONCHAIN_TX_LOOKUP_GENERAL\n' +
     '    params:\n' +
     '      query:\n' +
     '        required:\n' +
-    '          - name: tx_hash\n' +
-    '            type: string\n' +
-    '            intents: ["ONCHAIN_TX_LOOKUP_GENERAL"]\n' +
-    '            description: Complete 0x-prefixed 64-hex-character transaction hash.\n' +
-    '          - name: chain\n' +
-    '            type: string\n' +
-    '            intents: ["ONCHAIN_TX_LOOKUP_GENERAL"]\n' +
-    '            description: >-\n' +
-    '              EVM chain name, lower case: ethereum, base, arbitrum, optimism,\n' +
-    '              polygon, sepolia or base-sepolia. Ethereum mainnet may also be\n' +
-    '              written eth or mainnet.\n' +
+    '        - name: tx_hash\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - ONCHAIN_TX_LOOKUP_GENERAL\n' +
+    '          description: Complete 0x-prefixed 64-hex-character transaction hash.\n' +
+    '        - name: chain\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - ONCHAIN_TX_LOOKUP_GENERAL\n' +
+    '          description: \'Supported canonical chain names: ethereum, base, arbitrum, optimism, polygon, sepolia\n' +
+    '            and base-sepolia. Ethereum aliases eth and mainnet are accepted. State the chain explicitly; do\n' +
+    '            not infer another chain from a transaction hash.\'\n' +
     '\n' +
     '  - path: /v1/filings\n' +
     '    external_path: /v1/filings\n' +
     '    method: GET\n' +
-    '    description: >-\n' +
-    '      Counts a company\'s filings on SEC EDGAR (data.sec.gov submissions,\n' +
-    '      by filing date) in a period, optionally of one exact EDGAR form type,\n' +
-    '      and returns entity, form_type, filing_count, the filing titles newest first,\n' +
-    '      their URLs and a SHA-256 receipt. Use for questions such as "How many\n' +
-    '      Form 10-Q filings by Tesla, Inc. (CIK 1318605) in calendar 2023 are on\n' +
-    '      SEC EDGAR?". SEC EDGAR only: an unknown or ambiguous company or form\n' +
-    '      is refused (422), never answered from another source or with an\n' +
-    '      unfiltered count.\n' +
+    '    description: Counts one company\'s SEC EDGAR submissions by inclusive filing_date, optionally restricted\n' +
+    '      to one exact form type. Supports calendar years, explicit calendar quarters, valid quarter-ending dates\n' +
+    '      and explicit date ranges, not company fiscal periods. Returns entity, form_type, filing_count, newest-first\n' +
+    '      filing titles and URLs, and a SHA-256 receipt. Unknown or ambiguous company/form and unsupported periods\n' +
+    '      are refused, not replaced with an unfiltered count or another source.\n' +
     '    intents:\n' +
-    '      - REGULATORY_FILING_MONITOR_GENERAL\n' +
+    '    - REGULATORY_FILING_MONITOR_GENERAL\n' +
     '    params:\n' +
     '      query:\n' +
     '        required:\n' +
-    '          - name: entity\n' +
-    '            type: string\n' +
-    '            intents: ["REGULATORY_FILING_MONITOR_GENERAL"]\n' +
-    '            description: >-\n' +
-    '              The subject of the question verbatim, including any SEC form\n' +
-    '              type and CIK, e.g. "Form 10-Q filings by Tesla, Inc. (CIK\n' +
-    '              1318605)", "Tesla, Inc.", "TSLA", "1318605".\n' +
-    '          - name: period\n' +
-    '            type: string\n' +
-    '            intents: ["REGULATORY_FILING_MONITOR_GENERAL"]\n' +
-    '            description: Search period such as last 12 months, 2026, calendar 2023, or YYYY-MM-DD..YYYY-MM-DD. Calendar years only; fiscal-year periods are rejected.\n' +
+    '        - name: entity\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - REGULATORY_FILING_MONITOR_GENERAL\n' +
+    '          description: The subject of the question verbatim, including any SEC form type and CIK, e.g. "Form\n' +
+    '            10-Q filings by Tesla, Inc. (CIK 1318605)", "Tesla, Inc.", "TSLA", "1318605".\n' +
+    '        - name: period\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - REGULATORY_FILING_MONITOR_GENERAL\n' +
+    '          description: \'An inclusive filing-date period: last N months, a calendar year, an explicit calendar\n' +
+    '            Q1/Q2/Q3/Q4 with year, a valid quarter ending YYYY-MM-DD (March 31, June 30, September 30 or December\n' +
+    '            31), YYYY-MM-DD..YYYY-MM-DD, or a supported year/date range using to or through. Bare Q1-Q4 without\n' +
+    '            calendar qualification and company fiscal-year or fiscal-quarter requests are rejected.\'\n' +
     '        optional:\n' +
-    '          - name: form_type\n' +
-    '            type: string\n' +
-    '            intents: ["REGULATORY_FILING_MONITOR_GENERAL"]\n' +
-    '            description: One SEC EDGAR form type exactly as asked, e.g. 10-K, 10-Q, 8-K, 144/A, 4/A. Exact match (10-K counts originals only; 10-K/A counts amendments only). Omit to count all forms.\n' +
+    '        - name: form_type\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - REGULATORY_FILING_MONITOR_GENERAL\n' +
+    '          description: One exact SEC EDGAR form type as asked, including slash amendments, e.g. 10-K, 10-Q,\n' +
+    '            8-K, 144/A or 4/A. 10-K excludes 10-K/A and amendments are not folded into originals. A form embedded\n' +
+    '            in entity is retained; conflicting form specifications are rejected. Omit only when the question\n' +
+    '            asks for all forms.\n' +
     '\n' +
     '  - path: /v1/tvl\n' +
     '    external_path: /v1/tvl\n' +
     '    method: GET\n' +
-    '    description: >-\n' +
-    '      Returns the current total value locked of a DeFi protocol or chain\n' +
-    '      from DeFiLlama\'s keyless API: protocol_or_chain, tvl_usd,\n' +
-    '      chain_tvl_usd, as_of and a SHA-256 receipt. Use for questions such as\n' +
-    '      "What is the total value locked in Aave V3, in US dollars?".\n' +
+    '    description: Returns current DeFiLlama TVL in USD for one resolvable protocol, catalog parent aggregate\n' +
+    '      or chain. Version-qualified names remain version-qualified; catalog parent relationships are not replaced\n' +
+    '      by guessed slug substitutions. Returns protocol_or_chain, tvl_usd, as_of and a SHA-256 receipt. chain_tvl_usd\n' +
+    '      is an optional nullable breakdown, not a second required total. Unknown or ambiguous identities are refused.\n' +
     '    intents:\n' +
-    '      - TVL_LOOKUP_GENERAL\n' +
+    '    - TVL_LOOKUP_GENERAL\n' +
     '    params:\n' +
     '      query:\n' +
     '        required:\n' +
-    '          - name: protocol\n' +
-    '            type: string\n' +
-    '            intents: ["TVL_LOOKUP_GENERAL"]\n' +
-    '            description: >-\n' +
-    '              DeFi protocol name or DeFiLlama slug, keeping the version when\n' +
-    '              one is named (Aave V3 or aave-v3, Uniswap V3 or uniswap-v3,\n' +
-    '              Lido), or a chain name (ethereum). At most 512 characters.\n' +
+    '        - name: protocol\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - TVL_LOOKUP_GENERAL\n' +
+    '          description: Protocol name or DeFiLlama slug, preserving any requested version, catalog parent name,\n' +
+    '            or supported chain name. Use the complete identity from the question, at most 512 characters. A\n' +
+    '            protocol parent aggregate is not interchangeable with one child version; a missing optional chain\n' +
+    '            breakdown does not mean the total is missing.\n' +
     '\n' +
     '  - path: /v1/route\n' +
     '    external_path: /v1/route\n' +
     '    method: GET\n' +
-    '    description: >-\n' +
-    '      Returns a block-pinned Ethereum mainnet execution quote for selling\n' +
-    '      exactly 1 ETH for USDC, the best quote across Uniswap V2/V3, SushiSwap V2,\n' +
-    '      as amount_out in USDC base units (6 decimals) with a SHA-256 receipt.\n' +
+    '    description: The typed intent contract quotes exactly 1 ETH sold for USDC on Ethereum mainnet, with block-pinned\n' +
+    '      public RPC evidence and amount_out in USDC base units (6 decimals). Compares implemented Uniswap V2/V3\n' +
+    '      and SushiSwap V2 venues. The API separately implements native ETH/USDT, DAI/USDC, USDT/USDC, DAI/USDT\n' +
+    '      and WBTC/USDC extensions, each selling one whole input token with output in its actual buy-token base\n' +
+    '      units. Those extensions are outside this typed canonical contract and its accepted_fields; native amounts\n' +
+    '      are never inflated into the canonical range or relabelled as another token. Quotes are gross, not gas-adjusted;\n' +
+    '      no cross-chain, arbitrary-size or arbitrary-pair routing is promised.\n' +
     '    intents:\n' +
-    '      - OPTIMAL_EXECUTION_ROUTE_GENERAL\n' +
+    '    - OPTIMAL_EXECUTION_ROUTE_GENERAL\n' +
     '    params:\n' +
     '      query:\n' +
     '        required:\n' +
-    '          - name: pair\n' +
-    '            type: string\n' +
-    '            intents: ["OPTIMAL_EXECUTION_ROUTE_GENERAL"]\n' +
-    '            description: The swap to route. Only ETH/USDC (sell exactly 1 ETH for USDC on Ethereum mainnet).\n' +
-    '            accepted_fields:\n' +
-    '              ETH/USDC:\n' +
-    '                intents: ["OPTIMAL_EXECUTION_ROUTE_GENERAL"]\n' +
-    '                description: Sell exactly 1 ETH for USDC on Ethereum mainnet.\n' +
-    '\n' +
+    '        - name: pair\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - OPTIMAL_EXECUTION_ROUTE_GENERAL\n' +
+    '          description: \'Typed canonical intent pair: ETH/USDC only, selling exactly 1 ETH for USDC on Ethereum\n' +
+    '            mainnet. Separately implemented native API extension pairs are not accepted values for this typed\n' +
+    '            contract.\'\n' +
+    '          accepted_fields:\n' +
+    '            ETH/USDC:\n' +
+    '              intents:\n' +
+    '              - OPTIMAL_EXECUTION_ROUTE_GENERAL\n' +
+    '              description: Sell exactly 1 ETH for USDC on Ethereum mainnet; amount_out is USDC base units (6 decimals).\n' +
     '  - path: /v1/grid-price\n' +
     '    external_path: /v1/grid-price\n' +
     '    method: GET\n' +
-    '    description: >-\n' +
-    '      Returns the wholesale electricity price lmp_usd_per_mwh for one\n' +
-    '      pricing node or zone and one finished settlement interval, from\n' +
-    '      official public feeds: CAISO OASIS day-ahead hourly LMP, NYISO\n' +
-    '      real-time 5-minute zonal LBMP, and the Elering dashboard API\n' +
-    '      15-minute prices (EUR/MWh converted to USD with the open.er-api.com\n' +
-    '      EUR rate). Returns node_or_zone, market, interval_start, currency and\n' +
-    '      a SHA-256 receipt. Any other node or zone is refused (422). Use for\n' +
-    '      questions such as "What is the CAISO day-ahead LMP for settlement\n' +
-    '      interval 2026-09-13T14:00:00Z?".\n' +
+    '    description: Returns lmp_usd_per_mwh for a supported pricing node or zone and a finished UTC interval from\n' +
+    '      CAISO OASIS day-ahead hourly LMP, NYISO real-time 5-minute zonal LBMP, or Elering cached published price\n' +
+    '      rows converted from EUR/MWh with the recorded EUR/USD source. Returns node_or_zone, market, interval_start,\n' +
+    '      currency, checked_at and receipt timestamps, not a separate freshness/finality field. Normal valid cache\n' +
+    '      rows, including eligible provisional rows, use verdict=verified and confidence=1 without a provisional\n' +
+    '      label. An unconfirmed post-close row after failed revalidation or unavailable historical re-fetch instead\n' +
+    '      carries the unverified-cached-price warning in the answer. Elering is cache-only; absent evidence is not\n' +
+    '      interpolated or invented. A finished interval is not a promise of final settlement.\n' +
     '    intents:\n' +
-    '      - GRID_POWER_PRICE_GENERAL\n' +
+    '    - GRID_POWER_PRICE_GENERAL\n' +
     '    params:\n' +
     '      query:\n' +
     '        required:\n' +
-    '          - name: node_or_zone\n' +
-    '            type: string\n' +
-    '            intents: ["GRID_POWER_PRICE_GENERAL"]\n' +
-    '            description: >-\n' +
-    '              Exactly one of: CAISO hubs TH_NP15_GEN-APND, TH_SP15_GEN-APND,\n' +
-    '              TH_ZP26_GEN-APND (short names NP15, SP15, ZP26 also accepted),\n' +
-    '              or CAISO when no CAISO node is named (answered for the NP15\n' +
-    '              trading hub TH_NP15_GEN-APND, as the answer states); NYISO\n' +
-    '              zones ZONE_A to ZONE_K (NYISO names such as N.Y.C. also\n' +
-    '              accepted); Elering zones EE, FI, LV, LT.\n' +
-    '          - name: interval_start\n' +
-    '            type: string\n' +
-    '            intents: ["GRID_POWER_PRICE_GENERAL"]\n' +
-    '            description: >-\n' +
-    '              Start of the settlement interval, ISO-8601 UTC, e.g.\n' +
-    '              2026-09-13T14:00:00Z.\n' +
+    '        - name: node_or_zone\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - GRID_POWER_PRICE_GENERAL\n' +
+    '          description: CAISO hubs TH_NP15_GEN-APND, TH_SP15_GEN-APND or TH_ZP26_GEN-APND (NP15, SP15, ZP26 aliases);\n' +
+    '            bare CAISO explicitly selects NP15. NYISO zones ZONE_A..ZONE_K or supported NYISO names, including\n' +
+    '            WEST and N.Y.C.; source-qualified NYISO WEST is accepted. Elering zones EE, FI, LV, LT, also source-qualified\n' +
+    '            as Elering EE, Elering FI, Elering LV or Elering LT. Other market/zone combinations are refused.\n' +
+    '        - name: interval_start\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - GRID_POWER_PRICE_GENERAL\n' +
+    '          description: \'Exact finished settlement-interval start in ISO-8601 UTC with Z or +00:00, aligned to\n' +
+    '            the selected market: CAISO 60 minutes, NYISO 5 minutes, Elering 15-minute accepted keys. An aligned\n' +
+    '            key is not proof that a source row exists; do not shift an absent interval or infer a current/historical\n' +
+    '            price.\'\n' +
     '\n' +
     '  - path: /v1/validator\n' +
     '    external_path: /v1/validator\n' +
     '    method: GET\n' +
-    '    description: >-\n' +
-    '      Returns the effective balance in gwei of one Ethereum beacon-chain\n' +
-    '      validator at the finalized state, read from four independently\n' +
-    '      operated public beacon APIs (2-of-4 quorum): answered only when at\n' +
-    '      least two sources agree on effective_balance and status; fewer than\n' +
-    '      two agreeing sources, or any source that disagrees, fails closed\n' +
-    '      (502, no answer). Returns validator_index, effective_balance, status\n' +
-    '      and a SHA-256 receipt. Use for questions such as "What is the\n' +
-    '      effective balance of Ethereum validator index 1, in gwei?".\n' +
+    '    description: Returns effective_balance in gwei and status for one Ethereum beacon validator, bound to an\n' +
+    '      agreed finalized_state_root. At least two configured public beacon sources must agree on the finalized\n' +
+    '      root and at least two validator responses must agree on effective_balance/status for that root. Any returned\n' +
+    '      dissent or found-versus-404 conflict fails closed; unavailable legs do not become votes. Verified answers\n' +
+    '      may be reused only for the same validator and agreed finalized root, with their original receipt. This\n' +
+    '      is effective balance, not APY, reward income, uptime or slashing history.\n' +
     '    intents:\n' +
-    '      - VALIDATOR_PERFORMANCE_VERIFY_GENERAL\n' +
+    '    - VALIDATOR_PERFORMANCE_VERIFY_GENERAL\n' +
     '    params:\n' +
     '      query:\n' +
     '        required:\n' +
-    '          - name: validator_index\n' +
-    '            type: string\n' +
-    '            intents: ["VALIDATOR_PERFORMANCE_VERIFY_GENERAL"]\n' +
-    '            description: >-\n' +
-    '              Ethereum beacon-chain validator index as a canonical decimal\n' +
-    '              digit string (0, or a non-negative integer with no sign and no\n' +
-    '              leading zeros), e.g. 1, at most 1000000000 (the official\n' +
-    '              intent max). The handler rejects any other shape.\n' +
+    '        - name: validator_index\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - VALIDATOR_PERFORMANCE_VERIFY_GENERAL\n' +
+    '          description: Ethereum beacon-chain validator index as a canonical decimal digit string (0, or a non-negative\n' +
+    '            integer with no sign and no leading zeros), e.g. 1, at most 1000000000 (the official intent max).\n' +
+    '            The handler rejects any other shape.\n' +
+    '\n' +
+    '  - path: /v1/gas-price\n' +
+    '    external_path: /v1/gas-price\n' +
+    '    method: GET\n' +
+    '    description: Returns current gas_price_gwei on an explicitly named supported EVM chain from public RPC\n' +
+    '      quorum, with stored source evidence.\n' +
+    '    intents:\n' +
+    '    - GAS_PRICE_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: chain\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - GAS_PRICE_GENERAL\n' +
+    '          description: Copy the requested chain without inventing or silently defaulting identity or scope.\n' +
+    '  - path: /v1/balance\n' +
+    '    external_path: /v1/balance\n' +
+    '    method: GET\n' +
+    '    description: Returns a finalized native or ERC20 balance in whole token units for an explicit address\n' +
+    '      and supported chain. Optional token selects the asset; absent token means the native asset. No transaction\n' +
+    '      is sent.\n' +
+    '    intents:\n' +
+    '    - WALLET_BALANCE_CHECK_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: address\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - WALLET_BALANCE_CHECK_GENERAL\n' +
+    '          description: Copy the requested address without inventing or silently defaulting identity or scope.\n' +
+    '        - name: chain\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - WALLET_BALANCE_CHECK_GENERAL\n' +
+    '          description: Copy the requested chain without inventing or silently defaulting identity or scope.\n' +
+    '        optional:\n' +
+    '        - name: token\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - WALLET_BALANCE_CHECK_GENERAL\n' +
+    '          description: Copy the requested token without inventing or silently defaulting identity or scope.\n' +
+    '  - path: /v1/token-supply\n' +
+    '    external_path: /v1/token-supply\n' +
+    '    method: GET\n' +
+    '    description: Returns ERC20 total_supply in whole tokens from finalized-tag RPC quorum. The token text\n' +
+    '      must preserve explicit chain and contract identity, for example a token followed by on and the named\n' +
+    '      chain. Does not infer a chain for an ambiguous symbol.\n' +
+    '    intents:\n' +
+    '    - TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: token\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL\n' +
+    '          description: Copy the complete token string, keeping any explicit chain, contract address and\n' +
+    '            display label. Do not invent a chain.\n' +
+    '  - path: /v1/macro\n' +
+    '    external_path: /v1/macro\n' +
+    '    method: GET\n' +
+    '    description: Returns World Bank SL.UEM.TOTL.ZS unemployment rate_pct for a country and optional calendar\n' +
+    '      year. Omitted year uses latest published nonempty annual data; missing explicit-year data is refused.\n' +
+    '      Other economic indicators are not supported.\n' +
+    '    intents:\n' +
+    '    - MACRO_ECONOMIC_INDICATOR_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: indicator\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - MACRO_ECONOMIC_INDICATOR_GENERAL\n' +
+    '          description: Copy the requested indicator without inventing or silently defaulting identity or\n' +
+    '            scope.\n' +
+    '          accepted_fields:\n' +
+    '            unemployment rate:\n' +
+    '              intents:\n' +
+    '              - MACRO_ECONOMIC_INDICATOR_GENERAL\n' +
+    '              description: Supported canonical value.\n' +
+    '        - name: country\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - MACRO_ECONOMIC_INDICATOR_GENERAL\n' +
+    '          description: Copy the requested country without inventing or silently defaulting identity or scope.\n' +
+    '        optional:\n' +
+    '        - name: year\n' +
+    '          type: integer\n' +
+    '          intents:\n' +
+    '          - MACRO_ECONOMIC_INDICATOR_GENERAL\n' +
+    '          description: Optional explicit calendar year. Preserve the requested year; omit only when no year\n' +
+    '            was requested.\n' +
+    '  - path: /v1/dns\n' +
+    '    external_path: /v1/dns\n' +
+    '    method: GET\n' +
+    '    description: Returns has_record for one DNS name and one of the ten declared record types from recursive\n' +
+    '      resolver observations. Inconclusive failures and existence disagreement are refused, not reported\n' +
+    '      as absence.\n' +
+    '    intents:\n' +
+    '    - DNS_RECORD_LOOKUP_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: name\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - DNS_RECORD_LOOKUP_GENERAL\n' +
+    '          description: Copy the requested name without inventing or silently defaulting identity or scope.\n' +
+    '        - name: record_type\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - DNS_RECORD_LOOKUP_GENERAL\n' +
+    '          description: Copy the requested record_type without inventing or silently defaulting identity\n' +
+    '            or scope.\n' +
+    '          accepted_fields:\n' +
+    '            A:\n' +
+    '              intents:\n' +
+    '              - DNS_RECORD_LOOKUP_GENERAL\n' +
+    '              description: Supported canonical value.\n' +
+    '            AAAA:\n' +
+    '              intents:\n' +
+    '              - DNS_RECORD_LOOKUP_GENERAL\n' +
+    '              description: Supported canonical value.\n' +
+    '            CNAME:\n' +
+    '              intents:\n' +
+    '              - DNS_RECORD_LOOKUP_GENERAL\n' +
+    '              description: Supported canonical value.\n' +
+    '            MX:\n' +
+    '              intents:\n' +
+    '              - DNS_RECORD_LOOKUP_GENERAL\n' +
+    '              description: Supported canonical value.\n' +
+    '            NS:\n' +
+    '              intents:\n' +
+    '              - DNS_RECORD_LOOKUP_GENERAL\n' +
+    '              description: Supported canonical value.\n' +
+    '            TXT:\n' +
+    '              intents:\n' +
+    '              - DNS_RECORD_LOOKUP_GENERAL\n' +
+    '              description: Supported canonical value.\n' +
+    '            SOA:\n' +
+    '              intents:\n' +
+    '              - DNS_RECORD_LOOKUP_GENERAL\n' +
+    '              description: Supported canonical value.\n' +
+    '            CAA:\n' +
+    '              intents:\n' +
+    '              - DNS_RECORD_LOOKUP_GENERAL\n' +
+    '              description: Supported canonical value.\n' +
+    '            SRV:\n' +
+    '              intents:\n' +
+    '              - DNS_RECORD_LOOKUP_GENERAL\n' +
+    '              description: Supported canonical value.\n' +
+    '            PTR:\n' +
+    '              intents:\n' +
+    '              - DNS_RECORD_LOOKUP_GENERAL\n' +
+    '              description: Supported canonical value.\n' +
+    '  - path: /v1/fx\n' +
+    '    external_path: /v1/fx\n' +
+    '    method: GET\n' +
+    '    description: Returns converted_amount in the requested to_currency using dated daily public rate sources\n' +
+    '      and disclosed agreement or degraded coverage, not a live trading quote.\n' +
+    '    intents:\n' +
+    '    - CURRENCY_EXCHANGE_CONVERT\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: from_currency\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - CURRENCY_EXCHANGE_CONVERT\n' +
+    '          description: Copy the requested from_currency without inventing or silently defaulting identity\n' +
+    '            or scope.\n' +
+    '        - name: to_currency\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - CURRENCY_EXCHANGE_CONVERT\n' +
+    '          description: Copy the requested to_currency without inventing or silently defaulting identity\n' +
+    '            or scope.\n' +
+    '        optional:\n' +
+    '        - name: amount\n' +
+    '          type: number\n' +
+    '          intents:\n' +
+    '          - CURRENCY_EXCHANGE_CONVERT\n' +
+    '          description: Copy the requested amount without inventing or silently defaulting identity or scope.\n' +
+    '  - path: /v1/ssl\n' +
+    '    external_path: /v1/ssl\n' +
+    '    method: GET\n' +
+    '    description: Returns certificate_valid from an actual TLS certificate and hostname/trust-store check\n' +
+    '      on an allowed public hostname. Network failure is refused. No revocation or multi-vantage assurance\n' +
+    '      is claimed.\n' +
+    '    intents:\n' +
+    '    - SSL_VERIFICATION_CERT\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: host\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - SSL_VERIFICATION_CERT\n' +
+    '          description: Copy the requested host without inventing or silently defaulting identity or scope.\n' +
+    '  - path: /v1/email-security\n' +
+    '    external_path: /v1/email-security\n' +
+    '    method: GET\n' +
+    '    description: Returns lookup_ok for a public DNS response status for one domain/name and record type.\n' +
+    '      It does not report record presence, email safety or deliverability; NOERROR can have no matching records.\n' +
+    '    intents:\n' +
+    '    - EMAIL_SECURITY_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: domain\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - EMAIL_SECURITY_GENERAL\n' +
+    '          description: Copy the requested domain without inventing or silently defaulting identity or scope.\n' +
+    '        - name: record_type\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - EMAIL_SECURITY_GENERAL\n' +
+    '          description: Copy the requested record_type without inventing or silently defaulting identity\n' +
+    '            or scope.\n' +
     '\n' +
     'intent_mapping:\n' +
     '  ONCHAIN_TX_LOOKUP_GENERAL:\n' +
@@ -480,6 +711,105 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    output:\n' +
     '      effective_balance:\n' +
     '        path: effective_balance\n' +
-    '        unit: "gwei"\n',
+    '        unit: "gwei"\n' +
+    '\n' +
+    '  GAS_PRICE_GENERAL:\n' +
+    '    endpoint: /v1/gas-price\n' +
+    '    input:\n' +
+    '      chain:\n' +
+    '        from: chain\n' +
+    '    output:\n' +
+    '      chain:\n' +
+    '        path: chain\n' +
+    '      gas_price_gwei:\n' +
+    '        path: gas_price_gwei\n' +
+    '        unit: gwei\n' +
+    '      as_of:\n' +
+    '        path: as_of\n' +
+    '  WALLET_BALANCE_CHECK_GENERAL:\n' +
+    '    endpoint: /v1/balance\n' +
+    '    input:\n' +
+    '      address:\n' +
+    '        from: address\n' +
+    '      chain:\n' +
+    '        from: chain\n' +
+    '      token:\n' +
+    '        from: token\n' +
+    '    output:\n' +
+    '      address:\n' +
+    '        path: address\n' +
+    '      chain:\n' +
+    '        path: chain\n' +
+    '      balance:\n' +
+    '        path: balance\n' +
+    '        unit: whole token units\n' +
+    '      token_symbol:\n' +
+    '        path: token_symbol\n' +
+    '      as_of:\n' +
+    '        path: as_of\n' +
+    '  TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL:\n' +
+    '    endpoint: /v1/token-supply\n' +
+    '    input:\n' +
+    '      token:\n' +
+    '        from: token\n' +
+    '        how: Preserve explicit contract, display label and chain context verbatim; do not silently discard\n' +
+    '          a conflicting identity or assume a chain.\n' +
+    '    output:\n' +
+    '      total_supply:\n' +
+    '        path: total_supply\n' +
+    '        unit: whole tokens\n' +
+    '  MACRO_ECONOMIC_INDICATOR_GENERAL:\n' +
+    '    endpoint: /v1/macro\n' +
+    '    input:\n' +
+    '      indicator:\n' +
+    '        from: indicator\n' +
+    '      country:\n' +
+    '        from: country\n' +
+    '      year:\n' +
+    '        from: year\n' +
+    '    output:\n' +
+    '      rate_pct:\n' +
+    '        path: rate_pct\n' +
+    '        unit: percent\n' +
+    '  DNS_RECORD_LOOKUP_GENERAL:\n' +
+    '    endpoint: /v1/dns\n' +
+    '    input:\n' +
+    '      name:\n' +
+    '        from: name\n' +
+    '      record_type:\n' +
+    '        from: record_type\n' +
+    '    output:\n' +
+    '      has_record:\n' +
+    '        path: has_record\n' +
+    '  CURRENCY_EXCHANGE_CONVERT:\n' +
+    '    endpoint: /v1/fx\n' +
+    '    input:\n' +
+    '      from_currency:\n' +
+    '        from: from_currency\n' +
+    '      to_currency:\n' +
+    '        from: to_currency\n' +
+    '      amount:\n' +
+    '        from: amount\n' +
+    '    output:\n' +
+    '      converted_amount:\n' +
+    '        path: converted_amount\n' +
+    '  SSL_VERIFICATION_CERT:\n' +
+    '    endpoint: /v1/ssl\n' +
+    '    input:\n' +
+    '      host:\n' +
+    '        from: host\n' +
+    '    output:\n' +
+    '      certificate_valid:\n' +
+    '        path: certificate_valid\n' +
+    '  EMAIL_SECURITY_GENERAL:\n' +
+    '    endpoint: /v1/email-security\n' +
+    '    input:\n' +
+    '      domain:\n' +
+    '        from: domain\n' +
+    '      record_type:\n' +
+    '        from: record_type\n' +
+    '    output:\n' +
+    '      lookup_ok:\n' +
+    '        path: lookup_ok\n',
   cast: REGISTRATION_CAST_SNIPPET,
 };
