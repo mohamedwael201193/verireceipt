@@ -10,6 +10,12 @@ describe("route explanation, measured scope rather than global optimality", () =
   it.each([[1n, "0.000001"], [1_000_000n, "1.000000"], [9_999_999_999n, "9999.999999"]])("formats %s exactly without float rounding", (amountOut, value) => {
     expect(explainRouteQuote({ ...base, amountOut })).toContain(`${value} USDC`);
   });
+  it("scopes the above-range addition to explicit token decimals, not legacy registry rendering", () => {
+    const high = { ...base, amountOut: 900_000_000_000n };
+    expect(explainRouteQuote(high)).not.toContain("above the published");
+    expect(explainRouteQuote({ ...high, buyDecimals: 6 })).toContain("above the published");
+    expect(explainRouteQuote({ ...base, amountOut: 3n, buyDecimals: 6 })).not.toContain("stable-pair quote");
+  });
   it("bounds selection to surviving supported venue quotes", () => {
     const s = explainRouteQuote(base);
     expect(s).toContain("3 venue quotes that survived");

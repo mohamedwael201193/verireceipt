@@ -3,6 +3,7 @@
 // choice (core/storage.ts: DATABASE_URL -> Postgres, else SQLite), so the
 // same assertion runs against whichever store the suite is pointed at.
 import Database from "better-sqlite3";
+import { gunzipSync } from "node:zlib";
 import { storageBackend } from "../../src/core/storage";
 import { pgQueryForTests } from "../../src/core/pgStore";
 
@@ -38,6 +39,18 @@ export async function countReceipts(intent?: string): Promise<number> {
       ? (db.prepare("SELECT COUNT(*) AS n FROM miner_receipts").get() as { n: number }).n
       : (db.prepare("SELECT COUNT(*) AS n FROM miner_receipts WHERE intent = ?").get(intent) as { n: number }).n,
   );
+}
+
+export async function storedReceiptEvidence(id: string): Promise<string | undefined> {
+  const sql = "SELECT evidence_gzip FROM miner_receipts WHERE receipt_id = ";
+  let packed: Buffer | undefined;
+  if (storageBackend() === "postgres") {
+    const rows = await pgQueryForTests<{ evidence_gzip: Buffer | null }>(sql + "$1", [id]);
+    packed = rows[0]?.evidence_gzip ?? undefined;
+  } else {
+    packed = sqliteRead((db) => (db.prepare(sql + "?").get(id) as { evidence_gzip: Buffer | null } | undefined)?.evidence_gzip ?? undefined);
+  }
+  return packed ? gunzipSync(packed).toString("utf8") : undefined;
 }
 
 export async function storedReceiptRow(id: string): Promise<StoredReceiptRow | undefined> {
