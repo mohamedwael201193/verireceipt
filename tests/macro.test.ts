@@ -176,6 +176,42 @@ describe("handleMacro validation (stubbed, no network use)", () => {
 });
 
 describe("handleMacro answers (stubbed World Bank)", () => {
+  it("uses the source's latest nonempty year when year is absent", async () => {
+    const bodies = [indicatorJson(2021, 4.1), indicatorJson(2024, 5.2), indicatorJson(2025, null)].map((text) => JSON.parse(text)[1][0]);
+    const raw = JSON.stringify([{ pages: 1 }, bodies]);
+    stubWorldBank({ catalog: catalogJson(), indicator: raw });
+    const out = await handleMacro({ indicator: "unemployment rate", country: "Egypt" });
+    expect(out.year).toBe(2024);
+    expect(out.rate_pct).toBe(5.2);
+    expect(out.year_resolution).toBe("latest_published_nonempty");
+    expect(out.answer).toContain("latest published");
+    const receipt = out.receipt as { upstream_url: string; receipt_id: string; raw_response_sha256: string };
+    expect(receipt.upstream_url).toContain("mrnev=1");
+    expect(receipt.upstream_url).not.toContain("date=");
+    const evidence = await getReceiptEvidence(receipt.receipt_id);
+    expect(sha256Hex(evidence.evidence!)).toBe(receipt.raw_response_sha256);
+    expect(evidence.evidence!.toString()).toBe(raw);
+  });
+
+  it("does not silently use latest when an explicit requested year is missing", async () => {
+    stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2024, 5.2) });
+    await expectApiError(handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2023" }), 422, "NO_DATA");
+  });
+
+  it("refuses latest when every returned value is null", async () => {
+    stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2025, null) });
+    await expectApiError(handleMacro({ indicator: "unemployment rate", country: "Egypt" }), 422, "NO_DATA");
+  });
+
+  it("rejects an explicitly empty year rather than silently choosing latest", async () => {
+    await expectApiError(handleMacro({ indicator: "unemployment rate", country: "Egypt", year: " " }), 400, "INVALID_YEAR");
+  });
+
+  it("maps a malformed row collection to an explicit upstream failure", async () => {
+    stubWorldBank({ catalog: catalogJson(), indicator: JSON.stringify([{}, {}]) });
+    await expectApiError(handleMacro({ indicator: "unemployment rate", country: "Egypt" }), 502, "WORLD_BANK_UNAVAILABLE");
+  });
+
   it("answers a country's rate with 6-decimal rounding and a raw-bytes receipt", async () => {
     stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2023, 5.30999994277954) });
     const res = await handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2023" });
@@ -267,4 +303,21 @@ describe("handleMacro LIVE (real World Bank API, no stub)", () => {
     },
     LIVE_TIMEOUT_MS,
   );
+});
+
+
+describe("latest published annual data LIVE", () => {
+  it("returns the source-selected year with a verifiable receipt, not an assumed current year", async () => {
+    const out = await handleMacro({ indicator: "unemployment rate", country: "United States" });
+    expect(Number.isInteger(out.year)).toBe(true);
+    expect(out.year as number).toBeGreaterThanOrEqual(1960);
+    expect(out.year as number).toBeLessThanOrEqual(2100);
+    expect(out.year_resolution).toBe("latest_published_nonempty");
+    expect(out.rate_pct as number).toBeGreaterThanOrEqual(0);
+    expect(out.rate_pct as number).toBeLessThanOrEqual(100);
+    const receipt = out.receipt as { upstream_url: string; receipt_id: string; raw_response_sha256: string };
+    expect(receipt.upstream_url).toContain("mrnev=1");
+    const evidence = await getReceiptEvidence(receipt.receipt_id);
+    expect(sha256Hex(evidence.evidence!)).toBe(receipt.raw_response_sha256);
+  }, 60000);
 });
