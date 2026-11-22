@@ -1,6 +1,6 @@
 // Independent SEC recount, not a benchmark-answer lookup. The requested CIK,
 // form and date range determine what is fetched and counted for any provider.
-import { extractForms, mergeFormSpecs, parseFormType } from '../../src/handlers/filingsForms.js';
+import { extractForms, mergeFormSpecs, parseFormType, stripInvisible } from '../../src/handlers/filingsForms.js';
 import { finishSource, isoDate, object, readPrimaryJson, sourceCheck, sourceResult, type SourceOptions, type SourceVerification } from './sourceTypes.js';
 
 interface Filing { accession: string; date: string; form: string; document?: string }
@@ -18,7 +18,9 @@ function parseRows(raw: unknown): Filing[] {
     let document: string | undefined;
     if (j.primaryDocument !== undefined) {
       if (!Array.isArray(j.primaryDocument) || j.primaryDocument.length !== arrays[0].length || typeof j.primaryDocument[i] !== 'string') throw new Error('malformed primaryDocument coverage');
-      document = j.primaryDocument[i] || undefined;
+      const cleanDoc = stripInvisible(j.primaryDocument[i]).trim();
+      if (cleanDoc && (cleanDoc.split('/').length > 2 || !cleanDoc.split('/').every((part:string) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(part)))) throw new Error('unsafe primaryDocument path');
+      document = cleanDoc || undefined;
     }
     return { accession, date, form, document };
   });
@@ -39,18 +41,18 @@ function periodBounds(period: string, now: Date): {start: string; end: string} {
 function nameKey(name: string): string { return name.toLowerCase().replace(/[^a-z0-9]/g,''); }
 
 /** Bind optional paid assertions to the actual primary-matched rows. */
-function returnedAssertions(result:Record<string,unknown>, matching:Filing[], cik:number, issuer:string, form:string):boolean {
+function returnedAssertions(result:Record<string,unknown>, matching:Filing[], cik:number, issuer:string, form:string, queryEntity:string):boolean {
   const byAccession=new Map(matching.map(row=>[row.accession,row]));
   const issuerMatches=(value:unknown)=>typeof value==='string'&&(nameKey(value)===nameKey(issuer)||value===String(cik));
   if(result.form_type!==undefined&&result.form_type!==form)return false;
-  if(result.entity!==undefined&&!issuerMatches(result.entity))return false;
+  if(result.entity!==undefined&&result.entity!==queryEntity&&!issuerMatches(result.entity))return false;
   if(result.cik!==undefined&&String(result.cik)!==String(cik))return false;
   const linkMatches=(value:unknown,expectedAccession?:string):boolean=>{
     if(typeof value!=='string')return false;
     try{
       const url=new URL(value);
       if(url.protocol!=='https:'||!['sec.gov','www.sec.gov'].includes(url.hostname)||url.username||url.password||url.port||url.search||url.hash||url.pathname.includes('%'))return false;
-      const path=/^\/Archives\/edgar\/data\/(\d+)\/(\d{18})\/([^/]+)$/.exec(url.pathname);
+      const path=/^\/Archives\/edgar\/data\/(\d+)\/(\d{18})\/([A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)?)$/.exec(url.pathname);
       if(!path||Number(path[1])!==cik)return false;
       const row=matching.find(row=>row.accession.replace(/-/g,'')===path[2]);
       if(!row||(expectedAccession!==undefined&&row.accession!==expectedAccession))return false;
@@ -154,14 +156,14 @@ export async function verifyFilingSource(
     const unique = new Map<string,Filing>();
     for (const row of all) {
       const previous = unique.get(row.accession);
-      if (previous && (previous.date !== row.date || previous.form !== row.form)) throw new Error('conflicting SEC duplicate accession');
+      if (previous && (previous.date !== row.date || previous.form !== row.form || previous.document !== row.document)) throw new Error('conflicting SEC duplicate accession');
       unique.set(row.accession,row);
     }
     const matching = [...unique.values()].filter(x => x.form === spec.form && x.date >= bounds.start && x.date <= bounds.end);
     r.details = {cik,form:spec.form,start:bounds.start,end:bounds.end,primary_count:matching.length,history_pages:names.size,unique_source_rows:unique.size};
     sourceCheck(r,'filing completeness',true,`read main document and all ${names.size} history pages, deduplicated by accession`);
     sourceCheck(r,'filing count',Number.isSafeInteger(input.result.filing_count) && input.result.filing_count === matching.length,`provider count ${String(input.result.filing_count)}; primary recount ${matching.length}`);
-    const assertionsOk = returnedAssertions(input.result,matching,cik,main.name,spec.form);
+    const assertionsOk = returnedAssertions(input.result,matching,cik,main.name,spec.form,input.params.entity);
     sourceCheck(r,'returned filing assertions',assertionsOk,'returned issuer, accession, URL, title, form and date assertions must bind to primary-matched rows');
   } catch (error) {
     sourceCheck(r,'filing evidence available',false,error instanceof Error?error.message:'source verification failed');

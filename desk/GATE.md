@@ -101,7 +101,7 @@ deep-copied before awaits, so a callback cannot change its rule mid-run.
 4. **Break it** - ask for a venue whose verified value cannot satisfy the
    precommitted floor (`--set protocol=…`) and the outcome is HOLD naming
    the rule; tamper with any evidence and the failed checks are named.
-5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (373 tests across 23 files,
+5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (382 tests across 23 files,
    no network, no key); the gate flow is covered with mocked nodes including
    tamper cases.
 
@@ -171,3 +171,9 @@ Returned filing assertions are also constrained to the independently matched
 issuer and accession rows. SEC-hosted links alone do not establish ownership
 or relevance. Wrong-typed optional arrays, unrecognized/contradictory title
 formats, invented accession links and mismatched issuer/detail rows fail closed.
+
+The filing result's entity may be the exact already-validated query echo,
+as returned by the miner, or the independently verified issuer name/CIK.
+Changing the issuer or form inside a query-shaped result is not an echo.
+Primary document paths use the same invisible-character cleanup and
+one-safe-subdirectory contract as the miner; traversal/deeper paths are refused.

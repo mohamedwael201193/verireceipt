@@ -39,6 +39,23 @@ describe('filing primary-source semantics', () => {
   const result={filing_count:1,entity:'Example Corp',urls:['https://www.sec.gov/Archives/edgar/data/987654/000098765419000001/0000987654-19-000001-index.htm'],filings:['SEC Form 8-K (2019-02-03) - Example Corp (CIK 987654)'],filings_detail:[{form:'8-K',filing_date:'2019-02-03',cik:987654,accession_number:accession(1)}]};
   expect((await verifyFilingSource(input({result}),opts(fixture()))).status).toBe('verified');
  });
+ it('supports the real miner raw-query entity echo without weakening issuer assertions',async()=>{
+  const result={entity:input().params.entity,form_type:'8-K',filing_count:1,filings:['Form 8-K filed 2019-02-03'],filings_detail:[{form:'8-K',accession:accession(1),filing_date:'2019-02-03',url:'https://www.sec.gov/Archives/edgar/data/987654/000098765419000001/0000987654-19-000001-index.htm'}],urls:['https://www.sec.gov/Archives/edgar/data/987654/000098765419000001/0000987654-19-000001-index.htm']};
+  expect((await verifyFilingSource(input({result}),opts(fixture()))).status).toBe('verified');
+ });
+ it.each(['Form 8-K filings by Other Corp (CIK 111111)','Form 10-K filings by Example Corp (CIK 987654)'])('rejects a changed query-shaped entity claim: %s',async(entity)=>{
+  expect((await verifyFilingSource(input({result:{entity,filing_count:1}}),opts(fixture()))).status).toBe('failed');
+ });
+ it.each(['xslF345X05/ownership.xml',' filing.htm ','fi\u200bling.htm'])('supports safe normalized primary documents: %s',async(document)=>{
+  const clean=document.replace(/\u200b/g,'').trim();
+  const root={cik,name:'Example Corp',filings:{recent:{...rows(),primaryDocument:[document,'other.htm','amend.htm']},files:[]}};
+  const url='https://www.sec.gov/Archives/edgar/data/987654/000098765419000001/'+clean;
+  expect((await verifyFilingSource(input({result:{filing_count:1,urls:[url]}}),opts(fixture({root})))).status).toBe('verified');
+ });
+ it.each(['../filing.htm','safe/../../filing.htm','a/b/c.xml'])('refuses unsafe or too-deep primary document paths: %s',async(document)=>{
+  const root={cik,name:'Example Corp',filings:{recent:{...rows(),primaryDocument:[document,'other.htm','amend.htm']},files:[]}};
+  expect((await verifyFilingSource(input(),opts(fixture({root})))).status).toBe('failed');
+ });
  it('rejects a wrong numeric count even when response fields say ok', async () => {
   const r=await verifyFilingSource(input({result:{filing_count:7}}),opts(fixture()));
   expect(r.status).toBe('failed');expect(r.checks.some(x=>!x.ok)).toBe(true);
