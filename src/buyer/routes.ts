@@ -57,6 +57,8 @@ export function registerBuyer(app:FastifyInstance,options:{enabled?:boolean;runt
     }catch{try{store.uncertain(job.id);}catch{/* Existing durable reservation is never released here. */}}finally{controllers.delete(controller);}})();
     active.add(work);void work.finally(()=>active.delete(work));
    }
+   // Renew the same owner token through this job's full 24h access window.
+   reply.header('Set-Cookie',`__Host-vr_buyer=${token(request)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400`);
    return reply.status(202).send({job_id:job.id,reused:job.reused,paid_retry:false});
   }catch(error){return fail(reply,error);}
  });

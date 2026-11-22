@@ -179,3 +179,8 @@ concurrent starts, recovery GETs, unknown outcomes, response hooks, false PASS,
 full evidence versus summary, followup cooldown, startup/hourly cleanup,
 expiration and shutdown abort. Synthetic test results are not experiment data.
 The UI is not implemented by this increment. No hosted purchase has been run.
+
+Owner-cookie continuity: accepting a buy renews the same secure owner token for
+86400 seconds, including duplicate acceptance. A session opened earlier cannot
+lose its cookie before that newly reserved job's 24-hour payload access window.
+This does not extend the job's payload retention or create a new purchase.
