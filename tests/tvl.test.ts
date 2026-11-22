@@ -10,6 +10,7 @@ import { join, resolve } from 'path';
 import { ApiError } from '../src/core/errors';
 import {
   __awaitTvlBackgroundRefreshForTests,
+  __fetchTvlTextForTests,
   __awaitTvlProtocolFillForTests,
   __clearTvlCachesForTests,
   __clearTvlDiskCacheForTests,
@@ -536,6 +537,7 @@ beforeEach(async () => {
   // first; every test that starts a slow/gated refresh already awaits it,
   // so this resolves immediately in practice.
   await __awaitTvlBackgroundRefreshForTests();
+  await __awaitTvlProtocolFillForTests();
   // Delete the previous test's temp dir now that the drain above proves no
   // refresh is still writing to it. Deleted here (not in afterEach) so the
   // removal can never race an in-flight refresh.
@@ -3624,7 +3626,7 @@ describe('bundled seed file (A5)', () => {
     expect(out.tvl_usd).toBe(15121752429);
   });
 
-  it('the COMMITTED seed file resolves the 3 keys and holds exactly 5 fields per protocol', () => {
+  it('the COMMITTED seed file resolves the 3 keys and retains scalar fields plus exact parent IDs', () => {
     const seed = JSON.parse(
       readFileSync(
         resolve(process.cwd(), 'src', 'handlers', 'tvl-protocols-seed.json'),
@@ -3639,13 +3641,10 @@ describe('bundled seed file (A5)', () => {
     expect(seed.protocols.length).toBeGreaterThan(9000);
     expect(seed.chains.length).toBeGreaterThan(400);
     for (const entry of seed.protocols) {
-      expect(Object.keys(entry).sort()).toEqual([
-        'category',
-        'name',
-        'slug',
-        'symbol',
-        'tvl',
+      expect(Object.keys(entry).filter((k) => k !== 'parentProtocol').sort()).toEqual([
+        'category', 'name', 'slug', 'symbol', 'tvl',
       ]);
+      if (entry.parentProtocol !== undefined) expect(entry.parentProtocol).toMatch(/^parent#[A-Za-z0-9][A-Za-z0-9._-]*$/);
     }
     const bySlug = new Map(seed.protocols.map((p) => [p.slug as string, p]));
     expect(bySlug.get('aave-v3')).toBeDefined();
@@ -3970,6 +3969,16 @@ describe('handleTvl A5-fix2 (J2-R2)', () => {
   // handler's AbortSignal fires (the J2-R2 A3 shape); later calls answer
   // normally. Counts every /tvl and /protocol call so the tests can prove
   // which path the handler took.
+  // Real Response/ReadableStream semantics, so body timeouts exercise
+  // the same bounded reader as production rather than a text()-only fake.
+  function dripResponse(signal: AbortSignal | undefined | null): Response {
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        signal?.addEventListener('abort', () => controller.error(new Error('aborted')), { once: true });
+      },
+    }));
+  }
+
   function dripTvlFetch(opts: {
     tvlValue?: string;
     tvlDripCalls?: number;
@@ -3977,10 +3986,6 @@ describe('handleTvl A5-fix2 (J2-R2)', () => {
     protocolDrip?: boolean;
   }): { fetchImpl: typeof fetch; counts: { tvl: number; protocol: number } } {
     const counts = { tvl: 0, protocol: 0 };
-    const drip = (signal: AbortSignal | undefined | null) =>
-      new Promise<string>((_, rej) => {
-        signal?.addEventListener('abort', () => rej(new Error('aborted')));
-      });
     const fetchImpl = (async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -3989,22 +3994,14 @@ describe('handleTvl A5-fix2 (J2-R2)', () => {
       if (u === 'https://api.llama.fi/tvl/aave-v3') {
         counts.tvl++;
         if (counts.tvl <= (opts.tvlDripCalls ?? 1)) {
-          return {
-            ok: true,
-            status: 200,
-            text: () => drip(init?.signal as AbortSignal | undefined),
-          } as unknown as Response;
+          return dripResponse(init?.signal);
         }
         return new Response(opts.tvlValue ?? '15121752429', { status: 200 });
       }
       if (u === 'https://api.llama.fi/protocol/aave-v3') {
         counts.protocol++;
         if (opts.protocolDrip) {
-          return {
-            ok: true,
-            status: 200,
-            text: () => drip(init?.signal as AbortSignal | undefined),
-          } as unknown as Response;
+          return dripResponse(init?.signal);
         }
         return new Response(
           opts.protocolBody ?? JSON.stringify(AAVE_PROTOCOL_FIXTURE),
@@ -4064,17 +4061,7 @@ describe('handleTvl A5-fix2 (J2-R2)', () => {
       if (u === 'https://api.llama.fi/tvl/aave-v3') {
         tvlCalls++;
         if (tvlCalls === 1) {
-          return {
-            ok: true,
-            status: 200,
-            text: () =>
-              new Promise<string>((_, rej) => {
-                (init?.signal as AbortSignal | undefined)?.addEventListener(
-                  'abort',
-                  () => rej(new Error('aborted')),
-                );
-              }),
-          } as unknown as Response;
+          return dripResponse(init?.signal);
         }
         return new Response('{"tvl":1}', { status: 200 });
       }
@@ -4455,5 +4442,238 @@ describe('atomic disk writes (A5-fix, J2 N1)', () => {
         'tvl',
       ]);
     });
+  });
+});
+
+
+describe('catalog parent protocol resolution (epoch-35 Curve Finance regression)', () => {
+  // Exact source rows and response body fetched 2026-11-22; no invented total.
+  const parents = JSON.parse(readFileSync(resolve(process.cwd(), 'tests/fixtures/tvl/parent-protocols.json'), 'utf8'));
+  const total = readFileSync(resolve(process.cwd(), 'tests/fixtures/tvl/curve-finance-tvl.txt'), 'utf8');
+  const curve = parents.filter((p: { parentProtocol: string }) => p.parentProtocol === 'parent#curve-finance');
+  const transport = (calls: string[]) => (async (url: string | URL | Request) => {
+    const u = String(url); calls.push(u);
+    return u === 'https://api.llama.fi/tvl/curve-finance'
+      ? new Response(total) : new Response('unavailable in recorded transport', { status: 503 });
+  }) as typeof fetch;
+
+  for (const input of ['Curve Finance', 'curve-finance', 'CurveFinance', '  CURVE  FINANCE  ']) {
+    it(`resolves ${input} to the real catalog parent, never Curve DEX`, () => {
+      expect(resolveTvlTarget(input, parents, [])).toMatchObject({
+        kind: 'protocol', slug: 'curve-finance', parentId: 'parent#curve-finance',
+      });
+    });
+  }
+  it('keeps explicit children and versions separate from parent aggregates', () => {
+    for (const [q, slug] of [['Curve DEX', 'curve-dex'], ['Aave V3', 'aave-v3'], ['Uniswap V3', 'uniswap-v3']]) {
+      expect(resolveTvlTarget(q, parents, [])).toMatchObject({ kind: 'protocol', slug });
+      expect(resolveTvlTarget(q, parents, [])).not.toHaveProperty('parentId');
+    }
+  });
+  it('keeps exact dotted and mixed-case catalog IDs without inventing aliases', () => {
+    const catalog = [{ slug: 'test-child', name: 'Test Child', tvl: 1, parentProtocol: 'parent#stake.link' }];
+    expect(resolveTvlTarget('stake.link', catalog, [])).toMatchObject({ slug: 'stake.link', parentId: 'parent#stake.link' });
+    expect(resolveTvlTarget('stake link', catalog, [])).toBeNull();
+    expect(resolveTvlTarget('Edge', [{ ...catalog[0], parentProtocol: 'parent#Edge' }], [])).toMatchObject({ slug: 'Edge', parentId: 'parent#Edge' });
+  });
+  it('refuses ambiguous canonical parent identities rather than choosing list order', () => {
+    const catalog = [
+      { slug: 'first-child', name: 'First Child', tvl: 1, parentProtocol: 'parent#sample-v3' },
+      { slug: 'second-child', name: 'Second Child', tvl: 1, parentProtocol: 'parent#sample3' },
+    ];
+    expect(resolveTvlTarget('sample3', catalog, [])).toBeNull();
+    expect(resolveTvlTarget('sample3', [...catalog].reverse(), [])).toBeNull();
+  });
+  it('retains exact parent IDs through stripping without keeping bulky fields', () => {
+    const stripped = stripProtocolEntries(parents);
+    expect(stripped.find((p) => p.slug === 'curve-dex')?.parentProtocol).toBe('parent#curve-finance');
+    expect(resolveTvlTarget('Curve Finance', stripped, [])).toMatchObject({ slug: 'curve-finance' });
+    expect(stripProtocolEntry({ ...curve[0], parentProtocol: 'parent#../invalid' })).not.toHaveProperty('parentProtocol');
+    expect(resolveTvlTarget('Nonexistent Finance', stripped, [])).toBeNull();
+  });
+  it('reads the authoritative parent total, with a receipt and no child-total cross-check', async () => {
+    __seedTvlCachesForTests(parents, CHAINS_FIXTURE);
+    const calls: string[] = [];
+    const out = await handleTvl({ protocol: 'Curve Finance' }, { fetchImpl: transport(calls) });
+    expect(out.protocol_or_chain).toBe('curve-finance');
+    expect(out.tvl_usd).toBe(Number(total));
+    expect(out.tvl_usd).not.toBe(curve.find((p: { slug: string }) => p.slug === 'curve-dex').tvl);
+    expect(out.answer).toContain('Parent protocol aggregate');
+    expect(out.answer).toContain('no timestamp or catalog parent-total cross-check');
+    expect(out.receipt).toMatchObject({ upstream_url: 'https://api.llama.fi/tvl/curve-finance' });
+    expect(calls).not.toContain('https://api.llama.fi/tvl/curve-dex');
+    expect(calls).not.toContain('https://api.llama.fi/protocols');
+    await __awaitTvlProtocolFillForTests();
+  });
+  it('preserves parent metadata in a persisted disk cache', async () => {
+    await __seedTvlDiskCacheForTests(parents, CHAINS_FIXTURE, Date.now());
+    __clearTvlCachesForTests();
+    const out = await handleTvl({ protocol: 'Curve Finance' }, { fetchImpl: transport([]) });
+    expect(out.protocol_or_chain).toBe('curve-finance');
+    expect(out.tvl_usd).toBe(Number(total));
+    await __awaitTvlProtocolFillForTests();
+  });
+  for (const mode of ['memory', 'disk']) {
+    it(`upgrades old stripped ${mode} catalog metadata without a list download`, async () => {
+      const old = parents.map(({ parentProtocol: _, ...p }: { parentProtocol: string }) => p);
+      if (mode === 'memory') __seedTvlCachesForTests(old, CHAINS_FIXTURE);
+      else { await __seedTvlDiskCacheForTests(old, CHAINS_FIXTURE, Date.now()); __clearTvlCachesForTests(); }
+      const path = join(prevTvlTestDir as string, 'parent-seed.json');
+      writeFileSync(path, JSON.stringify({ fetched_at: Date.now(), protocols: parents, chains: CHAINS_FIXTURE }));
+      __setTvlSeedPathForTests(path); __setTvlSeedEnabledForTests(true);
+      const calls: string[] = [];
+      const out = await handleTvl({ protocol: 'Curve Finance' }, { fetchImpl: transport(calls) });
+      expect(out.protocol_or_chain).toBe('curve-finance');
+      expect(out.tvl_usd).toBe(Number(total));
+      expect(calls).not.toContain('https://api.llama.fi/protocols');
+      await __awaitTvlProtocolFillForTests();
+    });
+  }
+  it('does not revive expired parent metadata from a bundled seed', async () => {
+    __seedTvlCachesForTests(parents.map(({ parentProtocol: _, ...p }: { parentProtocol: string }) => p), CHAINS_FIXTURE);
+    const path = join(prevTvlTestDir as string, 'old-parent-seed.json');
+    writeFileSync(path, JSON.stringify({ fetched_at: Date.now() - 25*3600_000, protocols: parents, chains: CHAINS_FIXTURE }));
+    __setTvlSeedPathForTests(path); __setTvlSeedEnabledForTests(true);
+    await expect(handleTvl({ protocol: 'Curve Finance' }, { fetchImpl: transport([]) })).rejects.toMatchObject({ code: 'PROTOCOL_NOT_FOUND' });
+  });
+});
+
+describe('TVL process memory safety', () => {
+  beforeEach(() => __seedTvlCachesForTests(PROTOCOLS_FIXTURE, CHAINS_FIXTURE));
+  const oversizeStream = (cancelled: () => void) => {
+    let chunks = 0;
+    return new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (++chunks > 24) controller.close();
+        else controller.enqueue(new Uint8Array(128 * 1024).fill(32));
+      },
+      cancel: cancelled,
+    });
+  };
+  it('caps decompressed protocol bytes before JSON.parse, even without Content-Length', async () => {
+    let cancelled = false;
+    const fetchImpl = (async (url: string | URL | Request) =>
+      String(url) === 'https://api.llama.fi/tvl/aave-v3'
+        ? new Response('', { status: 503 })
+        : new Response(oversizeStream(() => { cancelled = true; }))) as typeof fetch;
+    await expect(handleTvl({ protocol: 'aave-v3' }, { fetchImpl })).rejects.toMatchObject({
+      status: 502, code: 'DEFILLAMA_RESPONSE_TOO_LARGE',
+    });
+    expect(cancelled).toBe(true);
+  });
+  it('refuses a declared oversized protocol body before consuming it', async () => {
+    let cancelled = false;
+    const fetchImpl = (async (url: string | URL | Request) =>
+      String(url) === 'https://api.llama.fi/tvl/aave-v3'
+        ? new Response('', { status: 503 })
+        : new Response(oversizeStream(() => { cancelled = true; }), {
+          headers: { 'Content-Length': String(32 * 1024 * 1024) },
+        })) as typeof fetch;
+    await expect(handleTvl({ protocol: 'aave-v3' }, { fetchImpl })).rejects.toMatchObject({
+      code: 'DEFILLAMA_RESPONSE_TOO_LARGE',
+    });
+    expect(cancelled).toBe(true);
+  });
+  it('oversized optional fills preserve a successful total and an honest null split', async () => {
+    let cancelled = false;
+    const fetchImpl = (async (url: string | URL | Request) =>
+      String(url) === 'https://api.llama.fi/tvl/lido'
+        ? new Response('30000000000')
+        : new Response(oversizeStream(() => { cancelled = true; }))) as typeof fetch;
+    const out = await handleTvl({ protocol: 'lido' }, { fetchImpl });
+    expect(out.tvl_usd).toBe(30000000000);
+    expect(out.chain_tvl_usd).toBeNull();
+    await __awaitTvlProtocolFillForTests();
+    expect(cancelled).toBe(true);
+    const second = await handleTvl({ protocol: 'lido' }, { fetchImpl });
+    expect(second.tvl_usd).toBe(30000000000);
+    expect(second.chain_tvl_usd).toBeNull();
+    await __awaitTvlProtocolFillForTests();
+  }, 15000);
+  it('runs at most one optional protocol fill across different slugs', async () => {
+    let fills = 0;
+    const fetchImpl = (async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.endsWith('/tvl/lido')) return new Response('30000000000');
+      if (u.endsWith('/tvl/uniswap-v3')) return new Response('1254368528');
+      if (u.includes('/protocol/')) fills++;
+      return new Response('unavailable', { status: 503 });
+    }) as typeof fetch;
+    const [a, b] = await Promise.all([
+      handleTvl({ protocol: 'lido' }, { fetchImpl }),
+      handleTvl({ protocol: 'uniswap-v3' }, { fetchImpl }),
+    ]);
+    expect(a.chain_tvl_usd).toBeNull(); expect(b.chain_tvl_usd).toBeNull();
+    await __awaitTvlProtocolFillForTests();
+    expect(fills).toBe(1);
+  });
+});
+
+
+describe('TVL every-source streaming byte bounds', () => {
+  const sources = [
+    ['https://api.llama.fi/protocols', 16 * 1024 * 1024],
+    ['https://api.llama.fi/v2/chains', 1024 * 1024],
+    ['https://api.llama.fi/v2/historicalChainTvl/Ethereum', 4 * 1024 * 1024],
+    ['https://api.llama.fi/tvl/lido', 4 * 1024],
+  ] as const;
+
+  for (const [url, limit] of sources) {
+    for (const headers of [undefined, { 'content-length': '1', 'content-encoding': 'gzip' }]) {
+      it(`caps ${url} with ${headers ? 'misleading compressed length' : 'no length header'}`, async () => {
+        let produced = 0;
+        let cancelled = false;
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            const bytes = 64 * 1024;
+            if (produced >= limit + 3 * bytes) controller.close();
+            else { produced += bytes; controller.enqueue(new Uint8Array(bytes).fill(32)); }
+          },
+          cancel() { cancelled = true; },
+        });
+        const transport = (async () => new Response(body, { headers })) as typeof fetch;
+        await expect(__fetchTvlTextForTests(url, transport, 5000)).rejects.toMatchObject({
+          status: 502, code: 'DEFILLAMA_RESPONSE_TOO_LARGE',
+        });
+        expect(cancelled).toBe(true);
+        expect(produced).toBeLessThanOrEqual(limit + 2 * 64 * 1024);
+      });
+    }
+
+    it(`cancels a declared oversized ${url} before reading`, async () => {
+      let cancelled = false;
+      const body = new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
+      const transport = (async () => new Response(body, {
+        headers: { 'content-length': String(limit + 1) },
+      })) as typeof fetch;
+      await expect(__fetchTvlTextForTests(url, transport, 5000)).rejects.toMatchObject({
+        code: 'DEFILLAMA_RESPONSE_TOO_LARGE',
+      });
+      expect(cancelled).toBe(true);
+    });
+
+    it(`preserves an under-cap ${url} body exactly`, async () => {
+      const raw = '123.456';
+      const transport = (async () => new Response(raw)) as typeof fetch;
+      expect(await __fetchTvlTextForTests(url, transport, 5000)).toBe(raw);
+    });
+  }
+});
+
+
+describe('verified MakerDAO legacy identity', () => {
+  const sky = { slug: 'sky-lending', name: 'Sky Lending', symbol: 'SKY', tvl: 2682107078.861777, category: 'CDP', parentProtocol: 'parent#maker' };
+  it.each(['MakerDAO', 'Maker DAO', ' makerdao '])('resolves %s to the source-identified former protocol', (query) => {
+    expect(resolveTvlTarget(query, [sky], [])).toMatchObject({ kind: 'protocol', slug: 'sky-lending', displayName: 'Sky Lending' });
+  });
+  it('does not substitute a sibling or invent a total if the target disappears', () => {
+    expect(resolveTvlTarget('MakerDAO', [{ ...sky, slug: 'sky-money', name: 'Sky Money' }], [])).toBeNull();
+  });
+  it('does not turn the parent Maker request into its largest child', () => {
+    expect(resolveTvlTarget('Maker', [sky], [])).toMatchObject({ slug: 'maker', parentId: 'parent#maker' });
+  });
+  it('preserves exact current-name and version scope', () => {
+    expect(resolveTvlTarget('sky-lending', [sky], [])).toMatchObject({ slug: 'sky-lending', confidence: 1 });
+    expect(resolveTvlTarget('MakerDAO V3', [sky], [])).toBeNull();
   });
 });

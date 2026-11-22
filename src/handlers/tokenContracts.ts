@@ -16,6 +16,8 @@
 // the handlers never guess a contract address. Callers may always pass
 // a raw 0x contract address instead, which needs no registry entry.
 
+import { badRequest } from "../core/errors";
+
 /** balanceOf(address) — ERC-20 selector. */
 export const SELECTOR_BALANCE_OF = "0x70a08231";
 /** totalSupply() — ERC-20 selector. */
@@ -108,6 +110,29 @@ export function isNativeSymbol(chain: string, symbol: string): boolean {
 /** Look up a symbol's contract on a chain; undefined when unknown. */
 export function tokenContractFor(chain: string, symbol: string): string | undefined {
   return TOKEN_CONTRACTS[chain]?.[symbol.trim().toUpperCase()];
+}
+
+/**
+ * Parse a complete display label plus one explicit contract address.
+ * The address governs; a known symbol cannot contradict its verified
+ * chain-specific contract. No substring mining or symbol fallback.
+ */
+export function labeledTokenContract(
+  chain: string,
+  token: string,
+): { contract: string; requestedSymbol: string | null } | undefined {
+  const match = token.trim().match(/^([^()]+?)\s*\(\s*(0x[0-9a-fA-F]{40})\s*\)$/);
+  if (!match) return undefined;
+  const label = match[1].trim();
+  const address = match[2];
+  const known = tokenContractFor(chain, label);
+  if (isNativeSymbol(chain, label) || (known && known.toLowerCase() !== address.toLowerCase())) {
+    throw badRequest(
+      "TOKEN_CONTRACT_MISMATCH",
+      `token label '${label}' contradicts explicit contract ${address} on ${chain}`,
+    );
+  }
+  return { contract: address, requestedSymbol: known ? label.toUpperCase() : null };
 }
 
 /**

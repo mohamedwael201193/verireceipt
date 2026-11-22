@@ -251,6 +251,15 @@ describe("handleGasPrice quorum (stubbed fetch)", () => {
 });
 
 describe("handleGasPrice LIVE (real public RPCs, no stub)", () => {
+  it("answers the published Arbitrum One name from real RPC quorum", async () => {
+    const out = await handleGasPrice({ chain: "Arbitrum One" });
+    expect(out.chain).toBe("arbitrum");
+    expect(out.gas_price_gwei as number).toBeGreaterThan(0);
+    const receipt = out.receipt as { receipt_id: string; raw_response_sha256: string };
+    const evidence = await getReceiptEvidence(receipt.receipt_id);
+    expect(sha256Hex(evidence.evidence!)).toBe(receipt.raw_response_sha256);
+  }, 60000);
+
   const LIVE_TIMEOUT_MS = 60000;
 
   it(
