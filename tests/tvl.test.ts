@@ -536,6 +536,7 @@ beforeEach(async () => {
   // first; every test that starts a slow/gated refresh already awaits it,
   // so this resolves immediately in practice.
   await __awaitTvlBackgroundRefreshForTests();
+  await __awaitTvlProtocolFillForTests();
   // Delete the previous test's temp dir now that the drain above proves no
   // refresh is still writing to it. Deleted here (not in afterEach) so the
   // removal can never race an in-flight refresh.
@@ -4455,5 +4456,76 @@ describe('atomic disk writes (A5-fix, J2 N1)', () => {
         'tvl',
       ]);
     });
+  });
+});
+
+describe('TVL process memory safety', () => {
+  beforeEach(() => __seedTvlCachesForTests(PROTOCOLS_FIXTURE, CHAINS_FIXTURE));
+  const oversizeStream = (cancelled: () => void) => {
+    let chunks = 0;
+    return new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (++chunks > 24) controller.close();
+        else controller.enqueue(new Uint8Array(128 * 1024).fill(32));
+      },
+      cancel: cancelled,
+    });
+  };
+  it('caps decompressed protocol bytes before JSON.parse, even without Content-Length', async () => {
+    let cancelled = false;
+    const fetchImpl = (async (url: string | URL | Request) =>
+      String(url) === 'https://api.llama.fi/tvl/aave-v3'
+        ? new Response('', { status: 503 })
+        : new Response(oversizeStream(() => { cancelled = true; }))) as typeof fetch;
+    await expect(handleTvl({ protocol: 'aave-v3' }, { fetchImpl })).rejects.toMatchObject({
+      status: 502, code: 'DEFILLAMA_RESPONSE_TOO_LARGE',
+    });
+    expect(cancelled).toBe(true);
+  });
+  it('refuses a declared oversized protocol body before consuming it', async () => {
+    let cancelled = false;
+    const fetchImpl = (async (url: string | URL | Request) =>
+      String(url) === 'https://api.llama.fi/tvl/aave-v3'
+        ? new Response('', { status: 503 })
+        : new Response(oversizeStream(() => { cancelled = true; }), {
+          headers: { 'Content-Length': String(32 * 1024 * 1024) },
+        })) as typeof fetch;
+    await expect(handleTvl({ protocol: 'aave-v3' }, { fetchImpl })).rejects.toMatchObject({
+      code: 'DEFILLAMA_RESPONSE_TOO_LARGE',
+    });
+    expect(cancelled).toBe(true);
+  });
+  it('oversized optional fills preserve a successful total and an honest null split', async () => {
+    let cancelled = false;
+    const fetchImpl = (async (url: string | URL | Request) =>
+      String(url) === 'https://api.llama.fi/tvl/lido'
+        ? new Response('30000000000')
+        : new Response(oversizeStream(() => { cancelled = true; }))) as typeof fetch;
+    const out = await handleTvl({ protocol: 'lido' }, { fetchImpl });
+    expect(out.tvl_usd).toBe(30000000000);
+    expect(out.chain_tvl_usd).toBeNull();
+    await __awaitTvlProtocolFillForTests();
+    expect(cancelled).toBe(true);
+    const second = await handleTvl({ protocol: 'lido' }, { fetchImpl });
+    expect(second.tvl_usd).toBe(30000000000);
+    expect(second.chain_tvl_usd).toBeNull();
+    await __awaitTvlProtocolFillForTests();
+  }, 15000);
+  it('runs at most one optional protocol fill across different slugs', async () => {
+    let fills = 0;
+    const fetchImpl = (async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.endsWith('/tvl/lido')) return new Response('30000000000');
+      if (u.endsWith('/tvl/uniswap-v3')) return new Response('1254368528');
+      if (u.includes('/protocol/')) fills++;
+      return new Response('unavailable', { status: 503 });
+    }) as typeof fetch;
+    const [a, b] = await Promise.all([
+      handleTvl({ protocol: 'lido' }, { fetchImpl }),
+      handleTvl({ protocol: 'uniswap-v3' }, { fetchImpl }),
+    ]);
+    expect(a.chain_tvl_usd).toBeNull(); expect(b.chain_tvl_usd).toBeNull();
+    await __awaitTvlProtocolFillForTests();
+    expect(fills).toBe(1);
   });
 });

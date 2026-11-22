@@ -971,6 +971,11 @@ const listsChainSplit = new Map<string, number>();
  * the freshness comparison needs a timestamp for the lists side too). */
 let listsChainSplitFetchedAt: number | null = null;
 const protocolFillInFlight = new Map<string, Promise<void>>();
+// A JSON parse can expand a multi-MB protocol history well beyond the
+// 256MB V8 heap on the starter instance. At most one optional fill runs.
+let activeProtocolFill = false;
+const MAX_PROTOCOL_BODY_BYTES = 2 * 1024 * 1024;
+
 /** Generation guard: bumped whenever the caches are cleared (tests), so a
  * fill started under a previous generation can never write stale values. */
 let protocolFillGen = 0;
@@ -1020,6 +1025,8 @@ function consistentChainSplit(
 function startProtocolChainFill(slug: string, fetchImpl: typeof fetch): Promise<void> {
   const existing = protocolFillInFlight.get(slug);
   if (existing) return existing;
+  if (activeProtocolFill) return Promise.resolve(); // nullable split, never block a total
+  activeProtocolFill = true;
   const gen = protocolFillGen;
   const p = (async (): Promise<void> => {
     try {
@@ -1036,6 +1043,8 @@ function startProtocolChainFill(slug: string, fetchImpl: typeof fetch): Promise<
     } catch {
       // Best-effort only: the split stays unknown (null) and the next
       // request retries. Never fails the answer.
+    } finally {
+      activeProtocolFill = false;
     }
   })();
   protocolFillInFlight.set(slug, p);
@@ -1443,7 +1452,41 @@ async function fetchText(
         res.status >= 500,
       );
     }
-    return await res.text();
+    if (!url.startsWith('https://api.llama.fi/protocol/')) return await res.text();
+    // Bound DECOMPRESSED bytes before string concatenation and JSON.parse.
+    // Content-Length alone is not a bound: upstream may compress or omit it.
+    const tooLarge = (): ApiError => upstreamUnavailable(
+      'DEFILLAMA_RESPONSE_TOO_LARGE',
+      `DeFiLlama protocol response exceeds the ${MAX_PROTOCOL_BODY_BYTES}-byte safety limit; total/split unavailable, not zero`,
+    );
+    const length = Number(res.headers.get('content-length'));
+    if (Number.isFinite(length) && length > MAX_PROTOCOL_BODY_BYTES) {
+      controller.abort();
+      void res.body?.cancel().catch(() => undefined);
+      throw tooLarge();
+    }
+    if (!res.body) return '';
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    const parts: string[] = [];
+    let bytes = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > MAX_PROTOCOL_BODY_BYTES) {
+          controller.abort();
+          void reader.cancel().catch(() => undefined);
+          throw tooLarge();
+        }
+        parts.push(decoder.decode(value, { stream: true }));
+      }
+      parts.push(decoder.decode());
+      return parts.join('');
+    } finally {
+      reader.releaseLock();
+    }
   } catch (err) {
     if (err instanceof ApiError) throw err;
     const timedOut = controller.signal.aborted;
