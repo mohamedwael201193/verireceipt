@@ -749,6 +749,37 @@ describe("generic ERC-20 pair resolution (2026-11-22)", () => {
     }
   });
 
+  it("pinned block 26472336: dust WETH hops cannot displace the better direct wstETH/USDC quote", async () => {
+    const pinned = JSON.parse(readFileSync(resolve(process.cwd(), "tests/fixtures/route-wsteth-usdc-dust-hop-block26472336.json"), "utf8"));
+    const directOut = BigInt(pinned.directCandidates[0].amountOut);
+    const uniHopOut = BigInt(pinned.combinedCandidates.find((q: {venue:string}) => q.venue === "Uniswap V2 via WETH").amountOut);
+    const sushiHopOut = BigInt(pinned.combinedCandidates.find((q: {venue:string}) => q.venue === "SushiSwap V2 via WETH").amountOut);
+    expect(directOut).toBe(1_705_865_475n);
+    expect(uniHopOut).toBe(186_892_531n);
+    expect(sushiHopOut).toBe(4_976_362n);
+    const calls: Array<{ to: string; data: string; blockRef: unknown }> = [];
+    const mk = () => startStubRpc({
+      blockNumber: pinned.block_number, blockHash: pinned.blockRef.blockHash,
+      failCalls: false, failUni: true, failSushi: true,
+      v3AmountOut: directOut, v2AmountOut: 0n,
+      uniHopAmountOut: uniHopOut, sushiHopAmountOut: sushiHopOut, capturedCalls: calls,
+    });
+    const a = await mk(); const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "wstETH/USDC" }, [a.url, b.url]);
+      expect(result.amount_out_base_units).toBe(directOut.toString());
+      expect(result.winning_venue).toMatch(/^Uniswap V3/);
+      expect(result.confidence).toBe(0.9);
+      expect(result.answer).toContain("direct-only baseline");
+      for (const call of calls) expect(call.blockRef).toEqual(pinned.blockRef);
+      const receipt = result.receipt as {receipt_id:string};
+      const stored = await getReceiptEvidence(receipt.receipt_id);
+      const evidence = JSON.parse(stored.evidence!.toString("utf8"));
+      expect(evidence.direct_hop_safety).toMatchObject({ policy: "non-degrading direct-only baseline", combined_winner_base_units: sushiHopOut.toString(), direct_winner_base_units: directOut.toString() });
+      expect(evidence.direct_hop_safety.rejected_hop_quotes).toHaveLength(2);
+    } finally { await a.close(); await b.close(); }
+  });
+
   it("a hop quote that beats every direct quote wins and is named as the route", async () => {
     const mk = () =>
       startStubRpc({

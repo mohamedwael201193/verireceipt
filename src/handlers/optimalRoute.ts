@@ -2859,10 +2859,31 @@ async function handleRouteInner(
   // agreement band, applied AFTER decoding and BEFORE winner selection.
   // A quote failing any stage is dropped as if the venue failed; if every
   // quote is dropped the endpoint fails closed with ALL_QUOTERS_FAILED.
-  const plausibleQuotes = filterPlausibleQuotes(quotes, {
-    maxOut: spec.plausibleMaxOut,
-    minOut: spec.plausibleMinOut,
-  });
+  const bounds = { maxOut: spec.plausibleMaxOut, minOut: spec.plausibleMinOut };
+  let plausibleQuotes = filterPlausibleQuotes(quotes, bounds);
+  // Adding route coverage must not make a usable direct-only result worse.
+  // Thin hop routes can pull the iterative lower median down repeatedly,
+  // dropping the best direct quote as a high outlier until only dust survives.
+  // Keep the independently filtered direct baseline in that case. Its safety
+  // checks are unchanged; this does not admit a quote rejected by that baseline.
+  const isHop = (q: VenueQuote) => q.venue.endsWith(" via WETH");
+  const directBaseline = quotes.some(isHop)
+    ? filterPlausibleQuotes(quotes.filter(q => !isHop(q)), bounds)
+    : [];
+  const directBest = pickBestQuote(directBaseline);
+  const combinedBest = pickBestQuote(plausibleQuotes);
+  const useDirectBaseline = directBest !== null &&
+    (combinedBest === null || directBest.amountOut > combinedBest.amountOut);
+  const directHopSafety = useDirectBaseline ? {
+    policy: "non-degrading direct-only baseline",
+    combined_winner_base_units: combinedBest?.amountOut.toString() ?? null,
+    direct_winner_base_units: directBest.amountOut.toString(),
+    rejected_hop_quotes: quotes.filter(isHop).map(q => ({
+      venue: q.venue, amount_out_base_units: q.amountOut.toString(),
+      rpc_url: q.rpcUrl, request: q.request, response: q.response,
+    })),
+  } : null;
+  if (useDirectBaseline) plausibleQuotes = directBaseline;
   if (plausibleQuotes.length === 0) {
     throw upstreamUnavailable(
       "ALL_QUOTERS_FAILED",
@@ -2947,6 +2968,9 @@ async function handleRouteInner(
   if (spec.curveStEthPool !== undefined && !plausibleQuotes.some((q) => q.venue === "Curve stETH pool")) {
     degradedReasons.push("Curve stETH pool produced no plausible quote");
   }
+  if (directHopSafety !== null) {
+    degradedReasons.push("direct-versus-hop disagreement: kept the independently filtered direct-only baseline because adding hop candidates reduced its output");
+  }
   const degraded = degradedReasons.length > 0;
   const confidence = plausibleQuotes.length >= 2 && !degraded ? 1.0 : 0.9;
   let answer = explainRouteQuote({
@@ -2973,6 +2997,7 @@ async function handleRouteInner(
     block_number_hex: blockHex,
     block_hash: block.blockHash,
     winning_venue: best.venue,
+    ...(directHopSafety === null ? {} : { direct_hop_safety: directHopSafety }),
     pair: spec.pair,
     amount_in: spec.amountIn.toString(),
     amount_in_label: spec.sellLabel,
