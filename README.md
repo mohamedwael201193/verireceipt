@@ -10,8 +10,10 @@ signal, answer and stored bytes before saving a purchase.
 
 [Live app](https://verireceipt.vercel.app/) ·
 [API docs](https://verireceipt.vercel.app/docs) ·
+[Recorded research proof](https://verireceipt.vercel.app/research) ·
 [Health](https://verireceipt.onrender.com/health) ·
 [Independent verification guide](JUDGE.md) ·
+[No-wallet research replay](docs/judge-verification.md) ·
 [Registration config](miner.yaml)
 
 A matching digest proves that the stored bytes have not changed. It does not
@@ -30,7 +32,10 @@ are separate and unbilled. Open Dashboard, then its Receipts tab.*
 | Canonical Desk purchases | 10/10 live re-verifications passed; all 10 included in epochs 31/32 | [`purchases.jsonl`](desk/ledger/purchases.jsonl), `cd desk && npm ci && npm run verify` |
 | Exact paid cost | 100,000 μUSDC, $0.10 Sepolia Test USDC | Receipt amount and epoch delivery row in each committed purchase |
 | Delivery checks | Epoch, receipt hash, payer, amount, intent and miner match; root/proof shape checked | [Epoch 32 delivery example](https://devnode.telegraphprotocol.com/v1/blocks/32/deliveries/0x1184cf63601c8766196e8de0ba9514f2243fb6f9b72739ac4008b6cfa29a4f6a) |
-| Desk verifier tests | 88/88 passed on 2026-11-21 | `cd desk && npm test` |
+| Desk verifier tests | 189/189 passed on 2026-11-22 | `cd desk && npm ci && npm test` |
+| Miner test suite | 1,423 passed, 14 skipped (Postgres tests skip without `DATABASE_URL`), measured 2026-11-22 | `npm ci && npm test` |
+| Frontend tests | 9,827/9,827 passed on 2026-11-22 | `cd frontend && npm ci && npm test` |
+| No-wallet research replay | Exit 0: `PASS historical SUPPORTED; count=3; current delivery=included`, re-run 2026-11-22 | `npm --prefix desk run judge:verify` — GET-only, no key or purchase; [guide](docs/judge-verification.md) |
 | Input coverage | Six intents; CAISO and NYISO prices, Aave TVL, a real deposit transaction, SEC filings, an ETH/USDC quote and validator 1 | Committed task inputs and hash-verified answers in the ledger |
 
 All ten purchases occurred on **one UTC date**, 2026-11-21. Two epochs are
@@ -41,7 +46,9 @@ new input, failure mode or mission outcome.
 ### Where the project stands
 
 - **Shipped:** six callable endpoints, stored-byte receipt inspection, browser
-  Mission 12/13 workbench, testnet escrow Desk agent and public purchase ledger.
+  Mission 12/13 workbench, testnet escrow Desk agent, public purchase ledger
+  and a receipted filing-coverage research workflow with a no-wallet public
+  replay command.
 - **Being checked:** weak-pair evaluator scores and additional purposeful input
   coverage. A correct direct answer is not proof of a high network score.
 - **Still to prove:** paid purchases linked to explicit mission-policy outcomes,
@@ -125,7 +132,7 @@ Field names vary per endpoint; `confidence`, `verdict`, `source`, and
 ## Registration facts
 
 - **registrationId:** `6160` on Ethereum Sepolia (chainId 11155111). Node status `active` at
-  `GET https://devnode.telegraphprotocol.com/api/miners/6160` (checked 2026-11-21 17:38 UTC).
+  `GET https://devnode.telegraphprotocol.com/api/miners/6160` (checked 2026-11-22 00:18 UTC).
   Created by `updateMiner(6152, …)` in tx
   [`0x93a5f833726da803d39396e208c5404889e0b64dbeb78519914fe1d18e3c1a8e`](https://sepolia.etherscan.io/tx/0x93a5f833726da803d39396e208c5404889e0b64dbeb78519914fe1d18e3c1a8e)
   (block 12183278). The earlier registration 6152 is superseded and shows `deregistered` on the node.
@@ -212,6 +219,40 @@ The ledger's actual receipt miner for these seven is superseded registration
 6152, not 6160. New experimental calls served by 6160 are kept separately and
 are not added to this ten-purchase catalog.
 
+## Research packet (Mission 13): pre-frozen policy, one paid answer
+
+The Desk research workflow ([guide](docs/research-packet.md)) turns a narrow
+filing-coverage question into a receipted result: it freezes the policy
+(company CIK, calendar year, exact form, minimum count) **before** payment,
+buys one answer through Sepolia testnet escrow, independently recounts the
+hash-checked stored SEC bytes, and reports SUPPORTED / NOT_SUPPORTED / HOLD.
+
+Recorded real run (2026-11-21, related-party, testnet): Tesla (CIK 1318605),
+exact form 10-Q, calendar year 2024, criterion at least 3. Result:
+**SUPPORTED — 3 exact 10-Q filings**, all checks passed at run time; delivery
+later recorded in block 33. Evidence: [appendix](docs/research-evidence/tesla-2024-10q-20261121.md),
+[machine-readable record](docs/research-evidence/tesla-2024-10q-20261121.json),
+[delivery reconciliation](docs/research-evidence/tesla-2024-10q-20261121-delivery.json),
+[paid signal](https://devnode.telegraphprotocol.com/engine/v1/signal/0x96d87b16a15c10e8be803eeb4d491c74adf9382ede0e4955d4de2f6f24db372e),
+[block 33 delivery](https://devnode.telegraphprotocol.com/v1/blocks/33/deliveries/0x69fb3b0a9b4b48359d6925595388b75ad2735f0ac119deed1ef4e01e765dac67).
+The live [research page](https://verireceipt.vercel.app/research) shows the
+same recorded proof.
+
+Anyone can replay this evidence without a wallet — the command is GET-only
+and makes no purchase:
+
+```bash
+npm ci && npm --prefix desk ci
+npm --prefix desk run judge:verify
+```
+
+Expected final line: `PASS historical SUPPORTED; count=3; current
+delivery=included`. See [docs/judge-verification.md](docs/judge-verification.md)
+for exactly what is and is not established. Limits: this is one historical,
+direct, related-party Sepolia testnet purchase; a free rehearsal had already
+returned 3, so the outcome was not blind. It is not independent adoption,
+ranked routing, investment advice or a legal compliance verdict.
+
 ## Running locally
 
 ```bash
@@ -220,12 +261,14 @@ npm run build
 npm start
 ```
 
-> **Node version for local tests:** run tests with Node 24 (the default
-> `node`, v24.22.1). The prebuilt `better-sqlite3` binding targets Node 24;
-> under Node 20 the grid tests fail at `new Database` (binding compiled for
-> NODE_MODULE_VERSION 137, Node 20 needs 115). Production is unaffected:
-> Render runs `npm ci` at deploy and rebuilds the binding natively for its
-> own Node version. Do not run `npm rebuild better-sqlite3` locally — other
-> test runs depend on the Node 24 binding.
+> **Node version for local tests:** verified 2026-11-22 on Node v22.23.5
+> (any Node >= 20.18 per `engines`): miner suite 1,423 passed / 14 skipped
+> (the Postgres tests skip without `DATABASE_URL`), desk suite 189/189,
+> frontend suite 9,827/9,827. `npm ci` builds the native `better-sqlite3`
+> binding for your own Node version, as Render does at deploy.
 
 See [`JUDGE.md`](JUDGE.md) for the independent 2-minute verification guide.
+
+## License
+
+[MIT](LICENSE) — copyright 2026 mohamedwael201193.
