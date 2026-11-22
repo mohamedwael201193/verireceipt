@@ -225,3 +225,12 @@ deployment or purchase was exercised by this UI work.
 Validation caveat: the existing dashboard test requiring its copied YAML docs
 snippet to equal root `miner.yaml` fails on the unchanged parent as well. This UI
 increment does not modify either file or claim a clean full frontend suite.
+
+
+Recovery display correction: the UI begins in a checking state, not a no-purchase
+state. A saved record is marked unverified before parsing or hashing. Any storage,
+plan-hash, WebCrypto or recovery-read failure keeps purchase status uncertain and
+blocks new previews. Only a successful check finding no saved record may show
+"Nothing purchased"; a user clearing a completed record may also restore that tab's
+empty state. The independent review's two negative controls, plus pending-hash and
+unreadable-storage checks, protect the whole screen, not only the alert wording.
