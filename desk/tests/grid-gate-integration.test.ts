@@ -17,7 +17,7 @@ async function run(value:number,withMarket=true){
  const c={id:'grid-source-fixture',intent:'GRID_POWER_PRICE_GENERAL',params,valueField:'lmp_usd_per_mwh',question:'Synthetic explicit NYISO RTM interval'};
  const frozenCaseSet={version:'fixture-v1',cases:[{id:c.id,intent:c.intent,params,value_field:c.valueField,question:c.question}]};
  const casesHash=createHash('sha256').update(canonicalPayloadJson(frozenCaseSet)).digest('hex');
- const base=node({intent:c.intent,requestParams:params,valueField:c.valueField,value,miner:'9999',minerSlug:'synthetic-provider',resultFields:{node_or_zone:'N.Y.C.',interval_start:params.interval_start,market:'RTM',currency:'USD'}}).f;
+ const base=node({upstreamUrl:'https://mis.nyiso.com/public/csv/realtime/20200115realtime_zone.csv',intent:c.intent,requestParams:params,valueField:c.valueField,value,miner:'9999',minerSlug:'synthetic-provider',resultFields:{node_or_zone:'N.Y.C.',interval_start:params.interval_start,market:'NYISO',currency:'USD'}}).f;
  let requests=0;
  const f=async(url:RequestInfo|URL,init?:RequestInit)=>{requests++;return String(url).startsWith('https://mis.nyiso.com/')?new Response('Time Stamp,Name,PTID,LBMP ($/MWHr)\n01/15/2020 10:00:00,N.Y.C.,61761,17.25\n'):base(url,init);};
  const payer=makePayer();

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { gridContract, officialCsvFromZip, parseCaisoRows, parseNyisoRows, verifyGridSource } from '../src/gridSource';
 const nyiso='Time Stamp,Name,PTID,LBMP ($/MWHr)\n01/15/2020 10:00:00,N.Y.C.,61761,17.25\n01/15/2020 10:05:00,N.Y.C.,61761,19.75\n';
-const caiso='INTERVALSTARTTIME_GMT,NODE,XML_DATA_ITEM,MW,MARKET_RUN_ID\n2020-01-15T15:00:00-00:00,TH_NP15_GEN-APND,LMP_PRC,23.125,DAM\n2020-01-15T15:00:00-00:00,TH_NP15_GEN-APND,LMP_PRC,44.5,RTM\n';
+const caiso='INTERVALSTARTTIME_GMT,INTERVALENDTIME_GMT,NODE,XML_DATA_ITEM,MW,MARKET_RUN_ID\n2020-01-15T15:00:00-00:00,2020-01-15T16:00:00-00:00,TH_NP15_GEN-APND,LMP_PRC,23.125,DAM\n2020-01-15T15:00:00-00:00,2020-01-15T16:00:00-00:00,TH_NP15_GEN-APND,LMP_PRC,44.5,RTM\n';
 const nyParams={node_or_zone:'ZONE_J',interval_start:'2020-01-15T15:00:00Z',market:'RTM'};
 const caParams={node_or_zone:'TH_NP15_GEN-APND',interval_start:'2020-01-15T15:00:00Z',market:'DAM'};
 const nyResult={node_or_zone:'N.Y.C.',interval_start:nyParams.interval_start,market:'RTM',currency:'USD',lmp_usd_per_mwh:17.25};
@@ -33,10 +33,10 @@ describe('grid market/source contract',()=>{
   expect(()=>parseCaisoRows(caiso.replace(',23.125,DAM',',,DAM'),gridContract(caParams))).toThrow();
   expect(()=>parseCaisoRows(caiso.replaceAll('15:00:00','16:00:00'),gridContract(caParams))).toThrow(/matching/);
  });
- it('handles DST repeated hours only with both explicit occurrences',()=>{
+ it('refuses isolated DST pairs without complete chronological evidence',()=>{
   const repeated='Time Stamp,Name,PTID,LBMP ($/MWHr)\n11/01/2020 01:30:00,N.Y.C.,61761,11\n11/01/2020 01:30:00,N.Y.C.,61761,22\n';
-  expect(parseNyisoRows(repeated,gridContract({...nyParams,interval_start:'2020-11-01T05:30:00Z'}))).toBe(11);
-  expect(parseNyisoRows(repeated,gridContract({...nyParams,interval_start:'2020-11-01T06:30:00Z'}))).toBe(22);
+  expect(()=>parseNyisoRows(repeated,gridContract({...nyParams,interval_start:'2020-11-01T05:30:00Z'}))).toThrow();
+  expect(()=>parseNyisoRows(repeated,gridContract({...nyParams,interval_start:'2020-11-01T06:30:00Z'}))).toThrow();
   expect(()=>parseNyisoRows(repeated.split('\n').slice(0,2).join('\n'),gridContract({...nyParams,interval_start:'2020-11-01T05:30:00Z'}))).toThrow();
  });
  it('records exact official source bytes and independently compares the number',async()=>{

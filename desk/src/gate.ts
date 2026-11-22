@@ -308,6 +308,7 @@ interface NodeLevel {
   value: unknown;
   minerSlug: string | null;
   delivery: "included" | "pending" | "error";
+  providerResponse?: Record<string, unknown>;
 }
 
 /**
@@ -429,7 +430,7 @@ async function verifyNodeLevel(
     d.status === "included" ? "included" : `${d.status}: ${d.detail} (previous epoch ${prev ? `${prev.status}${prevWindowOk ? " with recorded window" : ", window missing or inconsistent"}` : "none"})`);
   add("receipt time belongs to recorded epoch", epoch.ok, epoch.failures.join("; ") || "epoch window agrees");
 
-  return { ok: checks.every((c) => c.ok), checks, value, minerSlug, delivery: d.status };
+  return { ok: checks.every((c) => c.ok), checks, value, minerSlug, delivery: d.status, providerResponse: response };
 }
 
 interface VerifiedCore {
@@ -570,7 +571,7 @@ async function executeVerifiedPurchase(
       }
     }
     if (node.ok && input.intent === "GRID_POWER_PRICE_GENERAL") {
-      sourceVerification = await verifyGridSource({ params: input.params, result: body.result ?? {} }, { f, now: nowDate });
+      sourceVerification = await verifyGridSource({ params: input.params, result: body.result ?? {}, providerResult: node.providerResponse }, { f, now: nowDate });
       if (input.valueField !== "lmp_usd_per_mwh") {
         sourceVerification.status = "failed";
         sourceVerification.checks.push({name:"primary source supported grid field",ok:false,detail:"only independently matched LMP is supported"});

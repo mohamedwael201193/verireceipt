@@ -44,17 +44,22 @@ export function gridContract(params:Record<string,string>):GridContract {
  throw new Error('unsupported grid source node');
 }
 function csv(text:string):string[][] {
- const rows:string[][]=[];let row:string[]=[];let field='';let quoted=false;
+ const rows:string[][]=[];let row:string[]=[];let field='';let state:'start'|'plain'|'quoted'|'closed'='start';
+ const pushField=()=>{row.push(field.trim());field='';state='start';};
+ const pushRow=()=>{pushField();if(row.some(x=>x))rows.push(row);row=[];};
  for(let i=0;i<text.length;i++){
   const c=text[i];
-  if(c==='"'){
-   if(quoted&&text[i+1]==='"'){field+='"';i++;}else quoted=!quoted;
-  }else if(c===','&&!quoted){row.push(field.trim());field='';}
-  else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&text[i+1]==='\n')i++;row.push(field.trim());if(row.some(x=>x))rows.push(row);row=[];field='';}
-  else field+=c;
+  if(state==='quoted'){
+   if(c==='"'){if(text[i+1]==='"'){field+='"';i++;}else state='closed';}else field+=c;
+  }else if(c===',')pushField();
+  else if(c==='\n'||c==='\r'){if(c==='\r'&&text[i+1]==='\n')i++;pushRow();}
+  else if(c==='"'){if(state!=='start')throw new Error('quote inside unquoted CSV field');state='quoted';}
+  else {if(state==='closed')throw new Error('data after closing CSV quote');field+=c;state='plain';}
  }
- if(quoted)throw new Error('unterminated quoted CSV field');
- row.push(field.trim());if(row.some(x=>x))rows.push(row);
+ if(state==='quoted')throw new Error('unterminated quoted CSV field');
+ pushRow();
+ const header=rows[0];if(!header)throw new Error('missing CSV header');header[0]=header[0].replace(/^\uFEFF/,'');
+ if(new Set(header).size!==header.length||rows.some(row=>row.length!==header.length))throw new Error('duplicate CSV columns or inconsistent row width');
  return rows;
 }
 function decimal(value:string|undefined):number {
@@ -65,12 +70,15 @@ function one(values:number[]):number {if(values.length!==1)throw new Error('exac
 export function parseCaisoRows(text:string,c:GridContract):number {
  if(c.operator!=='CAISO'||c.market!=='DAM')throw new Error('wrong official grid market');
  const [header,...rows]=csv(text);if(!header)throw new Error('missing CSV header');
- const indexes=['INTERVALSTARTTIME_GMT','NODE','XML_DATA_ITEM','MW','MARKET_RUN_ID'].map(key=>header.indexOf(key));
+ const indexes=['INTERVALSTARTTIME_GMT','NODE','XML_DATA_ITEM','MW','MARKET_RUN_ID','INTERVALENDTIME_GMT'].map(key=>header.indexOf(key));
  if(indexes.some(i=>i<0))throw new Error('incomplete CAISO CSV schema');
- const [time,node,item,mw,run]=indexes;const values:number[]=[];
+ const [time,node,item,mw,run,end]=indexes;const values:number[]=[];
  for(const row of rows){
   if(row[node]!==c.node||row[item]!=='LMP_PRC'||row[run]!=='DAM')continue;
-  if(timestamp(row[time])===c.startMs)values.push(decimal(row[mw]));
+  if(timestamp(row[time])===c.startMs){
+   if(timestamp(row[end])!==c.startMs+3600000)throw new Error('CAISO row is not the exact hourly interval');
+   values.push(decimal(row[mw]));
+  }
  }
  return one(values);
 }
@@ -88,19 +96,28 @@ function wallCandidates(wall:string):number[]{
  if(!candidates.length)throw new Error('nonexistent NYISO local time');
  return candidates;
 }
+function fallbackChronology(wall:string,zoneRows:string[][],time:number):void {
+ const m=/^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):/.exec(wall)!;
+ const base=Date.parse(`${m[3]}-${m[1]}-${m[2]}T${m[4]}:00:00Z`);
+ const format=(offset:number)=>{const d=new Date(base+offset*60000).toISOString();return `${d.slice(5,7)}/${d.slice(8,10)}/${d.slice(0,4)} ${d.slice(11,19)}`;};
+ const expected=[format(-5),...Array.from({length:12},(_,i)=>format(i*5)),...Array.from({length:12},(_,i)=>format(i*5)),format(60)];
+ const first=zoneRows.findIndex(row=>row[time]===format(0));
+ const actual=zoneRows.slice(first-1,first+25).map(row=>row[time]);
+ if(first<1||JSON.stringify(actual)!==JSON.stringify(expected)||zoneRows.filter(row=>row[time].startsWith(wall.slice(0,14))).length!==24)throw new Error('fallback hour lacks complete ordered blocks and chronological neighbours');
+}
 export function parseNyisoRows(text:string,c:GridContract):number {
  if(c.operator!=='NYISO'||c.market!=='RTM')throw new Error('wrong official grid market');
  const [header,...rows]=csv(text);if(!header)throw new Error('missing CSV header');
- const time=header.indexOf('Time Stamp'),name=header.indexOf('Name'),price=header.findIndex(x=>x.startsWith('LBMP'));
- if([time,name,price].some(i=>i<0))throw new Error('incomplete NYISO CSV schema');
+ const time=header.indexOf('Time Stamp'),name=header.indexOf('Name'),price=header.indexOf('LBMP ($/MWHr)');
+ if([time,name,price].some(i=>i<0)||header.filter(x=>x.startsWith('LBMP')).length!==1)throw new Error('incomplete or contradictory NYISO USD CSV schema');
+ const zoneRows=rows.filter(row=>nyNode(row[name]??'')===c.node);
  const groups=new Map<string,string[]>();
- for(const row of rows){if(nyNode(row[name]??'')!==c.node)continue;const values=groups.get(row[time])??[];values.push(row[price]);groups.set(row[time],values);}
+ for(const row of zoneRows){const values=groups.get(row[time])??[];values.push(row[price]);groups.set(row[time],values);}
  const matches:number[]=[];
  for(const [wall,prices] of groups){
   const candidates=wallCandidates(wall);
   if(candidates.length!==prices.length)throw new Error('ambiguous or duplicate NYISO interval rows');
-  // NYISO file order distinguishes the two fall-back occurrences. With
-  // only one occurrence in an ambiguous wall hour, refuse rather than guess.
+  if(candidates.length===2)fallbackChronology(wall,zoneRows,time);
   for(let i=0;i<candidates.length;i++)if(candidates[i]===c.startMs)matches.push(decimal(prices[i]));
  }
  return one(matches);
@@ -149,13 +166,41 @@ async function readFeed(url:string,r:SourceVerification,options:SourceOptions):P
  return {status:200,bytes};
 }
 function caisoTime(ms:number):string {return new Date(ms).toISOString().slice(0,16).replace(/-/g,'')+'-0000';}
-export async function verifyGridSource(input:{params:Record<string,string>;result:Record<string,unknown>},options:SourceOptions={}):Promise<SourceVerification>{
+function productUrl(value:unknown,c:GridContract):boolean {
+ if(typeof value!=='string')return false;
+ try{
+  const u=new URL(value);
+  if(u.protocol!=='https:'||u.username||u.password||u.port||u.hash)return false;
+  if(c.operator==='NYISO'){
+   const date=nyParts(c.startMs).slice(0,10).replace(/-/g,'');
+   return u.hostname==='mis.nyiso.com'&&!u.search&&[`${date}realtime_zone.csv`,`${date.slice(0,6)}01realtime_zone_csv.zip`].some(name=>u.pathname==='/public/csv/realtime/'+name);
+  }
+  if(u.hostname!=='oasis.caiso.com'||u.pathname!=='/oasisapi/SingleZip')return false;
+  const q=u.searchParams;if([...q.keys()].some(key=>q.getAll(key).length!==1))return false;
+  return q.get('queryname')==='PRC_LMP'&&q.get('market_run_id')==='DAM'&&q.get('node')===c.node&&q.get('startdatetime')===caisoTime(c.startMs)&&q.get('enddatetime')===caisoTime(c.startMs+3600000);
+ }catch{return false;}
+}
+function returnedProduct(result:Record<string,unknown>,provider:Record<string,unknown>|undefined,c:GridContract):boolean {
+ let productEvidence=false;
+ for(const claims of provider?[result,provider]:[result]){
+  if(claims.market!==undefined){if(market(claims.market)===c.market)productEvidence=true;else if(claims.market!==c.operator)return false;}
+  for(const key of ['product','market_run_id'])if(claims[key]!==undefined){if(market(claims[key])!==c.market)return false;productEvidence=true;}
+  if(claims.receipt!==undefined){
+   if(!claims.receipt||typeof claims.receipt!=='object'||Array.isArray(claims.receipt))return false;
+   const url=(claims.receipt as Record<string,unknown>).upstream_url;
+   if(url!==undefined){if(!productUrl(url,c))return false;productEvidence=true;}
+  }
+ }
+ return result.market!==undefined&&productEvidence;
+}
+export async function verifyGridSource(input:{params:Record<string,string>;result:Record<string,unknown>;providerResult?:Record<string,unknown>},options:SourceOptions={}):Promise<SourceVerification>{
  const r=sourceResult();
  try{
   const c=gridContract(input.params);
-  r.details={contract_version:'grid-source-contract-v1',...c};
-  const returnedNode = c.operator==='NYISO' ? nyNode(String(input.result.node_or_zone??'')) : input.result.node_or_zone;
-  sourceCheck(r,'grid response identity',market(input.result.market)===c.market && returnedNode===c.node && input.result.currency==='USD' && timestamp(input.result.interval_start)===c.startMs,'returned node, market, UTC interval and currency must match the explicit query');
+  r.details={contract_version:'grid-source-contract-v2',...c};
+  const claims=input.providerResult?[input.result,input.providerResult]:[input.result];
+  const identitiesMatch=claims.every(p=>(c.operator==='NYISO'?nyNode(String(p.node_or_zone??'')):p.node_or_zone)===c.node && p.currency==='USD' && timestamp(p.interval_start)===c.startMs);
+  sourceCheck(r,'grid response identity',returnedProduct(input.result,input.providerResult,c) && identitiesMatch,'returned ISO/product claims need explicit product metadata or exact official product URL; node, UTC interval and currency must match the query');
   if(!r.checks.every(x=>x.ok))return finishSource(r);
   let price:number;
   if(c.operator==='NYISO'){

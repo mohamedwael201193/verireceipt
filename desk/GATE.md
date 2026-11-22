@@ -101,7 +101,7 @@ deep-copied before awaits, so a callback cannot change its rule mid-run.
 4. **Break it** - ask for a venue whose verified value cannot satisfy the
    precommitted floor (`--set protocol=…`) and the outcome is HOLD naming
    the rule; tamper with any evidence and the failed checks are named.
-5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (403 tests across 25 files,
+5. **Reproduce it** - `npm ci && npm run typecheck && npm test` (417 tests across 26 files,
    no network, no key); the gate flow is covered with mocked nodes including
    tamper cases.
 
@@ -200,3 +200,20 @@ wrong-market, duplicate or disagreeing source rows fail closed. The verifier
 makes no finality guarantee about a price that its source might later revise.
 Evaluation counts are separate from paid/uncertain-cost attempt counts;
 a no-purchase preflight abstention does not count as a paid attempt.
+
+Grid source contract v2 distinguishes the ISO name from its product. An
+ISO-form market label alone cannot prove RTM/DAM. It needs an explicit
+returned product/market-run claim, or a receipt URL that strictly names
+this exact official product, node/date and interval. Conflicting claims
+are refused. The node's hash-bound provider receipt supplies this metadata
+when the engine's mapped result omits the receipt. This does not make a
+provider's URL assertion primary-source proof: the official row is still
+fetched independently and compared. A request product by itself never
+establishes what an external handler served.
+
+The CSV parser refuses duplicate columns, row-width disagreements and
+malformed quotes. NYISO requires the exact USD LBMP header. CAISO requires
+an explicit end time exactly one hour after the requested start. NYISO
+fall-back pairing requires both complete ascending 12-slot repeated-hour
+blocks, the preceding 00:55 and following 02:00 observations, in that order.
+A lone repeated pair or a partial/reversed hour abstains on either occurrence.

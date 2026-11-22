@@ -21,6 +21,7 @@ export interface NodeOpts {
   intent?: string;
   valueField?: string;
   resultFields?: Record<string, unknown>;
+  upstreamUrl?: string;
   minerSlug?: string | null;
   value?: number;
   payloadValue?: number;
@@ -52,7 +53,7 @@ export function node(opts: NodeOpts = {}) {
     wallet_address: opts.wallet ?? payerAddress,
     intent_id: intent,
     request: `[intent] ${intent} → ${JSON.stringify(opts.requestParams ?? { protocol: "aave-v3" })}`,
-    response: { [valueField]: payloadValue, ...opts.resultFields, receipt: { receipt_id: RCPT, raw_response_sha256: RAW_SHA, upstream_url: "https://api.llama.fi/protocol/aave-v3" } },
+    response: { [valueField]: payloadValue, ...opts.resultFields, receipt: { receipt_id: RCPT, raw_response_sha256: RAW_SHA, upstream_url: opts.upstreamUrl ?? "https://api.llama.fi/protocol/aave-v3" } },
     timestamp: opts.payloadTimestamp === null ? undefined : (opts.payloadTimestamp ?? new Date(ts * 1000).toISOString()),
   };
   if (opts.minerSlug !== null) payload.miner_slug = opts.minerSlug ?? "verireceipt";
