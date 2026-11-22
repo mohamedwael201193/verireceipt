@@ -60,10 +60,40 @@ export const OUTPUT_MAPPING: Record<string, Record<string, OutputMapping>> = {
   VALIDATOR_PERFORMANCE_VERIFY_GENERAL: {
     effective_balance: { path: "effective_balance", unit: "gwei" },
   },
+  GAS_PRICE_GENERAL: {
+    chain: { path: "chain" },
+    gas_price_gwei: { path: "gas_price_gwei", unit: "gwei" },
+    as_of: { path: "as_of" },
+  },
+  WALLET_BALANCE_CHECK_GENERAL: {
+    address: { path: "address" },
+    chain: { path: "chain" },
+    balance: { path: "balance", unit: "whole token units" },
+    token_symbol: { path: "token_symbol" },
+    as_of: { path: "as_of" },
+  },
+  TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL: {
+    total_supply: { path: "total_supply", unit: "whole tokens" },
+  },
+  MACRO_ECONOMIC_INDICATOR_GENERAL: {
+    rate_pct: { path: "rate_pct", unit: "percent" },
+  },
+  DNS_RECORD_LOOKUP_GENERAL: {
+    has_record: { path: "has_record" },
+  },
+  CURRENCY_EXCHANGE_CONVERT: {
+    converted_amount: { path: "converted_amount" },
+  },
+  SSL_VERIFICATION_CERT: {
+    certificate_valid: { path: "certificate_valid" },
+  },
+  EMAIL_SECURITY_GENERAL: {
+    lookup_ok: { path: "lookup_ok" },
+  },
 };
 
 /** Official intent response field types (GET /engine/v1/intents/{intent} → response.fields), pinned here so the fill does not depend on a live fetch. `number` fields are never filled from raw, even if a future mapping omits `unit`. */
-export type FieldFormatType = "number" | "string" | "datetime" | "list" | "enum";
+export type FieldFormatType = "number" | "string" | "datetime" | "list" | "enum" | "bool";
 
 export interface FieldFormat {
   type: FieldFormatType;
@@ -104,6 +134,36 @@ export const FIELD_FORMAT: Record<string, Record<string, FieldFormat>> = {
   VALIDATOR_PERFORMANCE_VERIFY_GENERAL: {
     effective_balance: { type: "number" },
   },
+  GAS_PRICE_GENERAL: {
+    chain: { type: "string" },
+    gas_price_gwei: { type: "number" },
+    as_of: { type: "string" },
+  },
+  WALLET_BALANCE_CHECK_GENERAL: {
+    address: { type: "string" },
+    chain: { type: "string" },
+    balance: { type: "number" },
+    token_symbol: { type: "string" },
+    as_of: { type: "string" },
+  },
+  TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL: {
+    total_supply: { type: "number" },
+  },
+  MACRO_ECONOMIC_INDICATOR_GENERAL: {
+    rate_pct: { type: "number" },
+  },
+  DNS_RECORD_LOOKUP_GENERAL: {
+    has_record: { type: "bool" },
+  },
+  CURRENCY_EXCHANGE_CONVERT: {
+    converted_amount: { type: "number" },
+  },
+  SSL_VERIFICATION_CERT: {
+    certificate_valid: { type: "bool" },
+  },
+  EMAIL_SECURITY_GENERAL: {
+    lookup_ok: { type: "bool" },
+  },
 };
 
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -142,6 +202,10 @@ export function valueMatchesFormat(value: unknown, fmt: FieldFormat | undefined,
     }
     case "datetime":
       return typeof value === "string" && value !== "" && !Number.isNaN(Date.parse(value));
+    case "bool":
+      // Raw answers must already carry semantic booleans. Node parser tokens
+      // (for example DNS status0/NOERROR) are not coerced here.
+      return typeof value === "boolean";
     case "list":
       if (!Array.isArray(value)) return false;
       if (field === "urls") {
