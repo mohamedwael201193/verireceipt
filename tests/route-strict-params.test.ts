@@ -33,7 +33,7 @@ async function expectUnknown(query: Record<string, string | undefined>, key: str
     expect((err as ApiError).status).toBe(400);
     expect((err as ApiError).code).toBe("UNKNOWN_PARAM");
     expect((err as ApiError).message).toContain(`"${key}"`);
-    expect((err as ApiError).message).toContain("exactly 1 ETH");
+    expect((err as ApiError).message).toContain("takes only pair");
   }
   expect(rpcHits).toBe(before);
 }
@@ -53,10 +53,12 @@ describe("QA-09 /v1/route strict parameter contract", () => {
   });
 
   it("pair alone still reaches validation and the RPC path (no false refusal)", async () => {
-    await expect(handleRouteWithRpcs({ pair: "BTC/USDC" }, [rpcUrl])).rejects.toMatchObject({
-      status: 422,
-      code: "INVALID_PAIR",
-    });
+    // 2026-11-22 (owner decision): a well-formed unregistered pair gets
+    // the 400 unavailable envelope before any RPC work, not a 422.
+    const err = await handleRouteWithRpcs({ pair: "BTC/USDC" }, [rpcUrl]).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(400);
+    expect((err as ApiError).responseBody).toMatchObject({ status: "unavailable" });
     const before = rpcHits;
     await expect(handleRouteWithRpcs({ pair: "ETH/USDC" }, [rpcUrl, rpcUrl, rpcUrl])).rejects.toBeInstanceOf(ApiError);
     expect(rpcHits).toBeGreaterThan(before);

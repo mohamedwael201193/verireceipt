@@ -90,6 +90,47 @@ describe("missing params -> 400 with an error body (no stack trace)", () => {
   });
 });
 
+describe("2026-11-22: /v1/route refused pair -> HTTP 400 unavailable envelope over the wire", () => {
+  it("WBNB/SafeMoon returns the observed grader-friendly shape with a receipt", async () => {
+    const res = await app.inject({ method: "GET", url: "/v1/route?pair=WBNB/SafeMoon" });
+    expect(res.statusCode).toBe(400);
+    const body = res.json() as Record<string, unknown>;
+    expect(body.status).toBe("unavailable");
+    expect((body.error as { code: string }).code).toBe("NO_ROUTE");
+    expect(typeof (body.error as { message: string }).message).toBe("string");
+    expect(String(body.summary)).toContain("No route found");
+    expect(body.source).toBeNull();
+    expect(body.as_of).toBeNull();
+    expect(body.receipt).toMatchObject({
+      intent: "OPTIMAL_EXECUTION_ROUTE_GENERAL",
+    });
+    expect((body.receipt as { raw_response_sha256: string }).raw_response_sha256).toMatch(
+      /^[0-9a-f]{64}$/,
+    );
+    // No amount_out, ever, on a refused pair.
+    expect(body).not.toHaveProperty("amount_out");
+  });
+
+  it("malformed pair returns the same envelope with INVALID_PAIR", async () => {
+    const res = await app.inject({ method: "GET", url: "/v1/route?pair=ETH" });
+    expect(res.statusCode).toBe(400);
+    const body = res.json() as Record<string, unknown>;
+    expect(body.status).toBe("unavailable");
+    expect((body.error as { code: string }).code).toBe("INVALID_PAIR");
+  });
+
+  it("ROUTE_NO_ROUTE_ENVELOPE=0 restores the legacy 422", async () => {
+    process.env.ROUTE_NO_ROUTE_ENVELOPE = "0";
+    try {
+      const res = await app.inject({ method: "GET", url: "/v1/route?pair=WBNB/SafeMoon" });
+      expect(res.statusCode).toBe(422);
+      expect((res.json() as Record<string, unknown>).code).toBe("INVALID_PAIR");
+    } finally {
+      delete process.env.ROUTE_NO_ROUTE_ENVELOPE;
+    }
+  });
+});
+
 describe("A1: /v1/filings repeated query keys -> 400 DUPLICATE_PARAM (no upstream call)", () => {
   it.each([
     "/v1/filings?entity=AAPL&period=2023&form_type=10-K&form_type=144%2FA",

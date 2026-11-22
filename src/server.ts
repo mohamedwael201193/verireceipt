@@ -142,7 +142,7 @@ export function buildServer(): FastifyInstance {
 
   app.setErrorHandler((err, _request, reply) => {
     if (err instanceof ApiError) {
-      void reply.status(err.status).send(errorBody(err));
+      void reply.status(err.status).send(err.responseBody ?? errorBody(err));
       return;
     }
     // Fastify body-parse / validation errors are client errors, not an

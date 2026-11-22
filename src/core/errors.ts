@@ -2,6 +2,9 @@ export class ApiError extends Error {
   status: number;
   code: string;
   retryAfterSec?: number;
+  /** When set, the server sends this body verbatim instead of errorBody
+   * (used by the ROUTE unavailable-envelope path, 2026-11-22). */
+  responseBody?: Record<string, unknown>;
 
   constructor(status: number, code: string, message: string, retryAfterSec?: number) {
     super(message);
