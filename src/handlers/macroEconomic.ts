@@ -278,9 +278,10 @@ export async function handleMacro(
   const receiptDoc: Receipt = makeReceipt(INTENT, url, rawText, "1/1 authoritative source (World Bank)");
   try {
     await saveReceipt(receiptDoc, rawText);
-  } catch (err) {
-    console.warn(
-      `verireceipt: failed to persist MACRO receipt ${receiptDoc.receipt_id}: ${err instanceof Error ? err.message : String(err)}`,
+  } catch {
+    throw upstreamUnavailable(
+      "RECEIPT_PERSIST_FAILED",
+      "receipt evidence could not be stored; answer unavailable",
     );
   }
 

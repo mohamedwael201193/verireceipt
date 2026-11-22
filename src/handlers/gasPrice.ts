@@ -168,9 +168,10 @@ export async function handleGasPrice(
   const receiptDoc: Receipt = makeReceipt(INTENT, winner.rpcUrl, winner.rawText, votes);
   try {
     await saveReceipt(receiptDoc, winner.rawText);
-  } catch (err) {
-    console.warn(
-      `verireceipt: failed to persist GAS_PRICE receipt ${receiptDoc.receipt_id}: ${err instanceof Error ? err.message : String(err)}`,
+  } catch {
+    throw upstreamUnavailable(
+      "RECEIPT_PERSIST_FAILED",
+      "receipt evidence could not be stored; answer unavailable",
     );
   }
 

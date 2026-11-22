@@ -385,9 +385,10 @@ export async function handleBalance(
   const receiptDoc: Receipt = makeReceipt(INTENT, winner.rpcUrl, evidence, votes);
   try {
     await saveReceipt(receiptDoc, evidence);
-  } catch (err) {
-    console.warn(
-      `verireceipt: failed to persist BALANCE receipt ${receiptDoc.receipt_id}: ${err instanceof Error ? err.message : String(err)}`,
+  } catch {
+    throw upstreamUnavailable(
+      "RECEIPT_PERSIST_FAILED",
+      "receipt evidence could not be stored; answer unavailable",
     );
   }
 
