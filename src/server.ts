@@ -59,7 +59,7 @@ import { handleEmailSecurity } from "./handlers/emailSecurity";
 import { exactQuery } from "./core/exactQuery";
 import { diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
 import { handleMacro } from "./handlers/macroEconomic";
-import { handleTokenHolders } from "./handlers/tokenHolders";
+import { handleTokenHolders, holderUpstreamForQuery } from "./handlers/tokenHolders";
 import { createWiredFinanceHandlers } from "./handlers/financeWired";
 import { createWiredWeatherHandlers } from "./handlers/weatherWired";
 import { ApiError, badRequest, errorBody } from "./core/errors";
@@ -379,7 +379,7 @@ export function buildServer(): FastifyInstance {
     trackIntent("fx-now", () => handleFxNow(asQuery(request.query))),
   );
   app.get("/v1/token-holders", async (request) =>
-    trackIntent("token-holders", () => handleTokenHolders(asQuery(request.query))),
+    trackIntent("token-holders", () => handleTokenHolders(asQuery(request.query)), holderUpstreamForQuery(asQuery(request.query))),
   );
   // Wired finance observations (expansion): primary/fallback sources, no
   // averaging; keyed failover legs appear only when their env keys are set.

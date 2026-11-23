@@ -16,10 +16,10 @@ describe("holder source bounded cache and pacing", () => {
   expect(load).toHaveBeenCalledTimes(1);
   expect((await cachedHolderBody("same",load,accept)).fetchedAt).toBe(fetchedAt);
  });
- it("expires after 30s and refetches",async()=>{
+ it("expires after five minutes and refetches",async()=>{
   const load=vi.fn(async()=>"raw");
   await settle(cachedHolderBody("same",load,accept));
-  await vi.advanceTimersByTimeAsync(30001);
+  await vi.advanceTimersByTimeAsync(300001);
   await settle(cachedHolderBody("same",load,accept));expect(load).toHaveBeenCalledTimes(2);
  });
  it("serializes different-chain calls at least 2100ms apart",async()=>{
@@ -40,7 +40,7 @@ describe("holder source bounded cache and pacing", () => {
   const failed=expect(cachedHolderBody("a",load,accept)).rejects.toThrow("limited");await settle(failed);
   expect(load).toHaveBeenCalledTimes(1);
   const starts:number[]=[];
-  const blocked=expect(cachedHolderBody("b",async()=>{starts.push(Date.now());return "raw";},accept)).rejects.toThrow("remaining request budget");
+  const blocked=expect(cachedHolderBody("b",async()=>{starts.push(Date.now());return "raw";},accept)).rejects.toThrow("429 cooldown");
   await settle(blocked);expect(starts).toHaveLength(0);
   await vi.advanceTimersByTimeAsync(60000);
   await settle(cachedHolderBody("b",async()=>{starts.push(Date.now());return "raw";},accept));
@@ -78,4 +78,29 @@ it("caps eight pending distinct tokens before loading a ninth",async()=>{
  const pending=Array.from({length:7},(_,i)=>cachedHolderBody(String(i+1),async()=>"raw",accept).catch(e=>String(e)));
  await expect(cachedHolderBody("ninth",async()=>"raw",accept)).rejects.toThrow("queue full");
  release("raw");await settle(Promise.all([first,...pending]));
+});
+
+
+it("429 fallback returns only the last validated body and original acquisition time",async()=>{
+ const validate=vi.fn();let limited=false;
+ const load=vi.fn(async()=>{if(limited)throw Object.assign(new Error("429"),{status:429});return "real-body";});
+ const original=await settle(cachedHolderBody("x",load,validate));
+ await vi.advanceTimersByTimeAsync(300001);limited=true;
+ const stale=await settle(cachedHolderBody("x",load,validate));
+ expect(stale.body).toBe(original.body);expect(stale.fetchedAt).toBe(original.fetchedAt);
+ expect(stale.staleReason).toContain("429");
+ const calls=load.mock.calls.length;
+ expect((await cachedHolderBody("x",load,validate)).staleReason).toContain("429");expect(load.mock.calls.length).toBe(calls);
+});
+it("does not use retained data for non-429 failures",async()=>{
+ let fail=false;const load=async()=>{if(fail)throw new Error("503");return "real-body";};
+ await settle(cachedHolderBody("x",load,accept));await vi.advanceTimersByTimeAsync(300001);fail=true;
+ const checked=expect(cachedHolderBody("x",load,accept)).rejects.toThrow("503");await settle(checked);
+});
+it("rejects a retained observation crossing the 24h source bound during 429",async()=>{
+ const source=Date.now();let fail=false;
+ const load=async()=>{if(fail)throw Object.assign(new Error("429"),{status:429,retryAfterMs:60000});return "real-body";};
+ const validate=()=>{if(Date.now()-source>86400000)throw new Error("stale source");};
+ await settle(cachedHolderBody("x",load,validate));await vi.advanceTimersByTimeAsync(86400001);fail=true;
+ const checked=expect(cachedHolderBody("x",load,validate)).rejects.toThrow("429");await settle(checked);
 });

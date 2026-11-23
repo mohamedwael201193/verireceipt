@@ -1,19 +1,20 @@
 // Process-local provider pacing; cached bytes and acquisition time are atomic.
-const TTL_MS = 30_000;
+const TTL_MS = 5 * 60_000;
 const SPACING_MS = 2_100;
 const MAX_ENTRIES = 128;
 const MAX_PENDING = 8;
-export interface HolderObservation { body: string; fetchedAt: string }
+export interface HolderObservation { body: string; fetchedAt: string; staleReason?: string }
 interface Entry extends HolderObservation { expires: number }
 const cache = new Map<string, Entry>();
 const inFlight = new Map<string, Promise<HolderObservation>>();
 let tail: Promise<void> = Promise.resolve();
 let nextAllowed = 0;
 let pending = 0;
+let rateLimitedUntil = 0;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 export function resetHolderCacheForTests(): void {
   if (pending) throw new Error("cannot reset an active holder queue");
-  cache.clear(); inFlight.clear(); tail = Promise.resolve(); nextAllowed = 0;
+  cache.clear(); inFlight.clear(); tail = Promise.resolve(); nextAllowed = 0; rateLimitedUntil = 0;
 }
 export async function cachedHolderBody(url: string, load: (remainingMs: number) => Promise<string>, validate: (body: string) => void,
   deadlineAt = Date.now() + 7_500): Promise<HolderObservation> {
@@ -21,7 +22,17 @@ export async function cachedHolderBody(url: string, load: (remainingMs: number) 
   if (hit && Date.now() < hit.expires) {
     try { validate(hit.body); return { body: hit.body, fetchedAt: hit.fetchedAt }; } catch { cache.delete(url); }
   }
-  if (hit) cache.delete(url);
+  const staleFallback = (): HolderObservation | null => {
+    const prior = cache.get(url);
+    if (!prior) return null;
+    try { validate(prior.body); } catch { cache.delete(url); return null; }
+    return { body: prior.body, fetchedAt: prior.fetchedAt, staleReason: "GeckoTerminal HTTP 429; last real cached observation, not a current count" };
+  };
+  if (Date.now() < rateLimitedUntil) {
+    const prior = staleFallback();
+    if (prior) return prior;
+    throw Object.assign(new Error("GeckoTerminal HTTP 429 cooldown; no eligible cached observation"), { status: 429 });
+  }
   const existing = inFlight.get(url);
   if (existing) return existing;
   if (pending >= MAX_PENDING) throw new Error("holder source queue full; retry later");
@@ -49,7 +60,10 @@ export async function cachedHolderBody(url: string, load: (remainingMs: number) 
         const error = e as { status?: number; retryAfterMs?: number };
         if (error.status === 429) {
           const wait = Math.max(SPACING_MS, error.retryAfterMs ?? 5_000);
+          rateLimitedUntil = Math.max(rateLimitedUntil, Date.now() + Math.max(wait, 60_000));
           nextAllowed = Math.max(nextAllowed, Date.now() + wait);
+          const prior = staleFallback();
+          if (prior) return prior;
           if (attempt === 0 && Date.now() + wait + 100 < deadlineAt) continue;
         }
         throw e;

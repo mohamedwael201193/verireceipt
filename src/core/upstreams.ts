@@ -87,6 +87,7 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "rpc.mevblocker.io": "evm-rpc",
   "mainnet.base.org": "evm-rpc",
   "api.worldbank.org": "worldbank",
+  "api.geckoterminal.com": "geckoterminal",
   "eth.blockscout.com": "blockscout",
   "explorer.optimism.io": "blockscout",
   "api.crossref.org": "crossref",
@@ -187,6 +188,7 @@ export function recordUpstreamError(name: string, errorCode?: string): void {
 export function recordUpstreamOkFromReceipt(receipt: unknown): void {
   try {
     if (receipt === null || typeof receipt !== "object") return;
+    if (String((receipt as { quorum_votes?: unknown }).quorum_votes ?? "").includes("STALE DISCLOSED")) return;
     const { upstream_url, fetched_at } = receipt as {
       upstream_url?: unknown;
       fetched_at?: unknown;

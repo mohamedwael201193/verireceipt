@@ -22,6 +22,7 @@ import {
   handleTokenHolders,
   INTENT,
   setTokenHoldersFetchForTests,
+  holderUpstreamForQuery,
 } from "../src/handlers/tokenHolders";
 import { TOKEN_CONTRACTS } from "../src/handlers/tokenContracts";
 
@@ -249,4 +250,25 @@ it("bounds a hung source by the reduced HTTP budget instead of waiting beyond 8s
  setTokenHoldersFetchForTests(async()=>new Promise<string>(()=>{}));
  const checked=expect(handleTokenHolders({token:"USDC",chain:"base"})).rejects.toMatchObject({status:502,code:"INDEXER_UNREACHABLE"});
  await vi.advanceTimersByTimeAsync(4001);await checked;
+});
+
+
+it("stale 429 answer quotes source time and marks the receipt without changing raw evidence",async()=>{
+ const raw=readFileSync(join(__dirname,"fixtures/holder-gecko/base-usdc.json"),"utf8");
+ const updated=JSON.parse(raw).data.attributes.holders.last_updated;
+ vi.useFakeTimers();vi.setSystemTime(new Date(Date.parse(updated)+1000));
+ let limited=false;setTokenHoldersFetchForTests(async()=>{if(limited)throw Object.assign(new Error("429"),{status:429});return raw;});
+ const first=await handleTokenHolders({chain:"base",token:"USDC"});
+ await vi.advanceTimersByTimeAsync(300001);limited=true;
+ const r=await handleTokenHolders({chain:"base",token:"USDC"});
+ expect(r.verdict).toBe("stale");expect(r.stale).toBe(true);expect(String(r.answer)).toContain(updated);expect(String(r.answer)).toContain("HTTP 429");
+ const receipt=r.receipt as {receipt_id:string;fetched_at:string;quorum_votes:string};
+ expect(receipt.fetched_at).toBe((first.receipt as {fetched_at:string}).fetched_at);
+ expect(receipt.quorum_votes).toContain("STALE DISCLOSED");
+ expect((await getReceiptEvidence(receipt.receipt_id)).evidence!.toString()).toBe(raw);
+});
+it("attributes named and packed Gecko chains separately from Blockscout",()=>{
+ expect(holderUpstreamForQuery({chain:"polygon"})).toBe("geckoterminal");
+ expect(holderUpstreamForQuery({token:"USDC on bsc"})).toBe("geckoterminal");
+ expect(holderUpstreamForQuery({chain:"ethereum"})).toBe("blockscout");
 });

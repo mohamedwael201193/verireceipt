@@ -18,6 +18,7 @@ import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { cachedHolderBody, resetHolderCacheForTests } from "./holderSourceCache";
+import { recordUpstreamError } from "../core/upstreams";
 import { normalizeChain } from "./txLookup";
 import { ADDRESS_RE, TOKEN_CONTRACTS, isNativeSymbol, labeledTokenContract, tokenContractFor } from "./tokenContracts";
 
@@ -194,16 +195,19 @@ export async function handleTokenHolders(
   const sourceName = network ? "GeckoTerminal" : "Blockscout";
   let info: IndexerTokenInfo;
   let bodyFetchedAt: string;
+  let staleReason: string | undefined;
   try {
     const observation = network
       ? await cachedHolderBody(url, (remaining) => fetchText(url, remaining), (raw) => { parseGecko(raw, network, contract); }, deadlineAt)
       : { body: await fetchText(url, Math.min(4_000, deadlineAt - Date.now())), fetchedAt: new Date().toISOString() };
     bodyFetchedAt = observation.fetchedAt;
+    staleReason = "staleReason" in observation ? observation.staleReason : undefined;
+    if (staleReason) recordUpstreamError("geckoterminal", "UPSTREAM_RATE_LIMITED");
     info = network ? parseGecko(observation.body, network, contract) : parseIndexerResponse(observation.body, url, contract);
   } catch (err) {
     throw upstreamUnavailable(
       "INDEXER_UNREACHABLE",
-      `holder-count indexer failed for ${chain}: ${err instanceof Error ? err.message : String(err)}`,
+      `${sourceName} holder-count indexer failed for ${chain}: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 
@@ -225,9 +229,11 @@ export async function handleTokenHolders(
     holders_count: info.holdersCount,
     token_symbol: symbol,
     as_of: asOf,
+    stale: Boolean(staleReason),
+    ...(staleReason ? { stale_reason: staleReason } : {}),
   };
 
-  const receiptDoc: Receipt = makeReceipt(INTENT, url, info.rawBody, `1/1 indexer of record (${sourceName})`);
+  const receiptDoc: Receipt = makeReceipt(INTENT, url, info.rawBody, `1/1 indexer of record (${sourceName})${staleReason ? "; STALE DISCLOSED: HTTP 429 fallback; source observation " + asOf : ""}`);
   receiptDoc.fetched_at = bodyFetchedAt;
   if (Date.now() >= deadlineAt) throw upstreamUnavailable("HOLDER_DEADLINE", "holder lookup exceeded its 7.5s observation budget; no answer served");
   try {
@@ -244,9 +250,14 @@ export async function handleTokenHolders(
 
   if (Date.now() >= startedAt + 8_000) throw upstreamUnavailable("HOLDER_DEADLINE", "holder lookup exceeded its 8s total budget; no answer served");
   return envelope(INTENT, fields, receiptDoc, {
-    answer: `${symbol} (${contract}) on ${chain} has ${info.holdersCount} distinct holder addresses (${sourceName} indexer, as of ${asOf}).`,
-    verdict: "verified",
-    confidence: 0.9,
-    source: `${sourceName} indexer (${url}, keyless, receipted); holder aggregate, not RPC state${network ? "; original body may be reused for up to 30s; as_of is provider holders.last_updated" : ""}`,
+    answer: `${staleReason ? "STALE CACHED OBSERVATION, not a current count. " : ""}${symbol} (${contract}) on ${chain} has ${info.holdersCount} distinct holder addresses (${sourceName} indexer, as of ${asOf}).${staleReason ? " Upstream returned HTTP 429. This is the last real cached value observed at " + asOf + "; no count has been estimated or updated." : ""}`,
+    verdict: staleReason ? "stale" : "verified",
+    confidence: staleReason ? 0.5 : 0.9,
+    source: `${sourceName} indexer (${url}, keyless, receipted); holder aggregate, not RPC state${network ? "; original body may be reused for up to 5 minutes (or disclosed 429 fallback within the 24h source-age bound); as_of is provider holders.last_updated" : ""}`,
   });
+}
+
+export function holderUpstreamForQuery(query: Record<string, string | undefined>): string {
+  const chain = normalizeChain(query.chain ?? query.token?.match(/\s+on\s+(.+)$/i)?.[1]);
+  return GECKO_NETWORKS[chain ?? ""] ? "geckoterminal" : "blockscout";
 }
