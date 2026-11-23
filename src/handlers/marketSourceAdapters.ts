@@ -41,7 +41,7 @@ export function dexScreenerLiquiditySource(bindings: readonly PoolBinding[], app
     return {
         name: 'DEX Screener named pool reserve liquidity', approval,
         read: async (q, signal) => {
-            const matches = bindings.filter(b => b.chain.toLowerCase() === q.chain.toLowerCase() && b.pool.toLowerCase() === q.pool.toLowerCase());
+            const matches = bindings.filter(b => b.chain.toLowerCase() === q.chain.toLowerCase() && (b.pool.toLowerCase() === q.pool.toLowerCase() || b.address.toLowerCase() === q.pool.toLowerCase()));
             if (matches.length !== 1)
                 throw new Error('ambiguous pool binding');
             const p = matches[0];
