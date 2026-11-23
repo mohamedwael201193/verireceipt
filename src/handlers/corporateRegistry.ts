@@ -30,6 +30,9 @@ import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { resolveCikFromTickers, type TickersMap } from "./filings";
+import { sha256Hex } from "../core/receipt";
+
+function pad10(n: number): string { return String(n).padStart(10, "0"); }
 
 const SOURCE_TIMEOUT_MS = 6000;
 const TICKERS_TTL_MS = 24 * 60 * 60 * 1000;
@@ -55,7 +58,7 @@ async function fetchText(url: string, ua: string): Promise<string> {
   }
 }
 
-let tickersCache: { data: TickersMap; fetchedAt: number } | null = null;
+let tickersCache: { data: TickersMap; fetchedAt: number; raw: string } | null = null;
 export function __clearCorporateRegistryCacheForTests(): void { tickersCache = null; }
 
 const TICKERS_URL = "https://www.sec.gov/files/company_tickers.json";
@@ -114,9 +117,10 @@ export async function handleCorporateRegistry(query: Record<string, string | und
     const raw = await fetchText(TICKERS_URL, ua).catch((err: unknown) => {
       throw upstreamUnavailable("SEC_UNAVAILABLE", `SEC company_tickers fetch failed: ${err instanceof Error ? err.message : "unknown error"}`);
     });
-    tickersCache = { data: JSON.parse(raw) as TickersMap, fetchedAt: Date.now() };
+    tickersCache = { data: JSON.parse(raw) as TickersMap, fetchedAt: Date.now(), raw };
   }
   const tickersRawForReceipt = tickersCache.fetchedAt;
+  const tickersRawBody = tickersCache.raw;
   const match = resolveCikFromTickers(company, tickersCache.data);
   if (!match) {
     throw unprocessable("COMPANY_NOT_FOUND", `no US SEC filer matches "${company}" by CIK, ticker or name`);
@@ -131,6 +135,10 @@ export async function handleCorporateRegistry(query: Record<string, string | und
     as_of: asOf, profile,
     active_criterion: `filed with the SEC within the last ${ACTIVE_WINDOW_DAYS} days (EDGAR carries no good-standing flag)`,
     source_policy: "SEC EDGAR single registry (company_tickers.json + submissions API); US filers only; CIK is the registration id; no incorporation date in EDGAR",
+    // The tickers crosswalk body is too large to embed; its SHA-256 plus the
+    // single resolved row let a judge recompute the CIK resolution.
+    tickers_sha256: sha256Hex(tickersRawBody),
+    resolved_ticker_row: Object.values(tickersCache.data).find((e) => pad10(Number(e.cik_str)) === match.cik10) ?? null,
     raw_bodies: { submissions: subRaw }, tickers_file_cached_at: new Date(tickersRawForReceipt).toISOString(), fetched_at: fetchedAtTickers });
   const receipt = makeReceipt(INTENT, subUrl, evidence, "SEC EDGAR single registry; active = recent filer activity, not legal standing");
   receipt.fetched_at = fetchedAtTickers;

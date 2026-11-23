@@ -49,7 +49,10 @@ describe("CORPORATE_REGISTRY_LOOKUP_GENERAL", () => {
     const stored = await getReceiptEvidence(receipt.receipt_id);
     if (!stored.evidence) throw new Error("missing evidence");
     expect(sha256Hex(stored.evidence)).toBe(receipt.raw_response_sha256);
-    expect(JSON.parse(stored.evidence.toString("utf8")).raw_bodies.submissions).toBe(appleSub);
+    const ev = JSON.parse(stored.evidence.toString("utf8"));
+    expect(ev.raw_bodies.submissions).toBe(appleSub);
+    expect(ev.tickers_sha256).toBe(sha256Hex(tickers));
+    expect(ev.resolved_ticker_row).toMatchObject({ ticker: "AAPL", cik_str: 320193 });
   });
   it("resolves a CIK directly and a full title at name confidence", async () => {
     stub();
@@ -88,6 +91,17 @@ describe("CORPORATE_REGISTRY_LOOKUP_GENERAL", () => {
     const edited = JSON.parse(appleSub);
     edited.cik = "9999999999";
     expect(() => parseSubmissions(JSON.stringify(edited), "0000320193", new Date().toISOString())).toThrow();
+  });
+  it("fails closed with 502 when SEC_USER_AGENT is unset", async () => {
+    const saved = process.env.SEC_USER_AGENT;
+    delete process.env.SEC_USER_AGENT;
+    try {
+      stub();
+      await expect(handleCorporateRegistry({ company: "AAPL", jurisdiction: "US" }))
+        .rejects.toMatchObject({ status: 502, code: "SEC_USER_AGENT_MISSING" });
+    } finally {
+      process.env.SEC_USER_AGENT = saved;
+    }
   });
   it("an EDGAR outage is an honest 502", async () => {
     stub({ sub: "ERR" });
