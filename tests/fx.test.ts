@@ -208,6 +208,16 @@ describe("handleFx answers (stubbed sources)", () => {
     expect(result.verdict).toBe("verified");
     expect(result.rate).toBe(0.909918);
     expect(result.converted_amount).toBeCloseTo(90.9918, 4);
+    // The answer must disclose the anchor cluster and the excluded quotes
+    // with their distances - never silently pool (review, 2026-11-23).
+    const ans = String(result.answer);
+    expect(ans).toContain("anchored on the tightest agreeing cluster");
+    expect(ans).toContain("vatcomply=0.909918");
+    expect(ans).toContain("Frankfurter (ECB reference rates)=0.90992");
+    expect(ans).toContain("excluded floatrates=0.910744 (+9bps)");
+    expect(ans).toContain("open.er-api.com=0.911256 (+15bps)");
+    expect(ans).toContain("fawaz currency-api=0.91158 (+18bps)");
+    expect(String(result.source)).toContain("single-linkage");
     vi.unstubAllGlobals();
   });
 
