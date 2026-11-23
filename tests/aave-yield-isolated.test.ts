@@ -43,7 +43,7 @@ it('RAY liquidity rate converts to compounded APY basis points with Aave formula
     expect(() => liquidityRateRayToApyBps(-1n)).toThrow();
 });
 
-it('two agreeing legs yield the on-chain rate with incentives excluded, observed at the reserve update', async () => {
+it('two agreeing legs yield the on-chain rate with incentives excluded, observed at the pinned block', async () => {
     const now = Math.floor(Date.now() / 1000);
     const blockTs = now - 120;
     const lastUpdate = blockTs - 60;
@@ -52,7 +52,9 @@ it('two agreeing legs yield the on-chain rate with incentives excluded, observed
     const obs = await src.read({ project: 'aave-v3', symbol: 'USDC', chain: 'ethereum' }, new AbortController().signal);
     expect(obs.value.supplyApyBps).toBe(liquidityRateRayToApyBps(30000000000000000000000000n));
     expect(obs.value.components).toContain('incentives');
-    expect(obs.observedAt).toBe(new Date(lastUpdate * 1000).toISOString());
+    expect(obs.observedAt).toBe(new Date(blockTs * 1000).toISOString());
+    expect(JSON.parse(obs.rawBody).last_update_timestamp).toBe(lastUpdate);
+    expect(JSON.parse(obs.rawBody).raw_rpc_evidence.map((r:any)=>r.source_url)).toEqual(legs.map(l=>l.evidenceUrl));
     expect(obs.identity).toBe(JSON.stringify(['aave-v3', 'usdc', 'ethereum']));
     expect(obs.rawBody).toContain('"rpc_quorum":2');
 });
@@ -117,4 +119,17 @@ it('unbound project or symbol throws before any RPC call', async () => {
     await expect(src.read({ project: 'compound', symbol: 'USDC', chain: 'ethereum' }, new AbortController().signal)).rejects.toThrow('no unambiguous reviewed reserve binding');
     await expect(src.read({ project: 'aave-v3', symbol: 'WBTC', chain: 'ethereum' }, new AbortController().signal)).rejects.toThrow('no unambiguous reviewed reserve binding');
     expect(rpcCall).not.toHaveBeenCalled();
+});
+
+it('fresh pinned state with an old reserve mutation stays current and retains mutation time', async () => {
+ const now=Math.floor(Date.now()/1000),lastUpdate=now-86400;
+ scriptLeg(legs.map(l=>l.rpcUrl),{lastUpdate,blockAgeSec:120});
+ const obs=await aaveYieldSource([binding],legs,approval).read({project:'aave-v3',symbol:'USDC',chain:'ethereum'},new AbortController().signal);
+ expect(obs.observedAt).toBe(new Date((now-120)*1000).toISOString());
+ expect(JSON.parse(obs.rawBody).last_update_timestamp).toBe(lastUpdate);
+});
+it('RPC calls receive the source cancellation signal',async()=>{
+ scriptLeg(legs.map(l=>l.rpcUrl),{});const signal=new AbortController().signal;
+ await aaveYieldSource([binding],legs,approval).read({project:'aave-v3',symbol:'USDC',chain:'ethereum'},signal);
+ expect(vi.mocked(rpcCall).mock.calls.every(c=>c[3]===signal)).toBe(true);
 });

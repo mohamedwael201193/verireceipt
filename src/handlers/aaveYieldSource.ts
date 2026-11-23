@@ -76,7 +76,7 @@ async function readLeg(binding: AaveReserveBinding, leg: AaveRpcLeg, signal: Abo
         throw new Error('source deadline'); };
     const call = async (method: string, params: unknown[]): Promise<unknown> => {
         live();
-        const { result, rawText } = await rpcCall(leg.rpcUrl, method, params);
+        const { result, rawText } = await rpcCall(leg.rpcUrl, method, params, signal);
         raw.push({ method, params, rawText });
         return result;
     };
@@ -149,12 +149,12 @@ export function aaveYieldSource(bindings: readonly AaveReserveBinding[], legs: r
             if (!Number.isFinite(lastUpdate) || lastUpdate * 1000 > blockTime + 30000)
                 throw new Error('reserve update newer than pinned block');
             const apyBps = liquidityRateRayToApyBps(rateRay);
-            const observedAt = new Date(lastUpdate * 1000).toISOString();
+            const observedAt = r.blockTimestamp;
             const fetchedAt = new Date().toISOString();
             return {
                 identity: JSON.stringify([b.project.toLowerCase(), b.symbol.toLowerCase(), b.chain.toLowerCase()]),
                 sourceUrl: r.evidenceUrl,
-                rawBody: JSON.stringify({ binding: b, block_number: r.blockNumber, block_hash: r.blockHash, block_timestamp: r.blockTimestamp, rpc_quorum: 2, raw_reserve_data: r.rawReturn, liquidity_rate_ray: rateRay.toString(), last_update_timestamp: lastUpdate, rate_semantics: 'liquidityRate is a per-second APR in RAY (1e27); APY = (1 + rate/1e27/31536000)^31536000 - 1', raw_rpc_evidence: r.rawEvidence }),
+                rawBody: JSON.stringify({ binding: b, block_number: r.blockNumber, block_hash: r.blockHash, block_timestamp: r.blockTimestamp, rpc_quorum: 2, raw_reserve_data: r.rawReturn, liquidity_rate_ray: rateRay.toString(), last_update_timestamp: lastUpdate, rate_semantics: 'liquidityRate is a per-second APR in RAY (1e27); APY = (1 + rate/1e27/31536000)^31536000 - 1', raw_rpc_evidence: reads.map(read => ({source_url:read.evidenceUrl,raw_body:read.rawEvidence})) }),
                 observedAt,
                 fetchedAt,
                 value: { project: b.project, symbol: b.symbol, chain: b.chain, supplyApyBps: apyBps, components: 'on-chain liquidity (supply) rate only; incentives and rewards excluded' },
