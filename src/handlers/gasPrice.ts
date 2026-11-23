@@ -43,11 +43,9 @@ import { normalizeChain } from "./txLookup";
 
 export const INTENT = "GAS_PRICE_GENERAL";
 
-/** Mainnet chains where an agreeing 0 gwei is implausible (G3). */
-
-/** txLookup's chains plus avalanche (G2): every CHAIN_RPCS key with a
- * verified keyless gas quorum. txLookup's own SUPPORTED_CHAINS list is
- * unchanged (tx verification on avalanche is out of G2 scope). */
+/** txLookup's chains plus avalanche (G2) and bsc: every CHAIN_RPCS key
+ * with a verified keyless gas quorum. txLookup's own SUPPORTED_CHAINS
+ * list is unchanged (tx verification on those chains is out of scope). */
 const SUPPORTED_CHAINS = [
   "ethereum",
   "base",
@@ -57,6 +55,7 @@ const SUPPORTED_CHAINS = [
   "sepolia",
   "base-sepolia",
   "avalanche",
+  "bsc",
 ];
 
 /** Intent contract upper range bound for gas_price_gwei. */
@@ -74,6 +73,7 @@ const GAS_TOKEN: Record<string, string> = {
   optimism: "ETH",
   polygon: "POL",
   avalanche: "AVAX",
+  bsc: "BNB",
   sepolia: "ETH",
   "base-sepolia": "ETH",
 };

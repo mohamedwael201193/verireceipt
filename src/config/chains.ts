@@ -107,6 +107,16 @@ export const CHAIN_RPCS: Record<string, string[]> = {
     "https://avalanche.drpc.org",
     "https://avalanche-c-chain-rpc.publicnode.com",
   ],
+  // BNB Smart Chain (chain 56): three keyless legs across independent
+  // operators, verified live 2026-11-23: all answered eth_gasPrice
+  // 0x2faf080 (0.05 gwei), agreeing. bsc-dataseed1.ninicoin.io passed
+  // the same check and is the documented spare; bsc.drpc.org returned
+  // 403 and is NOT included.
+  bsc: [
+    "https://bsc-dataseed.binance.org",
+    "https://bsc-dataseed1.defibit.io",
+    "https://bsc-rpc.publicnode.com",
+  ],
   sepolia: [
     "https://ethereum-sepolia-rpc.publicnode.com",
     "https://sepolia.gateway.tenderly.co",

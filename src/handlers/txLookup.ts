@@ -132,6 +132,10 @@ const CHAIN_ALIASES: Record<string, string> = {
   "avalanche c-chain": "avalanche",
   "avalanche c chain": "avalanche",
   "c-chain": "avalanche",
+  bsc: "bsc",
+  "bnb smart chain": "bsc",
+  "bnb chain": "bsc",
+  "binance smart chain": "bsc",
 };
 
 /** Normalise a raw chain value to its canonical name: trim, lowercase,

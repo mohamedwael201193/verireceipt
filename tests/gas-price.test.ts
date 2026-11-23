@@ -330,6 +330,22 @@ describe("G2: avalanche quorum (stubbed fetch)", () => {
   });
 });
 
+describe("BSC quorum (stubbed fetch)", () => {
+  const BSC = CHAIN_RPCS.bsc; // 3 legs, verified live 2026-11-23 (0.05 gwei agreeing)
+  it("serves bsc from its own keyless quorum, gas priced in BNB", async () => {
+    stubGasFetch("bsc", {
+      [BSC[0]]: { kind: "ok", value: "0x2faf080" },
+      [BSC[1]]: { kind: "ok", value: "0x2faf080" },
+      [BSC[2]]: { kind: "throw" },
+    });
+    const res = (await handleGasPrice({ chain: "BNB Smart Chain" })) as Record<string, unknown>;
+    expect(res.chain).toBe("bsc");
+    expect(res.gas_price_gwei).toBe(0.05);
+    expect(res.verdict).toBe("verified");
+    expect(String(res.answer)).toContain("BNB");
+  });
+});
+
 describe("handleGasPrice LIVE (real public RPCs, no stub)", () => {
   it("answers the published Arbitrum One name from real RPC quorum", async () => {
     const out = await handleGasPrice({ chain: "Arbitrum One" });
