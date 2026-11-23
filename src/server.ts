@@ -15,6 +15,7 @@ import { handleTvl, startTvlListsRefreshTimer, stopTvlListsRefreshTimer, tvlDisk
 import { handleRoute } from "./handlers/optimalRoute";
 import { handleGridPrice } from "./handlers/gridPrice";
 import { handleValidator } from "./handlers/validator";
+import { handleOnchainMetric } from "./handlers/onchainMetric";
 import { handleGasPrice } from "./handlers/gasPrice";
 import { handleTransactionRisk } from "./handlers/transactionRisk";
 import { handleFinancialData } from "./handlers/financialData";
@@ -266,6 +267,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/stock-price", async (request) => trackIntent("stock-price", () => handleStockPrice(asQuery(request.query))));
   app.get("/v1/sanctions-screen", async (request) => trackIntent("sanctions-screen", () => handleSanctionsScreen(asQuery(request.query))));
   app.get("/v1/ip-geolocation", async (request) => trackIntent("ip-geolocation", () => handleIpGeolocation(asQuery(request.query))));
+  app.get("/v1/onchain-metric", async (request) => trackIntent("onchain-metric", () => handleOnchainMetric(exactQuery(request.raw.url ?? "", ["address", "block", "chain", "metric"]))));
   app.get("/v1/game-result", async (request) => trackIntent("game-result", () => handleGameResult(asQuery(request.query))));
   app.get("/v1/corporate-registry", async (request) => trackIntent("corporate-registry", () => handleCorporateRegistry(asQuery(request.query))));
   app.get("/v1/air-quality", async (request) => trackIntent("air-quality", () => handleAirQuality(asQuery(request.query))));

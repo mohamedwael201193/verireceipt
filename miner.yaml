@@ -109,6 +109,7 @@ semantics:
     - VULNERABILITY_TRIAGE_GENERAL
     - WEATHER_CHECK_TEMPERATURE
     - WEATHER_FORECAST_GENERAL
+    - ONCHAIN_METRIC_VERIFY_GENERAL
   signal_mapping:
     confidence_field: confidence
     label_field: answer
@@ -1089,6 +1090,41 @@ endpoints:
           - WEATHER_CHECK_TEMPERATURE
           description: City or place name, or latitude,longitude
 
+  - path: /v1/onchain-metric
+    external_path: /v1/onchain-metric
+    method: GET
+    description: 'Reads native balance and nonce for one EVM address at an explicit finalized block on ethereum,
+      polygon or arbitrum. At least two configured public RPC sources must agree on chain identity, block hash,
+      balance and nonce; the block hash is checked before and after reads. balance_gwei is Gwei (not ETH or POL),
+      balance_wei is exact base units and tx_count is sent-transaction nonce, not received transfers. No pending,
+      latest or unfinalized snapshot is served. Missing quorum is an honest refusal.'
+    intents:
+    - ONCHAIN_METRIC_VERIFY_GENERAL
+    params:
+      query:
+        required:
+        - name: address
+          type: string
+          intents:
+          - ONCHAIN_METRIC_VERIFY_GENERAL
+          description: Explicit 0x-prefixed 20-byte EVM wallet address.
+        - name: block
+          type: integer
+          intents:
+          - ONCHAIN_METRIC_VERIFY_GENERAL
+          description: Finalized block number from 0 to 1000000000000; no latest or pending tag.
+        optional:
+        - name: chain
+          type: string
+          intents:
+          - ONCHAIN_METRIC_VERIFY_GENERAL
+          description: 'ethereum (default), polygon or arbitrum.'
+        - name: metric
+          type: string
+          intents:
+          - ONCHAIN_METRIC_VERIFY_GENERAL
+          description: 'balance (default) or tx_count. Both are observed and returned for either selection.'
+
 intent_mapping:
   ONCHAIN_TX_LOOKUP_GENERAL:
     endpoint: /v1/tx
@@ -1840,3 +1876,27 @@ intent_mapping:
       temperature_c:
         path: temperature_c
         unit: "degrees Celsius"
+
+  ONCHAIN_METRIC_VERIFY_GENERAL:
+    endpoint: /v1/onchain-metric
+    input:
+      address:
+        from: address
+      block:
+        from: block
+      chain:
+        from: chain
+      metric:
+        from: metric
+    output:
+      balance_gwei:
+        path: balance_gwei
+        unit: "Gwei"
+      address:
+        path: address
+      block:
+        path: block
+      chain:
+        path: chain
+      tx_count:
+        path: tx_count

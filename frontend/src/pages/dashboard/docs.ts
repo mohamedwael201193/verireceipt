@@ -256,6 +256,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - VULNERABILITY_TRIAGE_GENERAL\n' +
     '    - WEATHER_CHECK_TEMPERATURE\n' +
     '    - WEATHER_FORECAST_GENERAL\n' +
+    '    - ONCHAIN_METRIC_VERIFY_GENERAL\n' +
     '  signal_mapping:\n' +
     '    confidence_field: confidence\n' +
     '    label_field: answer\n' +
@@ -310,8 +311,9 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          type: string\n' +
     '          intents:\n' +
     '          - REGULATORY_FILING_MONITOR_GENERAL\n' +
-    '          description: \'An inclusive filing-date period: last N months, a calendar year, an explicit calendar\n' +
-    '            Q1/Q2/Q3/Q4 with year, a valid quarter ending YYYY-MM-DD (March 31, June 30, September 30 or December\n' +
+    '          description: \'An inclusive filing-date period: last N months, a calendar year, year to date\n' +
+    '            (YTD, January 1 of the current calendar year through today), an explicit calendar\n' +
+    '            Q1/Q2/Q3/Q4 with year (e.g. "Q3 2026"), a valid quarter ending YYYY-MM-DD (March 31, June 30, September 30 or December\n' +
     '            31), YYYY-MM-DD..YYYY-MM-DD, or a supported year/date range using to or through. Bare Q1-Q4 without\n' +
     '            calendar qualification and company fiscal-year or fiscal-quarter requests are rejected.\'\n' +
     '        optional:\n' +
@@ -1235,6 +1237,41 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          - WEATHER_CHECK_TEMPERATURE\n' +
     '          description: City or place name, or latitude,longitude\n' +
     '\n' +
+    '  - path: /v1/onchain-metric\n' +
+    '    external_path: /v1/onchain-metric\n' +
+    '    method: GET\n' +
+    '    description: \'Reads native balance and nonce for one EVM address at an explicit finalized block on ethereum,\n' +
+    '      polygon or arbitrum. At least two configured public RPC sources must agree on chain identity, block hash,\n' +
+    '      balance and nonce; the block hash is checked before and after reads. balance_gwei is Gwei (not ETH or POL),\n' +
+    '      balance_wei is exact base units and tx_count is sent-transaction nonce, not received transfers. No pending,\n' +
+    '      latest or unfinalized snapshot is served. Missing quorum is an honest refusal.\'\n' +
+    '    intents:\n' +
+    '    - ONCHAIN_METRIC_VERIFY_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: address\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - ONCHAIN_METRIC_VERIFY_GENERAL\n' +
+    '          description: Explicit 0x-prefixed 20-byte EVM wallet address.\n' +
+    '        - name: block\n' +
+    '          type: integer\n' +
+    '          intents:\n' +
+    '          - ONCHAIN_METRIC_VERIFY_GENERAL\n' +
+    '          description: Finalized block number from 0 to 1000000000000; no latest or pending tag.\n' +
+    '        optional:\n' +
+    '        - name: chain\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - ONCHAIN_METRIC_VERIFY_GENERAL\n' +
+    '          description: \'ethereum (default), polygon or arbitrum.\'\n' +
+    '        - name: metric\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - ONCHAIN_METRIC_VERIFY_GENERAL\n' +
+    '          description: \'balance (default) or tx_count. Both are observed and returned for either selection.\'\n' +
+    '\n' +
     'intent_mapping:\n' +
     '  ONCHAIN_TX_LOOKUP_GENERAL:\n' +
     '    endpoint: /v1/tx\n' +
@@ -1353,6 +1390,9 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '      gas_price_gwei:\n' +
     '        path: gas_price_gwei\n' +
     '        unit: gwei\n' +
+    '      transfer_fee_usd:\n' +
+    '        path: transfer_fee_usd\n' +
+    '        unit: USD\n' +
     '      as_of:\n' +
     '        path: as_of\n' +
     '  WALLET_BALANCE_CHECK_GENERAL:\n' +
@@ -1982,6 +2022,30 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    output:\n' +
     '      temperature_c:\n' +
     '        path: temperature_c\n' +
-    '        unit: "degrees Celsius"\n',
+    '        unit: "degrees Celsius"\n' +
+    '\n' +
+    '  ONCHAIN_METRIC_VERIFY_GENERAL:\n' +
+    '    endpoint: /v1/onchain-metric\n' +
+    '    input:\n' +
+    '      address:\n' +
+    '        from: address\n' +
+    '      block:\n' +
+    '        from: block\n' +
+    '      chain:\n' +
+    '        from: chain\n' +
+    '      metric:\n' +
+    '        from: metric\n' +
+    '    output:\n' +
+    '      balance_gwei:\n' +
+    '        path: balance_gwei\n' +
+    '        unit: "Gwei"\n' +
+    '      address:\n' +
+    '        path: address\n' +
+    '      block:\n' +
+    '        path: block\n' +
+    '      chain:\n' +
+    '        path: chain\n' +
+    '      tx_count:\n' +
+    '        path: tx_count\n',
   cast: REGISTRATION_CAST_SNIPPET,
 };

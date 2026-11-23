@@ -14,7 +14,7 @@ describe("current frontend contract metadata", () => {
   const section = raw.toString().split("  supported_intents:\n")[1].split(/\n[^ ]/)[0];
   const listed = [...section.matchAll(/^    - ([A-Z0-9_]+)$/gm)].map(m => m[1]);
   expect(listed).toEqual([...DECLARED_INTENTS]);
-  expect(DECLARED_INTENT_COUNT).toBe(49);
+  expect(DECLARED_INTENT_COUNT).toBe(50);
   // The working miner.yaml is ahead of the chain again: its hash is the
   // pending 49-intent update hash; SEPOLIA_YAML_HASH stays the registered
   // hash (45 intents, registration 6177) until that tx lands.
