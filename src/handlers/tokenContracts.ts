@@ -154,3 +154,21 @@ export function toWholeUnits(value: bigint, decimals: number): number {
   }
   return Number(whole) + Number(frac6) / 1e6;
 }
+
+/** Chain preference order when a bare symbol names no chain: a symbol
+ * found on exactly one listed chain resolves there; a multi-chain
+ * symbol resolves to the first chain in this order that lists it
+ * (ethereum first — the canonical home of the multi-chain majors in
+ * this registry). The resolution is always disclosed by the caller. */
+const CANONICAL_CHAIN_ORDER = ["ethereum", "base", "arbitrum", "optimism", "polygon", "sepolia", "base-sepolia"];
+
+/** Canonical home chain + contract for a bare symbol with no chain
+ * given, or null when no listed chain carries the symbol. */
+export function canonicalHomeChain(symbol: string): { chain: string; contract: string } | null {
+  const sym = symbol.trim().toUpperCase();
+  for (const chain of CANONICAL_CHAIN_ORDER) {
+    const contract = TOKEN_CONTRACTS[chain]?.[sym];
+    if (contract) return { chain, contract };
+  }
+  return null;
+}

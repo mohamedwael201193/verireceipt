@@ -120,8 +120,41 @@ describe("handleTokenSupply validation (no network use)", () => {
 });
 
 describe("display-label input validation", () => {
-  it("does not silently choose a network for a chainless symbol", async () => {
-    await expectApiError(handleTokenSupply({ token: "USDC" }), 400, "MISSING_PARAM");
+  it("a chainless listed symbol resolves to its canonical home chain, disclosed", async () => {
+    stubSupplyFetch(Object.fromEntries(ETH.map((url) => [url, supplyBehavior(41000000123456n, 6, "USDC")])));
+    const out = await handleTokenSupply({ token: "USDC" });
+    expect(out.chain).toBe("ethereum");
+    expect(out.total_supply).toBe(41000000.123456);
+    expect(String(out.answer)).toContain("No chain was given");
+    expect(String(out.answer)).toContain("canonical home chain ethereum");
+    const receipt = out.receipt as { receipt_id: string };
+    const evidence = await getReceiptEvidence(receipt.receipt_id);
+    const parsed = JSON.parse(evidence.evidence!) as { chain_resolution: { resolved_chain: string } | string };
+    expect(typeof parsed.chain_resolution).toBe("object");
+    expect((parsed.chain_resolution as { resolved_chain: string }).resolved_chain).toBe("ethereum");
+  });
+
+  it("a single-chain listed symbol resolves to its only chain (ARB on arbitrum)", async () => {
+    const ARB_RPCS = CHAIN_RPCS.arbitrum;
+    stubSupplyFetch(Object.fromEntries(ARB_RPCS.map((url) => [url, supplyBehavior(10000000000n * 10n ** 18n, 18, "ARB")])));
+    const out = await handleTokenSupply({ token: "ARB" });
+    expect(out.chain).toBe("arbitrum");
+    expect(String(out.answer)).toContain("canonical home chain arbitrum");
+  });
+
+  it("a chainless UNLISTED symbol still refuses, and a raw address still needs a chain", async () => {
+    await expectApiError(handleTokenSupply({ token: "NOSUCHTOKEN" }), 400, "MISSING_PARAM");
+    await expectApiError(handleTokenSupply({ token: USDC_ETH }), 400, "MISSING_PARAM");
+  });
+
+  it("an explicit chain is unchanged and carries no home-chain disclosure", async () => {
+    stubSupplyFetch(Object.fromEntries(ETH.map((url) => [url, supplyBehavior(1000n, 6, "USDC")])));
+    const out = await handleTokenSupply({ token: "USDC on ethereum" });
+    expect(String(out.answer)).not.toContain("canonical home chain");
+    const receipt = out.receipt as { receipt_id: string };
+    const evidence = await getReceiptEvidence(receipt.receipt_id);
+    const parsed = JSON.parse(evidence.evidence!) as { chain_resolution: string };
+    expect(parsed.chain_resolution).toBe("not used (chain given)");
   });
 
   it.each([
