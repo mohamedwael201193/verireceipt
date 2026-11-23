@@ -85,6 +85,7 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "api.worldbank.org": "worldbank",
   "eth.blockscout.com": "blockscout",
   "explorer.optimism.io": "blockscout",
+  "api.crossref.org": "crossref",
 };
 
 /** Hostname suffixes shared by every CHAIN_RPCS host family. */
@@ -197,6 +198,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   yield: "aave-v3-evm-rpc",
   weather: "aviationweather-noaa",
   "weather-history": "ncei-noaa",
+  "academic-search": "crossref",
 };
 
 /**

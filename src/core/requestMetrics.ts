@@ -9,6 +9,7 @@ const ROUTE_INTENTS: Record<string, string> = {
   "/v1/cve": "CVE_LOOKUP_CVSS", "/v1/fx": "CURRENCY_EXCHANGE_CONVERT",
   "/v1/token-holders": "TOKEN_HOLDER_COUNT_GENERAL", "/v1/email-security": "EMAIL_SECURITY_GENERAL",
   "/v1/vulnerability-triage": "VULNERABILITY_TRIAGE_GENERAL",
+  "/v1/academic-search": "ACADEMIC_SEARCH_GENERAL",
 };
 // Only known parameter NAMES are emitted, including rejected aliases. Never values
 // or unknown names: callers can put a credential into an arbitrary query key.
