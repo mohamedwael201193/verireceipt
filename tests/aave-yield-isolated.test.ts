@@ -98,6 +98,20 @@ it('a reserve update newer than the pinned block is refused', async () => {
     await expect(src.read({ project: 'aave-v3', symbol: 'USDC', chain: 'ethereum' }, new AbortController().signal)).rejects.toThrow('newer than pinned block');
 });
 
+it('a stale pinned block (1 hour old) is refused', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const blockTs = now - 3600;
+    const block = { number: '0x10', hash: BLOCK_HASH, timestamp: '0x' + blockTs.toString(16) };
+    (rpcCall as any).mockImplementation(async (_u: string, method: string) => {
+        if (method === 'eth_chainId') return { result: '0x1', rawText: '' };
+        if (method === 'eth_getBlockByNumber') return { result: block, rawText: '' };
+        if (method === 'eth_call') return { result: reserveReturn(30000000000000000000000000n, blockTs - 60), rawText: '' };
+        throw new Error('unexpected');
+    });
+    const src = aaveYieldSource([binding], legs, approval);
+    await expect(src.read({ project: 'aave-v3', symbol: 'USDC', chain: 'ethereum' }, new AbortController().signal)).rejects.toThrow('pinned block is stale');
+});
+
 it('unbound project or symbol throws before any RPC call', async () => {
     const src = aaveYieldSource([binding], legs, approval);
     await expect(src.read({ project: 'compound', symbol: 'USDC', chain: 'ethereum' }, new AbortController().signal)).rejects.toThrow('no unambiguous reviewed reserve binding');
