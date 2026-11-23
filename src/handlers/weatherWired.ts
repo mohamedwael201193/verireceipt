@@ -15,7 +15,7 @@
 //   Frankfurt   EDDF  <-> GMW00035032 RHEIN MAIN   (WMO 10637, same site)
 //   Cairo       HECA  <-> EGE00147727 CAIRO ABBASSIA
 // GHCN has no Cairo International Airport station; the nearest listed
-// Cairo city station is Abbassia (30.08, 31.29), roughly 10 km from the
+// Cairo city station is Abbassia (30.08, 31.29), roughly 12 km from the
 // airport (30.12, 31.41). The current leg therefore observes at HECA and
 // the past leg at Abbassia, and both the binding scope and the per-answer
 // station disclosure say so. Nothing averages the two.
@@ -47,7 +47,7 @@ const GHCN_STATIONS_METADATA = 'https://www.ncei.noaa.gov/pub/data/ghcn/daily/gh
 /** Reviewed station bindings. `location` is the exact accepted spelling;
  * each answer discloses the actual observing station. */
 export const WEATHER_STATION_BINDINGS: readonly WeatherStationBinding[] = [
-    { location: 'Cairo', icao: 'HECA', ghcn: 'EGE00147727', metadataUrl: GHCN_STATIONS_METADATA, scope: 'Current: HECA Cairo International Airport METAR. Past: GHCN Cairo Abbassia station EGE00147727, about 10 km from the airport; no GHCN airport station exists for Cairo.' },
+    { location: 'Cairo', icao: 'HECA', ghcn: 'EGE00147727', metadataUrl: GHCN_STATIONS_METADATA, scope: 'Current: HECA Cairo International Airport METAR. Past: GHCN Cairo Abbassia station EGE00147727, about 12 km from the airport; no GHCN airport station exists for Cairo.' },
     { location: 'London', icao: 'EGLL', ghcn: 'UKM00003772', metadataUrl: GHCN_STATIONS_METADATA, scope: 'Heathrow airport station for both current (EGLL METAR) and past (GHCN UKM00003772, WMO 03772).' },
     { location: 'New York JFK', icao: 'KJFK', ghcn: 'USW00094789', metadataUrl: GHCN_STATIONS_METADATA, scope: 'JFK airport station for both current (KJFK METAR) and past (GHCN USW00094789, WMO 74486). Label is New York JFK, not the whole New York area.' },
     { location: 'Dubai', icao: 'OMDB', ghcn: 'AEM00041194', metadataUrl: GHCN_STATIONS_METADATA, scope: 'Dubai International airport station for both current (OMDB METAR) and past (GHCN AEM00041194, WMO 41194).' },

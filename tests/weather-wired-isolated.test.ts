@@ -33,7 +33,21 @@ it('station bindings pin the exact reviewed ICAO and GHCN ids per location', () 
 it('Cairo binding honestly discloses the Abbassia/airport station split', () => {
     const cairo = WEATHER_STATION_BINDINGS.find(b => b.location === 'Cairo')!;
     expect(cairo.scope).toContain('Abbassia');
-    expect(cairo.scope).toContain('10 km');
+    expect(cairo.scope).toContain('12 km');
+});
+
+it('partial location spellings fail closed, no fuzzy match', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+        const h = createWiredWeatherHandlers();
+        await expect(h.current({ location: 'New York' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });
+        await expect(h.past({ location: 'New York', date: '2026-11-20' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });
+        expect(fetchSpy).not.toHaveBeenCalled();
+    }
+    finally {
+        vi.unstubAllGlobals();
+    }
 });
 
 it('NOAA weather approvals assert public-domain commercial use and redistribution with reviewed dates', () => {
