@@ -94,9 +94,8 @@ describe("THREAT_INTELLIGENCE_INDICATOR", () => {
     await expect(handleThreatIndicator({})).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
     await expect(handleThreatIndicator({ indicator: "not an ip" })).rejects.toMatchObject({ status: 400, code: "INVALID_INDICATOR" });
   });
-  it("matchIndicator treats 999.1.1.1 as a domain-shaped non-IP, never as an IP", () => {
-    const { type } = matchIndicator("999.1.1.1", []);
-    expect(type).toBe("domain");
+  it("malformed IP cannot become an unlisted domain verdict", () => {
+    expect(()=>matchIndicator("999.1.1.1", [])).toThrowError(expect.objectContaining({code:"INVALID_INDICATOR"}));
   });
   it("GET /v1/threat-indicator is wired", async () => {
     const app = buildServer();
@@ -132,5 +131,23 @@ describe('URL IP-literal screening',()=>{
  });
  it.each(['http://16846985/','http://0x010a1009/','http://01.012.020.011/','http://1.10.4105/','http://%31.10.16.9/','http://1.10.16.9./','http://[::ffff:1.10.16.9]/','http://[::ffff:10a:1009]/','http://[2001:db8::1]/','http://user@1.10.16.9/'])('refuses ambiguous/unsupported literal before a clean result: %s',url=>{
   expect(()=>matchIndicator(url,[])).toThrowError(expect.objectContaining({status:400}));
+ });
+});
+
+describe('unsupported indicator types never receive a clean-domain answer',()=>{
+ it.each(['CVE-2021-44228','a'.repeat(64),'d41d8cd98f00b204e9800998ecf8427e','999.1.1.1','1.10.16.9.','bad.example..','127.1','0x7f000001','2001:4860:4860::8888','localhost','bad..example.com'])('refuses %s before any feed read',async indicator=>{
+  const fetch=vi.fn();vi.stubGlobal('fetch',fetch);await expect(handleThreatIndicator({indicator})).rejects.toMatchObject({status:400});expect(fetch).not.toHaveBeenCalled();
+ });
+});
+it('IPv6 explicitly names the unsupported IP feed coverage',async()=>{
+ const f=vi.fn();vi.stubGlobal('fetch',f);await expect(handleThreatIndicator({indicator:'2001:4860:4860::8888'})).rejects.toMatchObject({status:400,code:'UNSUPPORTED_IP_VERSION'});expect(f).not.toHaveBeenCalled();
+});
+
+describe('valid DNS and URL forms retain actual list matching',()=>{
+ it('single trailing DNS dot matches the same real listed domain',async()=>{
+  stub();const plain=await handleThreatIndicator({indicator:'malware.wicar.org'});const dotted=await handleThreatIndicator({indicator:'MALWARE.WICAR.ORG.'});expect(plain.malicious).toBe(true);expect(dotted.malicious).toBe(true);expect(dotted.matches).toEqual(plain.matches);
+ });
+ it.each(['example.com.','XN--BCHER-KVA.DE','https://malware.wicar.org:8443/path'])('accepts valid form %s',async indicator=>{
+  stub();const out=await handleThreatIndicator({indicator});expect(typeof out.malicious).toBe('boolean');if(indicator.startsWith('https'))expect(out.malicious).toBe(true);
  });
 });

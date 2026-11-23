@@ -195,11 +195,22 @@ export function canonicalScreeningHost(indicator: string): string {
   return host;
 }
 
+/** Unsupported identifiers must not be reported as absent from domain lists. */
+export function validateThreatIndicator(indicator:string):void {
+ if(/^https?:\/\//i.test(indicator)){canonicalScreeningHost(indicator);return;}
+ if(indicator.endsWith('.')&&/[a-z]/i.test(indicator))indicator=indicator.slice(0,-1);
+ if(isIP(indicator)===4)return;
+ if(isIP(indicator)===6)throw badRequest('UNSUPPORTED_IP_VERSION','this adapter has IPv4 feeds only; no IPv6 clean verdict is issued');
+ if(/^[\d.]+$/.test(indicator)||/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(indicator))throw badRequest('INVALID_INDICATOR','IP must be canonical dotted-decimal IPv4');
+ if(!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(indicator))throw badRequest('UNSUPPORTED_INDICATOR_TYPE','only IPv4 addresses, DNS domains and HTTP(S) URLs are covered; CVE identifiers, hashes and other strings are not screened');
+}
+
 /** Match an indicator against the loaded feeds. Exported for tests. */
 export function matchIndicator(indicator: string, states: FeedState[]): { type: "ip" | "domain" | "url"; matches: IndicatorMatch[] } {
+  validateThreatIndicator(indicator);
   const matches: IndicatorMatch[] = [];
   const isUrl = /^https?:\/\//i.test(indicator);
-  const host = isUrl ? canonicalScreeningHost(indicator) : indicator.toLowerCase();
+  const host = isUrl ? canonicalScreeningHost(indicator) : indicator.toLowerCase().replace(/\.$/,'');
   const asIp = ipToInt(host);
   const type: "ip" | "domain" | "url" = isUrl ? "url" : asIp !== null ? "ip" : "domain";
   for (const s of states) {
@@ -240,7 +251,7 @@ export async function handleThreatIndicator(query: Record<string, string | undef
   if (!indicator) throw badRequest("MISSING_PARAM", "indicator is required: an IPv4 address, a domain, or a URL");
   if (indicator.length > 2048) throw badRequest("INVALID_INDICATOR", "indicator is over 2048 characters");
   if (/\s/.test(indicator)) throw badRequest("INVALID_INDICATOR", "indicator must be a single IPv4 address, domain or URL, no whitespace");
-  if (/^https?:\/\//i.test(indicator)) canonicalScreeningHost(indicator);
+  validateThreatIndicator(indicator);
   const states = await loadFeeds();
   const fetchedAt = new Date().toISOString();
   const { type, matches } = matchIndicator(indicator, states);
