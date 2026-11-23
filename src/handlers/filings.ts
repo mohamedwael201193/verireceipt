@@ -2434,10 +2434,13 @@ export async function handleFilings(
   const family = formLabel ? formFamily(formLabel) : [];
   const what = formLabel ? `Form ${formLabel} filing` : 'filing';
   const listed = filings.slice(0, MAX_LISTED_FILINGS);
+  const reason = filingReason(filings, entity, period.label);
   const fields: Record<string, unknown> = {
     entity,
     form_type: formLabel,
     filing_count: filings.length,
+    by_type: reason.by_type,
+    latest_filing: reason.latest,
     filings: listed.map(filingTitle),
     filings_detail: listed,
     urls: listed.map((f) => f.url),
@@ -2461,7 +2464,7 @@ export async function handleFilings(
     );
   }
   return envelope(INTENT, fields, receipt, {
-    answer: `Found ${filings.length} ${what}${filings.length === 1 ? '' : 's'} for ${entity} in ${period.label}${
+    answer: reason.sentence + ` Found ${filings.length} ${what}${filings.length === 1 ? '' : 's'} for ${entity} in ${period.label}${
       family.length > 1
         ? ` (counting ${family.map((f) => `${f} ${fields.form_counts ? (fields.form_counts as Record<string, number>)[f] : 0}`).join(' + ')}: EDGAR renamed this form in Release 24.4)`
         : ''
@@ -2499,4 +2502,12 @@ function assertPhraseFormUnambiguous(form: string, all: Filing[], inPeriod: Fili
       }; pass the EDGAR form as form_type`,
     );
   }
+}
+
+/** Presentation-only summary derived from the exact counted filing rows. */
+export function filingReason(filings: readonly Filing[], entity: string, window: string): {by_type: Record<string,number>;latest: Filing|null;sentence:string} {
+ const by_type:Record<string,number>={};for(const f of filings)by_type[f.form]=(by_type[f.form]??0)+1;
+ const latest=[...filings].sort((a,b)=>b.filing_date.localeCompare(a.filing_date)||b.accession.localeCompare(a.accession))[0]??null;
+ const counts=Object.entries(by_type).sort(([a],[b])=>a.localeCompare(b)).map(([f,n])=>`${f}: ${n}`).join(', ')||'none';
+ return{by_type,latest,sentence:`In ${window}, ${entity} has ${filings.length} matching SEC EDGAR filings (by type: ${counts}); ${latest?`latest is Form ${latest.form} filed ${latest.filing_date}`:'no latest matching filing'}.`};
 }
