@@ -69,6 +69,16 @@ export interface Filing {
   accession: string;
   filing_date: string;
   url: string;
+  /** EDGAR acceptance timestamp (acceptanceDateTime), when EDGAR supplies
+   *  it. The moment the filing was accepted onto EDGAR — distinct from the
+   *  filing date, and the answer to "when was it accepted". */
+  accepted?: string;
+  /** EDGAR primaryDocDescription: the filing's own one-line description of
+   *  what the primary document is (e.g. "FORM 8-K", "CURRENT REPORT"). */
+  description?: string;
+  /** EDGAR items column: the 8-K item numbers the filing reports under
+   *  (e.g. "2.02 Results of Operations"), when present. */
+  items?: string;
 }
 
 /** Official REGULATORY_FILING_MONITOR_GENERAL field `filings` is
@@ -285,6 +295,7 @@ export function parsePeriod(periodRaw: string): Period {
     const end = new Date(Date.UTC(year, number * 3, 0)).toISOString().slice(0, 10);
     return { start, end, label };
   }
+
 
   // "2023 to 2023", "2021 through 2023", "2023-01-01 to 2023-03-31".
   const toRange = /^(\d{4}(?:-\d{2}-\d{2})?)\s+(?:to|through|thru|until)\s+(\d{4}(?:-\d{2}-\d{2})?)$/i.exec(period);
@@ -1273,6 +1284,9 @@ interface EdgarSubmissions {
       filingDate?: string[];
       form?: string[];
       primaryDocument?: string[];
+      acceptanceDateTime?: string[];
+      primaryDocDescription?: string[];
+      items?: string[];
     };
     files?: unknown;
   };
@@ -1557,6 +1571,19 @@ export function buildFilingsFromSubmissions(payload: EdgarSubmissions): Filing[]
     form.length,
     primaryDocument.length,
   );
+  // Optional EDGAR columns: acceptanceDateTime, primaryDocDescription,
+  // items. They carry the accepted date and a one-line disclosure for
+  // filings_detail. Each is read only when it is an array aligned with
+  // accessionNumber; a missing or misaligned column, or a malformed
+  // element, simply leaves the field unset — it is never load-bearing for
+  // count, identity, or URL construction.
+  const optionalColumn = (key: string): unknown[] | undefined => {
+    const v = (recent as Record<string, unknown>)[key];
+    return Array.isArray(v) && v.length === accessionNumber.length ? (v as unknown[]) : undefined;
+  };
+  const acceptanceDateTime = optionalColumn('acceptanceDateTime');
+  const primaryDocDescription = optionalColumn('primaryDocDescription');
+  const itemsColumn = optionalColumn('items');
   const out: Filing[] = [];
   for (let i = 0; i < n; i++) {
     const accession = accessionNumber[i];
@@ -1612,11 +1639,19 @@ export function buildFilingsFromSubmissions(payload: EdgarSubmissions): Filing[]
           .map((seg) => encodeURIComponent(seg))
           .join('/')}`
       : `https://www.sec.gov/Archives/edgar/data/${cikNum}/${accNoDash}/${accession}-index.htm`;
+    const acceptedRaw = acceptanceDateTime?.[i];
+    const descRaw = primaryDocDescription?.[i];
+    const itemsRaw = itemsColumn?.[i];
     out.push({
       form: formStr,
       accession,
       filing_date: filingDateStr,
       url,
+      ...(typeof acceptedRaw === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(acceptedRaw)
+        ? { accepted: acceptedRaw }
+        : {}),
+      ...(typeof descRaw === 'string' && descRaw.trim() !== '' ? { description: descRaw } : {}),
+      ...(typeof itemsRaw === 'string' && itemsRaw.trim() !== '' ? { items: itemsRaw } : {}),
     });
   }
   return out;
