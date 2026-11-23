@@ -61,6 +61,24 @@
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+type FxFailure = { reason: "timeout" | "http_status" | "transport_error"; status?: number };
+const fetchFailures = new WeakMap<object, FxFailure>();
+const FX_LOG_SOURCES = new Set(["frankfurter", "open-er-api", "fawaz", "vatcomply", "floatrates", "exchangerate-api"]);
+function warnFxSource(source: string, from: string, to: string, reason: string, status?: number): void {
+  console.warn(JSON.stringify({ event: "fx_source_failure", source: FX_LOG_SOURCES.has(source) ? source : "unknown",
+    from: /^[A-Z]{3}$/.test(from) ? from : "-", to: /^[A-Z]{3}$/.test(to) ? to : "-", reason, ...(status === undefined ? {} : { status }) }));
+}
+async function observeFxSource(source: string, from: string, to: string, read: () => Promise<SourceQuote | null>): Promise<SourceQuote | null> {
+  try {
+    const quote = await read();
+    if (quote === null) warnFxSource(source, from, to, "no_usable_quote");
+    return quote;
+  } catch (error) {
+    const detail = error && typeof error === "object" ? fetchFailures.get(error) : undefined;
+    warnFxSource(source, from, to, detail?.reason ?? (error instanceof SyntaxError ? "parse_error" : "source_error"), detail?.status);
+    throw error; // Preserve the original rejection and selection behavior. No URL/body/error text logged.
+  }
+}
 /** Local fetch with a hard per-call timeout. The URLs are built from
  * validated 3-letter ISO codes on three fixed public hosts, so there is
  * no SSRF surface (the grid ingester's fetchText is allowlist-bound to
@@ -70,8 +88,17 @@ async function fetchText(url: string, timeoutMs: number): Promise<string> {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+    if (!res.ok) {
+      const error = new Error(`HTTP ${res.status} from ${url}`);
+      fetchFailures.set(error, { reason: "http_status", status: res.status });
+      throw error;
+    }
     return await res.text();
+  } catch (error) {
+    if (error && typeof error === "object" && !fetchFailures.has(error)) {
+      fetchFailures.set(error, { reason: controller.signal.aborted ? "timeout" : "transport_error" });
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -227,11 +254,16 @@ export async function quoteExchangeRateApi(from: string, to: string, key: string
   let rawBody: string;
   try {
     rawBody = await fetchText(url, SOURCE_TIMEOUT_MS);
-  } catch {
+  } catch (original) {
     // fetchText errors embed the full URL — including the key path
     // segment. The leg's errors must be key-free in every
     // materialization, so the original error is discarded here.
-    throw new Error("exchangerate-api leg fetch failed");
+    const safe = new Error("exchangerate-api leg fetch failed");
+    if (original && typeof original === "object") {
+      const detail = fetchFailures.get(original);
+      if (detail) fetchFailures.set(safe, detail);
+    }
+    throw safe;
   }
   const parsed = JSON.parse(rawBody) as {
     result?: unknown;
@@ -359,7 +391,7 @@ export async function handleFx(
     legs.push({ name: "exchangerate-api", quote: (f, t) => quoteExchangeRateApi(f, t, exchangeKey) });
   }
   const settled = await settleWithStragglerGrace(
-    legs.map((s) => s.quote(from, to)),
+    legs.map((s) => observeFxSource(s.name, from, to, () => s.quote(from, to))),
     STRAGGLER_GRACE_MS,
     SOURCE_TIMEOUT_MS + 500,
   );
@@ -368,6 +400,7 @@ export async function handleFx(
   const erroredSources: string[] = [];
   const uncoveredSources: string[] = [];
   settled.forEach((outcome, i) => {
+    if (outcome === undefined) warnFxSource(legs[i].name, from, to, "pending_at_selection");
     if (outcome?.status === "fulfilled" && outcome.value !== null) {
       quotes.push(outcome.value);
     } else {
@@ -387,7 +420,7 @@ export async function handleFx(
   if (quotes.length === 0 && uncoveredSources.length > 0 && exchangeKey && !egpPair) {
     fallbackFired = true;
     try {
-      const q = await quoteExchangeRateApi(from, to, exchangeKey);
+      const q = await observeFxSource("exchangerate-api", from, to, () => quoteExchangeRateApi(from, to, exchangeKey));
       if (q !== null) {
         quotes.push(q);
       } else {
@@ -723,7 +756,7 @@ export async function handleFxNow(
 
   const legs = [...SOURCES];
   const settled = await settleWithStragglerGrace(
-    legs.map((s) => s.quote("USD", currency)),
+    legs.map((s) => observeFxSource(s.name, "USD", currency, () => s.quote("USD", currency))),
     STRAGGLER_GRACE_MS,
     SOURCE_TIMEOUT_MS + 500,
   );
@@ -732,6 +765,7 @@ export async function handleFxNow(
   const erroredSources: string[] = [];
   const uncoveredSources: string[] = [];
   settled.forEach((outcome, i) => {
+    if (outcome === undefined) warnFxSource(legs[i].name, "USD", currency, "pending_at_selection");
     if (outcome?.status === "fulfilled" && outcome.value !== null) {
       quotes.push(outcome.value);
     } else {
