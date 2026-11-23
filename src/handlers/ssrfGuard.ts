@@ -100,7 +100,7 @@ export async function guardPublicHttpUrl(raw: string | undefined, param: string)
 export async function measureGet(target: GuardedTarget, timeoutMs: number, ua: string): Promise<{ status: number; latency_ms: number }> {
   const started = Date.now();
   const u = new URL(target.url);
-  const selected = target.addresses[0];
+  const selected = [...target.addresses].sort((a,b) => isIP(a) - isIP(b))[0];
   if (!selected || !isIP(selected)) throw new Error("missing validated address");
   // Defence in depth for callers constructing a target outside the guard.
   publicProbeIp(selected);
@@ -110,24 +110,36 @@ export async function measureGet(target: GuardedTarget, timeoutMs: number, ua: s
       if (done) return; done = true; clearTimeout(timer);
       if (error) reject(error); else resolve(result!);
     };
-    const request = (u.protocol === "https:" ? httpsRequest : httpRequest)(u, {
-      method: "GET", agent: false, headers: { "User-Agent": ua },
+    let request: ReturnType<typeof httpRequest> | undefined;
+    const timer = setTimeout(() => {
+      const error = new Error("probe deadline exceeded"); error.name = "AbortError";
+      finish(error); request?.destroy(error);
+    }, timeoutMs);
+    try {
+    request = (u.protocol === "https:" ? httpsRequest : httpRequest)(u, {
+      method: "GET", agent: false, autoSelectFamily: false, family: isIP(selected), headers: { "User-Agent": ua },
       lookup: ((_host: string, options: any, callback: any) => {
         const record = { address: selected, family: isIP(selected) };
-        if (options?.all) callback(null, [record]); else callback(null, record.address, record.family);
+        // DNS lookup callbacks must be asynchronous, as the native resolver is.
+        // A synchronous unreachable-IPv6 callback can throw during TLS setup
+        // before request() returns and leave an unowned socket error.
+        queueMicrotask(() => {
+          if (options?.all) callback(null, [record]); else callback(null, record.address, record.family);
+        });
       }) as any,
     }, response => {
       const status = response.statusCode;
       // We measure response headers only. Do not download an unbounded body.
-      response.destroy(); request.destroy();
+      response.destroy(); request?.destroy();
       if (!status) finish(new Error("missing HTTP status"));
       else finish(undefined, { status, latency_ms: Date.now() - started });
     });
-    const timer = setTimeout(() => {
-      const error = new Error("probe deadline exceeded"); error.name = "AbortError";
-      finish(error); request.destroy(error);
-    }, timeoutMs);
     request.on("error", error => finish(error));
+    request.on("socket", socket => socket.on("error", error => finish(error)));
     request.end();
+    } catch (error) {
+      finish(error instanceof Error ? error : new Error("probe setup failed"));
+      request?.destroy();
+    }
   });
 }

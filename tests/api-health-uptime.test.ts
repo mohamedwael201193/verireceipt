@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
+import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 vi.mock("node:https", async importOriginal => ({ ...await importOriginal<typeof import("node:https")>(), request: vi.fn() }));
 vi.mock("node:http", async importOriginal => ({ ...await importOriginal<typeof import("node:http")>(), request: vi.fn() }));
@@ -136,15 +137,24 @@ describe("SSRF follow-ups (reviewer)", () => {
     expect(call[0].hostname).toBe("example.com");
     expect(call[1].agent).toBe(false);
     const callback=vi.fn();call[1].lookup("example.com",{all:true},callback);
+    await Promise.resolve();
     expect(callback).toHaveBeenCalledWith(null,[{address:"93.184.216.34",family:4}]);
     // A second lookup can never substitute a private answer after validation.
     const again=vi.fn();call[1].lookup("example.com",{},again);
+    await Promise.resolve();
     expect(again).toHaveBeenCalledWith(null,"93.184.216.34",4);
   });
   it("bounds a hung socket with an absolute deadline",async()=>{
     vi.mocked(httpsRequest).mockImplementation((() => {const req=new EventEmitter() as any;req.end=vi.fn();req.destroy=vi.fn();return req;}) as any);
     const {measureGet}=await import("../src/handlers/ssrfGuard");
     await expect(measureGet({url:"https://example.com",hostname:"example.com",port:443,addresses:["93.184.216.34"]},10,"test")).rejects.toMatchObject({name:"AbortError"});
+  });
+  it("uses the direct HTTP branch and prefers IPv4 when both are validated",async()=>{
+    stubFetch(200);vi.mocked(httpRequest).mockImplementation(vi.mocked(httpsRequest).getMockImplementation()! as any);
+    const {measureGet}=await import("../src/handlers/ssrfGuard");
+    const r=await measureGet({url:"http://example.com",hostname:"example.com",port:80,addresses:["2606:4700:4700::1111","93.184.216.34"]},1000,"test");
+    expect(r.status).toBe(200);const call=vi.mocked(httpRequest).mock.calls.at(-1)! as any;
+    expect(call[1].family).toBe(4);expect(call[1].autoSelectFamily).toBe(false);
   });
   it("literal IPv6 uses the same global validation without an extra DNS resolution",async()=>{
     const target=await guardPublicHttpUrl("https://[2606:4700:4700::1111]", "url");
