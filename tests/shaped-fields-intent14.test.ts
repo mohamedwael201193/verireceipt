@@ -9,8 +9,8 @@ const contracts = JSON.parse(readFileSync(resolve(process.cwd(), "tests/fixtures
 describe("fourteen-intent consumer format mirror", () => {
   it("pins every added mapped field to its captured official format type", () => {
     expect(Object.keys(contracts)).toHaveLength(8);
-    // 45 mirrored intents: the registered 14 plus the 31 declared pending updateMiner.
-    expect(Object.keys(OUTPUT_MAPPING)).toHaveLength(45);
+    // 49 mirrored intents: the registered 45 plus the 4 declared pending updateMiner.
+    expect(Object.keys(OUTPUT_MAPPING)).toHaveLength(49);
     expect(Object.keys(FIELD_FORMAT).sort()).toEqual(Object.keys(OUTPUT_MAPPING).sort());
     for (const [intent, contract] of Object.entries(contracts)) {
       const source = Object.fromEntries(contract.response.fields.map((f) => [f.name, f]));

@@ -140,6 +140,11 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, strin
     inputs: ["reference", "chains"],
     outputs: { address: null, status: null, chains: null, consistent: null, summary: null },
   },
+  CRYPTO_PRICE_USD: {
+    endpoint: "/v1/crypto-price",
+    inputs: ["symbol"],
+    outputs: { price_usd: "US dollars" },
+  },
   CVE_LOOKUP_CVSS: {
     endpoint: "/v1/cve",
     inputs: ["cve_id"],
@@ -185,6 +190,11 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, strin
     inputs: ["indicator"],
     outputs: { malicious: null },
   },
+  MINING_HASHPRICE_VERIFY_GENERAL: {
+    endpoint: "/v1/mining-hashprice",
+    inputs: ["block_height"],
+    outputs: { hashprice_sats_per_ph_day: "sats per PH/s per day", block_height: "block height", hashrate_eh_s: "EH/s", hashprice_usd_per_ph_day: "USD per PH/s per day" },
+  },
   NEWS_HEADLINES_GENERAL: {
     endpoint: "/v1/news-headlines",
     inputs: ["topic"],
@@ -219,6 +229,11 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, strin
     endpoint: "/v1/sports-score",
     inputs: ["game"],
     outputs: { home_team: null, away_team: null, home_score: "points", away_score: "points", status: null, date: null },
+  },
+  STORM_ALERT_GENERAL: {
+    endpoint: "/v1/storm-alert",
+    inputs: ["location", "window_hours"],
+    outputs: { location: null, risk_score: "fraction (0-1)", risk_level: null, peak_gust_kmh: "km/h", precipitation_mm: "mm", window: null },
   },
   STOCK_PRICE_US_EQUITY: {
     endpoint: "/v1/stock-price",
@@ -265,6 +280,11 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, strin
     inputs: ["cve_id"],
     outputs: { cvss_base_score: "CVSS score (0-10)" },
   },
+  WEATHER_CHECK_TEMPERATURE: {
+    endpoint: "/v1/weather-check",
+    inputs: ["location"],
+    outputs: { temperature_c: "degrees Celsius" },
+  },
   WEATHER_FORECAST_GENERAL: {
     endpoint: "/v1/weather-forecast",
     inputs: ["location", "window_hours"],
@@ -273,7 +293,7 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, strin
 };
 
 describe("A8 miner.yaml vs the official intent schemas", () => {
-  it("declares exactly the forty-five reviewed intents, each on its own endpoint", () => {
+  it("declares exactly the forty-nine reviewed intents, each on its own endpoint", () => {
     const si = block("  supported_intents:").map((l) => l.trim().replace(/^- /, "")).filter(Boolean);
     expect(si).toEqual(Object.keys(OFFICIAL));
     for (const [intent, o] of Object.entries(OFFICIAL)) {

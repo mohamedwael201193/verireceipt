@@ -260,6 +260,26 @@ export const OUTPUT_MAPPING: Record<string, Record<string, OutputMapping>> = {
     precipitation_probability_pct: { path: "precipitation_probability_pct", unit: "percent" },
     condition: { path: "condition" },
   },
+  CRYPTO_PRICE_USD: {
+    price_usd: { path: "price_usd", unit: "US dollars" },
+  },
+  MINING_HASHPRICE_VERIFY_GENERAL: {
+    hashprice_sats_per_ph_day: { path: "hashprice_sats_per_ph_day", unit: "sats per PH/s per day" },
+    block_height: { path: "block_height", unit: "block height" },
+    hashrate_eh_s: { path: "hashrate_eh_s", unit: "EH/s" },
+    hashprice_usd_per_ph_day: { path: "hashprice_usd_per_ph_day", unit: "USD per PH/s per day" },
+  },
+  STORM_ALERT_GENERAL: {
+    location: { path: "location" },
+    risk_score: { path: "risk_score", unit: "fraction (0-1)" },
+    risk_level: { path: "risk_level" },
+    peak_gust_kmh: { path: "peak_gust_kmh", unit: "km/h" },
+    precipitation_mm: { path: "precipitation_mm", unit: "mm" },
+    window: { path: "window" },
+  },
+  WEATHER_CHECK_TEMPERATURE: {
+    temperature_c: { path: "temperature_c", unit: "degrees Celsius" },
+  },
 };
 
 /** Official intent response field types (GET /engine/v1/intents/{intent} → response.fields), pinned here so the fill does not depend on a live fetch. `number` fields are never filled from raw, even if a future mapping omits `unit`. */
@@ -503,6 +523,26 @@ export const FIELD_FORMAT: Record<string, Record<string, FieldFormat>> = {
     temp_min_c: { type: "number" },
     precipitation_probability_pct: { type: "number" },
     condition: { type: "string" },
+  },
+  CRYPTO_PRICE_USD: {
+    price_usd: { type: "number" },
+  },
+  MINING_HASHPRICE_VERIFY_GENERAL: {
+    hashprice_sats_per_ph_day: { type: "number" },
+    block_height: { type: "number" },
+    hashrate_eh_s: { type: "number" },
+    hashprice_usd_per_ph_day: { type: "number" },
+  },
+  STORM_ALERT_GENERAL: {
+    location: { type: "string" },
+    risk_score: { type: "number" },
+    risk_level: { type: "enum", allowed: ["LOW", "MODERATE", "HIGH", "SEVERE"] },
+    peak_gust_kmh: { type: "number" },
+    precipitation_mm: { type: "number" },
+    window: { type: "string" },
+  },
+  WEATHER_CHECK_TEMPERATURE: {
+    temperature_c: { type: "number" },
   },
 };
 

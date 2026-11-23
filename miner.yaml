@@ -79,6 +79,7 @@ semantics:
     - CODE_PATCH_VERIFY_GENERAL
     - CORPORATE_REGISTRY_LOOKUP_GENERAL
     - CROSS_CHAIN_STATE_VERIFY_GENERAL
+    - CRYPTO_PRICE_USD
     - CVE_LOOKUP_CVSS
     - EVENT_OUTCOME_RESOLUTION_GENERAL
     - FINANCIAL_DATA_GENERAL
@@ -88,6 +89,7 @@ semantics:
     - IP_GEOLOCATION_GENERAL
     - LIQUIDITY_DEPTH_VERIFY_GENERAL
     - MALWARE_DETECTION_HASH
+    - MINING_HASHPRICE_VERIFY_GENERAL
     - NEWS_HEADLINES_GENERAL
     - NEWS_SEARCH_GENERAL
     - PAYMENT_METHOD_VERIFY_GENERAL
@@ -95,6 +97,7 @@ semantics:
     - SANCTIONS_SCREENING_MATCH_GENERAL
     - SLA_COMPLIANCE_GENERAL
     - SPORTS_SCORE_GENERAL
+    - STORM_ALERT_GENERAL
     - STOCK_PRICE_US_EQUITY
     - THREAT_INTELLIGENCE_INDICATOR
     - TOKEN_HOLDER_COUNT_GENERAL
@@ -104,6 +107,7 @@ semantics:
     - URL_SCAN_VERDICT
     - VENDOR_VERIFY_GENERAL
     - VULNERABILITY_TRIAGE_GENERAL
+    - WEATHER_CHECK_TEMPERATURE
     - WEATHER_FORECAST_GENERAL
   signal_mapping:
     confidence_field: confidence
@@ -1008,6 +1012,82 @@ endpoints:
           - WEATHER_FORECAST_GENERAL
           description: Forecast window
 
+  - path: /v1/crypto-price
+    external_path: /v1/crypto-price
+    method: GET
+    description: Current USD spot price for one crypto symbol from the Coinbase public spot API,
+      with a SHA-256 receipt. One named exchange's last spot quote, not an index or VWAP; symbols
+      the source does not list are refused, never guessed.
+    intents:
+    - CRYPTO_PRICE_USD
+    params:
+      query:
+        required:
+        - name: symbol
+          type: string
+          intents:
+          - CRYPTO_PRICE_USD
+          description: Asset symbol, e.g. BTC
+
+  - path: /v1/mining-hashprice
+    external_path: /v1/mining-hashprice
+    method: GET
+    description: Bitcoin hashprice at the current tip computed from measured inputs (mempool.space
+      1-week hashrate and per-block fee series, deterministic subsidy, Coinbase spot), with a SHA-256
+      receipt. A spot value from current measured series, never a forecast; a block_height other
+      than the current tip is an honest refusal, not an interpolated answer.
+    intents:
+    - MINING_HASHPRICE_VERIFY_GENERAL
+    params:
+      query:
+        optional:
+        - name: block_height
+          type: integer
+          intents:
+          - MINING_HASHPRICE_VERIFY_GENERAL
+          description: Bitcoin block height; only the current tip is served
+
+  - path: /v1/storm-alert
+    external_path: /v1/storm-alert
+    method: GET
+    description: Storm risk for a US point over a forward window from issued NWS alert products only,
+      with a SHA-256 receipt. The score is the worst severity among active issued products expiring
+      inside the window; no forecast model output is scored, and peak gust and precipitation numerics
+      are not carried by issued products. US coverage only.
+    intents:
+    - STORM_ALERT_GENERAL
+    params:
+      query:
+        required:
+        - name: location
+          type: string
+          intents:
+          - STORM_ALERT_GENERAL
+          description: Point as latitude,longitude (US coverage)
+        optional:
+        - name: window_hours
+          type: integer
+          intents:
+          - STORM_ALERT_GENERAL
+          description: Assessment window in hours, 1-240, default 24
+
+  - path: /v1/weather-check
+    external_path: /v1/weather-check
+    method: GET
+    description: Measured air temperature for a place from the nearest NOAA aviationweather.gov METAR
+      station, at most 90 minutes old, with a SHA-256 receipt. A measured station observation, not a
+      forecast, reanalysis or city-wide value; the station binding is explicit in the evidence.
+    intents:
+    - WEATHER_CHECK_TEMPERATURE
+    params:
+      query:
+        required:
+        - name: location
+          type: string
+          intents:
+          - WEATHER_CHECK_TEMPERATURE
+          description: City or place name, or latitude,longitude
+
 intent_mapping:
   ONCHAIN_TX_LOOKUP_GENERAL:
     endpoint: /v1/tx
@@ -1686,3 +1766,71 @@ intent_mapping:
         unit: "percent"
       condition:
         path: condition
+
+  CRYPTO_PRICE_USD:
+    endpoint: /v1/crypto-price
+    input:
+      symbol:
+        from: symbol
+        how: "The asset symbol as asked (BTC, ETH, SOL), uppercase, without a currency pair suffix."
+    output:
+      price_usd:
+        path: price_usd
+        unit: "US dollars"
+
+  MINING_HASHPRICE_VERIFY_GENERAL:
+    endpoint: /v1/mining-hashprice
+    input:
+      block_height:
+        from: block_height
+        how: "The requested Bitcoin block height. Leave empty when no height is named; only the current tip is served."
+    output:
+      hashprice_sats_per_ph_day:
+        path: hashprice_sats_per_ph_day
+        unit: "sats per PH/s per day"
+      block_height:
+        path: block_height
+        unit: "block height"
+      hashrate_eh_s:
+        path: hashrate_eh_s
+        unit: "EH/s"
+      hashprice_usd_per_ph_day:
+        path: hashprice_usd_per_ph_day
+        unit: "USD per PH/s per day"
+
+  STORM_ALERT_GENERAL:
+    endpoint: /v1/storm-alert
+    input:
+      location:
+        from: location
+        how: "The place as latitude,longitude. US coverage only (NWS alert products)."
+      window_hours:
+        from: window_hours
+        how: "The assessment window in hours when named (next 24 hours, this weekend); otherwise leave empty for the 24-hour default."
+    output:
+      location:
+        path: location
+      risk_score:
+        path: risk_score
+        unit: "fraction (0-1)"
+      risk_level:
+        path: risk_level
+      peak_gust_kmh:
+        path: peak_gust_kmh
+        unit: "km/h"
+      precipitation_mm:
+        path: precipitation_mm
+        unit: "mm"
+      window:
+        path: window
+
+  WEATHER_CHECK_TEMPERATURE:
+    endpoint: /v1/weather-check
+    input:
+      location:
+        from: location
+        how: "The city or place name as asked, or latitude,longitude when given as coordinates."
+    output:
+      temperature_c:
+        path: temperature_c
+        unit: "degrees Celsius"

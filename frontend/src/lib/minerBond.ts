@@ -21,7 +21,8 @@ import { SEPOLIA_REGISTRATION_ID } from "./minerRegistration";
 
 export const BOND_REGISTRATION_ID = SEPOLIA_REGISTRATION_ID;
 /** On-chain registered intent count for registration 6177 (45 today).
- * Equals DECLARED_INTENT_COUNT: the 45-intent updateMiner landed 2026-11-23. */
+ * Equals DECLARED_INTENT_COUNT again once the pending 49-intent updateMiner
+ * lands; the working miner.yaml already declares those 49. */
 export const BOND_INTENT_COUNT = 45;
 /** 6-decimal Test USDC base units: on-chain minerBond(6177) == quoteMinerBond(45). */
 export const MINER_BOND_BASE_UNITS = 4_320_000;

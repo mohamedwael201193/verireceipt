@@ -14,9 +14,10 @@ describe("current frontend contract metadata", () => {
   const section = raw.toString().split("  supported_intents:\n")[1].split(/\n[^ ]/)[0];
   const listed = [...section.matchAll(/^    - ([A-Z0-9_]+)$/gm)].map(m => m[1]);
   expect(listed).toEqual([...DECLARED_INTENTS]);
-  expect(DECLARED_INTENT_COUNT).toBe(45);
-  // The 45-intent updateMiner landed 2026-11-23: the working hash equals
-  // the registered SEPOLIA_YAML_HASH (registration 6177).
+  expect(DECLARED_INTENT_COUNT).toBe(49);
+  // The working miner.yaml is ahead of the chain again: its hash is the
+  // pending 49-intent update hash; SEPOLIA_YAML_HASH stays the registered
+  // hash (45 intents, registration 6177) until that tx lands.
   const workingHash = "0x" + createHash("sha256").update(raw).digest("hex");
   expect(workingHash).toBe(MINER_YAML_SHA256);
   expect(SEPOLIA_YAML_HASH).toBe("0xabaee05348e6d4374dd7fbf0c9da6a14794dfc372bffdb37b8958d1107b44d7a");
