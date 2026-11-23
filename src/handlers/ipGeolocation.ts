@@ -54,7 +54,9 @@ export function validatePublicIp(ip: string): void {
     const [a, b] = oct;
     if (a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
         (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224 ||
-        (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19))) {
+        (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19)) ||
+        // RFC 5737 documentation ranges (TEST-NET-1/2/3): no public geolocation.
+        (a === 192 && b === 0 && oct[2] === 2) || (a === 198 && b === 51 && oct[2] === 100) || (a === 203 && b === 0 && oct[2] === 113)) {
       throw unprocessable("PRIVATE_IP", `${ip} is a private, reserved or special-use address; it has no public geolocation`);
     }
     return;
@@ -152,7 +154,7 @@ export async function handleIpGeolocation(query: Record<string, string | undefin
       cityNote + (degraded ? ` Degraded: ${degraded}.` : "") +
       " IP geolocation is approximate — it names where the address block is registered or routed, not a device's physical location.",
     verdict: "verified",
-    confidence: who && api ? 0.9 : 0.9,
+    confidence: 0.9,
     source: `${who ? whoUrl : "(ipwho.is failed)"} + ${api ? apiUrl : "(ip-api.com failed)"}; coordinates from ${serving.source}, country ${who && api ? "cross-checked across both" : "single-source"}; coordinates never averaged; fetched ${fetchedAt}`,
   });
 }
