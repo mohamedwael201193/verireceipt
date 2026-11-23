@@ -106,3 +106,23 @@ describe("STORM_ALERT_GENERAL", () => {
     await app.close();
   });
 });
+
+describe("storm-alert horizon clause (reviewer follow-up)", () => {
+  it("a Severe product expiring ~11h out: 1h window excludes with score 0, 24h window counts with 0.75", () => {
+    const now = "2026-11-23T01:00:00.000Z";
+    const severe = {
+      event: "Severe Thunderstorm Warning", severity: "Severe", area: "Test County",
+      sent: "2026-11-23T00:30:00.000Z", effective: "2026-11-23T00:30:00.000Z",
+      onset: "2026-11-23T00:30:00.000Z", expires: "2026-11-23T12:00:00.000Z", // 11h out
+      score: 0.75,
+    };
+    const narrow = assessAlerts([severe], now, 1);
+    expect(narrow.score).toBe(0);
+    expect(narrow.counted).toHaveLength(0);
+    expect(narrow.excluded).toHaveLength(1);
+    const wide = assessAlerts([severe], now, 24);
+    expect(wide.score).toBe(0.75);
+    expect(wide.counted).toHaveLength(1);
+    expect(wide.excluded).toHaveLength(0);
+  });
+});
