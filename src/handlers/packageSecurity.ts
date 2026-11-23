@@ -17,32 +17,36 @@ export function parsePackageTarget(target: string | undefined): { name: string; 
 }
 type Obj = Record<string, any>;
 const SEVERITY: Record<string, number> = { CRITICAL: 4, HIGH: 3, MODERATE: 2, MEDIUM: 2, LOW: 1 };
-function affectedRelease(affected: Obj, version: string): boolean {
+function affectedRelease(affected: Obj, version: string): boolean | null {
   if (Array.isArray(affected.versions) && affected.versions.includes(version)) return true;
   const value = version.split('.').map(BigInt);
   const compare = (bound: unknown): number => {
     if (bound === '0') return 1;
     if (typeof bound !== 'string') throw new Error('invalid version bound');
-    const m = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(bound);
+    const m = /^(0|[1-9]\d*)(?:\.(0|[1-9]\d*))?(?:\.(0|[1-9]\d*))?(-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(bound);
     if (!m) throw new Error('unsupported version bound');
-    for (let i=0;i<3;i++) { const b=BigInt(m[i+1]); if (value[i] !== b) return value[i] > b ? 1 : -1; }
-    return m[4] ? 1 : 0; // stable release follows any prerelease at the same triple
+    for (let i=0;i<3;i++) { const b=BigInt(m[i+1] ?? '0'); if (value[i] !== b) return value[i] > b ? 1 : -1; }
+    return m[4] ? 1 : 0;
   };
+  let unsupported = false;
   for (const range of affected.ranges ?? []) {
-    if (range.type !== 'SEMVER' || !Array.isArray(range.events)) continue;
-    let active = false;
-    for (const event of range.events) {
-      if (event.introduced !== undefined) active = compare(event.introduced) >= 0;
-      else if (event.fixed !== undefined && compare(event.fixed) >= 0) active = false;
-      else if (event.last_affected !== undefined && compare(event.last_affected) > 0) active = false;
-      else if (event.limit !== undefined && compare(event.limit) >= 0) active = false;
-      else if (!['fixed','last_affected','limit'].some(k => event[k] !== undefined)) throw new Error('unsupported range event');
-    }
-    if (active) return true;
+    if (range.type !== 'SEMVER' || !Array.isArray(range.events)) { unsupported = true; continue; }
+    try {
+      let introduced: unknown = undefined;
+      for (const event of range.events) {
+        if (event.introduced !== undefined) { introduced = event.introduced; continue; }
+        const upper = event.fixed ?? event.last_affected ?? event.limit;
+        if (upper === undefined || introduced === undefined) throw new Error('unsupported range event');
+        const atUpper = compare(upper);
+        if (compare(introduced) >= 0 && (event.last_affected !== undefined ? atUpper <= 0 : atUpper < 0)) return true;
+        introduced = undefined;
+      }
+      if (introduced !== undefined && compare(introduced) >= 0) return true;
+    } catch { unsupported = true; }
   }
-  return false;
+  return unsupported ? null : false;
 }
-export function parsePackageAdvisories(raw: string, name: string, version?: string): { id: string; severity: string; aliases: string[] }[] {
+export function parsePackageAdvisories(raw: string, name: string, version?: string): { id: string; severity: string; aliases: string[]; versionEvidence: string }[] {
   const d = JSON.parse(raw) as Obj;
   if (!d || typeof d !== 'object' || Array.isArray(d) || d.next_page_token)
     throw new Error('incomplete OSV response');
@@ -51,20 +55,26 @@ export function parsePackageAdvisories(raw: string, name: string, version?: stri
     throw new Error('malformed OSV response');
   }
   if (!Array.isArray(d.vulns)) throw new Error('malformed advisories');
-  const records = new Map<string, { id: string; severity: string; aliases: string[] }>();
+  const records = new Map<string, { id: string; severity: string; aliases: string[]; versionEvidence: string }>();
   for (const v of d.vulns) {
     if (!v || typeof v !== 'object' || typeof v.id !== 'string' || !/^(GHSA-[a-z0-9-]+|CVE-\d{4}-\d+|OSV-[A-Za-z0-9-]+)$/.test(v.id) ||
         !Array.isArray(v.affected) || !v.affected.some((a: Obj) => a?.package?.ecosystem === 'npm' && a.package.name === name))
       throw new Error('advisory package identity mismatch');
     if (v.withdrawn) continue;
-    if (version && !v.affected.some((a: Obj) => a?.package?.ecosystem === 'npm' && a.package.name === name && affectedRelease(a, version)))
-      throw new Error('advisory does not explicitly cover requested release');
+    let versionEvidence = 'OSV query match';
+    if (version) {
+      const coverage = v.affected.filter((a: Obj) => a?.package?.ecosystem === 'npm' && a.package.name === name)
+        .map((a: Obj) => affectedRelease(a, version));
+      if (coverage.includes(true)) versionEvidence = 'locally confirmed version range';
+      else if (coverage.includes(null)) versionEvidence = 'OSV matched this version; local range interpretation unavailable';
+      else throw new Error('advisory does not explicitly cover requested release');
+    }
     const published = Date.parse(v.published), modified = Date.parse(v.modified);
     if (!Number.isFinite(published) || !Number.isFinite(modified) || modified < published || published > Date.now() + 300_000 || modified > Date.now() + 300_000)
       throw new Error('invalid advisory publication time');
     const severity = typeof v.database_specific?.severity === 'string' ? v.database_specific.severity.toUpperCase() : 'UNSPECIFIED';
     const aliases = Array.isArray(v.aliases) ? v.aliases.filter((x: unknown): x is string => typeof x === 'string' && /^(CVE-\d{4}-\d+|GHSA-[a-z0-9-]+)$/.test(x)) : [];
-    records.set(v.id, { id: v.id, severity, aliases });
+    records.set(v.id, { id: v.id, severity, aliases, versionEvidence });
   }
   return [...records.values()].sort((a,b) => (SEVERITY[b.severity] ?? 0) - (SEVERITY[a.severity] ?? 0) || a.id.localeCompare(b.id));
 }
@@ -94,7 +104,9 @@ export async function handlePackageSecurity(q: Record<string, string | undefined
   const advisories = parsePackageAdvisories(observation.raw, name, version);
   if (!advisories.length) throw unprocessable('NO_ADVISORY_COVERAGE', 'OSV returned no active matching advisories; absence is not proof of security and no Secure verdict is issued');
   const target = `${name}@${version}`;
-  const summary = `OSV reports ${advisories.length} active known advisory record(s) for npm ${target}. This is a package-version advisory lookup, not a source-code audit, exploitability assessment or complete security review.`;
+  const fallbackCount = advisories.filter(a => a.versionEvidence.includes('unavailable')).length;
+  const fallbackDisclosure = fallbackCount ? ` For ${fallbackCount} record(s), OSV matched this version but local range interpretation is unavailable.` : '';
+  const summary = `OSV reports ${advisories.length} active known advisory record(s) for npm ${target}. This is a package-version advisory lookup, not a source-code audit, exploitability assessment or complete security review.${fallbackDisclosure}`;
   const evidence = JSON.stringify({ target, request: { package: { name, ecosystem: 'npm' }, version }, source_url: URL,
     fetched_at: observation.fetchedAt, advisories, source_raw_body: observation.raw,
     scope: 'OSV query membership for exact npm package/version; count is unique active OSV record IDs, not alias count or distinct root-cause count; no transitive dependency scan' });
@@ -103,7 +115,7 @@ export async function handlePackageSecurity(q: Record<string, string | undefined
   try { await saveReceipt(receipt, evidence); }
   catch { throw upstreamUnavailable('RECEIPT_PERSIST_FAILED', 'receipt evidence could not be stored; answer unavailable'); }
   return envelope('SECURITY_REVIEW_GENERAL', { target, vulnerability_count: advisories.length,
-    issues: advisories.map(a => `${a.id}${a.aliases.length ? ` (${a.aliases.join(', ')})` : ''}; severity ${a.severity}`), summary,
+    issues: advisories.map(a => `${a.id}${a.aliases.length ? ` (${a.aliases.join(', ')})` : ''}; severity ${a.severity}; ${a.versionEvidence}`), summary,
     observed_at: observation.fetchedAt }, receipt, { answer: `${summary} Needs changes: review the listed advisories and applicable fixes.`,
       verdict: 'Needs changes', confidence: 0.85, source: `${URL}; exact npm package/version; retrieved ${observation.fetchedAt}; cached at most 5 minutes; advisory count is not a safety guarantee` });
 }

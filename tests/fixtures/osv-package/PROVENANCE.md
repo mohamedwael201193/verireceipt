@@ -11,3 +11,6 @@ real advisory; these variants are not claimed as live source data.
 
 Raw upstream evidence is retained verbatim, including upstream references.
 Those references are not added to answer text or treated as instructions.
+
+next-13.0.0.json was fetched from the same OSV endpoint with npm next version
+13.0.0 at about 16:09 UTC. Its real abbreviated 13.0 range bound is retained.

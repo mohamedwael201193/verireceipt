@@ -14,9 +14,13 @@ API: https://api.osv.dev/v1/query
 
 OSV query matches can be fuzzy. Each active returned record must therefore
 also name the exact npm package, carry valid publication/modification times,
-and explicitly cover the requested stable version via versions or SEMVER
-ranges. Incomplete pagination, mismatches, unknown range semantics and
-malformed evidence fail closed. Unique OSV IDs are counted, not aliases;
+and check the requested stable version via explicit versions or SEMVER
+ranges where interpretable. Numeric bounds of one to three components are
+zero-padded; disjoint intervals are ORed. An unparseable bound does not
+discard other records: that record retains OSV query membership with an
+explicit local-range-interpretation-unavailable disclosure. A locally
+interpretable range excluding the version, incomplete pagination, identity
+mismatches and malformed evidence fail closed. Unique OSV IDs are counted, not aliases;
 this may differ from distinct vulnerability root causes across databases.
 Published severity categories order issues; missing severity is unspecified.
 

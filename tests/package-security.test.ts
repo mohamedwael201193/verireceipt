@@ -25,6 +25,27 @@ describe('exact npm known-advisory security review',()=>{
   expect(()=>parsePackageAdvisories(real,'semver','7.5.2')).toThrow();
   expect(()=>parsePackageAdvisories(real,'semver','1.0.0')).toThrow();
  });
+ it('parses the captured next 13.0.0 response containing introduced 13.0',()=>{
+  const body=readFileSync(join(__dirname,'fixtures/osv-package/next-13.0.0.json'),'utf8');
+  expect(body).toContain('"introduced":"13.0"');
+  const parsed=parsePackageAdvisories(body,'next','13.0.0');
+  expect(parsed.some(a=>a.id==='GHSA-3h52-269p-cp9r')).toBe(true);
+ });
+ it('pads abbreviated numeric range bounds',()=>{
+  const d=JSON.parse(real);d.vulns[0].affected=[{package:{ecosystem:'npm',name:'semver'},ranges:[{type:'SEMVER',events:[{introduced:'13.0'},{fixed:'14.2.30'}]}]}];
+  expect(parsePackageAdvisories(JSON.stringify(d),'semver','13.0.0')).toHaveLength(1);
+  expect(parsePackageAdvisories(JSON.stringify(d),'semver','14.0.0')).toHaveLength(1);
+ });
+ it('ORs disjoint affected intervals',()=>{
+  const d=JSON.parse(real);d.vulns[0].affected=[{package:{ecosystem:'npm',name:'semver'},ranges:[{type:'SEMVER',events:[{introduced:'0'},{fixed:'1.2.0'},{introduced:'2.0.0'},{fixed:'2.1.0'}]}]}];
+  expect(parsePackageAdvisories(JSON.stringify(d),'semver','1.1.0')).toHaveLength(1);
+  expect(parsePackageAdvisories(JSON.stringify(d),'semver','2.0.1')).toHaveLength(1);
+  expect(()=>parsePackageAdvisories(JSON.stringify(d),'semver','1.5.0')).toThrow();
+ });
+ it('retains other records and discloses source membership when one bound cannot be interpreted',()=>{
+  const d=JSON.parse(real);const odd=structuredClone(d.vulns[0]);odd.id='GHSA-odd-range';odd.affected.forEach((a:any)=>a.ranges=[{type:'SEMVER',events:[{introduced:'unknown-bound'}]}]);d.vulns.push(odd);
+  const a=parsePackageAdvisories(JSON.stringify(d),'semver','7.5.1');expect(a).toHaveLength(2);expect(a.find(x=>x.id==='GHSA-odd-range')?.versionEvidence).toContain('OSV matched this version');
+ });
  it('deduplicates IDs and excludes withdrawn entries',()=>{
   const d=JSON.parse(real);d.vulns.push(d.vulns[0]);expect(parsePackageAdvisories(JSON.stringify(d),'semver')).toHaveLength(1);
   d.vulns[0].withdrawn='2026-11-01';expect(parsePackageAdvisories(JSON.stringify(d),'semver')).toHaveLength(0);
