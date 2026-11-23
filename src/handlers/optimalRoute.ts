@@ -428,6 +428,7 @@ import { ApiError, badRequest, unprocessable, upstreamUnavailable } from "../cor
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { quorum2of3 } from "../core/quorum";
+import { observeVelora, aggregatorSummary } from "./routeAggregator";
 import { MAINNET_RPCS } from "../config/chains";
 import { explainNoRoute, explainRouteQuote } from "../core/routeExplanation";
 
@@ -1985,7 +1986,7 @@ class HeaderGarbageError extends Error {}
 export async function handleRoute(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
-  return handleRouteWithRpcs(query, MAINNET_RPCS);
+  return handleRouteWithRpcs(query, MAINNET_RPCS, ROUTE_TOTAL_DEADLINE_MS, true);
 }
 
 /**
@@ -2002,6 +2003,7 @@ export async function handleRoute(
  * without a wrapper; the wrapper always supplies all three.
  */
 interface RouteRequestContext {
+  includeAggregator?: boolean;
   signal?: AbortSignal;
   startedAtMs?: number;
   deadlineMs?: number;
@@ -2122,6 +2124,7 @@ export async function handleRouteWithRpcs(
   query: Record<string, string | undefined>,
   rpcUrls: string[],
   deadlineMs: number = ROUTE_TOTAL_DEADLINE_MS,
+  includeAggregator: boolean = false,
 ): Promise<Record<string, unknown>> {
   const startedAtMs = Date.now();
   const controller = new AbortController();
@@ -2130,6 +2133,7 @@ export async function handleRouteWithRpcs(
     return await Promise.race([
       handleRouteInner(query, rpcUrls, {
         signal: controller.signal,
+        includeAggregator,
         startedAtMs,
         deadlineMs,
       }),
@@ -2821,6 +2825,8 @@ async function handleRouteInner(
   // grace expires serves nothing, whenever it reports later. The two
   // waits are different mechanisms with different purposes, and the
   // grace is bounded at 1 s and deadline-aware, not 4.5 s.
+  const aggregatorPending = ctx.includeAggregator && spec.pair === "ETH/USDC" && remainingBudgetMs(ctx) > 1500
+    ? observeVelora(blockNumber, ctx.signal) : null;
   const venueResults = await Promise.allSettled(
     venueAttempts.map((attempt) =>
       tryVenue(rotatedOrder(attempt.offset), blockHex, attempt.quoter, ctx.signal),
@@ -2991,12 +2997,24 @@ async function handleRouteInner(
       `calls at the pinned block.`;
   }
 
+  const aggregator = aggregatorPending ? await aggregatorPending : null;
+  const summary = aggregator ? aggregatorSummary(best.amountOut, aggregator) : null;
+  const servedAmount = summary?.median ?? best.amountOut;
+  if (aggregator) {
+    answer += ` Source observations: block-pinned venue baseline ${best.amountOut} base units (${Number(best.amountOut) / 1e6} USDC); ` +
+      (aggregator.excluded ? `Velora/ParaSwap excluded: ${aggregator.excluded}. ` :
+        `Velora/ParaSwap ${aggregator.amount_out} base units (${Number(aggregator.amount_out) / 1e6} USDC), block ${aggregator.block_number}. `) +
+      `Reported amount_out is the lower median of surviving source observations: ${servedAmount} base units (${Number(servedAmount) / 1e6} USDC). ` +
+      `Best single route is ${summary!.bestSource} at ${summary!.best} base units (${Number(summary!.best) / 1e6} USDC), before gas. ` +
+      `The aggregator is a provider-block observation, not hash-pinned by our RPC quorum. KyberSwap unavailable (403); no second aggregator claimed.`;
+  }
   // 4. Receipt over the exact winning quoter call, pinned to the block.
   const receiptEvidence = JSON.stringify({
     block_number: blockNumber,
     block_number_hex: blockHex,
     block_hash: block.blockHash,
     winning_venue: best.venue,
+    ...(aggregator ? { aggregator, amount_out_method: "lower median of block-pinned baseline and surviving Velora observation", amount_out: servedAmount.toString() } : {}),
     ...(directHopSafety === null ? {} : { direct_hop_safety: directHopSafety }),
     pair: spec.pair,
     amount_in: spec.amountIn.toString(),
@@ -3035,8 +3053,9 @@ async function handleRouteInner(
       // R126 (2026-11-22): a JSON number cannot hold a wei-scale integer
       // exactly, so amount_out stays a best-effort rendering and the exact
       // base-unit integer rides alongside as a decimal string.
-      amount_out: Number(best.amountOut),
-      amount_out_base_units: best.amountOut.toString(),
+      amount_out: Number(servedAmount),
+      amount_out_base_units: servedAmount.toString(),
+      ...(summary ? { best_route: summary.bestSource, best_amount_out_base_units: summary.best.toString(), baseline_amount_out_base_units: best.amountOut.toString() } : {}),
       block_number: blockNumber,
       winning_venue: best.venue,
     },
@@ -3044,7 +3063,7 @@ async function handleRouteInner(
     {
       answer,
       verdict: "verified",
-      confidence,
+      confidence: aggregator ? Math.min(confidence, 0.9) : confidence,
       source:
         `Block-pinned ${spec.venueSetLabel} quotes via 2-of-3 Ethereum RPC ` +
         "(quorum-pinned); each venue quote comes from a single RPC — quorum attests " +
@@ -3060,7 +3079,8 @@ async function handleRouteInner(
         "and cross-venue agreement" +
         "; amount_out is the JSON-number rendering (approximate above 2^53 base units)" +
         "; amount_out_base_units is the exact integer base-unit string" +
-        (degraded ? `; degraded: ${degradedReasons.join("; ")}` : ""),
+        (degraded ? `; degraded: ${degradedReasons.join("; ")}` : "") +
+        (aggregator ? `; reported amount_out uses lower-median source observations; Velora provider-block observation ${aggregator.url}; KyberSwap unavailable (403)` : ""),
     },
   );
 }
