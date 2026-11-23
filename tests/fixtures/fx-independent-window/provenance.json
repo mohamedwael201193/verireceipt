@@ -1,0 +1,10 @@
+{
+  "fetched_at": "2026-11-23T17:27:07.833129+00:00",
+  "sources": {
+    "frankfurter": "https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR,CAD,SEK",
+    "vatcomply": "https://api.vatcomply.com/rates?base=USD",
+    "openEr": "https://open.er-api.com/v6/latest/USD",
+    "floatrates": "https://www.floatrates.com/daily/usd.json",
+    "fawaz": "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json"
+  }
+}

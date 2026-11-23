@@ -457,7 +457,7 @@ export async function handleFx(
             `${stalest.rate} dated ${stalest.rateDate}`,
         ];
       } else {
-        const selected = selectAnchorServing(sorted);
+        const selected = selectForPair(sorted, from, to);
         const anchor = selected.anchor;
         // The helper can fall back to the full pool on tied/no clusters.
         // That fallback must never rescue a genuinely disagreeing pool.
@@ -475,7 +475,7 @@ export async function handleFx(
         ];
       }
     } else {
-      const selected = selectAnchorServing(sorted);
+      const selected = selectForPair(sorted, from, to);
       serving = selected.serving;
       clusterDetail = selected.clusterDetail;
       if (failedSources.length > 0) {
@@ -488,7 +488,7 @@ export async function handleFx(
     ];
   }
   const winner = serving[0];
-  const rate = winner.rate;
+  const rate = clusterDetail.startsWith("largest complete-span") ? serving.reduce((sum, q) => sum + q.rate, 0) / serving.length : winner.rate;
   const converted = Math.round(amount * rate * 1e6) / 1e6;
   const confidence = quotes.length >= 2 && degradedReasons.length === 0 && !straddledUpdate ? 1.0 : 0.9;
 
@@ -510,15 +510,16 @@ export async function handleFx(
       raw_body: q.rawBody,
     })),
     failed_sources: failedSources,
+    ...(clusterDetail.startsWith("largest complete-span") ? { independent_window_selection: clusterDetail, median_inputs: serving.map(q => ({source:q.source, rate:q.rate})) } : {}),
     ...(degradedReasons.some(reason => reason.startsWith("same-date pool")) ? {
-      selection_policy: "same-date wide pool: selected agreeing anchor cluster, lower observed median",
+      selection_policy: clusterDetail.startsWith("largest complete-span") ? "same-date independent-origin complete-span window median, even midpoint" : "same-date wide pool: selected agreeing anchor cluster, lower observed median",
       cluster_detail: clusterDetail,
       degraded_reasons: degradedReasons,
     } : {}),
   });
   const receiptDoc: Receipt = makeReceipt(
     INTENT,
-    winner.url,
+    clusterDetail.startsWith("largest complete-span") ? serving.map(q=>q.url).join(" + ") : winner.url,
     receiptEvidence,
     `${quotes.length}/${legs.length + (fallbackFired ? 1 : 0)} rate sources${degradedReasons.some(reason => reason.startsWith("same-date pool")) ? "; full pool disagreed; selected anchor cluster; exclusions disclosed" : ""}`,
   );
@@ -542,13 +543,13 @@ export async function handleFx(
   return envelope(INTENT, fields, receiptDoc, {
     answer:
       `${amount} ${from} = ${converted} ${to} at a rate of ${rate} ${to} per ${from}` +
-      ` (${winner.source}, rates dated ${winner.rateDate}` +
+      ` (${serving.map(q => q.source).join(" + ")}${serving.length > 1 && serving[0].rate !== serving[1].rate ? "; median midpoint, not a single-source quote" : ""}, rates dated ${winner.rateDate}` +
       (straddledUpdate
         ? `; ${straddleDetail} — the freshest is served; they did NOT agree within 0.5%)`
         : quotes.length > 1
           ? (degradedReasons.some(reason => reason.startsWith("same-date pool"))
               ? `; full source pool did NOT agree within 0.5%; serving the selected agreeing cluster`
-              : `; cross-checked against ${quotes.length} sources agreeing within 0.5%`) +
+              : clusterDetail.startsWith("largest complete-span") ? `; selected independent-origin window agrees within 0.5%` : `; cross-checked against ${quotes.length} sources agreeing within 0.5%`) +
             (clusterDetail ? `; ${clusterDetail}` : "") +
             ")"
           : "; single covering source)") +
@@ -560,7 +561,7 @@ export async function handleFx(
       `sources snapshot at different times of day, so a 0.5% pairwise agreement tolerance is applied ` +
       `and a wider same-date split requires a selected agreeing cluster of at least two quotes; otherwise refused, never averaged across clusters` +
       (clusterDetail
-        ? `; the served rate is the median of the tightest single-linkage agreeing cluster (5bps), not the full pool`
+        ? clusterDetail.startsWith("largest complete-span") ? `; ${clusterDetail}` : `; the served rate is the median of the tightest single-linkage agreeing cluster (5bps), not the full pool`
         : "") +
       (degradedReasons.length ? `; degraded: ${degradedReasons.join("; ")}` : ""),
   });
@@ -702,6 +703,52 @@ export function selectAnchorServing(sorted: SourceQuote[]): { serving: SourceQuo
   return { serving, clusterDetail, anchor };
 }
 
+/** Reviewed USD->EUR/CAD policy: complete-span windows, one vote per known origin.
+ * Other pairs retain the existing selection, including SEK and USD identity pairs.
+ * Named providers are not proof of wholly independent upstream price discovery.
+ */
+export function selectIndependentWindow(sorted: SourceQuote[]): { serving: SourceQuote[]; clusterDetail: string; anchor: SourceQuote[] } {
+  const origin = (q: SourceQuote): string =>
+    ["Frankfurter (ECB reference rates)", "vatcomply"].includes(q.source) ? "ECB" :
+    ["open.er-api.com", "exchangerate-api v6"].includes(q.source) ? "ExchangeRate-API" : q.source;
+  // Stable representative: Frankfurter before vatcomply, public before keyed mirror.
+  const priority = (q: SourceQuote): number => q.source === "Frankfurter (ECB reference rates)" || q.source === "open.er-api.com" ? 0 : 1;
+  const representatives = new Map<string, SourceQuote>();
+  for (const q of sorted) {
+    const old = representatives.get(origin(q));
+    if (!old || priority(q) < priority(old)) representatives.set(origin(q), q);
+  }
+  const independent = [...representatives.values()].sort((a,b) => a.rate-b.rate || a.source.localeCompare(b.source));
+  const windows: SourceQuote[][] = [];
+  for (let i=0;i<independent.length;i++) {
+    for (let j=i+1;j<independent.length;j++) {
+      if ((independent[j].rate-independent[i].rate)/independent[i].rate <= AGREEMENT_TOLERANCE) windows.push(independent.slice(i,j+1));
+    }
+  }
+  const span = (g: SourceQuote[]) => (g[g.length-1].rate-g[0].rate)/g[0].rate;
+  windows.sort((a,b) => b.length-a.length || span(a)-span(b) || a[0].rate-b[0].rate);
+  const anchor = windows[0];
+  if (!anchor) throw upstreamUnavailable("FX_SOURCES_DISAGREE", "no agreeing window with at least two independent source origins");
+  const n=anchor.length;
+  const serving = n%2 ? [anchor[Math.floor(n/2)]] : [anchor[n/2-1],anchor[n/2]];
+  const median = serving.reduce((sum,q) => sum+q.rate,0)/serving.length;
+  const gap = (q: SourceQuote) => { const bps = (q.rate-median)/median*10000; return `${bps>=0?"+":""}${bps.toFixed(2)}bps`; };
+  const all = sorted.map(q => `${q.source}=${q.rate} (${gap(q)})`).join(", ");
+  const ecb = sorted.filter(q => origin(q)==="ECB");
+  const tied = windows.filter(g => g.length===n).length>1;
+  const clusterDetail = `largest complete-span<=0.5% agreeing window of ${n} distinct known source origins: ${anchor.map(q=>`${q.source}=${q.rate}`).join(", ")}; ` +
+    `median=${median}${serving.length===2 ? "; even count: arithmetic mean of the two middle observed rates" : "; odd count: middle observed rate"}; ` +
+    `known duplicate origins counted once (ECB and ExchangeRate-API); provider upstream independence is not established; ` +
+    (tied ? "equal-support windows resolved by smallest full relative span, then lower start; " : "") +
+    `all fetched quotes and signed gaps to served median: ${all}; ECB fix reference: ${ecb.length?ecb.map(q=>`${q.source}=${q.rate} (${gap(q)})`).join(", "):"unavailable"}; ` +
+    `excluded from window: ${sorted.filter(q=>!anchor.includes(q)).map(q=>`${q.source}=${q.rate}`).join(", ") || "none"}`;
+  return { serving, anchor, clusterDetail };
+}
+function selectForPair(sorted: SourceQuote[], from: string, to: string) {
+  if (from === "USD" && (to === "EUR" || to === "CAD") && sorted.every(q=>rateDayKey(q.rateDate)===rateDayKey(sorted[0].rateDate)) && rateDayKey(sorted[0].rateDate)>0) return selectIndependentWindow(sorted);
+  return selectAnchorServing(sorted);
+}
+
 export async function handleFxNow(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
@@ -785,7 +832,7 @@ export async function handleFxNow(
             `${stalest.rate} dated ${stalest.rateDate}`,
         ];
       } else {
-        const selected = selectAnchorServing(sorted);
+        const selected = selectForPair(sorted, "USD", currency);
         const anchor = selected.anchor;
         // The helper can fall back to the full pool on tied/no clusters.
         // That fallback must never rescue a genuinely disagreeing pool.
@@ -803,7 +850,7 @@ export async function handleFxNow(
         ];
       }
     } else {
-      const selected = selectAnchorServing(sorted);
+      const selected = selectForPair(sorted, "USD", currency);
       serving = selected.serving;
       clusterDetail = selected.clusterDetail;
       if (failedSources.length > 0) {
@@ -816,7 +863,7 @@ export async function handleFxNow(
     ];
   }
   const winner = serving[0];
-  const rate = winner.rate;
+  const rate = clusterDetail.startsWith("largest complete-span") ? serving.reduce((sum, q) => sum + q.rate, 0) / serving.length : winner.rate;
   if (!Number.isFinite(rate) || rate < FX_NOW_RATE_MIN || rate > FX_NOW_RATE_MAX) {
     throw upstreamUnavailable(
       "FX_RATE_OUT_OF_RANGE",
@@ -839,15 +886,16 @@ export async function handleFxNow(
       raw_body: q.rawBody,
     })),
     failed_sources: failedSources,
+    ...(clusterDetail.startsWith("largest complete-span") ? { independent_window_selection: clusterDetail, median_inputs: serving.map(q => ({source:q.source, rate:q.rate})) } : {}),
     ...(degradedReasons.some(reason => reason.startsWith("same-date pool")) ? {
-      selection_policy: "same-date wide pool: selected agreeing anchor cluster, lower observed median",
+      selection_policy: clusterDetail.startsWith("largest complete-span") ? "same-date independent-origin complete-span window median, even midpoint" : "same-date wide pool: selected agreeing anchor cluster, lower observed median",
       cluster_detail: clusterDetail,
       degraded_reasons: degradedReasons,
     } : {}),
   });
   const receiptDoc: Receipt = makeReceipt(
     intent,
-    winner.url,
+    clusterDetail.startsWith("largest complete-span") ? serving.map(q=>q.url).join(" + ") : winner.url,
     receiptEvidence,
     `${quotes.length}/${legs.length} rate sources${degradedReasons.some(reason => reason.startsWith("same-date pool")) ? "; full pool disagreed; selected anchor cluster; exclusions disclosed" : ""}`,
   );
@@ -867,13 +915,13 @@ export async function handleFxNow(
   return envelope(intent, fields, receiptDoc, {
     answer:
       `1 USD buys ${rate} ${currency}` +
-      ` (${winner.source}, rates dated ${winner.rateDate}` +
+      ` (${serving.map(q => q.source).join(" + ")}${serving.length > 1 && serving[0].rate !== serving[1].rate ? "; median midpoint, not a single-source quote" : ""}, rates dated ${winner.rateDate}` +
       (straddledUpdate
         ? `; ${straddleDetail} — the freshest is served; they did NOT agree within 0.5%)`
         : quotes.length > 1
           ? (degradedReasons.some(reason => reason.startsWith("same-date pool"))
               ? `; full source pool did NOT agree within 0.5%; serving the selected agreeing cluster`
-              : `; cross-checked against ${quotes.length} sources agreeing within 0.5%`) +
+              : clusterDetail.startsWith("largest complete-span") ? `; selected independent-origin window agrees within 0.5%` : `; cross-checked against ${quotes.length} sources agreeing within 0.5%`) +
             (clusterDetail ? `; ${clusterDetail}` : "") +
             ")"
           : "; single covering source)") +
@@ -885,7 +933,7 @@ export async function handleFxNow(
       `sources snapshot at different times of day, so a 0.5% pairwise agreement tolerance is applied ` +
       `and a wider same-date split requires a selected agreeing cluster of at least two quotes; otherwise refused, never averaged across clusters` +
       (clusterDetail
-        ? `; the served rate is the median of the tightest single-linkage agreeing cluster (5bps), not the full pool`
+        ? clusterDetail.startsWith("largest complete-span") ? `; ${clusterDetail}` : `; the served rate is the median of the tightest single-linkage agreeing cluster (5bps), not the full pool`
         : "") +
       (degradedReasons.length ? `; degraded: ${degradedReasons.join("; ")}` : ""),
   });

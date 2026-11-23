@@ -28,23 +28,23 @@ async function receiptCheck(r: Record<string,any>) {
  for (const source of evidence.sources) expect(Object.values(originals)).toContain(source.raw_body);
 }
 describe('same-date wide FX pool, captured 2026-11-23 upstream bodies', () => {
- it.each([['EUR',0.91416],['SEK',10.272877]] as const)('%s serves the lower observed fix-cluster median, not a pooled average',async (currency,rate) => {
+ it.each([['EUR',0.91087802],['SEK',10.272877]] as const)('%s serves the reviewed scoped selection, preserving SEK',async (currency,rate) => {
   stub(); const r = await handleFxNow({currency});
   expect(r.rate).toBe(rate); expect(r.confidence).toBe(0.9);
   expect(String(r.answer)).toContain('full source pool did NOT agree within 0.5%');
   expect(String(r.answer)).toContain('Frankfurter'); expect(String(r.answer)).toContain('vatcomply');
   for (const name of ['open.er-api.com','floatrates','fawaz currency-api']) expect(String(r.answer)).toContain(name);
-  expect(String(r.answer)).toMatch(/-\d+bps/);
+  expect(String(r.answer)).toMatch(/-\d+(\.\d+)?bps/);
   expect(String(r.source)).toContain('publication timing is not independently verified');
   await receiptCheck(r);
  });
  it('conversion applies the identical EUR selection and discloses exclusions',async()=>{
   stub(); const r=await handleFx({from_currency:'USD',to_currency:'EUR',amount:'100'});
-  expect(r.rate).toBe(0.91416); expect(r.converted_amount).toBe(91.416); expect(r.confidence).toBe(0.9);
+  expect(r.rate).toBe(0.91087802); expect(r.converted_amount).toBe(91.087802); expect(r.confidence).toBe(0.9);
   expect(String(r.answer)).toContain('full source pool did NOT agree'); await receiptCheck(r);
  });
- it('CAD remains on the existing within-tolerance selection at confidence 1',async()=>{
-  stub(); const r=await handleFxNow({currency:'CAD'}); expect(r.rate).toBe(1.4362); expect(r.confidence).toBe(1);
+ it('CAD uses the independent-window even median at confidence 1',async()=>{
+  stub(); const r=await handleFxNow({currency:'CAD'}); expect(r.rate).toBe(1.433138805); expect(r.confidence).toBe(1);
   expect(String(r.answer)).not.toContain('full source pool did NOT agree');
  });
  it.each(['now','convert'])('%s refuses a pool with no agreeing pair',async kind=>{
