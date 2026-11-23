@@ -24,7 +24,8 @@ import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
-const SOURCE_TIMEOUT_MS = 15000;
+const SOURCE_TIMEOUT_MS = 4000;
+const RETRY_ERRORS = new Set(["MS_MAX_CONCURRENT_REQ", "GLOBAL_MAX_CONCURRENT_REQ", "MS_UNAVAILABLE", "SERVICE_UNAVAILABLE", "TIMEOUT"]);
 const UA = "VeriReceipt/2.0 vendor-verify observer (+https://verireceipt.vercel.app)";
 
 export const INTENT = "VENDOR_VERIFY_GENERAL";
@@ -49,32 +50,58 @@ export function parseVatNumber(raw: string): { cc: string; num: string } | null 
   return { cc: m[1], num: m[2] };
 }
 
+/** Extract complete VAT-shaped tokens, never infer a number from a name. */
+export function extractVat(raw: string): { cc: string; num: string } | null {
+  const matches = [...raw.toUpperCase().matchAll(/\b([A-Z]{2}[ .-]*[0-9][A-Z0-9]{1,13}(?:[ .-][0-9]{1,5})*)\b/g)]
+    .map((m) => parseVatNumber(m[1])).filter((v): v is { cc: string; num: string } => v !== null);
+  const unique = new Map(matches.map((v) => [v.cc + v.num, v]));
+  if (unique.size > 1) throw badRequest("AMBIGUOUS_VAT", "multiple VAT-shaped numbers found; supply vat_number explicitly");
+  return [...unique.values()][0] ?? null;
+}
+
 export async function handleVendorVerify(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const vendor = query.vendor?.trim();
-  if (!vendor) throw badRequest("MISSING_PARAM", "vendor is required: the vendor or company name");
-  if (vendor.length > 300) throw badRequest("INVALID_VENDOR", "vendor is over 300 characters");
+  if (vendor && vendor.length > 300) throw badRequest("INVALID_VENDOR", "vendor is over 300 characters");
   const vatRaw = query.vat_number?.trim();
-  if (!vatRaw) throw badRequest("MISSING_PARAM", "vat_number is required, e.g. LU26375245");
-  const parsed = parseVatNumber(vatRaw);
-  if (!parsed) throw badRequest("INVALID_VAT", "vat_number must be an EU VAT number: two-letter country code plus the national number, e.g. LU26375245");
+  let parsed = vatRaw ? parseVatNumber(vatRaw) : null;
+  if (vatRaw && !parsed) throw badRequest("INVALID_VAT", "vat_number must contain a country prefix and national number");
+  if (!parsed) {
+    const found = Object.values(query).filter((v): v is string => typeof v === "string")
+      .map(extractVat).filter((v): v is { cc: string; num: string } => v !== null);
+    const unique = new Map(found.map((v) => [v.cc + v.num, v]));
+    if (unique.size > 1) throw badRequest("AMBIGUOUS_VAT", "multiple VAT-shaped numbers found; supply vat_number explicitly");
+    parsed = [...unique.values()][0] ?? null;
+  }
+  if (!parsed) throw badRequest("MISSING_PARAM", "a VAT number is required, explicitly or in a text parameter");
   if (!VIES_STATES.has(parsed.cc)) {
-    throw unprocessable("VIES_SCOPE", `${parsed.cc} is not a VIES member-state code; only EU VAT numbers can be verified keyless — no other registry is guessed`);
+    throw unprocessable("VIES_SCOPE", `${parsed.cc} is not a VIES member-state code; only VIES-supported VAT numbers are served; GB HMRC lookup required authentication in the live probe, so no result is guessed`);
   }
   const url = `https://ec.europa.eu/taxation_customs/vies/rest-api/ms/${parsed.cc}/vat/${encodeURIComponent(parsed.num)}`;
   const fetchedAt = new Date().toISOString();
-  let body: string;
-  try {
+  let body = "";
+  const attempts: { status?: number; body: string; error?: string }[] = [];
+  for (let attempt = 0; attempt < 3; attempt++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
+    let retry = false;
     try {
       const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       body = await res.text();
-    } finally {
-      clearTimeout(timer);
-    }
-  } catch (e) {
-    throw upstreamUnavailable("VIES_UNREACHABLE", `the VIES service could not be reached: ${e instanceof Error ? e.message : String(e)}`);
+      attempts.push({ status: res.status, body });
+      if (!res.ok) {
+        if ((res.status >= 500 || res.status === 429) && attempt < 2) retry = true;
+        else throw new Error(`HTTP ${res.status}`);
+      } else {
+        try { retry = RETRY_ERRORS.has((JSON.parse(body) as ViesReply).userError ?? "") && attempt < 2; }
+        catch { retry = false; }
+      }
+    } catch (e) {
+      attempts.push({ body, error: e instanceof Error ? e.message : "network failure" });
+      if (attempt < 2) retry = true;
+      else throw upstreamUnavailable("VIES_UNREACHABLE", "VIES unavailable after three bounded attempts");
+    } finally { clearTimeout(timer); }
+    if (!retry) break;
+    await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
   }
   let vies: ViesReply;
   try {
@@ -93,11 +120,11 @@ export async function handleVendorVerify(query: Record<string, string | undefine
   const registeredAddress = vies.address && vies.address !== "---" ? vies.address.trim().replace(/\s+/g, " ") : null;
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({
-    vendor_queried: vendor, vat_number: `${parsed.cc}${parsed.num}`,
+    vendor_queried: vendor ?? null, vat_number: `${parsed.cc}${parsed.num}`,
     valid, registered_name: registeredName, registered_address: registeredAddress,
     vies_request_date: vies.requestDate ?? null,
     scope: "VIES confirms the VAT number's registration in its member state; it does NOT confirm the vendor string is that company, and says nothing about sanctions, solvency or honesty",
-    upstream: { url, body },
+    upstream: { url, body, attempts },
     fetched_at: fetchedAt,
   });
   // The receipt hashes this evidence JSON (the enforced doctrine: saved
@@ -110,13 +137,14 @@ export async function handleVendorVerify(query: Record<string, string | undefine
   } catch {
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
-  const answer = valid
+  let answer = valid
     ? `Yes, VAT number ${parsed.cc}${parsed.num} is valid and currently registered in ${parsed.cc === "XI" ? "Northern Ireland (XI)" : parsed.cc} per the EU VIES service (checked ${vies.requestDate ?? asOf})` +
       (registeredName ? `; registered to ${registeredName}${registeredAddress ? `, ${registeredAddress}` : ""}` : "") +
-      `. This verifies the number only: VIES does not confirm that "${vendor}" is that company, and validity says nothing about sanctions, solvency or honesty.`
-    : `No, VAT number ${parsed.cc}${parsed.num} is NOT currently valid per the EU VIES service (checked ${vies.requestDate ?? asOf}). That is a registry answer about the number, not a judgment about "${vendor}" as a business.`;
+      `. This verifies the number only: VIES does not confirm that "${vendor ?? "unspecified vendor"}" is that company, and validity says nothing about sanctions, solvency or honesty.`
+    : `No, VAT number ${parsed.cc}${parsed.num} is NOT currently valid per the EU VIES service (checked ${vies.requestDate ?? asOf}). That is a registry answer about the number, not a judgment about "${vendor ?? "unspecified vendor"}" as a business.`;
+  if (!vendor) answer += " No vendor name was supplied; this is number-only verification.";
   return envelope(INTENT, {
-    vendor,
+    vendor: vendor ?? null,
     vat_number: `${parsed.cc}${parsed.num}`,
     valid,
     registered_name: registeredName,

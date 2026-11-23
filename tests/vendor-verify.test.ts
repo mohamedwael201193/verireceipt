@@ -58,7 +58,7 @@ describe("VENDOR_VERIFY_GENERAL", () => {
   });
   it("missing and malformed params are 400", async () => {
     stub();
-    await expect(handleVendorVerify({ vat_number: "LU26375245" })).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
+    expect((await handleVendorVerify({ vat_number: "LU26375245" })).valid).toBe(true);
     await expect(handleVendorVerify({ vendor: "X" })).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
     await expect(handleVendorVerify({ vendor: "X", vat_number: "26375245" })).rejects.toMatchObject({ status: 400, code: "INVALID_VAT" });
   });
@@ -99,4 +99,32 @@ describe("VENDOR_VERIFY_GENERAL", () => {
     expect(body.valid).toBe(true);
     await app.close();
   });
+});
+
+
+describe("VIES number-only extraction and bounded retry", () => {
+ it("extracts from any text parameter and proceeds without vendor", async () => {
+  stub();
+  const r=await handleVendorVerify({question:"Check LU26375245 for this vendor",context:"VAT lookup"});
+  expect(r.valid).toBe(true); expect(String(r.answer)).toContain("number-only");
+ });
+ it("explicit VAT wins over incidental text", async () => {
+  stub(); const r=await handleVendorVerify({vat_number:"LU26375245",question:"DE000000000"});
+  expect(r.vat_number).toBe("LU26375245");
+ });
+ it("refuses ambiguous extracted numbers", async () => {
+  stub(); await expect(handleVendorVerify({question:"LU26375245 DE000000000"})).rejects.toMatchObject({status:400,code:"AMBIGUOUS_VAT"});
+ });
+ it("retries concurrency errors and binds all attempt bodies", async () => {
+  let n=0; const limited=JSON.stringify({userError:"MS_MAX_CONCURRENT_REQ"});
+  vi.stubGlobal("fetch",async()=>new Response(++n===1?limited:LU_VALID));
+  const r=await handleVendorVerify({vat_number:"LU26375245"}); expect(n).toBe(2);expect(r.valid).toBe(true);
+  const ev=await getReceiptEvidence((r.receipt as {receipt_id:string}).receipt_id);
+  const attempts=JSON.parse(ev.evidence!.toString()).upstream.attempts;
+  expect(attempts[0].body).toBe(limited);expect(attempts[1].body).toBe(LU_VALID);
+ });
+ it("retries a 503 before using the valid registry response", async()=>{
+  let n=0;vi.stubGlobal("fetch",async()=>++n===1?new Response("unavailable",{status:503}):new Response(LU_VALID));
+  expect((await handleVendorVerify({vat_number:"LU26375245"})).valid).toBe(true);expect(n).toBe(2);
+ });
 });
