@@ -97,6 +97,13 @@ describe("complete finalized validator record", () => {
     expect(result.balance).toBe(fixture.data.balance);
   });
 
+  it("renders a dust balance exactly (1 gwei = 0.000000001 ETH)", async () => {
+    const fetchImpl = transport((b) => { b.data.balance = "1"; });
+    const result = await handleValidator({ validator_index: "0" }, { fetchImpl });
+    expect(String(result.answer)).toContain("balance 0.000000001 ETH");
+    expect(result.balance).toBe("1");
+  });
+
   for (const sentinelField of ["activation_eligibility_epoch", "activation_epoch", "exit_epoch", "withdrawable_epoch"] as const) {
     it(`explains a sentinel returned in ${sentinelField}`, async () => {
       const fetchImpl = transport((b) => {
