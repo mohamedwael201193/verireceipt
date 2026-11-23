@@ -37,10 +37,14 @@ import { plainDecimal } from "../core/plainDecimal";
 //     treated as stale-suspect and diverted to the fallback, whose B2a
 //     7-day history gate is the arbiter (A5-fix2, J2-R2 F2).
 //   - Chain path: the request names a blockchain instead. Reading comes from
-//     GET https://api.llama.fi/v2/historicalChainTvl/{chain} (latest point of the
-//     returned history), NOT from the /v2/chains entry's `tvl` field, because
-//     the history point carries its own timestamp for `as_of` while the
-//     /v2/chains field does not.
+//     a short-TTL (5-minute) fresh read of GET /v2/chains (slice A part 2,
+//     2026-11-23): the catalog's `tvl` is the near-live number, and as_of is
+//     the real fetch time of the served data (the protocol path's /tvl
+//     precedent — the field carries no upstream timestamp, so fetch time is
+//     the honest observation time). Only when the fresh read fails or the
+//     entry carries no usable tvl does the path fall back to
+//     GET /v2/historicalChainTvl/{chain} (latest point) — a degraded mode,
+//     named in the answer and source, keeping its own point date as as_of.
 
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, unlink, writeFile } from 'fs/promises';
@@ -1346,6 +1350,42 @@ export function __getTvlChainSplitForTests(slug: string): number | undefined {
 let protocolsCache: { data: ProtocolEntry[]; fetchedAt: number } | null = null;
 let chainsCache: { data: ChainEntry[]; fetchedAt: number } | null = null;
 
+/**
+ * Short-TTL fresh /v2/chains read for the chain path (slice A part 2,
+ * 2026-11-23): the catalog number is near-live upstream, so a 5-minute
+ * reuse window keeps bursts cheap without serving a stale value; as_of is
+ * always the cache entry's REAL fetchedAt, never the request time. A
+ * failed or unparseable read returns null and the caller falls back to
+ * the historical endpoint (degraded mode, named there) — it never
+ * invents or extends a value.
+ */
+const CHAINS_FRESH_TTL_MS = 5 * 60 * 1000;
+let chainsFreshCache: { data: ChainEntry[]; fetchedAt: number } | null = null;
+async function loadFreshChainEntries(
+  fetchImpl: typeof fetch,
+  timeoutMs: number,
+): Promise<{ data: ChainEntry[]; fetchedAt: number } | null> {
+  const now = Date.now();
+  if (chainsFreshCache && now - chainsFreshCache.fetchedAt < CHAINS_FRESH_TTL_MS) {
+    return chainsFreshCache;
+  }
+  let rawBody: string;
+  try {
+    rawBody = await fetchText(CHAINS_URL, fetchImpl, timeoutMs);
+  } catch {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  chainsFreshCache = { data: parsed as ChainEntry[], fetchedAt: Date.now() };
+  return chainsFreshCache;
+}
+
 /** Test hook: clear the in-memory lists caches (and the chain-split caches). */
 export function __clearTvlCachesForTests(): void {
   protocolsCache = null;
@@ -1357,6 +1397,7 @@ export function __clearTvlCachesForTests(): void {
   listsChainSplit.clear();
   listsChainSplitFull.clear();
   listsChainSplitFetchedAt = null;
+  chainsFreshCache = null;
   protocolChainSplitCache.clear();
   protocolFillGen++;
 }
@@ -2739,9 +2780,68 @@ export async function handleTvl(
   }
 
   // --- Chain path: the request names a blockchain, not a protocol.
-  // Reading comes from GET /v2/historicalChainTvl/{chain} (latest point),
-  // not from the /v2/chains entry's `tvl` field, which carries no timestamp.
+  // Freshness (slice A part 2, 2026-11-23): the value comes from a
+  // short-TTL fresh read of GET /v2/chains with as_of = the real fetch
+  // time of the served data. The historical fallback below keeps its own
+  // point date and names the degraded mode — never the fresh as_of.
   // chain_tvl_usd is the TVL on the named chain, which IS the chain TVL. ---
+  const freshChains = await loadFreshChainEntries(fetchImpl, timeoutMs);
+  const freshEntry = freshChains?.data.find(
+    (c) =>
+      c !== null &&
+      typeof c === 'object' &&
+      typeof c.name === 'string' &&
+      c.name.toLowerCase() === target.chain.toLowerCase(),
+  );
+  const freshTvl = freshEntry?.tvl;
+  if (
+    freshChains !== null &&
+    freshChains !== undefined &&
+    typeof freshTvl === 'number' &&
+    Number.isFinite(freshTvl) &&
+    freshTvl > 0
+  ) {
+    const asOf = new Date(freshChains.fetchedAt).toISOString();
+    // Receipt evidence: same canonical pinned scheme as every other read —
+    // the hash covers the served catalog entry and its real fetch time, so
+    // a judge can re-fetch /v2/chains and compare against the pinned entry.
+    const evidence = stableStringify({
+      intent: INTENT,
+      upstream_url: CHAINS_URL,
+      chain: target.chain,
+      entry: {
+        name: freshEntry?.name,
+        gecko_id: freshEntry?.gecko_id ?? null,
+        tokenSymbol: freshEntry?.tokenSymbol ?? null,
+        tvl: freshTvl,
+      },
+      served_fetched_at: freshChains.fetchedAt,
+      reading: { tvl_usd: freshTvl, as_of: asOf },
+      mode: 'fresh',
+    });
+    const receipt = makeReceipt(INTENT, CHAINS_URL, evidence, '1/1 primary source');
+    try {
+      await saveReceipt(receipt, evidence);
+    } catch {
+      throw upstreamUnavailable('RECEIPT_PERSIST_FAILED', 'receipt evidence could not be stored; answer unavailable');
+    }
+    return envelope(
+      INTENT,
+      {
+        protocol_or_chain: target.chain,
+        tvl_usd: freshTvl,
+        chain_tvl_usd: freshTvl,
+        as_of: asOf,
+      },
+      receipt,
+      {
+        answer: formatAnswer(target.displayName, freshTvl, asOf),
+        verdict: 'verified',
+        confidence: target.confidence,
+        source: `DeFiLlama API (${CHAINS_URL})`,
+      },
+    );
+  }
   const upstreamUrl = HISTORICAL_CHAIN_TVL_URL(target.chain);
   const rawBody = await fetchText(upstreamUrl, fetchImpl, timeoutMs);
   let payload: Array<{ date?: number; tvl?: number }>;
@@ -2785,10 +2885,12 @@ export async function handleTvl(
     },
     receipt,
     {
-      answer: formatAnswer(target.displayName, reading.tvlUsd, reading.asOf),
+      answer:
+        formatAnswer(target.displayName, reading.tvlUsd, reading.asOf) +
+        ' Served from the latest history point (degraded: the live chains read carried no usable current value).',
       verdict: 'verified',
       confidence: target.confidence,
-      source: `DeFiLlama API (${upstreamUrl})`,
+      source: `DeFiLlama API (${upstreamUrl}), latest history point (degraded: no usable live chains value)`,
     },
   );
 }

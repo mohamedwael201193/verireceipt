@@ -8,6 +8,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 import { ApiError } from '../src/core/errors';
+import { getReceiptEvidence } from '../src/core/storage';
 import {
   __awaitTvlBackgroundRefreshForTests,
   __fetchTvlTextForTests,
@@ -214,7 +215,9 @@ const PROTOCOLS_FIXTURE = [
 const CHAINS_FIXTURE = [
   { name: 'Ethereum', gecko_id: 'ethereum', tokenSymbol: 'ETH', tvl: 35974180659 },
   { name: 'Arbitrum', gecko_id: 'arbitrum', tvl: 123456789 },
-  { name: 'Solana', gecko_id: 'solana', tokenSymbol: 'SOL', tvl: 888 },
+  // Real captured /v2/chains value 2026-11-20 (was the stub 888; slice A part 2
+  // made the catalog number load-bearing on the chain path).
+  { name: 'Solana', gecko_id: 'solana', tokenSymbol: 'SOL', tvl: 4686171520 },
   { name: 'Tezos', gecko_id: 'tezos', tokenSymbol: 'XTZ' },
   { name: 'Bitcoin', gecko_id: 'bitcoin', tokenSymbol: 'BTC', tvl: 3111736181 },
   { name: 'Avalanche', gecko_id: 'avalanche-2', tokenSymbol: 'AVAX', tvl: 537875458 },
@@ -882,16 +885,63 @@ describe('handleTvl with fixture transport', () => {
     expect(out.confidence).toBe(0.9);
   });
 
-  it('chain path through the handler: "ethereum" -> Ethereum chain TVL', async () => {
+  it('chain path through the handler: "ethereum" -> Ethereum chain TVL from the fresh /v2/chains read', async () => {
+    // Slice A part 2 (2026-11-23): the chain path serves the near-live
+    // /v2/chains catalog number with as_of = the real fetch time; the
+    // historical endpoint is now the degraded fallback only. The fixture
+    // catalog value (35,974,180,659) matches the captured live catalog.
     const out = await handleTvl({ protocol: 'ethereum' }, { fetchImpl: fixtureFetch() });
     expect(out.protocol_or_chain).toBe('Ethereum');
     expect(out.tvl_usd).toBe(35974180659);
     // For a chain lookup the TVL on the named chain IS the chain TVL.
     expect(out.chain_tvl_usd).toBe(35974180659);
-    expect(out.as_of).toBe(LATEST_ISO);
+    expect(String(out.as_of).slice(0, 10)).toBe(new Date().toISOString().slice(0, 10));
     expect(out.confidence).toBe(1.0);
+    expect(out.source).toBe('DeFiLlama API (https://api.llama.fi/v2/chains)');
+    const receipt = out.receipt as { receipt_id: string };
+    const stored = await getReceiptEvidence(receipt.receipt_id);
+    expect(stored.found).toBe(true);
+    const pinned = JSON.parse(stored.evidence!.toString('utf8'));
+    expect(pinned.mode).toBe('fresh');
+    expect(pinned.entry).toEqual({ name: 'Ethereum', gecko_id: 'ethereum', tokenSymbol: 'ETH', tvl: 35974180659 });
+    expect(typeof pinned.served_fetched_at).toBe('number');
+  });
+
+  it('fresh chains read is shared inside its 5-minute TTL, as_of tied to the real fetch time', async () => {
+    // Slice A part 2 condition: a short TTL instead of strictly per request.
+    // Two different chain queries within the TTL share ONE /v2/chains fetch,
+    // and both answers carry that fetch's real time as as_of.
+    let chainsFetches = 0;
+    const base = fixtureFetch();
+    const fetchImpl = (async (url: string | URL | Request): Promise<Response> => {
+      const u = String(url);
+      if (u === 'https://api.llama.fi/v2/chains') chainsFetches++;
+      return base(url as string);
+    }) as typeof fetch;
+    const a = await handleTvl({ protocol: 'ethereum' }, { fetchImpl });
+    const b = await handleTvl({ protocol: 'bitcoin' }, { fetchImpl });
+    expect(chainsFetches).toBe(1);
+    expect(a.as_of).toBe(b.as_of);
+    expect(a.tvl_usd).toBe(35974180659);
+    expect(b.tvl_usd).toBe(3111736181);
+    expect(b.source).toBe('DeFiLlama API (https://api.llama.fi/v2/chains)');
+  });
+
+  it('chain entry without a catalog tvl falls back to the history point, named as degraded', async () => {
+    // Tezos carries no `tvl` in the /v2/chains fixture, so the fresh read
+    // has no usable value: the answer comes from the history point
+    // (fixture 123456, real-shape Tezos history) with the point's own
+    // date, and both answer and source name the degraded mode.
+    const out = await handleTvl({ protocol: 'tezos' }, { fetchImpl: fixtureFetch() });
+    expect(out.protocol_or_chain).toBe('Tezos');
+    expect(out.tvl_usd).toBe(123456);
+    expect(out.as_of).toBe(LATEST_ISO);
+    expect(out.answer).toBe(
+      `Tezos has a total value locked of $123456 as of ${LATEST_DATE}.` +
+        ' Served from the latest history point (degraded: the live chains read carried no usable current value).',
+    );
     expect(out.source).toBe(
-      'DeFiLlama API (https://api.llama.fi/v2/historicalChainTvl/Ethereum)',
+      'DeFiLlama API (https://api.llama.fi/v2/historicalChainTvl/Tezos), latest history point (degraded: no usable live chains value)',
     );
   });
 
@@ -1936,7 +1986,10 @@ describe('handleTvl round-3 end-to-end (B1/B2 tickers and names)', () => {
     expect(out.tvl_usd).toBe(0);
     expect(out.as_of).toBe(LATEST_ISO);
     expect(out.verdict).toBe('verified');
-    expect(out.answer).toBe(`BounceBit has a total value locked of $0 as of ${LATEST_DATE}.`);
+    expect(out.answer).toBe(
+      `BounceBit has a total value locked of $0 as of ${LATEST_DATE}.` +
+        ' Served from the latest history point (degraded: the live chains read carried no usable current value).',
+    );
   });
 
   it('"Polygon zkEVM" reports a genuine $0 (latest point $0 today; stale $330,113 from 136d back is NOT served)', async () => {
@@ -2059,9 +2112,6 @@ describe('handleTvl refusal matrix (400 / 422 / 502)', () => {
         if (u === 'https://api.llama.fi/protocols') {
           return new Response(JSON.stringify(PROTOCOLS_FIXTURE), { status: 200 });
         }
-        if (u === 'https://api.llama.fi/v2/chains') {
-          return new Response(JSON.stringify(CHAINS_FIXTURE), { status: 200 });
-        }
         return new Response('upstream error', { status });
       }) as typeof fetch;
       for (const query of ['aave-v3', 'ethereum']) {
@@ -2123,8 +2173,10 @@ describe('handleTvl refusal matrix (400 / 422 / 502)', () => {
         if (u === 'https://api.llama.fi/protocols') {
           return new Response(JSON.stringify(PROTOCOLS_FIXTURE), { status: 200 });
         }
+        // Slice A part 2: the fresh /v2/chains read must FAIL here so the
+        // degraded historical path (and its parser gate) is what runs.
         if (u === 'https://api.llama.fi/v2/chains') {
-          return new Response(JSON.stringify(CHAINS_FIXTURE), { status: 200 });
+          return new Response('unavailable', { status: 503 });
         }
         if (u.startsWith('https://api.llama.fi/v2/historicalChainTvl/')) {
           return new Response(body, { status: 200 });
@@ -3100,7 +3152,8 @@ describe('handleTvl round-4 (B2a stale reading -> 502 through the handler)', () 
         return new Response(JSON.stringify(PROTOCOLS_FIXTURE), { status: 200 });
       }
       if (u === 'https://api.llama.fi/v2/chains') {
-        return new Response(JSON.stringify(CHAINS_FIXTURE), { status: 200 });
+        // Slice A part 2: fresh read down -> the degraded historical gate runs.
+        return new Response('unavailable', { status: 503 });
       }
       if (u.startsWith('https://api.llama.fi/v2/historicalChainTvl/')) {
         return new Response(
@@ -3384,7 +3437,9 @@ describe('handleTvl round-4 (answer carries the as_of date)', () => {
         return new Response(JSON.stringify(PROTOCOLS_FIXTURE), { status: 200 });
       }
       if (u === 'https://api.llama.fi/v2/chains') {
-        return new Response(JSON.stringify(CHAINS_FIXTURE), { status: 200 });
+        // Slice A part 2: fresh read down -> degraded historical fallback,
+        // which keeps its own point date and names the degraded mode.
+        return new Response('unavailable', { status: 503 });
       }
       if (u.startsWith('https://api.llama.fi/v2/historicalChainTvl/')) {
         return new Response(
@@ -3395,7 +3450,13 @@ describe('handleTvl round-4 (answer carries the as_of date)', () => {
       return new Response('not found', { status: 404 });
     }) as typeof fetch;
     const out = await handleTvl({ protocol: 'ethereum' }, { fetchImpl });
-    expect(out.answer).toBe(`Ethereum has a total value locked of $35.97B ($35974180659) as of ${dateStr}.`);
+    expect(out.answer).toBe(
+      `Ethereum has a total value locked of $35.97B ($35974180659) as of ${dateStr}.` +
+        ' Served from the latest history point (degraded: the live chains read carried no usable current value).',
+    );
+    expect(out.source).toBe(
+      'DeFiLlama API (https://api.llama.fi/v2/historicalChainTvl/Ethereum), latest history point (degraded: no usable live chains value)',
+    );
   });
 });
 
