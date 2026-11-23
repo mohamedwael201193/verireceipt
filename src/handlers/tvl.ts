@@ -330,7 +330,21 @@ const LATEST_MAX_AGE_S = 7 * 24 * 60 * 60;
 
 export type TvlTarget =
   | { kind: 'protocol'; slug: string; displayName: string; confidence: number; parentId?: string }
-  | { kind: 'chain'; chain: string; displayName: string; confidence: number };
+  | { kind: 'chain'; chain: string; displayName: string; confidence: number }
+  | {
+      // Chain-scoped protocol query ("aave v3 on ethereum"): the protocol
+      // total serves as tvl_usd and chain_tvl_usd is the protocol's TVL on
+      // the NAMED chain only (never the dominant chain), per the intent
+      // contract. The query refuses honestly when the named chain carries
+      // no TVL for the protocol or the per-chain split is unavailable.
+      kind: 'protocol_on_chain';
+      slug: string;
+      displayName: string;
+      chain: string;
+      chainDisplayName: string;
+      confidence: number;
+      parentId?: string;
+    };
 
 /**
  * Resolve a raw `protocol` query value against the DeFiLlama protocols and
@@ -640,6 +654,50 @@ export function resolveTvlTarget(
   return null;
 }
 
+/**
+ * Chain-scoped resolution ("aave v3 on ethereum"): tried only when the
+ * whole query resolved to nothing, so every existing resolution keeps
+ * winning (no regression surface). The query splits on its LAST " on ";
+ * the right side must resolve to a chain by its exact name or gecko id
+ * (largest TVL wins on a tie, as in resolveTvlTarget) and the left side
+ * must resolve to a PROTOCOL via the ordinary resolver. Anything else
+ * (unresolvable side, chain on the left, protocol on the right) returns
+ * null and the query stays an ordinary 422. Multi-word chain names
+ * ("aave on op mainnet") work because the split is on the last " on ".
+ */
+export function resolveProtocolOnChain(
+  input: string,
+  protocols: ProtocolEntry[],
+  chains: ChainEntry[],
+): TvlTarget | null {
+  const normalized = input.trim().toLowerCase().replace(/\s+/g, ' ');
+  const idx = normalized.lastIndexOf(' on ');
+  if (idx < 0) return null;
+  const protocolPart = normalized.slice(0, idx).trim();
+  const chainPart = normalized.slice(idx + 4).trim();
+  if (protocolPart.length < 3 || chainPart.length < 3) return null;
+  const chain: ChainEntry | null =
+    sortedByTvlDesc(
+      chains.filter(
+        (c) =>
+          (typeof c.name === 'string' && c.name.toLowerCase() === chainPart) ||
+          (typeof c.gecko_id === 'string' && c.gecko_id.toLowerCase() === chainPart),
+      ),
+    )[0] ?? null;
+  if (chain === null) return null;
+  const protocolTarget = resolveTvlTarget(protocolPart, protocols, chains);
+  if (protocolTarget === null || protocolTarget.kind !== 'protocol') return null;
+  return {
+    kind: 'protocol_on_chain',
+    slug: protocolTarget.slug,
+    displayName: protocolTarget.displayName,
+    chain: chain.name,
+    chainDisplayName: chain.name,
+    confidence: protocolTarget.confidence,
+    ...(protocolTarget.parentId ? { parentId: protocolTarget.parentId } : {}),
+  };
+}
+
 const NON_CHAIN_TVL_METRIC = /(?:^|-)(?:borrowed|staking|pool2|vesting|offers|treasury|owntokens)$/i;
 
 /**
@@ -661,6 +719,38 @@ export function dominantChainTvl(
     if (best === null || value > best) best = value;
   }
   return best;
+}
+
+/**
+ * Full per-chain split from raw publisher chainTvls (chain-scoped "X on Y"
+ * queries): every chain bucket with a positive finite value, keyed by chain
+ * name, excluding the known non-chain metric buckets dominantChainTvl also
+ * excludes. Returns null when no usable chain bucket remains. The map is
+ * small (chains per protocol), unlike the 31 MB protocol history.
+ */
+export function fullChainSplit(
+  currentChainTvls: Record<string, number> | undefined | null,
+): Record<string, number> | null {
+  if (!currentChainTvls || typeof currentChainTvls !== 'object') return null;
+  let split: Record<string, number> | null = null;
+  for (const [chain, value] of Object.entries(currentChainTvls)) {
+    if (NON_CHAIN_TVL_METRIC.test(chain)) continue;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) continue;
+    (split ??= {})[chain] = value;
+  }
+  return split;
+}
+
+/** Case-insensitive lookup of one chain's value in a per-chain split map. */
+function chainSplitValue(
+  byChain: Record<string, number>,
+  chainName: string,
+): number | null {
+  const wanted = chainName.toLowerCase();
+  for (const [chain, value] of Object.entries(byChain)) {
+    if (chain.toLowerCase() === wanted) return value;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1014,9 +1104,19 @@ export function stripProtocolEntries(entries: ProtocolEntry[]): ProtocolEntry[] 
 interface ChainSplitEntry {
   chainTvlUsd: number | null;
   fetchedAt: number;
+  /** Full per-chain split for chain-scoped queries, same fetch as the
+   * dominant reading. Absent on entries written before the split was
+   * retained; such an entry counts as unknown for chain-scoped lookups. */
+  byChain?: Record<string, number> | null;
 }
 const protocolChainSplitCache = new Map<string, ChainSplitEntry>();
 const listsChainSplit = new Map<string, number>();
+/** Full per-chain split from the live protocol list, retained for the
+ * top 200 protocols by TVL (chain-scoped "X on Y" answers without a
+ * /protocol fill). Rebuilt on every lists refresh alongside the dominant
+ * map; like that map it is in-memory only, so a restart serves an honest
+ * "split unavailable" refusal until the first refresh lands. */
+const listsChainSplitFull = new Map<string, Record<string, number>>();
 /** When the lists chain-split map was last rebuilt (A5-fix2, J2-R2 F6:
  * the freshness comparison needs a timestamp for the lists side too). */
 let listsChainSplitFetchedAt: number | null = null;
@@ -1062,6 +1162,12 @@ function rebuildListsChainSplit(
   fetchedAtMs: number = Date.now(),
 ): void {
   installListsChainSplit(deriveListsChainSplit(protocols), fetchedAtMs);
+  listsChainSplitFull.clear();
+  const byTvlDesc = [...protocols].sort((a, b) => (b.tvl ?? 0) - (a.tvl ?? 0));
+  for (const entry of byTvlDesc.slice(0, 200)) {
+    const split = fullChainSplit(entry.chainTvls);
+    if (split !== null) listsChainSplitFull.set(entry.slug, split);
+  }
 }
 
 /**
@@ -1108,6 +1214,7 @@ function startProtocolChainFill(slug: string, fetchImpl: typeof fetch): Promise<
         protocolChainSplitCache.set(slug, {
           chainTvlUsd: reading.chainTvlUsd,
           fetchedAt: Date.now(),
+          byChain: fullChainSplit(payload.currentChainTvls),
         });
       }
     } catch {
@@ -1171,6 +1278,49 @@ function chainTvlUsdFor(
   return chosen;
 }
 
+/**
+ * Resolve a protocol's TVL on one NAMED chain ("X on Y") without blocking:
+ * the FRESHER of the fill cache's full split and the live-lists full split
+ * wins (same freshness rule as chainTvlUsdFor), looked up case-insensitively
+ * and cross-checked against the fresh total (an impossible split is
+ * suppressed, J2-R2 F3). Three honest outcomes, never an invented number:
+ *   - value:   the named chain carries TVL in the split;
+ *   - no_tvl:  the split is known and records no TVL on the named chain;
+ *   - unknown: no split is available yet (background fill kicked off) or
+ *              the only candidate failed the total cross-check.
+ */
+function chainTvlOnChainFor(
+  slug: string,
+  chainDisplayName: string,
+  fetchImpl: typeof fetch,
+  tvlUsd: number,
+): { state: 'value'; value: number } | { state: 'no_tvl' } | { state: 'unknown' } {
+  const fill = protocolChainSplitCache.get(slug);
+  const fillSplit = fill?.byChain ?? undefined;
+  const listsAge = listsChainSplitFetchedAt === null ? Infinity : Date.now() - listsChainSplitFetchedAt;
+  const fromLists = listsAge >= 0 && listsAge < LISTS_TTL_MS ? listsChainSplitFull.get(slug) : undefined;
+  let byChain: Record<string, number> | undefined;
+  if (fillSplit !== undefined && fromLists !== undefined) {
+    byChain =
+      listsChainSplitFetchedAt !== null && fill !== undefined && listsChainSplitFetchedAt > fill.fetchedAt
+        ? fromLists
+        : fillSplit;
+  } else if (fillSplit !== undefined) {
+    byChain = fillSplit;
+  } else if (fromLists !== undefined) {
+    byChain = fromLists;
+  } else {
+    // No split anywhere: kick the background fill so a retry can answer.
+    void startProtocolChainFill(slug, fetchImpl);
+    return { state: 'unknown' };
+  }
+  const value = chainSplitValue(byChain, chainDisplayName);
+  if (value === null) return { state: 'no_tvl' };
+  const checked = consistentChainSplit(value, tvlUsd);
+  if (checked === null) return { state: 'unknown' };
+  return { state: 'value', value: checked };
+}
+
 /** Test hook: await the in-flight background chain-split fill(s). */
 export function __awaitTvlProtocolFillForTests(slug?: string): Promise<void> {
   if (slug !== undefined) {
@@ -1196,6 +1346,7 @@ export function __clearTvlCachesForTests(): void {
   // a later test would see a previous test's split. In-flight fills are
   // generation-guarded, so they can no longer write after this bump.
   listsChainSplit.clear();
+  listsChainSplitFull.clear();
   listsChainSplitFetchedAt = null;
   protocolChainSplitCache.clear();
   protocolFillGen++;
@@ -2186,6 +2337,57 @@ function formatAnswer(displayName: string, tvlUsd: number, asOf: string): string
   return `${displayName} has a total value locked of ${formatUsd(tvlUsd)} as of ${asOf.slice(0, 10)}.`;
 }
 
+/**
+ * Chain-scoped answer ("X on Y"): the total PLUS the named chain's share,
+ * both full-precision. The chain value is always a real number here — the
+ * no-TVL and split-unavailable cases are honest refusals thrown before an
+ * answer is ever formatted.
+ */
+function formatScopedAnswer(
+  displayName: string,
+  tvlUsd: number,
+  chainDisplayName: string,
+  chainTvlUsd: number,
+  asOf: string,
+): string {
+  return `${displayName} has a total value locked of ${formatUsd(tvlUsd)} as of ${asOf.slice(0, 10)}, of which ${formatUsd(chainTvlUsd)} is on ${chainDisplayName}.`;
+}
+
+/**
+ * chain_tvl_usd for the protocol path. An ordinary protocol query gets the
+ * dominant-chain reading (null when unknown — the answer never blocks on
+ * the split). A chain-scoped query ("X on Y") MUST name the asked chain's
+ * value: when the split records no TVL on that chain the request refuses
+ * with 422 CHAIN_TVL_NONE, and when no split is available yet it refuses
+ * with 502 CHAIN_SPLIT_UNAVAILABLE (retry_after_sec 65, the background
+ * fill kicked off) — the same fail-closed posture as the cold-lists warm,
+ * and never an invented number or a silently substituted dominant chain.
+ */
+function scopedChainTvlOrThrow(
+  target: Extract<TvlTarget, { kind: 'protocol' | 'protocol_on_chain' }>,
+  fetchImpl: typeof fetch,
+  tvlUsd: number,
+): number | null {
+  if (target.kind !== 'protocol_on_chain') {
+    return chainTvlUsdFor(target.slug, fetchImpl, tvlUsd);
+  }
+  const scoped = chainTvlOnChainFor(target.slug, target.chainDisplayName, fetchImpl, tvlUsd);
+  if (scoped.state === 'value') return scoped.value;
+  if (scoped.state === 'no_tvl') {
+    throw unprocessable(
+      'CHAIN_TVL_NONE',
+      `DeFiLlama's current per-chain split records no TVL for ${target.displayName} on ${target.chainDisplayName}`,
+    );
+  }
+  void startProtocolChainFill(target.slug, fetchImpl);
+  throw new ApiError(
+    502,
+    'CHAIN_SPLIT_UNAVAILABLE',
+    `DeFiLlama per-chain split for "${target.slug}" is not available yet (background fill in progress), retry shortly`,
+    LISTS_WARM_RETRY_AFTER_SEC,
+  );
+}
+
 export async function handleTvl(
   query: Record<string, string | undefined>,
   deps: TvlDeps = {},
@@ -2217,7 +2419,12 @@ export async function handleTvl(
   // withdrawn). A5: loadListsFromCache is async (async disk/seed reads).
   const { protocols: cachedProtocols, chains } = await loadListsFromCache(fetchImpl);
   const protocols = await withParentMetadata(cachedProtocols);
-  const target = resolveTvlTarget(protocol, protocols, chains);
+  // Chain-scoped queries ("aave v3 on ethereum") resolve ONLY when the
+  // whole query resolves to nothing, so every existing resolution keeps
+  // winning (resolveProtocolOnChain's own precondition).
+  const target =
+    resolveTvlTarget(protocol, protocols, chains) ??
+    resolveProtocolOnChain(protocol, protocols, chains);
   if (target === null) {
     throw unprocessable(
       'PROTOCOL_NOT_FOUND',
@@ -2270,7 +2477,7 @@ export async function handleTvl(
   // same pinned scheme as before (re-hash the SERVED bytes, never a
   // re-fetch: live values move). The fallback keeps the existing evidence
   // (full history + currentChainTvls). ---
-  if (target.kind === 'protocol') {
+  if (target.kind === 'protocol' || target.kind === 'protocol_on_chain') {
     const tvlUrl = TVL_URL(target.slug);
     // The lists `tvl` for this slug is the F2 freshness reference (the
     // /protocols list tvl equals the /tvl value live, to the cent).
@@ -2324,11 +2531,17 @@ export async function handleTvl(
       const tvlUsd = primaryTvlUsd;
       const rawBody = primaryRawBody;
       const asOf = new Date().toISOString();
-      const chainTvlUsd = chainTvlUsdFor(target.slug, fetchImpl, tvlUsd);
+      // Chain-scoped ("X on Y"): the named chain's value from the full
+      // per-chain split, or an honest refusal — never the dominant chain,
+      // never an invented number.
+      const chainTvlUsd = scopedChainTvlOrThrow(target, fetchImpl, tvlUsd);
       const evidence = stableStringify({
         intent: INTENT,
         upstream_url: tvlUrl,
         protocol: target.slug,
+        ...(target.kind === 'protocol_on_chain'
+          ? { scoped_chain: target.chainDisplayName }
+          : {}),
         tvl_response: rawBody,
         ...(target.parentId ? { resolution: {
           parent_id: target.parentId,
@@ -2356,11 +2569,16 @@ export async function handleTvl(
           protocol_or_chain: target.slug,
           tvl_usd: tvlUsd,
           chain_tvl_usd: chainTvlUsd,
+          ...(target.kind === 'protocol_on_chain'
+            ? { scoped_chain: target.chainDisplayName }
+            : {}),
           as_of: asOf,
         },
         receipt,
         {
-          answer: formatAnswer(target.displayName, tvlUsd, asOf) + (target.parentId
+          answer: (target.kind === 'protocol_on_chain'
+            ? formatScopedAnswer(target.displayName, tvlUsd, target.chainDisplayName, chainTvlUsd as number, asOf)
+            : formatAnswer(target.displayName, tvlUsd, asOf)) + (target.parentId
             ? ' Parent protocol aggregate from its own endpoint, not a child total; observed at fetch time (upstream supplies no timestamp or catalog parent-total cross-check).'
             : ''),
           verdict: 'verified',
@@ -2390,13 +2608,40 @@ export async function handleTvl(
     // A5-fix2 (J2-R2 F3): the fallback split comes from the same payload
     // as the total, but a stale/mixed payload can still carry a dominant
     // above the total — drop it to null, as on the primary path.
-    const chainTvlUsd = consistentChainSplit(reading.chainTvlUsd, reading.tvlUsd);
+    const dominantSplit = consistentChainSplit(reading.chainTvlUsd, reading.tvlUsd);
+    // Chain-scoped ("X on Y"): the named chain's value comes from THIS
+    // payload's currentChainTvls (already paid for), with the same honest
+    // refusals as the primary path — never the dominant chain, never an
+    // invented number.
+    const byChain = fullChainSplit(payload.currentChainTvls);
+    let chainTvlUsd: number | null;
+    if (target.kind === 'protocol_on_chain') {
+      const scopedValue = byChain === null ? null : chainSplitValue(byChain, target.chainDisplayName);
+      if (scopedValue === null) {
+        throw unprocessable(
+          'CHAIN_TVL_NONE',
+          `DeFiLlama's current per-chain split records no TVL for ${target.displayName} on ${target.chainDisplayName}`,
+        );
+      }
+      const checked = consistentChainSplit(scopedValue, reading.tvlUsd);
+      if (checked === null) {
+        throw upstreamUnavailable(
+          'DEFILLAMA_BAD_RESPONSE',
+          `DeFiLlama per-chain split for "${target.slug}" on ${target.chainDisplayName} is inconsistent with its total; not served`,
+        );
+      }
+      chainTvlUsd = checked;
+    } else {
+      chainTvlUsd = dominantSplit;
+    }
     // A5-fix: a fallback call already paid for the /protocol body — warm
     // the chain-split cache from it, so the next primary-path call for
-    // this slug serves chain_tvl_usd without a background fill.
+    // this slug serves chain_tvl_usd without a background fill. The full
+    // per-chain split is retained too, for chain-scoped queries.
     protocolChainSplitCache.set(target.slug, {
-      chainTvlUsd,
+      chainTvlUsd: dominantSplit,
       fetchedAt: Date.now(),
+      byChain,
     });
     // Receipt evidence (receipt-fix, 2026-11-20): the hash covers
     // CANONICAL PINNED evidence, NOT the raw body. The raw
@@ -2420,6 +2665,9 @@ export async function handleTvl(
       protocol: target.slug,
       tvl: Array.isArray(payload.tvl) ? payload.tvl : [],
       currentChainTvls: payload.currentChainTvls ?? null,
+      ...(target.kind === 'protocol_on_chain'
+        ? { scoped_chain: target.chainDisplayName }
+        : {}),
       reading: {
         tvl_usd: reading.tvlUsd,
         chain_tvl_usd: chainTvlUsd,
@@ -2438,11 +2686,16 @@ export async function handleTvl(
         protocol_or_chain: target.slug,
         tvl_usd: reading.tvlUsd,
         chain_tvl_usd: chainTvlUsd,
+        ...(target.kind === 'protocol_on_chain'
+          ? { scoped_chain: target.chainDisplayName }
+          : {}),
         as_of: reading.asOf,
       },
       receipt,
       {
-        answer: formatAnswer(target.displayName, reading.tvlUsd, reading.asOf),
+        answer: target.kind === 'protocol_on_chain'
+          ? formatScopedAnswer(target.displayName, reading.tvlUsd, target.chainDisplayName, chainTvlUsd as number, reading.asOf)
+          : formatAnswer(target.displayName, reading.tvlUsd, reading.asOf),
         verdict: 'verified',
         confidence: target.confidence,
         source: `DeFiLlama API (${upstreamUrl})`,
