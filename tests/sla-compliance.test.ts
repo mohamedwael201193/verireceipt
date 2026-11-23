@@ -86,12 +86,13 @@ describe("SLA_COMPLIANCE_GENERAL", () => {
     expect(res.json().uptime_pct).toBeNull();
     await app.close();
   });
-  it("a malformed period is a 400", async () => {
+  it("a free-string period returns disclosed unknown nulls", async () => {
     stub();
     const app = buildServer();
     const res = await app.inject({ method: "GET", url: "/v1/sla-compliance?service=github&period=last-month" });
-    expect(res.statusCode).toBe(400);
-    expect(res.json().code).toBe("INVALID_PERIOD");
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("unknown");
+    expect(res.json().uptime_pct).toBeNull();
     await app.close();
   });
   it("a statuspage outage fails closed with a 502", async () => {
@@ -145,8 +146,9 @@ describe("SLA_COMPLIANCE_GENERAL", () => {
         method: "GET",
         url: `/v1/sla-compliance?service=github&period=${encodeURIComponent(bad)}`,
       });
-      expect(res.statusCode, bad).toBe(400);
-      expect(res.json().code).toBe("INVALID_PERIOD");
+      expect(res.statusCode, bad).toBe(200);
+      expect(res.json().status).toBe("unknown");
+      expect(res.json().uptime_pct).toBeNull();
     }
     await app.close();
   });

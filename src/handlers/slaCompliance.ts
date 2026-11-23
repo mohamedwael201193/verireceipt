@@ -26,8 +26,8 @@
 // different number, which is why the rule travels with the answer.
 //
 // FAIL CLOSED: unreachable/malformed/non-200 statuspage, an incident
-// log too short to cover the window, or a period that is not Nd is an
-// error, never a guessed uptime.
+// log too short to cover a resolved rolling window is an error. An
+// unsupported period returns disclosed unknown nulls, never guessed uptime.
 import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -62,15 +62,15 @@ interface Incident {
   resolved_at: string | null;
 }
 
-function parsePeriod(raw: string | undefined): { days: number } {
+function parsePeriod(raw: string | undefined): { days: number } | null {
   if (!raw) throw badRequest("MISSING_PARAM", "period is required: a number of days as Nd, e.g. 30d");
   // AUDIT S2: the contract's own example is "last 30 days", so accept the
   // natural phrasings too — "last N days", "past N days", "N days" — all
   // mapping to the same Nd window; bounds and refusals are unchanged.
   const m = /^(?:(?:the\s+)?(?:last|past)\s+)?(\d{1,3})\s*(?:d|days?)$/.exec(raw.trim().toLowerCase());
-  if (!m) throw badRequest("INVALID_PERIOD", "period must be Nd days, e.g. 7d, 30d, 90d");
+  if (!m) return null;
   const days = Number(m[1]);
-  if (days < 1 || days > 90) throw badRequest("INVALID_PERIOD", "period must be between 1d and 90d; longer windows exceed what a statuspage incident log covers");
+  if (days < 1 || days > 90) return null;
   return { days };
 }
 
@@ -131,16 +131,21 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
   const service = query.service?.trim().toLowerCase();
   if (!service) throw badRequest("MISSING_PARAM", `service is required: one of ${Object.keys(STATUSPAGES).join(", ")}`);
   if (service.length > 64) throw badRequest("INVALID_SERVICE", "service is over 64 characters");
-  const { days } = parsePeriod(query.period);
+  const resolvedPeriod = parsePeriod(query.period);
+  const days = resolvedPeriod?.days;
   const alias=service.replace(/[^a-z0-9.]/g,'');
   const host = STATUSPAGES[alias] ?? Object.values(STATUSPAGES).find(host=>host===service) ?? (/^[a-z0-9][a-z0-9-]{1,60}\.statuspage\.io$/.test(service)?service:null);
-  if (!host) {
+  if (!host || days === undefined) {
     const at=new Date().toISOString();
-    const evidence=JSON.stringify({service,period_days:days,status:'not_found',source_resolution:'No verified statuspage binding; no guessed hostname or external lookup',checked_at:at});
-    const receipt=makeReceipt(INTENT,'local:verified-statuspage-bindings',evidence,'No provider found; no uptime observation');receipt.fetched_at=at;
+    const status=!host?'not_found':'unknown';
+    const reason=!host?'No verified statuspage binding; no guessed hostname or external lookup':
+      'Period is not a supported rolling 1-90 day window. Calendar months and other free text are accepted, but no complete calendar-period source window was established; no arithmetic performed';
+    const period=days===undefined?query.period!.trim():`${days}d`;
+    const evidence=JSON.stringify({service,period,period_days:days??null,status,source_resolution:reason,checked_at:at});
+    const receipt=makeReceipt(INTENT,'local:verified-statuspage-bindings',evidence,'No supported observation window; no uptime observation');receipt.fetched_at=at;
     try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
-    const answer=`${service}: no verified statuspage source found. Uptime, SLA target and compliance are unknown, not zero or fully operational.`;
-    return envelope(INTENT,{service,period:`${days}d`,status:'not_found',uptime_pct:null,sla_target_pct:null,compliant:null,summary:answer},receipt,{answer,verdict:'unverified',confidence:0,source:'Verified statuspage binding list only; no provider observation'});
+    const answer=`${service}: ${reason}. Uptime, SLA target and compliance are unknown, not zero or fully operational.`;
+    return envelope(INTENT,{service,period,status,uptime_pct:null,sla_target_pct:null,compliant:null,summary:answer},receipt,{answer,verdict:'unverified',confidence:0,source:'Verified statuspage binding list only; no provider observation'});
   }
   const summaryUrl=`https://${host}/api/v2/summary.json`;
   let summaryBody:string, summary:any;
