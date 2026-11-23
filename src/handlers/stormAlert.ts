@@ -20,8 +20,11 @@
 //   issue/expiry times. No forecast model output is scored.
 // - US coverage only: the /points lookup 404s outside the NWS grid,
 //   which is an honest 422 OUTSIDE_NWS_COVERAGE, never a silent LOW.
-// - location must be "lat,lon" decimal degrees; place names are not
-//   geocoded (no keyless geocoder is part of this slice).
+// - location may be "lat,lon" decimal degrees or a place name (S1,
+//   audit 2026-11-23: the contract reads "The place"). Place names are
+//   geocoded with the same Open-Meteo geocoder and fail-closed rules as
+//   the forecast slice (named resolution, ambiguity refused), and the
+//   resolved place and its coordinates are named in every answer.
 // - peak_gust_kmh and precipitation_mm are null: issued alert products
 //   do not carry those numerics and they are never invented.
 //
@@ -31,7 +34,8 @@
 // Minor/Unknown 0.25, none 0.0. Levels: >=0.875 SEVERE, >=0.625 HIGH,
 // >=0.375 MODERATE, else LOW.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
-import { envelope, makeReceipt } from "../core/receipt";
+import { resolveGeocode } from "./weatherForecast";
+import { envelope, makeReceipt, sha256Hex } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
 const SOURCE_TIMEOUT_MS = 6000;
@@ -106,7 +110,28 @@ async function fetchText(url: string): Promise<{ status: number; body: string }>
 export const INTENT = "STORM_ALERT_GENERAL";
 
 export async function handleStormAlert(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
-  const { lat, lon } = parseLocation(query.location);
+  // S1: "lat,lon" as before, or a place name through the geocoder (the
+  // contract's "The place"). The resolved label is used in the answer.
+  const rawLocation = query.location?.trim();
+  let lat: number, lon: number, placeLabel: string;
+  let geocoder: { url: string; body: string } | null = null;
+  if (rawLocation && !/^\s*-?\d{1,2}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?\s*$/.test(rawLocation)) {
+    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(rawLocation)}&count=10&language=en&format=json`;
+    let g: { status: number; body: string };
+    try {
+      g = await fetchText(geoUrl);
+      if (g.status >= 400) throw new Error(`geocoder HTTP ${g.status}`);
+    } catch {
+      throw upstreamUnavailable("GEOCODER_UNREACHABLE", "the Open-Meteo geocoder could not be reached; pass \"lat,lon\" to skip geocoding");
+    }
+    const hit = resolveGeocode(g.body, rawLocation);
+    lat = hit.latitude; lon = hit.longitude;
+    placeLabel = `${hit.name}${hit.admin1 ? `, ${hit.admin1}` : ""}${hit.country ? `, ${hit.country}` : ""} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+    geocoder = { url: geoUrl, body: g.body };
+  } else {
+    ({ lat, lon } = parseLocation(query.location));
+    placeLabel = `${lat},${lon}`;
+  }
   let windowHours = 24;
   if (query.window_hours !== undefined && query.window_hours.trim() !== "") {
     const w = Number(query.window_hours);
@@ -134,7 +159,9 @@ export async function handleStormAlert(query: Record<string, string | undefined>
   const nowIso = new Date().toISOString();
   const { score, level, counted, excluded } = assessAlerts(alerts, nowIso, windowHours);
   const asOf = new Date().toISOString();
-  const evidence = JSON.stringify({ location: `${lat},${lon}`, window_hours: windowHours, as_of: asOf,
+  const evidence = JSON.stringify({ location: `${lat},${lon}`, resolved_place: geocoder ? placeLabel : "not geocoded (coordinates given directly)",
+    geocoder: geocoder ? { url: geocoder.url, sha256: sha256Hex(Buffer.from(geocoder.body, "utf8")) } : "not used",
+    window_hours: windowHours, as_of: asOf,
     alerts: alerts.map((a) => ({ ...a, counted: counted.includes(a) })),
     risk_mapping: "worst severity among active alerts expiring inside the window: Extreme 1.0, Severe 0.75, Moderate 0.5, Minor/Unknown 0.25, none 0; levels >=0.875 SEVERE, >=0.625 HIGH, >=0.375 MODERATE, else LOW",
     source_policy: "NWS api.weather.gov issued alert products only; no forecast output scored; US coverage only",
@@ -148,10 +175,10 @@ export async function handleStormAlert(query: Record<string, string | undefined>
   }
   const fmt = (a: IssuedAlert) => `${a.event} (${a.severity}), issued ${a.sent}, expires ${a.expires}`;
   const answer = counted.length === 0
-    ? `Storm risk LOW (score 0) for ${lat},${lon} over the next ${windowHours}h: no issued NWS alert products are active at this point expiring inside the window` +
+    ? `Storm risk LOW (score 0) for ${placeLabel} over the next ${windowHours}h: no issued NWS alert products are active at this point expiring inside the window` +
       (excluded.length ? ` (${excluded.length} issued product(s) not counted toward this window: ${excluded.map((a) => `${a.event}, onset ${a.onset}, expires ${a.expires}`).join("; ")})` : "") +
       ". Issued US NWS alert products only; no forecast model output is scored."
-    : `Storm risk ${level} (score ${score}) for ${lat},${lon} over the next ${windowHours}h from ${counted.length} issued NWS alert product(s): ` +
+    : `Storm risk ${level} (score ${score}) for ${placeLabel} over the next ${windowHours}h from ${counted.length} issued NWS alert product(s): ` +
       counted.map(fmt).join("; ") +
       (excluded.length ? `. Not counted toward this window: ${excluded.map((a) => `${a.event}, onset ${a.onset}, expires ${a.expires}`).join("; ")}` : "") +
       ". Score is the worst severity among these issued products (Extreme 1.0 / Severe 0.75 / Moderate 0.5 / Minor 0.25); no forecast model output is scored. Peak gust and precipitation numerics are not carried by issued alert products.";

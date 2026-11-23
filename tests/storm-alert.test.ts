@@ -28,9 +28,16 @@ function stub(opts: { alerts?: string; points?: string | "404" } = {}): void {
   });
 }
 describe("STORM_ALERT_GENERAL", () => {
-  it("location must be lat,lon; window_hours is bounded", async () => {
+  it("location may be lat,lon or a place name; window_hours is bounded", async () => {
     await expect(handleStormAlert({})).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
-    await expect(handleStormAlert({ location: "Corpus Christi" })).rejects.toMatchObject({ status: 400, code: "BAD_LOCATION" });
+    // A place name the geocoder cannot resolve is an honest 422, not a guess.
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const u = String(url);
+      if (u.startsWith("https://geocoding-api.open-meteo.com/")) return new Response('{"results":[]}', { status: 200 });
+      throw new Error(`unexpected fetch ${u}`);
+    });
+    await expect(handleStormAlert({ location: "Zzznotaplace" })).rejects.toMatchObject({ status: 422, code: "PLACE_NOT_FOUND" });
+    vi.unstubAllGlobals();
     await expect(handleStormAlert({ location: "91,0" })).rejects.toMatchObject({ status: 400, code: "BAD_LOCATION" });
     await expect(handleStormAlert({ location: "27.3,-97.2", window_hours: "0" })).rejects.toMatchObject({ status: 400, code: "BAD_WINDOW" });
     await expect(handleStormAlert({ location: "27.3,-97.2", window_hours: "241" })).rejects.toMatchObject({ status: 400, code: "BAD_WINDOW" });
@@ -92,6 +99,31 @@ describe("STORM_ALERT_GENERAL", () => {
     expect(result.risk_level).toBe("LOW");
     expect(String(result.answer)).toContain("no issued NWS alert products");
   });
+  it("S1: a place name is geocoded, resolved and named in the answer", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(FROZEN);
+    const geo = JSON.stringify({ results: [{ name: "Corpus Christi", latitude: 27.8006, longitude: -97.3964, country: "United States", admin1: "Texas", country_code: "US" }] });
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const u = String(url);
+      if (u.startsWith("https://geocoding-api.open-meteo.com/")) return new Response(geo, { status: 200 });
+      if (u.includes("/points/")) return new Response(corpusPoints, { status: 200 });
+      return new Response(corpusAlerts, { status: 200 });
+    });
+    const result = await handleStormAlert({ location: "Corpus Christi", window_hours: "24" });
+    expect(result.risk_score).toBe(0.75);
+    const ans = String(result.answer);
+    expect(ans).toContain("Corpus Christi, Texas, United States (27.8006, -97.3964)");
+    expect(ans).toContain("Special Marine Warning (Severe)");
+    // Outside the NWS grid after geocoding stays an honest 422, never LOW.
+    const geoCairo = JSON.stringify({ results: [{ name: "Cairo", latitude: 30.0444, longitude: 31.2357, country: "Egypt", country_code: "EG" }] });
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const u = String(url);
+      if (u.startsWith("https://geocoding-api.open-meteo.com/")) return new Response(geoCairo, { status: 200 });
+      if (u.includes("/points/")) return new Response("{}", { status: 404 });
+      throw new Error(`unexpected fetch ${u}`);
+    });
+    await expect(handleStormAlert({ location: "Cairo, Egypt" })).rejects.toMatchObject({ status: 422, code: "OUTSIDE_NWS_COVERAGE" });
+  });
+
   it("outside the NWS grid is an honest 422, never a silent LOW", async () => {
     stub({ points: "404" });
     await expect(handleStormAlert({ location: "48.85,2.35" }))
