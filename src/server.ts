@@ -28,6 +28,7 @@ import { handlePaymentMethod } from "./handlers/paymentMethod";
 import { handleUrlSafe } from "./handlers/urlSafe";
 import { handleMalwareHash } from "./handlers/malwareHash";
 import { handleSlaCompliance } from "./handlers/slaCompliance";
+import { handleSportsScore } from "./handlers/sportsScore";
 import { handleBalance } from "./handlers/walletBalance";
 import { handleTokenSupply } from "./handlers/tokenSupply";
 import { fxLogLine, handleFx, handleFxNow } from "./handlers/currencyConvert";
@@ -343,6 +344,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/url-safe", async (request) => trackIntent("url-safe", () => handleUrlSafe(asQuery(request.query))));
   app.get("/v1/malware-hash", async (request) => trackIntent("malware-hash", () => handleMalwareHash(asQuery(request.query))));
   app.get("/v1/sla-compliance", async (request) => trackIntent("sla-compliance", () => handleSlaCompliance(asQuery(request.query))));
+  app.get("/v1/sports-score", async (request) => trackIntent("sports-score", () => handleSportsScore(asQuery(request.query))));
   app.get("/v1/threat-indicator", async (request) => trackIntent("threat-indicator", () => handleThreatIndicator(asQuery(request.query))));
   app.get("/v1/balance", async (request) =>
     trackIntent("balance", () => handleBalance(asQuery(request.query))),
