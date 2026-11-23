@@ -101,3 +101,19 @@ describe("PAYMENT_METHOD_VERIFY_GENERAL", () => {
     await app.close();
   });
 });
+
+it("treats actual empty200 binlist record as no record, retaining exact source bytes", async () => {
+  const raw = readFileSync(join(FX, "binlist-empty-999999.json"), "utf8");
+  const fetcher = vi.fn(async () => new Response(raw)); vi.stubGlobal("fetch", fetcher);
+  const out = await handlePaymentMethod({ bin: "999999" });
+  expect(out.valid).toBe(false); expect(out.network).toBeNull(); expect(out.answer).toContain("No record");
+  const receipt = out.receipt as { receipt_id: string; raw_response_sha256: string };
+  const stored = await getReceiptEvidence(receipt.receipt_id);
+  expect(sha256Hex(stored.evidence!)).toBe(receipt.raw_response_sha256);
+  expect(String(stored.evidence)).toContain(JSON.stringify(raw));
+  await handlePaymentMethod({ bin: "999999" }); expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it("malformed upstream JSON is an honest502 not an escaping SyntaxError",async()=>{
+ vi.stubGlobal("fetch",async()=>new Response("{not-json"));
+ await expect(handlePaymentMethod({bin:"411111"})).rejects.toMatchObject({status:502});
+});

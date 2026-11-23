@@ -67,8 +67,12 @@ async function lookupBin(bin: string): Promise<{ found: boolean; body: string; c
     throw upstreamUnavailable("BINLIST_DEGRADED", `the BIN database answered HTTP ${res.status} (rate limit or outage); refusing to guess`);
   }
   const body = await res.text();
-  cache.set(bin, { at: Date.now(), found: true, body });
-  return { found: true, body, cached: false, fetchedAt };
+  let parsed: BinlistReply;
+  try { parsed = JSON.parse(body); } catch { throw upstreamUnavailable("BINLIST_MALFORMED", "BIN database returned invalid JSON"); }
+  const present = (value: unknown): boolean => typeof value === "string" && value.trim().length > 0;
+  const found = parsed !== null && typeof parsed === "object" && (present(parsed.scheme) || present(parsed.country?.name) || present(parsed.country?.alpha2));
+  cache.set(bin, { at: Date.now(), found, body });
+  return { found, body, cached: false, fetchedAt };
 }
 
 export async function handlePaymentMethod(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
@@ -92,7 +96,7 @@ export async function handlePaymentMethod(query: Record<string, string | undefin
   const cardType = info.type ?? null;
   const evidence = JSON.stringify({
     bin: raw, valid, network, issuing_bank: issuingBank, issuing_country: issuingCountry, card_type: cardType,
-    upstream: { url: `https://lookup.binlist.net/${raw}`, status: found ? 200 : "400/404 (no record)", body: found ? body : null, cached },
+    upstream: { url: `https://lookup.binlist.net/${raw}`, status: body ? 200 : "400/404 (no record)", body: body || null, cached },
     scope: "a BIN has no checksum (Luhn needs the full card number, which is never received); valid means the prefix is allocated and known to the binlist.net database — valid=false is 'no record', not proof the prefix is unallocated",
     fetched_at: fetchedAt, as_of: asOf,
   });
