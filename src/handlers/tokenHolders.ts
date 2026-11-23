@@ -10,19 +10,10 @@
 // and `chain`; scored output `holders_count` (integer, 0..1e10), plus
 // off_chain `token` and `token_symbol`.
 //
-// WHY SINGLE-SOURCE: holder counts are an indexer-side aggregate, not
-// chain state. Independent indexers legitimately disagree (measured
-// live 2026-11-22: ethplorer 9,223,477 vs eth.blockscout.com 9,618,845
-// holders for ethereum USDC — different indexing lag and counting
-// rules), so the exact-value 2-of-N quorum used for RPC state reads
-// can never converge across indexers. Instead each chain is served by
-// one receipted indexer of record (same pattern as the World Bank
-// macro handler: "1/1 authoritative source"), and chains without a
-// working keyless indexer are 422 UNSUPPORTED_CHAIN rather than
-// answered from an unverifiable source. Blockscout instances probed
-// live 2026-11-22: eth.blockscout.com and explorer.optimism.io answer
-// keyless; the base/arbitrum/polygon instances sit behind a Cloudflare
-// challenge for server-side calls and are NOT used.
+// Holder counts are indexer-side aggregates, not RPC state. Ethereum and
+// optimism retain Blockscout as indexer of record. BSC, Polygon, Base and
+// Arbitrum use GeckoTerminal's token-info holders aggregate. The named
+// per-chain source and source update time (when present) are disclosed.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -41,7 +32,13 @@ const INDEXERS: Record<string, string> = {
   optimism: "https://explorer.optimism.io",
 };
 
-const SUPPORTED_CHAINS = Object.keys(INDEXERS);
+const GECKO_NETWORKS: Record<string, string> = { bsc: "bsc", polygon: "polygon_pos", base: "base", arbitrum: "arbitrum" };
+// Verified against token-info address and symbol on 2026-11-23. These are
+// holder-index bindings only; they do not extend the RPC token registry.
+const HOLDER_CONTRACTS: Record<string, Record<string, string>> = {
+  bsc: { USDT: "0x55d398326f99059ff775485246999027b3197955", USDC: "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d" },
+};
+const SUPPORTED_CHAINS = [...Object.keys(INDEXERS), ...Object.keys(GECKO_NETWORKS)];
 
 /** Test seam / runtime override for the HTTP fetch. */
 type FetchText = (url: string) => Promise<string>;
@@ -70,6 +67,7 @@ interface IndexerTokenInfo {
   holdersCount: number;
   symbol: string | null;
   rawBody: string;
+  sourceUpdated?: string;
 }
 
 function parseIndexerResponse(rawBody: string, url: string, contract: string): IndexerTokenInfo {
@@ -98,6 +96,26 @@ function parseIndexerResponse(rawBody: string, url: string, contract: string): I
   return { holdersCount: holders, symbol, rawBody };
 }
 
+function parseGecko(rawBody: string, network: string, contract: string): IndexerTokenInfo {
+  const data = JSON.parse(rawBody)?.data;
+  const a = data?.attributes;
+  if (data?.id?.toLowerCase() !== `${network}_${contract}`.toLowerCase() || data?.type !== "token" ||
+      typeof a?.address !== "string" || a.address.toLowerCase() !== contract.toLowerCase()) {
+    throw new Error("GeckoTerminal network/token identity mismatch");
+  }
+  const count = a?.holders?.count;
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0 || count > MAX_HOLDERS) {
+    throw new Error("GeckoTerminal holders count missing or outside contract range");
+  }
+  if (typeof a.symbol !== "string" || !a.symbol.trim()) throw new Error("GeckoTerminal symbol missing");
+  const updated = a?.holders?.last_updated;
+  if (typeof updated !== "string" || !Number.isFinite(Date.parse(updated)) ||
+      Date.parse(updated) > Date.now() + 60000 || Date.now() - Date.parse(updated) > 86400000) {
+    throw new Error("GeckoTerminal holder update time missing or stale");
+  }
+  return { holdersCount: count, symbol: a.symbol, rawBody, sourceUpdated: updated };
+}
+
 export async function handleTokenHolders(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
@@ -124,7 +142,8 @@ export async function handleTokenHolders(
     throw badRequest("MISSING_PARAM", "token and chain are required query parameters");
   }
   const indexer = INDEXERS[chain];
-  if (!indexer) {
+  const network = GECKO_NETWORKS[chain];
+  if (!indexer && !network) {
     throw unprocessable(
       "UNSUPPORTED_CHAIN",
       `unsupported chain for holder counts: ${chain}; served chains: ${SUPPORTED_CHAINS.join(", ")} (keyless indexer of record per chain; other chains are refused rather than guessed)`,
@@ -144,12 +163,12 @@ export async function handleTokenHolders(
       `${tokenRaw} is the native coin on ${chain}; holder counts are served for ERC-20 tokens only`,
     );
   } else {
-    const lookedUp = tokenContractFor(chain, tokenRaw);
+    const lookedUp = HOLDER_CONTRACTS[chain]?.[tokenRaw.toUpperCase()] ?? tokenContractFor(chain, tokenRaw);
     if (!lookedUp) {
       throw unprocessable(
         "UNSUPPORTED_TOKEN",
         `unsupported token: ${tokenRaw} on ${chain}; pass a 0x contract address or one of: ${Object.keys(
-          TOKEN_CONTRACTS[chain] ?? {},
+          { ...TOKEN_CONTRACTS[chain], ...HOLDER_CONTRACTS[chain] },
         ).join(", ") || "(none verified)"}`,
       );
     }
@@ -157,10 +176,14 @@ export async function handleTokenHolders(
     requestedSymbol = tokenRaw.trim().toUpperCase();
   }
 
-  const url = `${indexer}/api/v2/tokens/${contract}`;
+  const url = network
+    ? `https://api.geckoterminal.com/api/v2/networks/${network}/tokens/${contract}/info`
+    : `${indexer}/api/v2/tokens/${contract}`;
+  const sourceName = network ? "GeckoTerminal" : "Blockscout";
   let info: IndexerTokenInfo;
   try {
-    info = parseIndexerResponse(await fetchText(url), url, contract);
+    const body = await fetchText(url);
+    info = network ? parseGecko(body, network, contract) : parseIndexerResponse(body, url, contract);
   } catch (err) {
     throw upstreamUnavailable(
       "INDEXER_UNREACHABLE",
@@ -178,7 +201,7 @@ export async function handleTokenHolders(
     );
   }
   const symbol = requestedSymbol ?? info.symbol ?? "unknown";
-  const asOf = new Date().toISOString();
+  const asOf = info.sourceUpdated ?? new Date().toISOString();
 
   const fields: Record<string, unknown> = {
     token: contract,
@@ -188,7 +211,7 @@ export async function handleTokenHolders(
     as_of: asOf,
   };
 
-  const receiptDoc: Receipt = makeReceipt(INTENT, url, info.rawBody, "1/1 indexer of record (Blockscout)");
+  const receiptDoc: Receipt = makeReceipt(INTENT, url, info.rawBody, `1/1 indexer of record (${sourceName})`);
   try {
     await saveReceipt(receiptDoc, info.rawBody);
   } catch {
@@ -197,9 +220,9 @@ export async function handleTokenHolders(
   }
 
   return envelope(INTENT, fields, receiptDoc, {
-    answer: `${symbol} (${contract}) on ${chain} has ${info.holdersCount} distinct holder addresses (Blockscout indexer, as of ${asOf}).`,
+    answer: `${symbol} (${contract}) on ${chain} has ${info.holdersCount} distinct holder addresses (${sourceName} indexer, as of ${asOf}).`,
     verdict: "verified",
     confidence: 0.9,
-    source: `Blockscout indexer (${indexer}, keyless, receipted)`,
+    source: `${sourceName} indexer (${url}, keyless, receipted); holder aggregate, not RPC state`,
   });
 }
