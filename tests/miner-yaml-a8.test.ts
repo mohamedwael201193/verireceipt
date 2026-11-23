@@ -296,10 +296,14 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, Outpu
     inputs: ["address", "block", "chain", "metric"],
     outputs: { balance_gwei: "Gwei", address: null, block: null, chain: null, tx_count: null },
   },
+  AIR_QUALITY_INDEX_GENERAL: { endpoint: "/v1/air-quality", inputs: ["lat", "lon"], outputs: {"aqi": null, "aqi_scale": null, "acceptable": null, "european_aqi": null, "pm2_5_ugm3": "micrograms per cubic metre", "pm10_ugm3": "micrograms per cubic metre", "nitrogen_dioxide_ugm3": "micrograms per cubic metre", "ozone_ugm3": "micrograms per cubic metre", "carbon_monoxide_ugm3": "micrograms per cubic metre", "latitude": "degrees", "longitude": "degrees", "upstream_hour": null} },
+  API_HEALTH_CHECK_GENERAL: { endpoint: "/v1/api-health", inputs: ["url"], outputs: {"url": null, "healthy": null, "reachable": null, "http_status": null, "latency_ms": "milliseconds"} },
+  SERVER_UPTIME_MONITOR_GENERAL: { endpoint: "/v1/server-uptime", inputs: ["host"], outputs: {"host": null, "reachable_now": null, "http_status": null, "latency_ms": "milliseconds"} },
+
 };
 
 describe("A8 miner.yaml vs the official intent schemas", () => {
-  it("declares exactly the fifty reviewed intents, each on its own endpoint", () => {
+  it("declares exactly the fifty-three reviewed intents, each on its own endpoint", () => {
     const si = block("  supported_intents:").map((l) => l.trim().replace(/^- /, "")).filter(Boolean);
     expect(si).toEqual(Object.keys(OFFICIAL));
     for (const [intent, o] of Object.entries(OFFICIAL)) {

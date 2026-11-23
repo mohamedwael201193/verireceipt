@@ -110,6 +110,9 @@ semantics:
     - WEATHER_CHECK_TEMPERATURE
     - WEATHER_FORECAST_GENERAL
     - ONCHAIN_METRIC_VERIFY_GENERAL
+    - AIR_QUALITY_INDEX_GENERAL
+    - API_HEALTH_CHECK_GENERAL
+    - SERVER_UPTIME_MONITOR_GENERAL
   signal_mapping:
     confidence_field: confidence
     label_field: answer
@@ -1125,6 +1128,56 @@ endpoints:
           - ONCHAIN_METRIC_VERIFY_GENERAL
           description: 'balance (default) or tx_count. Both are observed and returned for either selection.'
 
+  - path: /v1/air-quality
+    external_path: /v1/air-quality
+    method: GET
+    description: "Current Open-Meteo CAMS model-derived air quality estimate at the returned grid cell, not a ground-station measurement. The current estimate may be derived from model output. Discloses grid, source time and interval. Refuses stale, future, wrong-unit or mismatched-grid evidence. acceptable is a local threshold (US AQI at or below 100), not personal medical advice or an official clearance."
+    intents:
+    - AIR_QUALITY_INDEX_GENERAL
+    params:
+      query:
+        required:
+        - name: lat
+          type: string
+          intents:
+          - AIR_QUALITY_INDEX_GENERAL
+          description: "Explicit latitude in decimal degrees, from -90 to 90."
+        - name: lon
+          type: string
+          intents:
+          - AIR_QUALITY_INDEX_GENERAL
+          description: "Explicit longitude in decimal degrees, from -180 to 180."
+
+  - path: /v1/api-health
+    external_path: /v1/api-health
+    method: GET
+    description: "One measured public-target GET from this server vantage with DNS address pinned through connection and TLS hostname validation. Reports response-header latency and status, not JSON schema payload validation, historical uptime or global availability. Redirects are not followed. Private, reserved and ambiguous targets are refused; one check per target per minute."
+    intents:
+    - API_HEALTH_CHECK_GENERAL
+    params:
+      query:
+        required:
+        - name: url
+          type: string
+          intents:
+          - API_HEALTH_CHECK_GENERAL
+          description: "Public HTTP or HTTPS URL, no credentials; only ports 80 and 443."
+
+  - path: /v1/server-uptime
+    external_path: /v1/server-uptime
+    method: GET
+    description: "Point-in-time public-host HTTP reachability from this server only, not an uptime percentage, historical measurement or multiple-edge observation. DNS address is pinned through connection, TLS hostname is checked and redirects are never followed. Private and reserved targets are refused; one check per target per minute."
+    intents:
+    - SERVER_UPTIME_MONITOR_GENERAL
+    params:
+      query:
+        required:
+        - name: host
+          type: string
+          intents:
+          - SERVER_UPTIME_MONITOR_GENERAL
+          description: "Public HTTP or HTTPS hostname or URL, no credentials; only ports 80 and 443."
+
 intent_mapping:
   ONCHAIN_TX_LOOKUP_GENERAL:
     endpoint: /v1/tx
@@ -1900,3 +1953,77 @@ intent_mapping:
         path: chain
       tx_count:
         path: tx_count
+
+  AIR_QUALITY_INDEX_GENERAL:
+    endpoint: /v1/air-quality
+    input:
+      lat:
+        from: lat
+      lon:
+        from: lon
+    output:
+      aqi:
+        path: aqi
+      aqi_scale:
+        path: aqi_scale
+      acceptable:
+        path: acceptable
+      european_aqi:
+        path: european_aqi
+      pm2_5_ugm3:
+        path: pm2_5_ugm3
+        unit: "micrograms per cubic metre"
+      pm10_ugm3:
+        path: pm10_ugm3
+        unit: "micrograms per cubic metre"
+      nitrogen_dioxide_ugm3:
+        path: nitrogen_dioxide_ugm3
+        unit: "micrograms per cubic metre"
+      ozone_ugm3:
+        path: ozone_ugm3
+        unit: "micrograms per cubic metre"
+      carbon_monoxide_ugm3:
+        path: carbon_monoxide_ugm3
+        unit: "micrograms per cubic metre"
+      latitude:
+        path: latitude
+        unit: "degrees"
+      longitude:
+        path: longitude
+        unit: "degrees"
+      upstream_hour:
+        path: upstream_hour
+
+  API_HEALTH_CHECK_GENERAL:
+    endpoint: /v1/api-health
+    input:
+      url:
+        from: url
+    output:
+      url:
+        path: url
+      healthy:
+        path: healthy
+      reachable:
+        path: reachable
+      http_status:
+        path: http_status
+      latency_ms:
+        path: latency_ms
+        unit: "milliseconds"
+
+  SERVER_UPTIME_MONITOR_GENERAL:
+    endpoint: /v1/server-uptime
+    input:
+      host:
+        from: host
+    output:
+      host:
+        path: host
+      reachable_now:
+        path: reachable_now
+      http_status:
+        path: http_status
+      latency_ms:
+        path: latency_ms
+        unit: "milliseconds"

@@ -257,6 +257,9 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - WEATHER_CHECK_TEMPERATURE\n' +
     '    - WEATHER_FORECAST_GENERAL\n' +
     '    - ONCHAIN_METRIC_VERIFY_GENERAL\n' +
+    '    - AIR_QUALITY_INDEX_GENERAL\n' +
+    '    - API_HEALTH_CHECK_GENERAL\n' +
+    '    - SERVER_UPTIME_MONITOR_GENERAL\n' +
     '  signal_mapping:\n' +
     '    confidence_field: confidence\n' +
     '    label_field: answer\n' +
@@ -1272,6 +1275,56 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          - ONCHAIN_METRIC_VERIFY_GENERAL\n' +
     '          description: \'balance (default) or tx_count. Both are observed and returned for either selection.\'\n' +
     '\n' +
+    '  - path: /v1/air-quality\n' +
+    '    external_path: /v1/air-quality\n' +
+    '    method: GET\n' +
+    '    description: "Current Open-Meteo CAMS model-derived air quality estimate at the returned grid cell, not a ground-station measurement. The current estimate may be derived from model output. Discloses grid, source time and interval. Refuses stale, future, wrong-unit or mismatched-grid evidence. acceptable is a local threshold (US AQI at or below 100), not personal medical advice or an official clearance."\n' +
+    '    intents:\n' +
+    '    - AIR_QUALITY_INDEX_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: lat\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - AIR_QUALITY_INDEX_GENERAL\n' +
+    '          description: "Explicit latitude in decimal degrees, from -90 to 90."\n' +
+    '        - name: lon\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - AIR_QUALITY_INDEX_GENERAL\n' +
+    '          description: "Explicit longitude in decimal degrees, from -180 to 180."\n' +
+    '\n' +
+    '  - path: /v1/api-health\n' +
+    '    external_path: /v1/api-health\n' +
+    '    method: GET\n' +
+    '    description: "One measured public-target GET from this server vantage with DNS address pinned through connection and TLS hostname validation. Reports response-header latency and status, not JSON schema payload validation, historical uptime or global availability. Redirects are not followed. Private, reserved and ambiguous targets are refused; one check per target per minute."\n' +
+    '    intents:\n' +
+    '    - API_HEALTH_CHECK_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: url\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - API_HEALTH_CHECK_GENERAL\n' +
+    '          description: "Public HTTP or HTTPS URL, no credentials; only ports 80 and 443."\n' +
+    '\n' +
+    '  - path: /v1/server-uptime\n' +
+    '    external_path: /v1/server-uptime\n' +
+    '    method: GET\n' +
+    '    description: "Point-in-time public-host HTTP reachability from this server only, not an uptime percentage, historical measurement or multiple-edge observation. DNS address is pinned through connection, TLS hostname is checked and redirects are never followed. Private and reserved targets are refused; one check per target per minute."\n' +
+    '    intents:\n' +
+    '    - SERVER_UPTIME_MONITOR_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: host\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - SERVER_UPTIME_MONITOR_GENERAL\n' +
+    '          description: "Public HTTP or HTTPS hostname or URL, no credentials; only ports 80 and 443."\n' +
+    '\n' +
     'intent_mapping:\n' +
     '  ONCHAIN_TX_LOOKUP_GENERAL:\n' +
     '    endpoint: /v1/tx\n' +
@@ -2046,6 +2099,80 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '      chain:\n' +
     '        path: chain\n' +
     '      tx_count:\n' +
-    '        path: tx_count\n',
+    '        path: tx_count\n' +
+    '\n' +
+    '  AIR_QUALITY_INDEX_GENERAL:\n' +
+    '    endpoint: /v1/air-quality\n' +
+    '    input:\n' +
+    '      lat:\n' +
+    '        from: lat\n' +
+    '      lon:\n' +
+    '        from: lon\n' +
+    '    output:\n' +
+    '      aqi:\n' +
+    '        path: aqi\n' +
+    '      aqi_scale:\n' +
+    '        path: aqi_scale\n' +
+    '      acceptable:\n' +
+    '        path: acceptable\n' +
+    '      european_aqi:\n' +
+    '        path: european_aqi\n' +
+    '      pm2_5_ugm3:\n' +
+    '        path: pm2_5_ugm3\n' +
+    '        unit: "micrograms per cubic metre"\n' +
+    '      pm10_ugm3:\n' +
+    '        path: pm10_ugm3\n' +
+    '        unit: "micrograms per cubic metre"\n' +
+    '      nitrogen_dioxide_ugm3:\n' +
+    '        path: nitrogen_dioxide_ugm3\n' +
+    '        unit: "micrograms per cubic metre"\n' +
+    '      ozone_ugm3:\n' +
+    '        path: ozone_ugm3\n' +
+    '        unit: "micrograms per cubic metre"\n' +
+    '      carbon_monoxide_ugm3:\n' +
+    '        path: carbon_monoxide_ugm3\n' +
+    '        unit: "micrograms per cubic metre"\n' +
+    '      latitude:\n' +
+    '        path: latitude\n' +
+    '        unit: "degrees"\n' +
+    '      longitude:\n' +
+    '        path: longitude\n' +
+    '        unit: "degrees"\n' +
+    '      upstream_hour:\n' +
+    '        path: upstream_hour\n' +
+    '\n' +
+    '  API_HEALTH_CHECK_GENERAL:\n' +
+    '    endpoint: /v1/api-health\n' +
+    '    input:\n' +
+    '      url:\n' +
+    '        from: url\n' +
+    '    output:\n' +
+    '      url:\n' +
+    '        path: url\n' +
+    '      healthy:\n' +
+    '        path: healthy\n' +
+    '      reachable:\n' +
+    '        path: reachable\n' +
+    '      http_status:\n' +
+    '        path: http_status\n' +
+    '      latency_ms:\n' +
+    '        path: latency_ms\n' +
+    '        unit: "milliseconds"\n' +
+    '\n' +
+    '  SERVER_UPTIME_MONITOR_GENERAL:\n' +
+    '    endpoint: /v1/server-uptime\n' +
+    '    input:\n' +
+    '      host:\n' +
+    '        from: host\n' +
+    '    output:\n' +
+    '      host:\n' +
+    '        path: host\n' +
+    '      reachable_now:\n' +
+    '        path: reachable_now\n' +
+    '      http_status:\n' +
+    '        path: http_status\n' +
+    '      latency_ms:\n' +
+    '        path: latency_ms\n' +
+    '        unit: "milliseconds"\n',
   cast: REGISTRATION_CAST_SNIPPET,
 };
