@@ -11,8 +11,9 @@
 // order), total_matches (integer [0, 1e8]), brief (<= 80 chars).
 //
 // SOURCE: Crossref REST API (api.crossref.org) — keyless, public,
-// free; the polite pool is joined with a mailto parameter as the
-// Crossref docs ask. Probed live 2026-11-23. OpenAlex was evaluated
+// free; used from the public pool with a project User-Agent, no mailto
+// (owner decision 2026-11-23: no personal address in this public repo
+// or third-party logs). Probed live 2026-11-23. OpenAlex was evaluated
 // first and rejected for now: its anonymous search was rate-limited
 // cluster-wide (HTTP 429 "search cluster under elevated load") at probe
 // time, so it cannot be the dependable primary.
@@ -32,11 +33,11 @@ import { saveReceipt } from "../core/storage";
 
 /** Local fetch with a hard timeout. One fixed public host, query value
  * URL-encoded, so there is no SSRF surface. */
-async function fetchText(url: string, timeoutMs: number): Promise<string> {
+async function fetchText(url: string, timeoutMs: number, userAgent: string): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": userAgent } });
     if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
     return await res.text();
   } finally {
@@ -49,8 +50,10 @@ const SOURCE_TIMEOUT_MS = 5000;
 const ROWS = 5;
 /** Onchain request slot caps query at 256 bytes. */
 const MAX_QUERY_BYTES = 256;
-/** Polite-pool contact as the Crossref REST docs request. */
-const MAILTO = "verireceipt-dev@proton.me";
+/** Public pool, no mailto: the owner does not want a personal address
+ * in this public repo or in a third party's logs (2026-11-23). The
+ * User-Agent identifies the project by its public site instead. */
+const UA = "VeriReceipt/2.0 academic-search observer (+https://verireceipt.vercel.app)";
 
 export function parseCrossrefWorks(raw: string): { total: number; papers: { title: string; doi: string }[]; skipped: number } {
   let parsed: unknown;
@@ -88,9 +91,9 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
   if (Buffer.byteLength(q, "utf8") > MAX_QUERY_BYTES) {
     throw badRequest("QUERY_TOO_LONG", `query must fit the onchain 256-byte request slot (got ${Buffer.byteLength(q, "utf8")} bytes)`);
   }
-  const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(q)}&rows=${ROWS}&mailto=${MAILTO}`;
+  const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(q)}&rows=${ROWS}`;
   const fetchedAt = new Date().toISOString();
-  const raw = await fetchText(url, SOURCE_TIMEOUT_MS).catch((err: unknown) => {
+  const raw = await fetchText(url, SOURCE_TIMEOUT_MS, UA).catch((err: unknown) => {
     throw upstreamUnavailable("CROSSREF_UNREACHABLE", `Crossref search failed: ${err instanceof Error ? err.message : "unknown error"}`);
   });
   const { total, papers, skipped } = parseCrossrefWorks(raw);
@@ -98,16 +101,24 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
   const titles = papers.map((p) => p.title);
   const dois = papers.map((p) => p.doi);
   const listing = papers.map((p, i) => `${i + 1}. ${p.title} (DOI ${p.doi})`).join("; ");
-  const brief = papers.length
-    ? `${papers.length} of ${total} Crossref matches; top: ${papers[0].title}`.slice(0, 80)
-    : `No Crossref matches for this query`.slice(0, 80);
+  // Code-point-safe 80-cell brief: a naive .slice(0, 80) can split a
+  // UTF-16 surrogate pair and emit a lone surrogate.
+  const briefRaw = papers.length
+    ? `${papers.length} of ${total} Crossref matches; top: ${papers[0].title}`
+    : `No Crossref matches for this query`;
+  const brief = Array.from(briefRaw).slice(0, 80).join("");
   const evidence = JSON.stringify({ query: q, as_of: asOf, total_matches: total,
     papers, skipped_items: skipped,
-    source_policy: "Crossref REST API, keyless public polite pool (mailto parameter); single source, Crossref relevance order",
+    source_policy: "Crossref REST API, keyless public pool (no mailto by owner decision 2026-11-23; project User-Agent instead); single source, Crossref relevance order",
     raw_body: raw, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, url, evidence, "Crossref bibliographic search; relevance order and match count are Crossref's own");
   receipt.fetched_at = fetchedAt;
-  await saveReceipt(receipt, evidence);
+  try {
+    await saveReceipt(receipt, evidence);
+  } catch {
+    // A search result is not a receipted answer until its evidence is stored.
+    throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
+  }
   // The contract's "answer" response field is the envelope's own
   // answer (meta below); the fields object carries the off-chain lists.
   return envelope(INTENT, {

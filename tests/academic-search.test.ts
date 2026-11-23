@@ -35,6 +35,7 @@ describe("ACADEMIC_SEARCH_GENERAL", () => {
     expect(dois[0]).toBe("10.1109/msecp.2004.1264852");
     expect(String(result.answer)).toContain("Crossref's own relevance order");
     expect((result.brief as string).length).toBeLessThanOrEqual(80);
+    expect((result.brief as string)).not.toMatch(/[\uD800-\uDFFF]/); // no lone surrogates
     const receipt = result.receipt as { receipt_id: string; raw_response_sha256: string; intent: string };
     expect(receipt.intent).toBe("ACADEMIC_SEARCH_GENERAL");
     const stored = await getReceiptEvidence(receipt.receipt_id);
@@ -42,6 +43,15 @@ describe("ACADEMIC_SEARCH_GENERAL", () => {
     expect(sha256Hex(stored.evidence)).toBe(receipt.raw_response_sha256);
     const body = JSON.parse(stored.evidence.toString("utf8"));
     expect(body.raw_body).toBe(works);
+  });
+  it("a title needing truncation still yields a surrogate-safe 80-cell brief", async () => {
+    const edited = JSON.parse(works);
+    edited.message.items[0].title = ["T".repeat(60) + " \uD83D\uDD25".replace("\\uD83D\\uDD25", "\uD83D\uDD25") + "x".repeat(40)];
+    stub(JSON.stringify(edited));
+    const result = await handleAcademicSearch({ query: "verifiable compute receipts" });
+    const brief = result.brief as string;
+    expect(brief.length).toBeLessThanOrEqual(80);
+    expect(brief).not.toMatch(/[\uD800-\uDFFF]/);
   });
   it("zero matches is a real answer with empty lists, never an error", async () => {
     stub(none);
