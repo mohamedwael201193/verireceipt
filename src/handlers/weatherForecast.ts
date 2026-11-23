@@ -33,7 +33,7 @@
 // the current local hour; a window the upstream arrays do not cover is
 // refused, never extrapolated. FAIL CLOSED on any upstream failure,
 // truncation or null-filled window.
-import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
+import { ApiError, badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, sha256Hex } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
@@ -133,11 +133,54 @@ export async function handleWeatherForecast(query: Record<string, string | undef
     if (lat < -90 || lat > 90 || lon < -180 || lon > 180) throw badRequest("INVALID_LOCATION", "lat,lon out of range (lat -90..90, lon -180..180)");
     resolvedName = `${lat.toFixed(4)}, ${lon.toFixed(4)} (coordinates given directly, not geocoded)`;
   } else {
-    geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=10&language=en&format=json`;
-    geoBody = await fetchText(geoUrl, "the Open-Meteo geocoder");
-    const hit = resolveGeocode(geoBody, location);
-    lat = hit.latitude; lon = hit.longitude;
-    resolvedName = `${hit.name}${hit.admin1 ? `, ${hit.admin1}` : ""}${hit.country ? `, ${hit.country}` : ""} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+    const geocode = async (name: string): Promise<{ url: string; body: string }> => {
+      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=10&language=en&format=json`;
+      return { url, body: await fetchText(url, "the Open-Meteo geocoder") };
+    };
+    const nameOf = (hit: GeoHit) =>
+      `${hit.name}${hit.admin1 ? `, ${hit.admin1}` : ""}${hit.country ? `, ${hit.country}` : ""} (${hit.latitude.toFixed(4)}, ${hit.longitude.toFixed(4)})`;
+    let resolved: { lat: number; lon: number; name: string } | null = null;
+    let notFound: ApiError | null = null;
+    const first = await geocode(location);
+    try {
+      const hit = resolveGeocode(first.body, location);
+      geoUrl = first.url; geoBody = first.body;
+      resolved = { lat: hit.latitude, lon: hit.longitude, name: nameOf(hit) };
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "PLACE_NOT_FOUND") notFound = e;
+      else throw e;
+    }
+    if (!resolved && notFound && /\s/.test(location)) {
+      // A space-separated "City Country" without the comma defeats the
+      // geocoder's literal search. Retry with the trailing tokens as a
+      // country qualifier against a fresh city search, and fail closed
+      // on zero or several country matches — never a silent first hit.
+      const tokens = location.split(/\s+/);
+      for (let hintLen = 1; hintLen <= Math.min(3, tokens.length - 1) && !resolved; hintLen++) {
+        const city = tokens.slice(0, tokens.length - hintLen).join(" ");
+        const hint = tokens.slice(tokens.length - hintLen).join(" ").toLowerCase();
+        const retry = await geocode(city);
+        let hits: GeoHit[];
+        try {
+          hits = ((JSON.parse(retry.body) as { results?: GeoHit[] }).results ?? []);
+        } catch {
+          throw upstreamUnavailable("GEOCODER_MALFORMED", "the geocoder returned a body that is not JSON; refusing to guess a location");
+        }
+        const matches = hits.filter((r) =>
+          (r.country ?? "").toLowerCase() === hint || (r.country_code ?? "").toLowerCase() === hint);
+        if (matches.length > 1) {
+          const candidates = matches.map((r) => `${r.name}, ${r.admin1 ? r.admin1 + ", " : ""}${r.country ?? "?"} (${r.latitude.toFixed(3)}, ${r.longitude.toFixed(3)})`);
+          throw unprocessable("AMBIGUOUS_LOCATION",
+            `"${location}" matches ${candidates.length} places: ${candidates.join("; ")}. Pass the place as "City, Country" or "lat,lon" — a first-hit pick is never made silently`);
+        }
+        if (matches.length === 1) {
+          geoUrl = retry.url; geoBody = retry.body;
+          resolved = { lat: matches[0].latitude, lon: matches[0].longitude, name: nameOf(matches[0]) };
+        }
+      }
+    }
+    if (!resolved) throw notFound ?? new Error("geocode resolution failed");
+    lat = resolved.lat; lon = resolved.lon; resolvedName = resolved.name;
   }
 
   // One extra day beyond the bare window: forecast_days=1 returns only

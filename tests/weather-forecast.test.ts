@@ -150,3 +150,41 @@ describe("WEATHER_FORECAST_GENERAL", () => {
     await app.close();
   });
 });
+
+describe("WEATHER_FORECAST_GENERAL space-separated city+country (no comma)", () => {
+  const GEO_MULTI = JSON.stringify({ results: [
+    { name: "Cairo", latitude: 30.0444, longitude: 31.2357, country: "Egypt", country_code: "EG", admin1: "Al Qahirah" },
+    { name: "Cairo", latitude: 39.9836, longitude: -89.1337, country: "United States", country_code: "US", admin1: "Illinois" },
+  ]});
+  const GEO_EMPTY = JSON.stringify({ results: [] });
+  function stubSplit(opts: { cityBody?: string } = {}): void {
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("geocoding-api.open-meteo.com")) {
+        if (u.includes("name=Cairo%20Egypt")) return new Response(GEO_EMPTY, { status: 200 });
+        if (u.includes("name=Cairo")) return new Response(opts.cityBody ?? GEO_MULTI, { status: 200 });
+        return new Response(GEO_EMPTY, { status: 200 });
+      }
+      if (u.includes("api.open-meteo.com")) return new Response(FC_CAIRO, { status: 200 });
+      throw new Error(`unexpected fetch ${u}`);
+    });
+  }
+  it("\"Cairo Egypt\" resolves through the country qualifier and names the resolved place", async () => {
+    stubSplit();
+    const result = await handleWeatherForecast({ location: "Cairo Egypt" });
+    expect(String(result.location)).toContain("Cairo");
+    expect(String(result.location)).toContain("Egypt");
+    expect(String(result.location)).toContain("30.0444");
+  });
+  it("two places in the hinted country refuse ambiguous, never a silent first hit", async () => {
+    stubSplit({ cityBody: JSON.stringify({ results: [
+      { name: "Cairo", latitude: 30.0444, longitude: 31.2357, country: "Egypt", country_code: "EG" },
+      { name: "New Cairo", latitude: 30.03, longitude: 31.47, country: "Egypt", country_code: "EG" },
+    ]}) });
+    await expect(handleWeatherForecast({ location: "Cairo Egypt" })).rejects.toMatchObject({ status: 422, code: "AMBIGUOUS_LOCATION" });
+  });
+  it("no country match keeps the honest PLACE_NOT_FOUND", async () => {
+    stubSplit({ cityBody: GEO_EMPTY });
+    await expect(handleWeatherForecast({ location: "Cairo Egypt" })).rejects.toMatchObject({ status: 422, code: "PLACE_NOT_FOUND" });
+  });
+});
