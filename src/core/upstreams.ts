@@ -99,6 +99,7 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "aviationweather.gov": "aviationweather-noaa",
   "api.coinbase.com": "coinbase",
   "gamma-api.polymarket.com": "polymarket-gamma",
+  "nasstatus.faa.gov": "faa-nas",
   "feeds.bbci.co.uk": "bbc-rss",
   "ip-api.com": "ip-api",
   "site.api.espn.com": "espn",
@@ -229,6 +230,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "crypto-price": "coinbase",
   "weather-check": "aviationweather-noaa",
   "event-outcome": "polymarket-gamma",
+  "travel-disruption": "faa-nas",
 };
 
 /**
