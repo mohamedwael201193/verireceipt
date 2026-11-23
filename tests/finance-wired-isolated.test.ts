@@ -49,7 +49,7 @@ it('every configured approval keeps licence booleans false and points at the opa
         expect(Number.isFinite(Date.parse(a.checkedAt))).toBe(true);
         expect(a.ownerRiskAcceptance?.scope).toBe('testnet-hackathon');
         expect(a.ownerRiskAcceptance?.sourceReference).toBe(OWNER_REFERENCE);
-        expect(Date.parse(a.ownerRiskAcceptance!.acceptedAt)).toBe(Date.parse('2026-11-22T22:27:23.000Z'));
+        expect(Date.parse(a.ownerRiskAcceptance!.acceptedAt)).toBe(Date.parse('2026-11-23'));
     }
 });
 

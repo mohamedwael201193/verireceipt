@@ -11,7 +11,7 @@
 // grant us commercial redistribution, so commercialUse/redistribution
 // stay false. Each source runs under the owner's recorded terms-risk
 // acceptance for this testnet hackathon project, recorded on the trusted
-// WhatsApp channel at 2026-11-23 00:27:23 Cairo. Personal transport
+// owner channel. Only an opaque dated reference is retained. Personal transport
 // identifiers are deliberately excluded from source and receipt metadata.
 // The record below is a presence-only pointer to that out-of-band
 // message; it is not itself proof of approval (see observedSources.ts).
@@ -42,7 +42,7 @@ import { aaveYieldSource, type AaveReserveBinding } from './aaveYieldSource';
 const OWNER_RISK_ACCEPTANCE = {
     sourceReference: 'owner-risk-acceptance-2026-11-23',
     scope: 'testnet-hackathon' as const,
-    acceptedAt: '2026-11-22T22:27:23.000Z',
+    acceptedAt: '2026-11-23',
 };
 function termsRiskApproval(termsUrl: string, checkedAt: string): SourceApproval {
     return { termsUrl, checkedAt, commercialUse: false, redistribution: false, ownerRiskAcceptance: { ...OWNER_RISK_ACCEPTANCE } };
