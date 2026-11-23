@@ -10,6 +10,7 @@ import Receipts from "./pages/Receipts";
 import Status from "./pages/Status";
 import Buyer from "./pages/Buyer";
 import Research from "./pages/Research";
+import ResearchDesk from "./pages/ResearchDesk";
 
 /** App shell routes.
  *
@@ -60,6 +61,7 @@ export default function App() {
           <Route path="status" element={<Status />} />
           <Route path="docs" element={<Docs />} />
           <Route path="research" element={<Research />} />
+          <Route path="research/desk" element={<ResearchDesk />} />
           <Route path="buyer" element={<Buyer />} />
           <Route path="*" element={<NotFound />} />
         </Route>
