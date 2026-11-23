@@ -221,6 +221,54 @@ describe("handleFx answers (stubbed sources)", () => {
     vi.unstubAllGlobals();
   });
 
+  it("epoch-41 live shape (measured 2026-11-23 00:41Z): a larger recomputed cluster no longer outvotes the fix pair", async () => {
+    // Measured live in epoch 41: the Monday-recomputed sources formed a
+    // THREE-member tight cluster (er-api 0.911134 fresh Monday 00:02:32Z,
+    // fawaz 0.91158016, floatrates 0.91074399) against the Friday ECB fix
+    // pair (frankfurter 0.90992, vatcomply 0.909918). Raw size anchored on
+    // the recomputed side; the reference is fix-heavy (the truth sources
+    // are frankfurter + er-api and every top-ranked miner serves the fix),
+    // so the fix republication pair must anchor. Both sides sit inside the
+    // scorer's 50bps tolerance, so this is alignment, not a score trick.
+    stubFxSources({
+      frankfurter: frankfurterBody(0.90992, "2026-11-20"),
+      openEr: openErBody(0.911134, "Mon, 23 Nov 2026 00:02:32 +0000"),
+      fawaz: fawazBody(0.91158016, "2026-11-23"),
+      vatcomply: vatcomplyBody(0.909918, "2026-11-20"),
+      floatrates: floatratesBody(0.91074399, "Fri, 20 Nov 2026 23:59:00 GMT"),
+    });
+    const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
+    expect(result.verdict).toBe("verified");
+    expect(result.rate).toBe(0.909918);
+    expect(result.converted_amount).toBeCloseTo(90.9918, 4);
+    const ans = String(result.answer);
+    expect(ans).toContain("anchored on the tightest agreeing cluster");
+    expect(ans).toContain("vatcomply=0.909918");
+    expect(ans).toContain("Frankfurter (ECB reference rates)=0.90992");
+    expect(ans).toContain("excluded floatrates=0.91074399");
+    expect(ans).toContain("open.er-api.com=0.911134");
+    expect(ans).toContain("fawaz currency-api=0.91158016");
+    vi.unstubAllGlobals();
+  });
+
+  it("no fix republication in the pool -> the largest tight cluster anchors, as before", async () => {
+    // frankfurter + vatcomply down: the rule must reduce to the previous
+    // largest-cluster behaviour, never refuse and never invent a fix.
+    stubFxSources({
+      frankfurter: "ERR",
+      openEr: openErBody(0.911134, "Mon, 23 Nov 2026 00:02:32 +0000"),
+      fawaz: fawazBody(0.91158016, "2026-11-23"),
+      vatcomply: "ERR",
+      floatrates: floatratesBody(0.91074399, "Fri, 20 Nov 2026 23:59:00 GMT"),
+    });
+    const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
+    expect(result.verdict).toBe("verified");
+    // The recomputed trio anchors; its median (lower-middle of
+    // {0.91074399, 0.911134, 0.91158016}) is 0.911134.
+    expect(result.rate).toBe(0.911134);
+    vi.unstubAllGlobals();
+  });
+
   it("kill-each-source failover: any one source down -> the remaining four answer", async () => {
     for (const killed of ["frankfurter", "openEr", "fawaz", "vatcomply", "floatrates"] as const) {
       const opts: StubOpts = {
