@@ -53,6 +53,17 @@ function expectedWindow(hours: number): { max: number; min: number } {
 }
 
 describe("WEATHER_FORECAST_GENERAL", () => {
+  it("requests one extra forecast day so a 24h window after local midnight is coverable (live bug pin)", async () => {
+    // Live on 2026-11-23 a 24h window 422'd: forecast_days=1 makes
+    // Open-Meteo return only today's local hours (00:00-23:00), so a
+    // window starting after hour 00 is never covered. The handler must
+    // ask for ceil(window/24)+1 days.
+    const requested = stub();
+    await handleWeatherForecast({ location: "Cairo, Egypt" });
+    const fc = requested.find((u) => u.includes("api.open-meteo.com/v1/forecast"));
+    expect(fc).toBeDefined();
+    expect(fc).toContain("forecast_days=2");
+  });
   it("a qualified place name resolves, names place+coords, and the window stats match the fixture exactly", async () => {
     stub();
     const result = await handleWeatherForecast({ location: "Cairo, Egypt" });

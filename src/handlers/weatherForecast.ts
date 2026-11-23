@@ -140,7 +140,10 @@ export async function handleWeatherForecast(query: Record<string, string | undef
     resolvedName = `${hit.name}${hit.admin1 ? `, ${hit.admin1}` : ""}${hit.country ? `, ${hit.country}` : ""} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
   }
 
-  const forecastDays = Math.min(16, Math.ceil(windowHours / 24));
+  // One extra day beyond the bare window: forecast_days=1 returns only
+  // today's 24 local hours (00:00-23:00), so a window starting at any
+  // local hour after 00:00 needs hours from the following day(s).
+  const forecastDays = Math.min(16, Math.ceil(windowHours / 24) + 1);
   const fcUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
     `&hourly=temperature_2m,precipitation_probability,weather_code&forecast_days=${forecastDays}&timezone=auto`;
   const fcBody = await fetchText(fcUrl, "the Open-Meteo forecast API");
