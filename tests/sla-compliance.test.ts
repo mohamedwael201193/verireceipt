@@ -109,4 +109,22 @@ describe("SLA_COMPLIANCE_GENERAL", () => {
     expect(res.json().code).toBe("STATUSPAGE_MALFORMED");
     await app.close();
   });
+  it("an incident log too shallow to cover the window fails closed with a 502", async () => {
+    // Every page answers with the same recent incident, so the log
+    // never reaches back 30 days within the page cap.
+    const recent = JSON.stringify({
+      page: {},
+      incidents: [{ id: "x1", name: "Recent incident", impact: "major", started_at: "2026-11-22T10:00:00.000Z", resolved_at: "2026-11-22T11:00:00.000Z" }],
+    });
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const u = String(url);
+      if (u.includes("githubstatus.com")) return new Response(recent, { status: 200 });
+      throw new Error(`unexpected fetch ${u}`);
+    });
+    const app = buildServer();
+    const res = await app.inject({ method: "GET", url: "/v1/sla-compliance?service=github&period=30d" });
+    expect(res.statusCode).toBe(502);
+    expect(res.json().code).toBe("INCIDENT_LOG_SHALLOW");
+    await app.close();
+  });
 });
