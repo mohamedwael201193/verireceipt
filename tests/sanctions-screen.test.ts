@@ -37,6 +37,22 @@ describe("SANCTIONS_SCREENING_MATCH_GENERAL", () => {
     expect(matchScore("Aero Caribbean", "AERO-CARIBBEAN")).toBe(1); // normalization folds punctuation
     expect(matchScore("John Smith", "AEROCARIBBEAN AIRLINES")).toBeLessThan(0.5);
   });
+  it("pins MATCH_THRESHOLD 0.85: the reviewer control scores 0.57, is reported as a candidate, and matched stays false", async () => {
+    // Reviewer control pair: a near-but-different name must land below the
+    // threshold and still be disclosed as a candidate. The reviewer's memo
+    // quoted 0.57, which is this pair's Sørensen-Dice component; the
+    // documented score is max(Dice, normalized Levenshtein) = 0.666667.
+    expect(matchScore("ANGLO CARIBBEAN SHIPPING", "ANGLO-CARIBBEAN CO., LTD.")).toBe(0.666667);
+    stub();
+    const result = await handleSanctionsScreen({ name: "ANGLO CARIBBEAN SHIPPING" });
+    expect(result.matched).toBe(false);
+    const matches = result.matches as { name: string; score: number; above_threshold: boolean }[];
+    const anglo = matches.find((m) => m.name.includes("ANGLO-CARIBBEAN"));
+    expect(anglo).toBeDefined();
+    expect(anglo!.score).toBe(0.666667);
+    expect(anglo!.above_threshold).toBe(false);
+    expect(String(result.answer)).toContain("threshold 0.85");
+  });
   it("validates before fetching", async () => {
     await expect(handleSanctionsScreen({})).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
     await expect(handleSanctionsScreen({ name: "!!!" })).rejects.toMatchObject({ status: 400, code: "INVALID_NAME" });
