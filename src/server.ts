@@ -21,7 +21,7 @@ import { handleTokenSupply } from "./handlers/tokenSupply";
 import { handleFx, handleFxNow } from "./handlers/currencyConvert";
 import { handleDns } from "./handlers/dnsLookup";
 import { handleSsl } from "./handlers/sslVerification";
-import { handleCve } from "./handlers/cveLookup";
+import { handleCve, handleVulnTriage } from "./handlers/cveLookup";
 import { handleEmailSecurity } from "./handlers/emailSecurity";
 import { exactQuery } from "./core/exactQuery";
 import { diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
@@ -227,6 +227,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/dns", async (request) => trackIntent("dns", () => handleDns(asQuery(request.query))));
   app.get("/v1/ssl", async (request) => trackIntent("ssl", () => handleSsl(asQuery(request.query))));
   app.get("/v1/cve", async (request) => trackIntent("cve", () => handleCve(asQuery(request.query))));
+  app.get("/v1/vulnerability-triage", async (request) => trackIntent("vulnerability-triage", () => handleVulnTriage(asQuery(request.query))));
   app.get("/v1/email-security", async (request) => trackIntent("email-security", () => handleEmailSecurity(exactQuery(request.raw.url ?? "", ["domain", "record_type"])), "dns.google"));
   app.get("/v1/filings", async (request) =>
     trackIntent("filings", () => {

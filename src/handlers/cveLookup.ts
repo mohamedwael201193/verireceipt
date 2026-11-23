@@ -182,3 +182,68 @@ export async function handleCve(query: Record<string, string | undefined>): Prom
     source: `${candidates.map((r) => r.url).join(" + ")}; ${nvdEnabled ? "NVD primary when available, CVE record fallback" : "NVD disabled; published CVE record only, degraded single-source coverage"}; selected assessment is not an average; source fetched ${winner.fetchedAt ?? asOf}; checked ${asOf}`,
   });
 }
+
+// VULNERABILITY_TRIAGE_GENERAL — GET /v1/vuln-triage?cve_id=CVE-...
+//
+// Intent contract (https://devnode.telegraphprotocol.com/engine/v1/intents/VULNERABILITY_TRIAGE_GENERAL,
+// read 2026-11-22): request cve_id; scored response cvss_base_score =
+// the CVSS v3.1 base score, the NVD primary assessment (never an EPSS
+// probability or percentile). Differences from handleCve are deliberate:
+// v3.1 ONLY (v3.0/v2/v4 are never substituted), the scored field name is
+// cvss_base_score, and the NVD primary assessment wins whenever NVD is
+// enabled and carries one. Same transport, same per-process NVD budget,
+// same fail-closed disabled-by-default NVD policy, same
+// disagreement-refused doctrine. The answer says what the number is: a
+// published base severity score, not a prediction of exploitation.
+export const TRIAGE_INTENT = "VULNERABILITY_TRIAGE_GENERAL";
+export async function handleVulnTriage(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+  const id = query.cve_id?.trim().toUpperCase();
+  if (!id) throw badRequest("MISSING_PARAM", "cve_id is required");
+  if (!/^CVE-\d{4}-\d{4,19}$/.test(id)) throw badRequest("INVALID_CVE", "cve_id must have CVE-YYYY-NNNN format");
+  const nvd = `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${id}`;
+  const mitre = `https://cveawg.mitre.org/api/cve/${id}`;
+  const nvdEnabled = process.env.CVE_NVD_ENABLED === "true";
+  const outcomes = await collectRecords([
+    nvdEnabled ? fetchRecord(nvd, (raw) => parseNvdCve(id, nvd, raw)) : Promise.reject(new Error("NVD disabled by source policy")),
+    fetchRecord(mitre, (raw) => parseMitreCve(id, mitre, raw)),
+  ]);
+  if (outcomes.some(r => r?.status === 'rejected' && r.reason instanceof RejectedCveRecord)) {
+    throw unprocessable('CVE_REJECTED', `a matching source marks ${id} rejected; refusing another source's published score`);
+  }
+  const records = outcomes.flatMap((r) => r?.status === "fulfilled" ? [r.value] : []);
+  if (!records.length) throw upstreamUnavailable("CVE_SOURCES_DOWN", `no source returned a usable record for ${id}`);
+  // CVSS v3.1 only: the contract pins the version, so a v3.0 assessment
+  // is not a valid answer here and is never substituted.
+  const candidates = records.filter((r): r is SourceRecord & { assessment: Assessment } => r.assessment !== null && r.assessment.version === "3.1");
+  if (!candidates.length) throw unprocessable("NO_CVSS_V3_1", `no published CVSS v3.1 base score found for ${id}; v3.0, v2 and v4 scores are not substituted`);
+  const scores = candidates.map((c) => c.assessment.score);
+  if (Math.max(...scores) - Math.min(...scores) > 0.30000001) {
+    throw upstreamUnavailable("CVE_ASSESSMENTS_DISAGREE", `published CVSS v3.1 assessments disagree for ${id}: ` +
+      candidates.map((c) => `${c.assessment.assessor}=${c.assessment.score}`).join("; ") + "; refusing to average them");
+  }
+  // Source order keeps the NVD primary assessment first when NVD served one.
+  const winner = candidates[0];
+  const chosen = winner.assessment;
+  const asOf = new Date().toISOString();
+  const evidence = JSON.stringify({ cve_id: id, as_of: asOf, selected: chosen, nvd_enabled: nvdEnabled,
+    source_policy: nvdEnabled ? "NVD explicitly enabled; aggregate egress ownership required" : "NVD disabled; published CVE record only, degraded single-source coverage",
+    contract_note: "cvss_base_score is the published CVSS v3.1 base score; not an EPSS probability or percentile",
+    sources: records.map((r) => ({ url: r.url, assessment: r.assessment, raw_body: r.raw, fetched_at: r.fetchedAt })),
+    unavailable_sources: outcomes.flatMap((r, i) => r?.status !== "fulfilled" ? [i === 0 ? nvd : mitre] : []) });
+  const receipt = makeReceipt(TRIAGE_INTENT, winner.url, evidence, `${candidates.length}/2 published CVSS v3.1 assessments; source agreement, not independent scoring`);
+  receipt.fetched_at = winner.fetchedAt ?? asOf;
+  await saveReceipt(receipt, evidence);
+  const assessmentText = candidates.map((c) => `${c.assessment.assessor}: ${c.assessment.score}`).join("; ");
+  return envelope(TRIAGE_INTENT, { cve_id: id, cvss_base_score: chosen.score, severity: cvssSeverity(chosen.score),
+    cvss_version: chosen.version, vector: chosen.vector, description: winner.description, published: winner.published,
+    references: winner.references, as_of: asOf }, receipt, {
+    answer: `${id}: CVSS v3.1 base score ${chosen.score}/10 (${cvssSeverity(chosen.score)}), ${chosen.assessor}. ` +
+      `Vector: ${chosen.vector}. Published v3.1 assessments: ${assessmentText}. ` +
+      (candidates.length === 1 ? "Only one usable CVSS v3.1 assessment was available; coverage is degraded. " : "") +
+      (!nvdEnabled ? "NVD access is disabled by source policy. " : "") +
+      "This is a published base severity score: not an EPSS probability, not a prediction of exploitation, not your environment's risk. " +
+      (records.some(r => r.url === nvd) ? "This product uses data from the NVD API but is not endorsed or certified by the NVD." : "Published CVE record data; no NVD API data used in this response."),
+    verdict: "verified", confidence: candidates.length === 2 && scores[0] === scores[1] ? 1 : 0.9,
+    source: `${candidates.map((r) => r.url).join(" + ")}; ${nvdEnabled ? "NVD primary when available, published CVE record fallback" : "NVD disabled; published CVE record only, degraded single-source coverage"}; selected assessment is not an average; source fetched ${winner.fetchedAt ?? asOf}; checked ${asOf}`,
+  });
+}
