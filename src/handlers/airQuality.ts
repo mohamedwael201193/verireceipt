@@ -131,7 +131,7 @@ export async function handleAirQuality(query: Record<string, string | undefined>
     `Current US AQI ${r.us_aqi} (EPA scale) at grid cell ${r.grid_latitude}, ${r.grid_longitude}` +
     ` (nearest cell to ${lat}, ${lon}), upstream hour ${r.time}Z — ${acceptable ? "acceptable (at or below 100, EPA moderate or better)" : "above 100 (unhealthy for sensitive groups or worse)"}.` +
     ` PM2.5 ${r.pm2_5 ?? "n/a"} µg/m³, PM10 ${r.pm10 ?? "n/a"} µg/m³, NO2 ${r.nitrogen_dioxide ?? "n/a"} µg/m³, O3 ${r.ozone ?? "n/a"} µg/m³.` +
-    ` These are Open-Meteo modelled current conditions (CAMS blend) at the returned grid cell, interval ${r.interval_seconds} seconds, not a ground-station measurement. CAMS forecast-model output supplies this current estimate.`;
+    ` These are Open-Meteo modelled current conditions (CAMS blend) at the returned grid cell, interval ${r.interval_seconds} seconds, not a ground-station measurement. This current estimate may be derived from model output.`;
   return envelope(INTENT, {
     aqi: r.us_aqi,
     aqi_scale: "US EPA",

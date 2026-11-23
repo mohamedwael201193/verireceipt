@@ -37,7 +37,7 @@ describe("AIR_QUALITY_INDEX_GENERAL", () => {
     const ans = String(result.answer);
     expect(ans).toContain("modelled current conditions");
     expect(ans).toContain("not a ground-station measurement");
-    expect(ans).toContain("CAMS forecast-model output");
+    expect(ans).toContain("may be derived from model output");
     expect(result.confidence).toBe(0.8);
     const receipt = result.receipt as { receipt_id: string; raw_response_sha256: string; intent: string };
     expect(receipt.intent).toBe("AIR_QUALITY_INDEX_GENERAL");
