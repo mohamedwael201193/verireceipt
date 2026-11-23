@@ -34,7 +34,10 @@ export function chainlinkPriceSource(bindings: readonly FeedBinding[], reader: P
             if (matches.length !== 1)
                 throw new Error('no unambiguous reviewed USD feed binding');
             const b = matches[0];
-            if (!/^0x[0-9a-fA-F]{40}$/.test(b.proxy) || new URL(b.registryUrl).protocol !== 'https:' || !Number.isFinite(b.maxAgeMs) || b.maxAgeMs <= 0 || b.maxAgeMs > 60000)
+            // maxAgeMs is the feed's own published heartbeat (ETH/USD 3600 s,
+            // BTC/USD 3600 s, long-tail feeds up to 24 h), not a global cap:
+            // round freshness is enforced against it in parseChainlinkRound.
+            if (!/^0x[0-9a-fA-F]{40}$/.test(b.proxy) || new URL(b.registryUrl).protocol !== 'https:' || !Number.isFinite(b.maxAgeMs) || b.maxAgeMs <= 0 || b.maxAgeMs > 86400000)
                 throw new Error('invalid current-price feed binding');
             const r = await reader(b, signal);
             if (signal.aborted)
@@ -42,7 +45,11 @@ export function chainlinkPriceSource(bindings: readonly FeedBinding[], reader: P
             if (r.chainId !== b.chainId || r.proxy.toLowerCase() !== b.proxy.toLowerCase() || !/^0x[0-9a-fA-F]{64}$/.test(r.blockHash) || !/^\d+$/.test(r.blockNumber) || r.rpcQuorum < 2)
                 throw new Error('pinned feed identity/quorum mismatch');
             const blockTime = Date.parse(r.blockTimestamp);
-            if (!Number.isFinite(blockTime) || Date.now() - blockTime > 5 * 60000 || blockTime > Date.now() + 30000)
+            // The pin is an agreement anchor, not the freshness check: a
+            // finalized mainnet block legitimately lags the head by ~2
+            // epochs (~13-19 min; 45 min bounds worst-case finality lag).
+            // Freshness is enforced on the round's updatedAt, not the pin.
+            if (!Number.isFinite(blockTime) || Date.now() - blockTime > 45 * 60000 || blockTime > Date.now() + 30000)
                 throw new Error('pinned block is stale');
             parseFeedDescription(r.descriptionAbi, query.symbol);
             const decimals = parseFeedDecimals(r.decimalsAbi);
