@@ -16,10 +16,9 @@
 //   sats/PH/day   = revenue * 144 blocks/day * 1e15 / mean 1w hashrate
 // It is a spot hashprice from measured inputs, never a forecast.
 //
-// A block_height other than the current tip is an honest 422:
-// historical hashprice is not served because the measured inputs are
-// current-window series.
-import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
+// Historical blocks use their own reward, difficulty and historical USD price.
+// This single-block basis is distinct from the unchanged current weekly basis.
+import { ApiError, badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
@@ -74,7 +73,7 @@ async function fetchText(url: string): Promise<string> {
   const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
   try {
     const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new ApiError(503, "UPSTREAM_UNREACHABLE", `mempool/source input unavailable (HTTP ${res.status})`);
     return await res.text();
   } finally {
     clearTimeout(timer);
@@ -83,14 +82,50 @@ async function fetchText(url: string): Promise<string> {
 
 export const INTENT = "MINING_HASHPRICE_VERIFY_GENERAL";
 
+const historicalCache = new Map<number, { at: number; value: Record<string, unknown> }>();
+export function resetHashpriceCacheForTests(): void { historicalCache.clear(); }
+async function historicalHashprice(height: number, fetchedAt: string): Promise<Record<string, unknown>> {
+  const cached = historicalCache.get(height);
+  if (cached && Date.now() - cached.at < 60000) return cached.value;
+  const hashUrl = `https://mempool.space/api/block-height/${height}`;
+  const hashRaw = await fetchText(hashUrl);
+  const hash = hashRaw.trim();
+  if (!/^[0-9a-f]{64}$/.test(hash)) throw upstreamUnavailable("BAD_BLOCK", "block-height source returned no usable hash");
+  const blockUrl = `https://mempool.space/api/v1/block/${hash}`;
+  const blockRaw = await fetchText(blockUrl);
+  const block = JSON.parse(blockRaw);
+  const reward = block.extras?.reward, difficulty = block.difficulty, timestamp = block.timestamp;
+  if (block.id !== hash || block.height !== height || !Number.isSafeInteger(reward) || reward <= 0 || !Number.isFinite(difficulty) || difficulty <= 0 || !Number.isSafeInteger(timestamp) || timestamp <= 0) throw upstreamUnavailable("BAD_BLOCK", "historical block identity or measured inputs are invalid");
+  const priceUrl = `https://mempool.space/api/v1/historical-price?timestamp=${timestamp}&currency=USD`;
+  const priceRaw = await fetchText(priceUrl);
+  const price = JSON.parse(priceRaw)?.prices?.[0];
+  if (!Number.isFinite(price?.USD) || price.USD <= 0 || !Number.isSafeInteger(price.time) || price.time > timestamp || timestamp - price.time > 86400) throw upstreamUnavailable("BAD_PRICE", "no usable historical USD price near the block timestamp");
+  const hashrate = difficulty * 2 ** 32 / 600;
+  const sats = reward * 144 * 1e15 / hashrate;
+  if (!Number.isFinite(sats) || sats < 1 || sats > 1e9) throw unprocessable("OUT_OF_CONTRACT_RANGE", "single-block hashprice is outside1..1e9 sats/PH/day; not served");
+  const evidence = JSON.stringify({ height, hash, reward_sats: reward, difficulty, timestamp, price_timestamp: price.time, historical_usd: price.USD, formula: "hashrate_Hs=difficulty*2^32/600; sats_per_PH_day=reward_sats*144*1e15/hashrate_Hs", basis: "single-block reward over difficulty-implied hashrate, not a weekly average", raw_bodies: { hash: hashRaw, block: blockRaw, price: priceRaw }, fetched_at: fetchedAt });
+  const receipt = makeReceipt(INTENT, blockUrl, evidence, "mempool.space historical block and historical USD price; disclosed computation"); receipt.fetched_at = fetchedAt;
+  try { await saveReceipt(receipt, evidence); } catch { throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable"); }
+  const value = envelope(INTENT, { hashprice_sats_per_ph_day: Math.round(sats * 100) / 100, block_height: height, hashrate_eh_s: hashrate / 1e18, hashprice_usd_per_ph_day: Math.round(sats / 1e8 * price.USD * 100) / 100 }, receipt,
+    { answer: `Bitcoin block ${height}: ${Math.round(sats * 100) / 100} sats/PH/day. Basis: single-block reward ${reward} sats over difficulty-implied hashrate (${difficulty} *2^32/600), not a weekly average. USD uses the historical price $${price.USD} at ${new Date(price.time * 1000).toISOString()}, near the block timestamp ${new Date(timestamp * 1000).toISOString()}.`, verdict: "verified", confidence: 0.85, source: `${hashUrl} + ${blockUrl} + ${priceUrl}; measured historical inputs, not a forecast` });
+  if (historicalCache.size >= 64) historicalCache.delete(historicalCache.keys().next().value!);
+  historicalCache.set(height, { at: Date.now(), value }); return value;
+}
+
 export async function handleMiningHashprice(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   let requestedHeight: number | null = null;
   if (query.block_height !== undefined && query.block_height.trim() !== "") {
     const h = Number(query.block_height);
-    if (!Number.isInteger(h) || h < 0 || h > 100000000) throw badRequest("BAD_HEIGHT", "block_height must be an integer in [0, 100000000]");
+    if (!Number.isInteger(h) || h < 1 || h > 1000000000) throw badRequest("BAD_HEIGHT", "block_height must be an integer in [1, 1000000000]");
     requestedHeight = h;
   }
   const fetchedAt = new Date().toISOString();
+  if (requestedHeight !== null) {
+    const tip = Number((await fetchText(TIP_URL)).trim());
+    if (!Number.isSafeInteger(tip) || tip < 1) throw upstreamUnavailable("NO_USABLE_TIP", "tip height is unavailable");
+    if (requestedHeight > tip) throw unprocessable("ABOVE_TIP", `height ${requestedHeight} is above observed tip ${tip}; no future block hashprice is asserted`);
+    if (requestedHeight < tip) return historicalHashprice(requestedHeight, fetchedAt);
+  }
   const urls = [HASHRATE_URL, FEES_URL, TIP_URL, SPOT_URL];
   const settled = await Promise.allSettled(urls.map(fetchText));
   if (settled.some((s) => s.status === "rejected")) {

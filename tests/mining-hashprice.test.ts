@@ -4,8 +4,8 @@ import { join } from "node:path";
 const scratch = mkdtempSync("/tmp/mining-hp-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-afterEach(() => vi.unstubAllGlobals());
-import { handleMiningHashprice, computeHashprice, parseFees, parseHashrate, subsidyAt } from "../src/handlers/miningHashprice";
+afterEach(() => { vi.unstubAllGlobals(); resetHashpriceCacheForTests(); });
+import { handleMiningHashprice, computeHashprice, parseFees, parseHashrate, subsidyAt, resetHashpriceCacheForTests } from "../src/handlers/miningHashprice";
 import { buildServer } from "../src/server";
 import { getReceiptEvidence } from "../src/core/storage";
 import { sha256Hex } from "../src/core/receipt";
@@ -34,9 +34,9 @@ describe("MINING_HASHPRICE_VERIFY_GENERAL", () => {
   it("validates block_height and refuses historical heights honestly", async () => {
     stub();
     await expect(handleMiningHashprice({ block_height: "-1" })).rejects.toMatchObject({ status: 400, code: "BAD_HEIGHT" });
-    await expect(handleMiningHashprice({ block_height: "100000001" })).rejects.toMatchObject({ status: 400, code: "BAD_HEIGHT" });
-    await expect(handleMiningHashprice({ block_height: "900000" }))
-      .rejects.toMatchObject({ status: 422, code: "HISTORICAL_NOT_SERVED" });
+    await expect(handleMiningHashprice({ block_height: "1000000001" })).rejects.toMatchObject({ status: 400, code: "BAD_HEIGHT" });
+    await expect(handleMiningHashprice({ block_height: "999999999" })).rejects.toMatchObject({ status: 422, code: "ABOVE_TIP" });
+    await expect(handleMiningHashprice({ block_height: "0" })).rejects.toMatchObject({ status: 400, code: "BAD_HEIGHT" });
     const ok = await handleMiningHashprice({ block_height: "977127" });
     expect(ok.block_height).toBe(977127);
   });
@@ -80,4 +80,40 @@ describe("MINING_HASHPRICE_VERIFY_GENERAL", () => {
     expect(res.statusCode).toBe(200);
     await app.close();
   });
+});
+
+
+describe("single-block historical hashprice from actual mempool bodies", () => {
+  function historicalStub(height: number, fail = false): ReturnType<typeof vi.fn> {
+    const fetcher = vi.fn(async (url: unknown) => {
+      if (fail) return new Response("unavailable", { status: 503 });
+      const u = String(url);
+      return new Response(u.includes("tip/height") ? tip : u.includes("block-height") ? fx(`block-${height}-hash.txt`) : u.includes("historical-price") ? fx(`block-${height}-price.json`) : fx(`block-${height}.json`));
+    }); vi.stubGlobal("fetch", fetcher); return fetcher;
+  }
+  it.each([[840000, 948924.85], [900000, 49790.20]])("computes block%s within the measured tolerance", async (height, expected) => {
+    const fetcher = historicalStub(height);
+    const out = await handleMiningHashprice({ block_height: String(height) });
+    expect(Number(out.hashprice_sats_per_ph_day) / expected).toBeCloseTo(1, 2);
+    const block = JSON.parse(fx(`block-${height}.json`));
+    const exact = block.extras.reward * 144 * 1e15 / (block.difficulty * 2 ** 32 / 600);
+    expect(out.hashprice_sats_per_ph_day).toBe(Math.round(exact * 100) / 100);
+    expect(out.answer).toContain("single-block reward"); expect(out.answer).toContain("not a weekly average");
+    const receipt = out.receipt as { receipt_id: string; raw_response_sha256: string };
+    const stored = await getReceiptEvidence(receipt.receipt_id); expect(sha256Hex(stored.evidence!)).toBe(receipt.raw_response_sha256);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    await handleMiningHashprice({ block_height: String(height) }); expect(fetcher).toHaveBeenCalledTimes(5);
+  });
+  it("historical upstream503 is disclosed503", async () => {
+    historicalStub(840000, true);
+    await expect(handleMiningHashprice({ block_height: "840000" })).rejects.toMatchObject({ status: 503, code: "UPSTREAM_UNREACHABLE" });
+  });
+});
+it("historical cache reuses at59s and expires at60s",async()=>{
+ const now=Date.now();const spy=vi.spyOn(Date,"now").mockReturnValue(now);
+ const f=vi.fn(async(u:unknown)=>new Response(String(u).includes("tip/height")?tip:String(u).includes("block-height")?fx("block-840000-hash.txt"):String(u).includes("historical-price")?fx("block-840000-price.json"):fx("block-840000.json")));vi.stubGlobal("fetch",f);
+ try{await handleMiningHashprice({block_height:"840000"});expect(f).toHaveBeenCalledTimes(4);
+ spy.mockReturnValue(now+59000);await handleMiningHashprice({block_height:"840000"});expect(f).toHaveBeenCalledTimes(5);
+ spy.mockReturnValue(now+60000);await handleMiningHashprice({block_height:"840000"});expect(f).toHaveBeenCalledTimes(9);
+ }finally{spy.mockRestore()}
 });
