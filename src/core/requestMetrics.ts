@@ -7,7 +7,7 @@ const ROUTE_INTENTS: Record<string, string> = {
   "/v1/transaction-risk": "TRANSACTION_RISK_GENERAL",
   "/v1/financial-data": "FINANCIAL_DATA_GENERAL",
   "/v1/cross-chain-state": "CROSS_CHAIN_STATE_VERIFY_GENERAL",
-  "/v1/reserve-attestation": "ASSET_RESERVE_ATTESTATION_GENERAL", "/v1/threat-indicator": "THREAT_INTELLIGENCE_INDICATOR", "/v1/url-scan": "URL_SCAN_VERDICT", "/v1/balance": "WALLET_BALANCE_CHECK_GENERAL",
+  "/v1/reserve-attestation": "ASSET_RESERVE_ATTESTATION_GENERAL", "/v1/threat-indicator": "THREAT_INTELLIGENCE_INDICATOR", "/v1/url-scan": "URL_SCAN_VERDICT", "/v1/weather-forecast": "WEATHER_FORECAST_GENERAL", "/v1/balance": "WALLET_BALANCE_CHECK_GENERAL",
   "/v1/token-supply": "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL", "/v1/macro": "MACRO_ECONOMIC_INDICATOR_GENERAL",
   "/v1/dns": "DNS_RECORD_LOOKUP_GENERAL", "/v1/ssl": "SSL_VERIFICATION_CERT",
   "/v1/cve": "CVE_LOOKUP_CVSS", "/v1/fx": "CURRENCY_EXCHANGE_CONVERT",
