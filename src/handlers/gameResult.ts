@@ -65,6 +65,9 @@ export function parseGameInput(raw: string): { date: string; dates: string; team
   const m = /(20\d{2})-(\d{2})-(\d{2})/.exec(raw);
   if (!m) throw badRequest("DATE_REQUIRED", "game must name the date in YYYY-MM-DD form, e.g. \"Chargers vs Ravens 2026-11-16\"");
   const date = `${m[1]}-${m[2]}-${m[3]}`;
+  const instant = new Date(date + 'T00:00:00Z');
+  if (!Number.isFinite(instant.getTime()) || instant.toISOString().slice(0, 10) !== date)
+    throw badRequest('INVALID_DATE', 'game must carry a real calendar date in YYYY-MM-DD form');
   const rest = raw.replace(m[0], " ").trim();
   const parts = rest.split(/\s+(?:vs\.?|v|at|@)\s+/i).map((p) => p.trim()).filter(Boolean);
   if (parts.length !== 2 || !norm(parts[0]) || !norm(parts[1])) {
@@ -91,6 +94,8 @@ export function parseScoreboard(raw: string, league: string): Candidate[] {
     const away = competitors.find((c) => c.homeAway === "away");
     if (!home || !away) continue;
     const scoreOf = (c: Record<string, unknown>): number | null => {
+      if ((typeof c.score !== 'string' && typeof c.score !== 'number') ||
+          (typeof c.score === 'string' && !/^\d+$/.test(c.score))) return null;
       const s = Number(c.score);
       return Number.isInteger(s) && s >= 0 && s <= 1000 ? s : null;
     };
@@ -146,6 +151,10 @@ export async function handleGameResult(query: Record<string, string | undefined>
   if (g.homeScore === null || g.awayScore === null) {
     throw unprocessable("NO_USABLE_SCORE", `ESPN carried no usable final scores for ${g.name}`);
   }
+  const expectedWinner = g.homeScore > g.awayScore ? g.home : g.awayScore > g.homeScore ? g.away : '';
+  if (g.winner !== expectedWinner) {
+    throw unprocessable('INCONSISTENT_FINAL_RESULT', 'published winner flag and final scores disagree or winner is missing; refusing to invent a winner');
+  }
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({ game: raw, parsed: { date, teamA, teamB }, as_of: asOf,
     matched_event: g, covered_leagues: [...bodies.keys()], unavailable_leagues: failed,
@@ -161,11 +170,11 @@ export async function handleGameResult(query: Record<string, string | undefined>
   }
   const tie = g.homeScore === g.awayScore;
   return envelope(INTENT, { winner: tie ? "" : g.winner, home_team: g.home, away_team: g.away,
-    home_score: g.homeScore, away_score: g.awayScore, date: g.date || date, league: g.league }, receipt, {
+    home_score: g.homeScore, away_score: g.awayScore, date: g.date || date, requested_scoreboard_date: date, date_semantics: "date is the event UTC start date; requested_scoreboard_date is the source scoreboard day and can differ across midnight", league: g.league }, receipt, {
     answer: `${g.name} (${g.league}), ${g.date || date}: final — ${g.away} ${g.awayScore}, ${g.home} ${g.homeScore}. ` +
       (tie ? "The game ended tied; there is no winner. " : `${g.winner} won. `) +
       `Source: ESPN site API (single source). Covered leagues: ${[...bodies.keys()].join(", ")}${failed.length ? `; unavailable: ${failed.join(", ")}` : ""}. ` +
-      "Only completed games serve; this is ESPN's published final, not a live score.",
+      "Only completed games serve; this is ESPN's published final, not a live score. The displayed date is the UTC event date; the requested scoreboard day can differ across midnight.",
     verdict: "verified",
     confidence: 0.9,
     source: `${leagueUrl}; ESPN site API single source, honestly named; completed event only; fetched ${fetchedAt}`,

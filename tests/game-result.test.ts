@@ -89,4 +89,33 @@ describe("GAME_RESULT_GENERAL", () => {
     expect(res.json().winner).toBe("Los Angeles Chargers");
     await app.close();
   });
+  it.each(['', ' ', null, false, [], 'NaN', '1.5'])('negative mutation: unusable final score %j is not zero', async(score) => {
+    const edited = JSON.parse(nfl);
+    edited.events[0].competitions[0].competitors.find((c:any)=>c.homeAway==='home').score = score;
+    stub({nfl:JSON.stringify(edited)});
+    await expect(handleGameResult({game:'Chargers vs Ravens 2026-11-16'})).rejects.toMatchObject({code:'NO_USABLE_SCORE'});
+  });
+  it.each(['2026-02-30','2026-13-01','2026-00-01'])('invalid calendar date %s fails before network', async(date) => {
+    const f=vi.fn();vi.stubGlobal('fetch',f);
+    await expect(handleGameResult({game:'Chargers vs Ravens '+date})).rejects.toMatchObject({code:'INVALID_DATE'});
+    expect(f).not.toHaveBeenCalled();
+  });
+  it('negative mutation: winner flag contradicting scores is refused',async()=>{
+    const edited=JSON.parse(nfl);
+    for(const c of edited.events[0].competitions[0].competitors)c.winner=c.homeAway==='home';
+    stub({nfl:JSON.stringify(edited)});
+    await expect(handleGameResult({game:'Chargers vs Ravens 2026-11-16'})).rejects.toMatchObject({code:'INCONSISTENT_FINAL_RESULT'});
+  });
+  it('negative mutation: absent winner is not silently inferred from scores',async()=>{
+    const edited=JSON.parse(nfl);
+    for(const c of edited.events[0].competitions[0].competitors)delete c.winner;
+    stub({nfl:JSON.stringify(edited)});
+    await expect(handleGameResult({game:'Chargers vs Ravens 2026-11-16'})).rejects.toMatchObject({code:'INCONSISTENT_FINAL_RESULT'});
+  });
+  it('real scoreboard day and UTC event start date differ honestly across midnight',async()=>{
+    stub();const out=await handleGameResult({game:'Chargers vs Ravens 2026-11-16'});
+    expect(out.date).toBe('2026-11-17');expect(out.requested_scoreboard_date).toBe('2026-11-16');
+    expect(String(out.date_semantics)).toContain('UTC');
+  });
+
 });
