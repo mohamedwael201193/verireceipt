@@ -97,7 +97,8 @@ export async function guardPublicHttpUrl(raw: string | undefined, param: string)
 }
 
 /** One measured GET to a validated, pinned address; redirects never followed. */
-export async function measureGet(target: GuardedTarget, timeoutMs: number, ua: string): Promise<{ status: number; latency_ms: number }> {
+export interface ProbeHeaders { status: number; latency_ms: number; location?: string; tls_verified: boolean; raw_headers: string[] }
+export async function measureHeaders(target: GuardedTarget, timeoutMs: number, ua: string): Promise<ProbeHeaders> {
   const started = Date.now();
   const u = new URL(target.url);
   const selected = [...target.addresses].sort((a,b) => isIP(a) - isIP(b))[0];
@@ -106,7 +107,7 @@ export async function measureGet(target: GuardedTarget, timeoutMs: number, ua: s
   publicProbeIp(selected);
   return new Promise((resolve, reject) => {
     let done = false;
-    const finish = (error?: Error, result?: {status: number; latency_ms: number}) => {
+    const finish = (error?: Error, result?: ProbeHeaders) => {
       if (done) return; done = true; clearTimeout(timer);
       if (error) reject(error); else resolve(result!);
     };
@@ -129,10 +130,18 @@ export async function measureGet(target: GuardedTarget, timeoutMs: number, ua: s
       }) as any,
     }, response => {
       const status = response.statusCode;
+      const location = typeof response.headers?.location === 'string' ? response.headers.location : undefined;
+      // Retain only observation headers, never cookies or authentication data.
+      const allowed = new Set(['date','server','content-type','location','strict-transport-security']);
+      const raw_headers: string[] = [];
+      for (let i=0;i<(response.rawHeaders??[]).length;i+=2) {
+        if (allowed.has(response.rawHeaders[i].toLowerCase())) raw_headers.push(response.rawHeaders[i],response.rawHeaders[i+1]);
+      }
+      const tls_verified = u.protocol === 'https:' && (response.socket as import('node:tls').TLSSocket)?.authorized === true;
       // We measure response headers only. Do not download an unbounded body.
       response.destroy(); request?.destroy();
       if (!status) finish(new Error("missing HTTP status"));
-      else finish(undefined, { status, latency_ms: Date.now() - started });
+      else finish(undefined, { status, latency_ms: Date.now() - started, location, tls_verified, raw_headers });
     });
     request.on("error", error => finish(error));
     request.on("socket", socket => socket.on("error", error => finish(error)));
@@ -142,4 +151,10 @@ export async function measureGet(target: GuardedTarget, timeoutMs: number, ua: s
       request?.destroy();
     }
   });
+}
+
+/** Compatibility wrapper: existing health callers retain their exact result shape. */
+export async function measureGet(target: GuardedTarget, timeoutMs: number, ua: string): Promise<{status:number;latency_ms:number}> {
+ const measured=await measureHeaders(target,timeoutMs,ua);
+ return {status:measured.status,latency_ms:measured.latency_ms};
 }

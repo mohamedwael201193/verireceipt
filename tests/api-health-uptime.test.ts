@@ -170,3 +170,13 @@ describe("SSRF follow-ups (reviewer)", () => {
     await expect(guardPublicHttpUrl("example.com.", "url")).rejects.toMatchObject({ status: 422, code: "RATE_LIMITED" });
   });
 });
+
+it('header probe retains only allowed raw headers, validates TLS and destroys the response without reading body',async()=>{
+ const destroy=vi.fn();
+ vi.mocked(httpsRequest).mockImplementation(((_url:unknown,_options:unknown,response:any)=>{
+  const request=new EventEmitter() as any;request.destroy=vi.fn();request.end=()=>queueMicrotask(()=>response({statusCode:302,headers:{location:'https://next.example/'},rawHeaders:['Date','Mon, 23 Nov 2026 22:00:00 GMT','Location','https://next.example/','Set-Cookie','synthetic-do-not-retain','Authorization','synthetic-do-not-retain'],socket:{authorized:true},destroy}));return request;
+ }) as any);
+ const {measureHeaders}=await import('../src/handlers/ssrfGuard');
+ const out=await measureHeaders({url:'https://example.com/',hostname:'example.com',port:443,addresses:['93.184.216.34']},1000,'test');
+ expect(out.tls_verified).toBe(true);expect(out.location).toBe('https://next.example/');expect(out.raw_headers).toEqual(['Date','Mon, 23 Nov 2026 22:00:00 GMT','Location','https://next.example/']);expect(destroy).toHaveBeenCalledTimes(1);
+});

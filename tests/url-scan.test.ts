@@ -5,6 +5,8 @@ const scratch = mkdtempSync("/tmp/url-scan-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 afterEach(() => vi.unstubAllGlobals());
+vi.mock('../src/handlers/urlProbe',()=>({probeUrlHeaders:vi.fn(async()=>({kind:'test-disabled header probe',stop:'probe-unavailable',hops:[]}))}));
+import {probeUrlHeaders} from '../src/handlers/urlProbe';
 import { handleUrlScan } from "../src/handlers/urlScan";
 import { resetThreatIntelCacheForTests } from "../src/handlers/threatIntel";
 import { buildServer } from "../src/server";
@@ -125,4 +127,11 @@ describe("URL_SCAN_VERDICT", () => {
     expect(res.statusCode).toBe(400);
     await app.close();
   });
+});
+
+it('listed targets are not contacted and clean feed results retain probe failure without safety inflation',async()=>{
+ stub();vi.mocked(probeUrlHeaders).mockClear();
+ const blocked=await handleUrlScan({url:'http://malware.wicar.org/data/eicar.com'});expect(blocked.safe).toBe(false);expect(probeUrlHeaders).not.toHaveBeenCalled();
+ const out=await handleUrlScan({url:'https://example.com/'});expect(out.safe).toBe(true);expect((out.live_probe as any).stop).toBe('probe-unavailable');
+ const stored=await getReceiptEvidence((out.receipt as any).receipt_id);expect(JSON.parse(String(stored.evidence)).live_probe.stop).toBe('probe-unavailable');
 });

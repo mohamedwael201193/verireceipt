@@ -6,7 +6,8 @@
 // THREAT_INTELLIGENCE_INDICATOR (shared loader and cache — see
 // threatIntel.ts for the feed list, truncation floors and fail-closed
 // doctrine). The URL itself is NEVER fetched, rendered or executed:
-// this is a blocklist screening, not a live sandbox scan, and the
+// a bounded public-target header probe is optional evidence only; this
+// is blocklist screening, not a live sandbox scan, and the
 // answer says so.
 //
 // Intent contract (read 2026-11-23): request url (string); scored
@@ -21,6 +22,7 @@
 import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+import { probeUrlHeaders } from './urlProbe';
 import { loadFeeds, matchIndicator, type IndicatorMatch } from "./threatIntel";
 
 export const INTENT = "URL_SCAN_VERDICT";
@@ -53,17 +55,18 @@ export async function handleUrlScan(query: Record<string, string | undefined>): 
     if (!matches.some((x) => x.feed === m.feed && x.raw === m.raw)) matches.push(m);
   }
   const safe = matches.length === 0;
+  const liveProbe = safe ? await probeUrlHeaders(raw) : {kind:"not attempted",stop:"listed-target-not-contacted",hops:[]};
   const asOf = new Date().toISOString();
   const feedMeta = states.map((s) => ({ feed: s.feed.name, url: s.feed.url, entries: s.lines.length, sha256: s.sha256, published: s.published }));
   const evidence = JSON.stringify({
-    url: raw, host, safe, as_of: asOf,
+    url: raw, host, safe, as_of: asOf, live_probe: liveProbe,
     matches: matches.map((m) => ({ feed: m.feed, matched_entry: m.raw })),
     feeds: feedMeta,
-    method: "blocklist screening of the exact URL and its host; the URL itself was NOT fetched, rendered or executed",
+    method: "blocklist screening plus optional bounded header-only public-target observation; page body NOT fetched, rendered or executed",
     honesty: "safe=true means no feed listed this URL or host as of the fetch times; blocklists are not safelists, so absence is not a guarantee of safety",
     fetched_at: fetchedAt,
   });
-  const receipt = makeReceipt(INTENT, `${states.length} keyless blocklists`, evidence, "full-list downloads with truncation floors; every matching raw line receipted; the URL was not fetched");
+  const receipt = makeReceipt(INTENT, `${states.length} keyless blocklists`, evidence, "full-list downloads with truncation floors; every matching raw line receipted; page body not fetched; optional header-only probe metadata retained");
   receipt.fetched_at = fetchedAt;
   try {
     await saveReceipt(receipt, evidence);
@@ -73,11 +76,12 @@ export async function handleUrlScan(query: Record<string, string | undefined>): 
   const checkedDesc = `${states.length} feeds (${feedMeta.map((f) => `${f.feed}: ${f.entries} entries`).join(", ")})`;
   const answer = safe
     ? `Yes, ${raw} appears safe to visit: no phishing or malware report for this URL or its host ${host} in any of the ${states.length} blocklists checked (${checkedDesc}) as of ${asOf}. ` +
-      `This is a blocklist screening, not a guarantee: blocklists are not safelists, the URL itself was not fetched or analysed, and a site with no listing can still be hostile.`
+      `This is a blocklist screening, not a guarantee: blocklists are not safelists, page body was not fetched or analysed, and a site with no listing can still be hostile. Header-only observation: ${liveProbe.stop}; it does not change the blocklist-based safe field.`
     : `No, ${raw} is NOT safe to visit: reported by ${matches.map((m) => `${m.feed} ("${m.raw}")`).join("; ")}. ` +
       `Checked against ${checkedDesc}. The URL itself was not fetched or analysed.`;
   return envelope(INTENT, {
     safe,
+    live_probe: liveProbe,
     url: raw,
     host,
     matches: matches.map((m) => ({ feed: m.feed, matched_entry: m.raw })),
