@@ -149,7 +149,7 @@ describe("A9 r3 honest finalized-root labelling", () => {
     >;
     expect(res.verdict).toBe("verified");
     expect(res.finalized_state_root).toBe(TEST_ROOT_A);
-    expect(String(res.answer)).toContain(`at finalized state root ${TEST_ROOT_A}`);
+    expect(String(res.answer)).toContain(`at state root ${TEST_ROOT_A}`);
     expect((res.receipt as Receipt).receipt_id).toBeTruthy();
   });
 
