@@ -1,3 +1,4 @@
+import { refreshSourceReachability, sourceReachabilitySnapshot } from "./core/sourceReachability";
 import { handleFraudDetection } from './handlers/fraudDetection';
 // VeriReceipt — Fastify server entrypoint.
 //
@@ -238,15 +239,17 @@ export function buildServer(): FastifyInstance {
   // 2026-11-20 by grep of the frontend repo — so both are kept);
   // `upstreams` is now the live registry snapshot ({} until a handler
   // call observes an upstream) instead of a hardcoded {}. /health
-  // stays cheap: all three are in-memory reads, no upstream calls,
+  // stays cheap: reads the last result and launches nonblocking bounded source checks,
   // no DB touch.
   app.get("/health", async () => {
+    refreshSourceReachability();
     const loopLag = getLoopLagSnapshot();
     return {
       status: "ok",
       service: "verireceipt",
       uptime_s: Math.floor((Date.now() - startedAtMs) / 1000),
       upstreams: getUpstreamsSnapshot(),
+      source_reachability: sourceReachabilitySnapshot(),
       loopLagMs: loopLag,
       loop_lag_ms: loopLag,
       jobs: getJobsSnapshot(),
