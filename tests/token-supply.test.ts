@@ -121,45 +121,35 @@ describe("handleTokenSupply validation (no network use)", () => {
 });
 
 describe("display-label input validation", () => {
-  it('chainless provider failure or stale asset refuses instead of substituting chain supply',async()=>{
-    const fixture=JSON.parse(readFileSync(join(__dirname,'fixtures/token-aggregate/usdc.json'),'utf8'));
-    const clock=vi.spyOn(Date,'now').mockReturnValue(Date.parse(fixture.last_updated));
-    try {
-      for(const mode of ['failure','stale']) {
-        stubSupplyFetch(Object.fromEntries(ETH.map(url=>[url,supplyBehavior(41000000123456n,6,'USDC')])));
-        const rpcFetch=globalThis.fetch;
-        vi.stubGlobal('fetch',async(url:unknown,init?:RequestInit)=>{
-          if(String(url).includes('api.coingecko.com')) {
-            if(mode==='failure')throw new Error('provider unavailable');
-            return new Response(JSON.stringify({...fixture,last_updated:'2000-01-01T00:00:00Z'}));
-          }
-          return rpcFetch(url as any,init);
-        });
-        await expect(handleTokenSupply({token:'USDC'})).rejects.toMatchObject({code:'ASSET_SUPPLY_UNAVAILABLE',status:502});
-      }
-    }finally{clock.mockRestore();}
-  });
-  it("a chainless listed symbol resolves to its canonical home chain, disclosed", async () => {
-    const clock=vi.spyOn(Date,"now").mockReturnValue(Date.parse(JSON.parse(readFileSync(join(__dirname,"fixtures/token-aggregate/usdc.json"),"utf8")).last_updated));
-    try {
-    stubSupplyFetch(Object.fromEntries(ETH.map((url) => [url, supplyBehavior(41000000123456n, 6, "USDC")])));
-    const out = await handleTokenSupply({ token: "USDC" });
-    expect(out.chain).toBe("ethereum");
-    expect(out.per_chain_total_supply).toBe(41000000.123456);
-    expect(out.total_supply).toBe(JSON.parse(readFileSync(join(__dirname,"fixtures/token-aggregate/usdc.json"),"utf8")).market_data.total_supply);
-    expect(String(out.answer)).toContain("No chain was given");
-    expect(String(out.answer)).toContain("canonical home chain ethereum");
-    const receipt = out.receipt as { receipt_id: string };
-    const evidence = await getReceiptEvidence(receipt.receipt_id);
-    const parsed = JSON.parse(evidence.evidence!) as { chain_resolution: { resolved_chain: string } | string };
-    expect(typeof parsed.chain_resolution).toBe("object");
-    expect((parsed.chain_resolution as { resolved_chain: string }).resolved_chain).toBe("ethereum");
+  it.each([{token:'USDC'}, {token:'USDC on ethereum'}, {token:USDC_ETH,chain:'ethereum'}])('chain total has no aggregate-provider dependency: %j', async query=>{
+    const capture=JSON.parse(readFileSync(join(__dirname,'fixtures/token-chain-supply/usdc-finalized.json'),'utf8'));
+    const seen:string[]=[];
+    vi.stubGlobal('fetch',async(url:unknown,init?:{body?:unknown})=>{
+      const u=String(url);seen.push(u);
+      const leg=capture.legs.find((l:any)=>l.url===u)??(ETH.includes(u)?capture.legs[0]:null);
+      if(!leg)throw new Error('aggregate provider unavailable');
+      const request=JSON.parse(String(init?.body));
+      const response=leg.responses.find((r:any)=>r.request.params[0].data===request.params[0].data);
+      return new Response(response.raw);
+    });
+    const out=await handleTokenSupply(query);
+    const raw=BigInt(JSON.parse(capture.legs[0].responses[0].raw).result);
+    const decimals=Number(BigInt(JSON.parse(capture.legs[0].responses[1].raw).result));
+    const digits=raw.toString().padStart(decimals+1,'0');
+    expect(out.total_supply).toBe(Number(digits.slice(0,-decimals)+'.'+digits.slice(-decimals)));
+    expect(out.chain).toBe('ethereum');
+    expect(String(out.total_supply_scope)).toContain('chain-specific');
+    expect(seen.every(url=>ETH.includes(url))).toBe(true);
+    expect(String(out.answer)).toContain('total supply on ethereum');
+    const evidence=await getReceiptEvidence((out.receipt as any).receipt_id);
     const full=JSON.parse(evidence.evidence!);
-    expect(full.asset_total.raw_body).toBe(readFileSync(join(__dirname,"fixtures/token-aggregate/usdc.json"),"utf8"));
+    expect(full.supply_base_units_hex).toBe('0x'+raw.toString(16));
+    expect(full.asset_total).toBeUndefined();
+    if(query.token==='USDC'){
+      expect(String(out.answer)).toContain('canonical home chain ethereum');
+      expect(full.chain_resolution.resolved_chain).toBe('ethereum');
+    }else expect(full.chain_resolution).toBe('not used (chain given)');
     expect(sha256Hex(evidence.evidence!)).toBe((out.receipt as any).raw_response_sha256);
-    expect(String(out.answer)).toContain("provider-reported asset total");
-    expect(String(out.answer)).toContain("Per-chain figure follows separately");
-    } finally {clock.mockRestore();}
   });
 
   it("a single-chain listed symbol resolves to its only chain (ARB on arbitrum)", async () => {

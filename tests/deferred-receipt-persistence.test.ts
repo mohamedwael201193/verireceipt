@@ -28,6 +28,13 @@ import { buildServer } from "../src/server";
 const fixture = JSON.parse(readFileSync(join(__dirname, "fixtures/deferred-persistence-real-sources.json"), "utf8"));
 interface RecordedResponse { url: string; method: string; body: unknown; status: number; raw_text: string; sha256: string }
 interface CapturedCase { query: Record<string, string>; expected_fields: Record<string, unknown>; expected_raw_text: string; expected_raw_sha256: string; clock: string }
+// The source captures stay unchanged; supply receipts now add an explicit chain-scope label.
+const supplyScope = "chain-specific ERC-20 totalSupply, decimals applied; not a global asset or circulating supply";
+fixture.scenarios.supply.expected_fields.total_supply_scope = supplyScope;
+const supplyEvidence = JSON.parse(fixture.scenarios.supply.expected_raw_text);
+supplyEvidence.total_supply_scope = supplyScope;
+fixture.scenarios.supply.expected_raw_text = JSON.stringify(supplyEvidence, Object.keys(supplyEvidence).sort());
+fixture.scenarios.supply.expected_raw_sha256 = sha256Hex(fixture.scenarios.supply.expected_raw_text);
 const responses = fixture.responses as RecordedResponse[];
 const key = (url: string, method: string, body: unknown) => JSON.stringify([url, method, body]);
 const responseMap = new Map<string, RecordedResponse[]>();

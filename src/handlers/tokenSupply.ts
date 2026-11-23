@@ -41,7 +41,6 @@ import {
   tokenContractFor,
 } from "./tokenContracts";
 
-import {aggregateAssetId,assetSupply} from './tokenAssetSupply';
 
 export const INTENT = "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL";
 
@@ -246,11 +245,6 @@ export async function handleTokenSupply(
     );
   }
 
-  let aggregate: Awaited<ReturnType<typeof assetSupply>> | null = null;
-  if(homeChain && requestedSymbol && aggregateAssetId(requestedSymbol)) {
-    try { aggregate=await assetSupply(requestedSymbol); }
-    catch {throw upstreamUnavailable('ASSET_SUPPLY_UNAVAILABLE','current identity-matching asset total could not be read; no chain total is relabeled as global');}
-  }
   const winner = pair.leg;
   const totalSupply = toWholeUnits(winner.supply, winner.decimals);
   const symbol = requestedSymbol ?? winner.symbol;
@@ -258,8 +252,8 @@ export async function handleTokenSupply(
   const votes = `${pair.count}/${total} sources agreed`;
 
   const fields: Record<string, unknown> = {
-    total_supply: aggregate?.total_supply ?? totalSupply,
-    ...(aggregate?{per_chain_total_supply:totalSupply,total_supply_scope:aggregate.scope,asset_total_source:aggregate.source_url,asset_total_source_updated_at:aggregate.source_updated_at}:{}),
+    total_supply: totalSupply,
+    total_supply_scope: "chain-specific ERC-20 totalSupply, decimals applied; not a global asset or circulating supply",
     token_symbol: symbol,
     chain,
     as_of: asOf,
@@ -272,7 +266,7 @@ export async function handleTokenSupply(
     chain_resolution: homeChain
       ? { input: query.token?.trim(), resolved_chain: homeChain, note: "no chain given; resolved to the symbol's canonical home chain in the registry, disclosed, never a silent pick" }
       : "not used (chain given)",
-    ...(aggregate?{asset_total:aggregate}:{}),
+    total_supply_scope: "chain-specific ERC-20 totalSupply, decimals applied; not a global asset or circulating supply",
     decimals: winner.decimals,
     method: "eth_call totalSupply+decimals+symbol",
     rpc_url: winner.rpcUrl,
@@ -291,9 +285,9 @@ export async function handleTokenSupply(
   }
 
   return envelope(INTENT, fields, receiptDoc, {
-    answer: `${aggregate?`${symbol} provider-reported asset total supply: ${aggregate.total_supply}. ${aggregate.scope}. ${aggregate.attribution}. ${aggregate.source_url} Per-chain figure follows separately. `:""}${homeChain ? `No chain was given; ${symbol} resolved to its canonical home chain ${homeChain} (disclosed, not a silent pick). ` : ""}${symbol} total supply on ${chain}: ${totalSupply} (finalized block, ${votes}).`,
+    answer: `${homeChain ? `No chain was given; ${symbol} resolved to its canonical home chain ${homeChain} (disclosed, not a silent pick). ` : ""}${symbol} total supply on ${chain}: ${totalSupply} (finalized block, ${votes}).`,
     verdict: "verified",
     confidence: pair.count === total ? 1.0 : 0.9,
-    source: `${aggregate?aggregate.source_url+"; Powered by CoinGecko; ":""}EVM RPC quorum (${chain}, 2-of-${total}, finalized)`,
+    source: `EVM RPC quorum (${chain}, 2-of-${total}, finalized)`,
   });
 }
