@@ -191,6 +191,8 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "token-supply": "evm-rpc",
   macro: "worldbank",
   "token-holders": "blockscout",
+  price: "chainlink-evm-rpc",
+  liquidity: "dexscreener",
 };
 
 /**

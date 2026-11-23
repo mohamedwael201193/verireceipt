@@ -27,6 +27,7 @@ import { exactQuery } from "./core/exactQuery";
 import { diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
 import { handleMacro } from "./handlers/macroEconomic";
 import { handleTokenHolders } from "./handlers/tokenHolders";
+import { createWiredFinanceHandlers } from "./handlers/financeWired";
 import { ApiError, badRequest, errorBody } from "./core/errors";
 import { getDb } from "./core/db";
 import {
@@ -291,6 +292,15 @@ export function buildServer(): FastifyInstance {
   );
   app.get("/v1/token-holders", async (request) =>
     trackIntent("token-holders", () => handleTokenHolders(asQuery(request.query))),
+  );
+  // Wired finance observations (expansion): primary/fallback sources, no
+  // averaging; keyed failover legs appear only when their env keys are set.
+  const wiredFinance = createWiredFinanceHandlers();
+  app.get("/v1/price", async (request) =>
+    trackIntent("price", () => wiredFinance.price(asQuery(request.query))),
+  );
+  app.get("/v1/liquidity", async (request) =>
+    trackIntent("liquidity", () => wiredFinance.liquidity(asQuery(request.query))),
   );
 
   // G10: serve stored receipts + their exact raw evidence bytes
