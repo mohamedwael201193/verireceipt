@@ -455,7 +455,7 @@ interface VerifiedCore {
  * throws: a refused or unverifiable purchase is returned as failed evidence
  * with worst-case spend recorded for anything that reached a signature.
  */
-async function executeVerifiedPurchase(
+export async function executeVerifiedPurchase(
   input: { intent: string; params: Record<string, string>; valueField: string; kind: string },
   payer: Payer,
   opts: { spend: SpendLedger; now?: () => Date; f?: Fetch; onRawResponse?: (raw: RawResponse) => void | Promise<void>; secUserAgent?: string; durableBeforeSign?: (notice: SignNotice) => Promise<void> },
