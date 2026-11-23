@@ -113,6 +113,7 @@ semantics:
     - AIR_QUALITY_INDEX_GENERAL
     - API_HEALTH_CHECK_GENERAL
     - SERVER_UPTIME_MONITOR_GENERAL
+    - SECURITY_REVIEW_GENERAL
   signal_mapping:
     confidence_field: confidence
     label_field: answer
@@ -1178,6 +1179,26 @@ endpoints:
           - SERVER_UPTIME_MONITOR_GENERAL
           description: "Public HTTP or HTTPS hostname or URL, no credentials; only ports 80 and 443."
 
+  - path: /v1/security-review
+    external_path: /v1/security-review
+    method: GET
+    description: 'Exact npm release package@major.minor.patch known-advisory lookup using OSV. Supports optional
+      npm: prefix and scoped npm names only. No source-code, contract, site or transitive-dependency audit.
+      Positive active advisory coverage returns Needs changes with unique OSV record count and published
+      severity ordering; aliases do not increase count. No active matches is an honest refusal, never Secure.
+      Unsupported local version bounds use OSV query membership with explicit disclosure. Retains raw
+      upstream evidence verbatim, source timestamp and a five-minute cache limit.'
+    intents:
+    - SECURITY_REVIEW_GENERAL
+    params:
+      query:
+        required:
+        - name: target
+          type: string
+          intents:
+          - SECURITY_REVIEW_GENERAL
+          description: 'Exact npm package@major.minor.patch, for example semver@7.5.1. No ranges, tags, URLs or prereleases.'
+
 intent_mapping:
   ONCHAIN_TX_LOOKUP_GENERAL:
     endpoint: /v1/tx
@@ -2027,3 +2048,19 @@ intent_mapping:
       latency_ms:
         path: latency_ms
         unit: "milliseconds"
+
+  SECURITY_REVIEW_GENERAL:
+    endpoint: /v1/security-review
+    input:
+      target:
+        from: target
+    output:
+      verdict:
+        path: verdict
+      vulnerability_count:
+        path: vulnerability_count
+        unit: "vulnerabilities"
+      issues:
+        path: issues
+      summary:
+        path: summary

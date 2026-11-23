@@ -260,6 +260,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - AIR_QUALITY_INDEX_GENERAL\n' +
     '    - API_HEALTH_CHECK_GENERAL\n' +
     '    - SERVER_UPTIME_MONITOR_GENERAL\n' +
+    '    - SECURITY_REVIEW_GENERAL\n' +
     '  signal_mapping:\n' +
     '    confidence_field: confidence\n' +
     '    label_field: answer\n' +
@@ -1325,6 +1326,26 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          - SERVER_UPTIME_MONITOR_GENERAL\n' +
     '          description: "Public HTTP or HTTPS hostname or URL, no credentials; only ports 80 and 443."\n' +
     '\n' +
+    '  - path: /v1/security-review\n' +
+    '    external_path: /v1/security-review\n' +
+    '    method: GET\n' +
+    '    description: \'Exact npm release package@major.minor.patch known-advisory lookup using OSV. Supports optional\n' +
+    '      npm: prefix and scoped npm names only. No source-code, contract, site or transitive-dependency audit.\n' +
+    '      Positive active advisory coverage returns Needs changes with unique OSV record count and published\n' +
+    '      severity ordering; aliases do not increase count. No active matches is an honest refusal, never Secure.\n' +
+    '      Unsupported local version bounds use OSV query membership with explicit disclosure. Retains raw\n' +
+    '      upstream evidence verbatim, source timestamp and a five-minute cache limit.\'\n' +
+    '    intents:\n' +
+    '    - SECURITY_REVIEW_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: target\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - SECURITY_REVIEW_GENERAL\n' +
+    '          description: \'Exact npm package@major.minor.patch, for example semver@7.5.1. No ranges, tags, URLs or prereleases.\'\n' +
+    '\n' +
     'intent_mapping:\n' +
     '  ONCHAIN_TX_LOOKUP_GENERAL:\n' +
     '    endpoint: /v1/tx\n' +
@@ -2173,6 +2194,22 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '        path: http_status\n' +
     '      latency_ms:\n' +
     '        path: latency_ms\n' +
-    '        unit: "milliseconds"\n',
+    '        unit: "milliseconds"\n' +
+    '\n' +
+    '  SECURITY_REVIEW_GENERAL:\n' +
+    '    endpoint: /v1/security-review\n' +
+    '    input:\n' +
+    '      target:\n' +
+    '        from: target\n' +
+    '    output:\n' +
+    '      verdict:\n' +
+    '        path: verdict\n' +
+    '      vulnerability_count:\n' +
+    '        path: vulnerability_count\n' +
+    '        unit: "vulnerabilities"\n' +
+    '      issues:\n' +
+    '        path: issues\n' +
+    '      summary:\n' +
+    '        path: summary\n',
   cast: REGISTRATION_CAST_SNIPPET,
 };
