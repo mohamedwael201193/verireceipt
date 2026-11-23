@@ -1,31 +1,10 @@
-// CORPORATE_REGISTRY_LOOKUP_GENERAL — GET /v1/corporate-registry?company=<name|ticker|CIK>&jurisdiction=US
-//
-// Zero-LLM. Looks up a US public company in the SEC's EDGAR registry —
-// the only jurisdiction this handler covers, named honestly in every
-// answer — with a SHA-256 receipt over the exact upstream response
-// bodies.
-//
-// Intent contract (https://devnode.telegraphprotocol.com/engine/v1/intents/CORPORATE_REGISTRY_LOOKUP_GENERAL,
-// read 2026-11-22): request company + jurisdiction (both required);
-// response legal_name, registration_id, active (scored bool),
-// jurisdiction, registered_address, incorporated.
-//
-// SOURCE: SEC EDGAR (www.sec.gov company_tickers.json + data.sec.gov
-// submissions API), keyless, identified by the SEC_USER_AGENT env like
-// the filings handlers (fail closed when unset). Single registry,
-// honestly named. Probed live 2026-11-23.
-//
-// HONEST SCOPE (said in every answer):
-//   - Coverage is US SEC filers ONLY. Any other jurisdiction is 422
-//     JURISDICTION_NOT_COVERED naming the coverage, never a guess.
-//   - registration_id is the SEC CIK (EDGAR's registry identifier), not
-//     an LEI or a state company number.
-//   - "active" means "has filed with the SEC within the last 400 days"
-//     (EDGAR carries no good-standing flag) — a filer-activity signal,
-//     NOT a legal good-standing or solvency determination.
-//   - EDGAR does not carry the incorporation date; `incorporated` is
-//     served empty and said so, never invented. The state of
-//     incorporation (when EDGAR carries it) is reported separately.
+import {handleGleifRegistry} from './gleifRegistry';
+// CORPORATE_REGISTRY_LOOKUP_GENERAL: SEC first for US filers, GLEIF elsewhere
+// and on a completed SEC crosswalk miss. SEC failure is not a miss.
+// SEC CIK and recent-filing activity are distinct from legal standing. GLEIF
+// returns legal entity status and registeredAs, with explicit incomplete LEI
+// coverage. Neither source proves nonexistence on a negative name search.
+// GLEIF terms, source policy, pacing and captures: docs/corporate-gleif.md.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -108,8 +87,7 @@ export async function handleCorporateRegistry(query: Record<string, string | und
   const jurisdiction = query.jurisdiction?.trim();
   if (!jurisdiction) throw badRequest("MISSING_PARAM", "jurisdiction is required");
   if (!US_JURISDICTIONS.has(jurisdiction.toLowerCase())) {
-    throw unprocessable("JURISDICTION_NOT_COVERED",
-      `only US SEC filers are covered by this handler; ${jurisdiction} has no covered registry here — no answer is guessed`);
+    return handleGleifRegistry(company,jurisdiction);
   }
   const ua = requireUserAgent();
   const fetchedAtTickers = new Date().toISOString();
@@ -123,7 +101,7 @@ export async function handleCorporateRegistry(query: Record<string, string | und
   const tickersRawBody = tickersCache.raw;
   const match = resolveCikFromTickers(company, tickersCache.data);
   if (!match) {
-    throw unprocessable("COMPANY_NOT_FOUND", `no US SEC filer matches "${company}" by CIK, ticker or name`);
+    return handleGleifRegistry(company,"US");
   }
   const subUrl = submissionsUrl(match.cik10);
   const subRaw = await fetchText(subUrl, ua).catch((err: unknown) => {

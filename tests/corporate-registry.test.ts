@@ -18,16 +18,15 @@ function stub(opts: { sub?: string } = {}): void {
   vi.stubGlobal("fetch", async (url: string) => {
     const u = String(url);
     if (u.includes("company_tickers")) return new Response(tickers, { status: 200 });
+    if(u.includes("api.gleif.org")) return new Response(readFileSync(join(__dirname,"fixtures/corporate-gleif/negative.json"),"utf8"));
     if (opts.sub === "ERR") throw new Error("test outage");
     return new Response(opts.sub ?? appleSub, { status: 200 });
   });
 }
 describe("CORPORATE_REGISTRY_LOOKUP_GENERAL", () => {
-  it("validates before fetching and covers only the US", async () => {
+  it("validates required inputs before fetching", async () => {
     await expect(handleCorporateRegistry({})).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
     await expect(handleCorporateRegistry({ company: "Apple" })).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
-    await expect(handleCorporateRegistry({ company: "Siemens", jurisdiction: "DE" }))
-      .rejects.toMatchObject({ status: 422, code: "JURISDICTION_NOT_COVERED" });
   });
   it("resolves a ticker and serves the real EDGAR profile with honest scoping", async () => {
     stub();
@@ -75,10 +74,10 @@ describe("CORPORATE_REGISTRY_LOOKUP_GENERAL", () => {
     await expect(handleCorporateRegistry({ company: "Acme", jurisdiction: "US" }))
       .rejects.toMatchObject({ status: 422, code: "AMBIGUOUS_ENTITY" });
   });
-  it("an unknown company is an honest 422", async () => {
+  it("an unknown SEC company falls through to an honest GLEIF not_found", async () => {
     stub();
-    await expect(handleCorporateRegistry({ company: "ZZQ Nonexistent Holdings", jurisdiction: "US" }))
-      .rejects.toMatchObject({ status: 422, code: "COMPANY_NOT_FOUND" });
+    const out=await handleCorporateRegistry({ company: "ZZQ Nonexistent Holdings", jurisdiction: "US" });
+    expect(out.lookup_status).toBe("not_found");expect(out.active).toBeNull();
   });
   it("active=false when the last filing is older than the window", () => {
     const edited = JSON.parse(appleSub);
