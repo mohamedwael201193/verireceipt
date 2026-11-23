@@ -9,14 +9,14 @@ import {
   fetchMinerRegistrationStatus,
 } from "./minerRegistration";
 
-// Shape returned by GET https://devnode.telegraphprotocol.com/api/miners/6174
+// Shape returned by GET https://devnode.telegraphprotocol.com/api/miners/6177
 // on 2026-11-22 (trimmed to the fields this module reads).
 const liveBody = (over: Record<string, unknown> = {}) => ({
   miner: {
-    registration_id: 6174,
+    registration_id: 6177,
     slug: "verireceipt",
     activation_status: "active",
-    yaml_hash: "7e6ba1228d6c171535fdc82f31d220acf4695dc5d9319530cb206be36f0ea9c7",
+    yaml_hash: "abaee05348e6d4374dd7fbf0c9da6a14794dfc372bffdb37b8958d1107b44d7a",
     rejection_reason: null,
     retrying: false,
     ...over,
@@ -31,28 +31,28 @@ describe("fetchMinerRegistrationStatus", () => {
     vi.unstubAllGlobals();
   });
 
-  it("pins the confirmed updateMiner facts for registration 6174", () => {
-    expect(SEPOLIA_REGISTRATION_ID).toBe(6174);
-    expect(SEPOLIA_PREVIOUS_REGISTRATION_ID).toBe(6171);
-    expect(SEPOLIA_REGISTER_TX).toBe("0x8466bb0a2937ec86056ed89d389559c43d73e18802fdfe0d077c1c32736c4c3e");
-    expect(SEPOLIA_YAML_HASH).toBe("0x7e6ba1228d6c171535fdc82f31d220acf4695dc5d9319530cb206be36f0ea9c7");
-    expect(SEPOLIA_YAML_PIN).toBe("f1a260701d3bc532019d4576404f40a09958b34c");
+  it("pins the confirmed updateMiner facts for registration 6177", () => {
+    expect(SEPOLIA_REGISTRATION_ID).toBe(6177);
+    expect(SEPOLIA_PREVIOUS_REGISTRATION_ID).toBe(6176);
+    expect(SEPOLIA_REGISTER_TX).toBe("0xc6ba683b68ca2e5fec185620085cf76c8e6f31467a62e62f03db82b8b4d1ba74");
+    expect(SEPOLIA_YAML_HASH).toBe("0xabaee05348e6d4374dd7fbf0c9da6a14794dfc372bffdb37b8958d1107b44d7a");
+    expect(SEPOLIA_YAML_PIN).toBe("d604c5433276e70af9e2d359ce9d096f951f85fa");
   });
 
-  it("reads only /api/miners/6174", async () => {
+  it("reads only /api/miners/6177", async () => {
     const fetchMock = vi.fn(async () => json(liveBody()));
     vi.stubGlobal("fetch", fetchMock);
     await fetchMinerRegistrationStatus();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toBe(
-      "https://devnode.telegraphprotocol.com/api/miners/6174",
+      "https://devnode.telegraphprotocol.com/api/miners/6177",
     );
   });
 
   it("does not report active when the live node 404s (ingestion pending)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ error: "miner registration not found" }, 404)));
     const status = await fetchMinerRegistrationStatus();
-    expect(status.registrationId).toBe(6174);
+    expect(status.registrationId).toBe(6177);
     expect(status.nodeReportsActive).toBe(false);
     expect(status.nodeByRegistrationId.kind).toBe("not_found");
     expect(describeNodeListing(status.nodeByRegistrationId)).toContain("UNVERIFIED");
@@ -101,7 +101,7 @@ describe("fetchMinerRegistrationStatus", () => {
   });
 
   it("treats a bare listed-but-not-active body as not active", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => json({ id: 6174, active: false })));
+    vi.stubGlobal("fetch", vi.fn(async () => json({ id: 6177, active: false })));
     const status = await fetchMinerRegistrationStatus();
     expect(status.nodeReportsActive).toBe(false);
     expect(status.nodeByRegistrationId.kind).toBe("listed");
@@ -121,8 +121,8 @@ describe("fetchMinerRegistrationStatus", () => {
   // matching registration_id AND the pinned yaml_hash. Each body below
   // reported "active" under r6.
   it.each([
-    ["boolean active, no activation_status, no hash", { miner: { registration_id: 6174, active: true } }],
-    ["boolean is_active, no activation_status", { miner: { registration_id: 6174, is_active: true, yaml_hash: "7e6ba1228d6c171535fdc82f31d220acf4695dc5d9319530cb206be36f0ea9c7" } }],
+    ["boolean active, no activation_status, no hash", { miner: { registration_id: 6177, active: true } }],
+    ["boolean is_active, no activation_status", { miner: { registration_id: 6177, is_active: true, yaml_hash: "abaee05348e6d4374dd7fbf0c9da6a14794dfc372bffdb37b8958d1107b44d7a" } }],
     ["activation_status active but yaml_hash missing", liveBody({ yaml_hash: undefined })],
     ["activation_status active but yaml_hash empty", liveBody({ yaml_hash: "" })],
     ["activation_status active but registration_id missing", liveBody({ registration_id: undefined })],
@@ -139,7 +139,7 @@ describe("fetchMinerRegistrationStatus", () => {
   it("accepts a 0x-prefixed, upper-case yaml_hash that matches the pin", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => json(liveBody({ yaml_hash: "0x" + "7e6ba1228d6c171535fdc82f31d220acf4695dc5d9319530cb206be36f0ea9c7".toUpperCase() }))),
+      vi.fn(async () => json(liveBody({ yaml_hash: "0x" + "abaee05348e6d4374dd7fbf0c9da6a14794dfc372bffdb37b8958d1107b44d7a".toUpperCase() }))),
     );
     const status = await fetchMinerRegistrationStatus();
     expect(status.nodeReportsActive).toBe(true);

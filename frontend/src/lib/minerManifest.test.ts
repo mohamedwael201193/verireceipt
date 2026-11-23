@@ -15,20 +15,20 @@ describe("current frontend contract metadata", () => {
   const listed = [...section.matchAll(/^    - ([A-Z0-9_]+)$/gm)].map(m => m[1]);
   expect(listed).toEqual([...DECLARED_INTENTS]);
   expect(DECLARED_INTENT_COUNT).toBe(45);
-  // The working miner.yaml is ahead of the chain: its hash is the pending
-  // update hash, and SEPOLIA_YAML_HASH stays the registered hash until the tx.
+  // The 45-intent updateMiner landed 2026-11-23: the working hash equals
+  // the registered SEPOLIA_YAML_HASH (registration 6177).
   const workingHash = "0x" + createHash("sha256").update(raw).digest("hex");
   expect(workingHash).toBe(MINER_YAML_SHA256);
-  expect(SEPOLIA_YAML_HASH).toBe("0x7e6ba1228d6c171535fdc82f31d220acf4695dc5d9319530cb206be36f0ea9c7");
+  expect(SEPOLIA_YAML_HASH).toBe("0xabaee05348e6d4374dd7fbf0c9da6a14794dfc372bffdb37b8958d1107b44d7a");
  });
  it("separates six selected demos from the declarations", () => {
   expect(INTENTS).toHaveLength(6);
   expect(INTENT_ENDPOINTS).toHaveLength(6);
-  expect(BOND_INTENT_COUNT).toBe(14); // on-chain registered count, pending the 45-intent update
+  expect(BOND_INTENT_COUNT).toBe(45); // on-chain registered count (registration 6177)
   expect(BOND_REGISTRATION_ID).toBe(SEPOLIA_REGISTRATION_ID);
-  expect(SEPOLIA_REGISTRATION_ID).toBe(6174);
-  expect(MINER_BOND_BASE_UNITS).toBe(2_150_000);
-  expect(SEPOLIA_SERVING_REGISTRATION_IDS).toEqual([6152, 6160, 6174]);
+  expect(SEPOLIA_REGISTRATION_ID).toBe(6177);
+  expect(MINER_BOND_BASE_UNITS).toBe(4_320_000);
+  expect(SEPOLIA_SERVING_REGISTRATION_IDS).toEqual([6152, 6160, 6174, 6176, 6177]);
  });
  it("does not conflate manual Desk probes with header health", () => {
   const text = readFileSync(resolve(__dirname, "../pages/Dashboard.tsx"), "utf8");

@@ -1,6 +1,6 @@
-// Canonical declarations from miner.yaml (45: the registered 14 plus the 31
-// verified new intents pending the next updateMiner for registration 6174;
-// lib/minerRegistration.ts keeps the on-chain registered truth of 14).
+// Canonical declarations from miner.yaml (45 intents). Registration 6177
+// declares exactly these on chain (updateMiner landed 2026-11-23);
+// lib/minerRegistration.ts keeps the on-chain registered truth.
 // Six homepage demos are a selected subset, not the full declared contract.
 export const DECLARED_INTENTS = [
   "ONCHAIN_TX_LOOKUP_GENERAL",
@@ -52,6 +52,6 @@ export const DECLARED_INTENTS = [
 export const DECLARED_INTENT_COUNT = DECLARED_INTENTS.length;
 export const MINER_YAML_SHA256 = "0xabaee05348e6d4374dd7fbf0c9da6a14794dfc372bffdb37b8958d1107b44d7a";
 
-/** SHA-256 of the repo-root miner.yaml bytes (45 intents). It becomes the
- * on-chain yaml_hash of registration 6174 when the pending updateMiner lands;
- * SEPOLIA_YAML_HASH in lib/minerRegistration.ts stays the registered truth. */
+/** SHA-256 of the repo-root miner.yaml bytes (45 intents). It equals the
+ * on-chain yaml_hash of registration 6177 and SEPOLIA_YAML_HASH in
+ * lib/minerRegistration.ts (updateMiner landed 2026-11-23). */

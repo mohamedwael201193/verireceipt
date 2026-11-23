@@ -153,8 +153,8 @@ describe("Dashboard page", () => {
     expect(screen.queryByText(/Score 98 \/ 100/)).toBeNull();
     expect(screen.queryByText(/Archived Receipts: 124/)).toBeNull();
     // Verified bond is shown instead (Auth drawer value; the StatusDocs
-    // "Bond $2.15" badge only exists while that view is mounted).
-    expect(screen.getByText("$2.15 Test USDC")).toBeTruthy();
+    // "Bond $4.32" badge only exists while that view is mounted).
+    expect(screen.getByText("$4.32 Test USDC")).toBeTruthy();
     expect(screen.queryByText(/\$1\.40/)).toBeNull();
     // The session ledger chrome renders (starts empty — 0 receipts).
     expect(await screen.findByText(/Receipts \(this tab\):/)).toBeTruthy();

@@ -9,7 +9,7 @@
 //
 // Render service facts shown are only the documented base URL plus the
 // miner.yaml registration facts (miner id 774921, slug verireceipt) and the
-// bond, which is re-read live on-chain (minerBond(6174), quoteMinerBond(14)). Live Sepolia registration status is
+// bond, which is re-read live on-chain (minerBond(6177), quoteMinerBond(45)). Live Sepolia registration status is
 // read from the Telegraph node and is never shown as "active" unless
 // that live read says so. The Render plan, disk, and region are NOT
 // shown: the API does not report them. No "Always-Warm" claim, no sponsored
@@ -424,7 +424,7 @@ export default function Status() {
         <p className="vr-muted vr-small">
           The miner is registered on Ethereum Sepolia. The identifiers below are the
           confirmed updateMiner transaction facts (it replaced the earlier registration
-          {registration.data?.previousRegistrationId ?? 6171}). Activation on the Telegraph node is read live and is shown as active only
+          {registration.data?.previousRegistrationId ?? 6176}). Activation on the Telegraph node is read live and is shown as active only
           when that read says so.
         </p>
         {registration.data ? (

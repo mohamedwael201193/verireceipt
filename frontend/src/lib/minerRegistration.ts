@@ -1,38 +1,25 @@
 /**
- * Current Sepolia registration6174: confirmed updateMiner of6171, block12190478.
+ * Current Sepolia registration 6177: confirmed updateMiner of 6176, block 12194171.
  * Node activation stays live-read and requires the exact id, status and YAML hash.
  * Historical serving IDs are retained for old paid receipts, never rewritten.
  */
 import { useLiveQuery, type LiveQueryResult } from "./hooks";
+import { DECLARED_INTENTS } from "./minerManifest";
 
-export const SEPOLIA_REGISTRATION_ID = 6174;
+export const SEPOLIA_REGISTRATION_ID = 6177;
 
-/** The intents registration 6174 currently declares on chain (the 14 above).
- * miner.yaml's DECLARED_INTENTS is ahead of this until the next updateMiner. */
-export const SEPOLIA_REGISTERED_INTENTS = [
-  "ONCHAIN_TX_LOOKUP_GENERAL",
-  "REGULATORY_FILING_MONITOR_GENERAL",
-  "TVL_LOOKUP_GENERAL",
-  "OPTIMAL_EXECUTION_ROUTE_GENERAL",
-  "GRID_POWER_PRICE_GENERAL",
-  "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
-  "GAS_PRICE_GENERAL",
-  "WALLET_BALANCE_CHECK_GENERAL",
-  "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL",
-  "MACRO_ECONOMIC_INDICATOR_GENERAL",
-  "DNS_RECORD_LOOKUP_GENERAL",
-  "CURRENCY_EXCHANGE_CONVERT",
-  "SSL_VERIFICATION_CERT",
-  "EMAIL_SECURITY_GENERAL",
-] as const;
+/** The intents registration 6177 declares on chain. The 45-intent updateMiner
+ * (tx below) landed 2026-11-23, so this now equals the working miner.yaml's
+ * DECLARED_INTENTS; kept as a distinct export because it is the on-chain truth. */
+export const SEPOLIA_REGISTERED_INTENTS = DECLARED_INTENTS;
 
-export const SEPOLIA_PREVIOUS_REGISTRATION_ID = 6171;
+export const SEPOLIA_PREVIOUS_REGISTRATION_ID = 6176;
 export const SEPOLIA_REGISTER_TX =
-  "0x8466bb0a2937ec86056ed89d389559c43d73e18802fdfe0d077c1c32736c4c3e";
-export const SEPOLIA_REGISTER_BLOCK = 12190478;
+  "0xc6ba683b68ca2e5fec185620085cf76c8e6f31467a62e62f03db82b8b4d1ba74";
+export const SEPOLIA_REGISTER_BLOCK = 12194171;
 export const SEPOLIA_YAML_HASH =
-  "0x7e6ba1228d6c171535fdc82f31d220acf4695dc5d9319530cb206be36f0ea9c7";
-export const SEPOLIA_YAML_PIN = "f1a260701d3bc532019d4576404f40a09958b34c";
+  "0xabaee05348e6d4374dd7fbf0c9da6a14794dfc372bffdb37b8958d1107b44d7a";
+export const SEPOLIA_YAML_PIN = "d604c5433276e70af9e2d359ce9d096f951f85fa";
 /**
  * Every registration id that has answered paid calls for slug "verireceipt".
  * Telegraph receipts name the registration that served the call, so committed
@@ -40,7 +27,7 @@ export const SEPOLIA_YAML_PIN = "f1a260701d3bc532019d4576404f40a09958b34c";
  * rewritten. The current registration is always included.
  */
 export const SEPOLIA_SERVING_REGISTRATION_IDS: readonly number[] = Array.from(
-  new Set([6152, 6160, SEPOLIA_REGISTRATION_ID]), // pin:keep (historical ids)
+  new Set([6152, 6160, 6174, 6176, SEPOLIA_REGISTRATION_ID]), // pin:keep (historical ids)
 );
 export const SEPOLIA_EXPLORER_TX = `https://sepolia.etherscan.io/tx/${SEPOLIA_REGISTER_TX}`;
 export const TELEGRAPH_NODE_BASE = "https://devnode.telegraphprotocol.com";
@@ -66,11 +53,11 @@ export interface MinerRegistrationStatus {
   yamlHash: string;
   yamlPin: string;
   explorerTx: string;
-  /** Live Telegraph node read for /api/miners/6174. */
+  /** Live Telegraph node read for /api/miners/6177. */
   nodeByRegistrationId: NodeListing;
   /**
-   * True only when the live node body for 6174 says activation_status
-   * "active" AND carries registration_id 6174 AND the pinned yaml_hash
+   * True only when the live node body for 6177 says activation_status
+   * "active" AND carries registration_id 6177 AND the pinned yaml_hash
    * (all three required; no boolean fallbacks). Pending ingestion (404)
    * is not active.
    */
@@ -105,7 +92,7 @@ interface ActiveRead {
  *   - activation_status is the string "active" (no boolean `active` /
  *     `is_active` fallback — the node's documented field is the string);
  *   - registration_id is present and equals the id that was asked for;
- *   - for 6174, yaml_hash is present and equals the pinned miner.yaml
+ *   - for 6177, yaml_hash is present and equals the pinned miner.yaml
  *     hash (a missing hash is NOT a pass).
  * Anything else is reported as listed-but-not-active with the reason.
  */

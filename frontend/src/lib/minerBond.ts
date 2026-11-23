@@ -1,33 +1,32 @@
 /**
  * Miner registration bond: one source of truth for every bond figure in the UI.
  *
- * On-chain facts (Ethereum Sepolia, Diamond 0x72a70e…a08b, read 2026-11-22):
+ * On-chain facts (Ethereum Sepolia, Diamond 0x72a70e…a08b, read 2026-11-23):
  *   minerBondParams() -> [1000000, 100000, 70000, 9, 172800]
- *   quoteMinerBond(14) -> [2150000, 2150000]   (14 intents)
- *   minerBond(6174)   -> [2150000, 2150000]              (our live registration)
- *   updateMiner tx 0x8466bb0a…4c3e created registration6174 at block12190478.
+ *   quoteMinerBond(45) -> [4320000, 4320000]   (45 intents)
+ *   minerBond(6177)   -> [4320000, 4320000]              (our live registration)
+ *   updateMiner tx 0xc6ba683b…ba74 created registration 6177 at block 12194171.
  * Bonds on this Diamond are paid in Sepolia Test USDC (6 decimals), per
  * telegraph-docs protocol/addresses-and-params.md. Pricing per
  * protocol/roles.md: $1 for the first intent, $0.10 for each further intent
- * up to 9, then $0.07 each. VeriReceipt declares 14 intents:
- * $1.00 + 8 x $0.10 + 5 x $0.07 = $2.15.
+ * up to 9, then $0.07 each. VeriReceipt declares 45 intents:
+ * $1.00 + 8 x $0.10 + 36 x $0.07 = $4.32.
  *
  * Static displays use the labelled constant below. The Status page also
- * re-reads minerBond(6174) and quoteMinerBond(14) live and shows any
+ * re-reads minerBond(6177) and quoteMinerBond(45) live and shows any
  * disagreement instead of hiding it.
  */
 
 import { SEPOLIA_REGISTRATION_ID } from "./minerRegistration";
 
 export const BOND_REGISTRATION_ID = SEPOLIA_REGISTRATION_ID;
-/** On-chain registered intent count for registration 6174 (14 today).
- * It equals DECLARED_INTENT_COUNT again once the pending 45-intent
- * updateMiner lands; the working miner.yaml already declares those 45. */
-export const BOND_INTENT_COUNT = 14;
-/** 6-decimal Test USDC base units: on-chain minerBond(6174) == quoteMinerBond(14). */
-export const MINER_BOND_BASE_UNITS = 2_150_000;
+/** On-chain registered intent count for registration 6177 (45 today).
+ * Equals DECLARED_INTENT_COUNT: the 45-intent updateMiner landed 2026-11-23. */
+export const BOND_INTENT_COUNT = 45;
+/** 6-decimal Test USDC base units: on-chain minerBond(6177) == quoteMinerBond(45). */
+export const MINER_BOND_BASE_UNITS = 4_320_000;
 export const MINER_BOND_SOURCE =
-  "on-chain minerBond(6174) = quoteMinerBond(14) = 2,150,000 Test USDC base units (Sepolia, read 2026-11-22)";
+  "on-chain minerBond(6177) = quoteMinerBond(45) = 4,320,000 Test USDC base units (Sepolia, read 2026-11-23)";
 
 /** minerBondParams() as read on 2026-11-22 (USD, 6 decimals). */
 export const MINER_BOND_PARAMS = {
@@ -55,7 +54,7 @@ export function bondForIntents(n: number, p: BondParams = MINER_BOND_PARAMS): nu
   return p.firstIntent + mid * p.furtherIntent + tail * p.tailIntent;
 }
 
-/** 2150000 -> "$2.15" (6-decimal USDC base units, exact integer cents). */
+/** 4320000 -> "$4.32" (6-decimal USDC base units, exact integer cents). */
 export function formatUsdcBaseUnits(units: number | bigint): string {
   const u = BigInt(units);
   const ZERO = BigInt(0);
@@ -66,9 +65,9 @@ export function formatUsdcBaseUnits(units: number | bigint): string {
   return `$${dollars.toString()}.${rem.toString().padStart(2, "0")}`;
 }
 
-/** "$2.15" */
+/** "$4.32" */
 export const MINER_BOND_USD_TEXT = formatUsdcBaseUnits(MINER_BOND_BASE_UNITS);
-/** 2.15 */
+/** 4.32 */
 export const MINER_BOND_USD = MINER_BOND_BASE_UNITS / 1_000_000;
 
 // ---- live read (Status page) ----------------------------------------------
@@ -104,9 +103,9 @@ function firstWord(hex: string): bigint {
 }
 
 export interface LiveMinerBond {
-  /** minerBond(6174), Test USDC base units. */
+  /** minerBond(6177), Test USDC base units. */
   registrationBond: bigint;
-  /** quoteMinerBond(14) first return value, base units. */
+  /** quoteMinerBond(45) first return value, base units. */
   quoteForIntents: bigint;
   /** Both live values equal the labelled constant. */
   matchesConstant: boolean;
