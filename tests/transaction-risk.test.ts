@@ -94,3 +94,45 @@ describe("TRANSACTION_RISK_GENERAL", () => {
     await app.close();
   });
 });
+
+describe("transaction-risk follow-ups (reviewer)", () => {
+  it("heuristic-only combinations are capped at 0.4 MEDIUM, never HIGH", async () => {
+    // Reverted (+0.3) contract creation (+0.1) carrying 200 ETH (+0.1)
+    // sums to 0.5 by raw weights but must cap at 0.4.
+    const bigCreationTx = { ...txResult, to: null, value: "0xad78ebc5ac6200000" }; // 200 ETH
+    const revertedReceipt = { ...receiptResult, status: "0x0", logs: [] };
+    vi.stubGlobal("fetch", async (url: unknown, init?: { body?: string }) => {
+      const u = String(url);
+      if (u.includes("ofac.treas.gov")) return new Response(sdnWithout, { status: 200 });
+      const method = JSON.parse(String(init?.body ?? "{}")).method;
+      return new Response(rpcBody(method === "eth_getTransactionReceipt" ? revertedReceipt : bigCreationTx), { status: 200 });
+    });
+    const result = await handleTransactionRisk({ transaction: TX_HASH });
+    expect(result.risk_score).toBe(0.4);
+    expect(result.risk_level).toBe("MEDIUM");
+  });
+  it("pre-Byzantium receipts follow txLookup doctrine: root means success, no status and no root means failure", async () => {
+    const byzantine = { ...receiptResult };
+    delete (byzantine as Record<string, unknown>).status;
+    (byzantine as Record<string, unknown>).root = "0x" + "ab".repeat(32);
+    vi.stubGlobal("fetch", async (url: unknown, init?: { body?: string }) => {
+      const u = String(url);
+      if (u.includes("ofac.treas.gov")) return new Response(sdnWithout, { status: 200 });
+      const method = JSON.parse(String(init?.body ?? "{}")).method;
+      return new Response(rpcBody(method === "eth_getTransactionReceipt" ? byzantine : txResult), { status: 200 });
+    });
+    const ok = await handleTransactionRisk({ transaction: TX_HASH });
+    expect(ok.risk_level).toBe("LOW"); // root present: NOT flagged reverted
+    vi.unstubAllGlobals();
+    const noRoot = { ...receiptResult };
+    delete (noRoot as Record<string, unknown>).status;
+    vi.stubGlobal("fetch", async (url: unknown, init?: { body?: string }) => {
+      const u = String(url);
+      if (u.includes("ofac.treas.gov")) return new Response(sdnWithout, { status: 200 });
+      const method = JSON.parse(String(init?.body ?? "{}")).method;
+      return new Response(rpcBody(method === "eth_getTransactionReceipt" ? noRoot : txResult), { status: 200 });
+    });
+    const bad = await handleTransactionRisk({ transaction: TX_HASH });
+    expect((bad.signals as string[]).join(" ")).toContain("TX_REVERTED");
+  });
+});

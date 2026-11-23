@@ -134,8 +134,12 @@ export async function handleTransactionRisk(query: Record<string, string | undef
   const from = String(tx.result.from ?? "").toLowerCase();
   const to = tx.result.to === null || tx.result.to === undefined ? null : String(tx.result.to).toLowerCase();
   const valueWei = BigInt(String(tx.result.value ?? "0x0"));
-  const statusHex = String(receipt.result.status ?? "0x1");
-  const reverted = statusHex === "0x0";
+  // txLookup's effectiveStatus doctrine: a pre-Byzantium receipt carries
+  // `root` instead of `status` and means success; neither field means
+  // failure. Never default a missing status to success.
+  const statusRaw = receipt.result.status;
+  const root = receipt.result.root;
+  const reverted = typeof statusRaw === "string" ? statusRaw === "0x0" : typeof root !== "string";
   const logs = Array.isArray(receipt.result.logs) ? receipt.result.logs : [];
   const listed = new Set(sdn.addresses);
   const sanctionedFrom = listed.has(from);
