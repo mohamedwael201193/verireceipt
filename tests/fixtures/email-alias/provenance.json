@@ -1,0 +1,75 @@
+{
+  "fetched_at": "2026-11-23T17:38:07.678216+00:00",
+  "sources": [
+    {
+      "file": "spf-google.json",
+      "url": "https://dns.google/resolve?name=google.com&type=16",
+      "status": 0
+    },
+    {
+      "file": "spf-cloudflare.json",
+      "url": "https://cloudflare-dns.com/dns-query?name=google.com&type=16",
+      "status": 0
+    },
+    {
+      "file": "dmarc-google.json",
+      "url": "https://dns.google/resolve?name=_dmarc.google.com&type=16",
+      "status": 0
+    },
+    {
+      "file": "dmarc-cloudflare.json",
+      "url": "https://cloudflare-dns.com/dns-query?name=_dmarc.google.com&type=16",
+      "status": 0
+    },
+    {
+      "file": "dkim-google.json",
+      "url": "https://dns.google/resolve?name=google.com&type=16",
+      "status": 0
+    },
+    {
+      "file": "dkim-cloudflare.json",
+      "url": "https://cloudflare-dns.com/dns-query?name=google.com&type=16",
+      "status": 0
+    },
+    {
+      "file": "bimi-google.json",
+      "url": "https://dns.google/resolve?name=default._bimi.verireceipt-probe.invalid&type=16",
+      "status": 3
+    },
+    {
+      "file": "bimi-cloudflare.json",
+      "url": "https://cloudflare-dns.com/dns-query?name=default._bimi.verireceipt-probe.invalid&type=16",
+      "status": 3
+    },
+    {
+      "file": "mta-sts-google.json",
+      "url": "https://dns.google/resolve?name=_mta-sts.google.com&type=16",
+      "status": 0
+    },
+    {
+      "file": "mta-sts-cloudflare.json",
+      "url": "https://cloudflare-dns.com/dns-query?name=_mta-sts.google.com&type=16",
+      "status": 0
+    },
+    {
+      "file": "tls-rpt-google.json",
+      "url": "https://dns.google/resolve?name=_smtp._tls.google.com&type=16",
+      "status": 0
+    },
+    {
+      "file": "tls-rpt-cloudflare.json",
+      "url": "https://cloudflare-dns.com/dns-query?name=_smtp._tls.google.com&type=16",
+      "status": 0
+    },
+    {
+      "file": "mx-google.json",
+      "url": "https://dns.google/resolve?name=google.com&type=15",
+      "status": 0
+    },
+    {
+      "file": "mx-cloudflare.json",
+      "url": "https://cloudflare-dns.com/dns-query?name=google.com&type=15",
+      "status": 0
+    }
+  ]
+}
