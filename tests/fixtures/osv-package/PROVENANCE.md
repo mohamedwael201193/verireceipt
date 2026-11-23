@@ -14,3 +14,7 @@ Those references are not added to answer text or treated as instructions.
 
 next-13.0.0.json was fetched from the same OSV endpoint with npm next version
 13.0.0 at about 16:09 UTC. Its real abbreviated 13.0 range bound is retained.
+
+mongodb-3.0.0.json was fetched at about 16:15 UTC, same endpoint, npm mongodb
+version 3.0.0. It retains a real record whose publication time follows its
+modification time. Both timestamps remain validated as finite and not future.

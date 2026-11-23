@@ -31,6 +31,11 @@ describe('exact npm known-advisory security review',()=>{
   const parsed=parsePackageAdvisories(body,'next','13.0.0');
   expect(parsed.some(a=>a.id==='GHSA-3h52-269p-cp9r')).toBe(true);
  });
+ it('retains real records whose publication timestamp follows their modification timestamp',()=>{
+  const raw=readFileSync(join(__dirname,'fixtures/osv-package/mongodb-3.0.0.json'),'utf8');
+  const body=JSON.parse(raw);expect(body.vulns.some((v:any)=>Date.parse(v.published)>Date.parse(v.modified))).toBe(true);
+  expect(parsePackageAdvisories(raw,'mongodb','3.0.0').length).toBeGreaterThan(0);
+ });
  it('pads abbreviated numeric range bounds',()=>{
   const d=JSON.parse(real);d.vulns[0].affected=[{package:{ecosystem:'npm',name:'semver'},ranges:[{type:'SEMVER',events:[{introduced:'13.0'},{fixed:'14.2.30'}]}]}];
   expect(parsePackageAdvisories(JSON.stringify(d),'semver','13.0.0')).toHaveLength(1);

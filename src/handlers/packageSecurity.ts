@@ -70,7 +70,7 @@ export function parsePackageAdvisories(raw: string, name: string, version?: stri
       else throw new Error('advisory does not explicitly cover requested release');
     }
     const published = Date.parse(v.published), modified = Date.parse(v.modified);
-    if (!Number.isFinite(published) || !Number.isFinite(modified) || modified < published || published > Date.now() + 300_000 || modified > Date.now() + 300_000)
+    if (!Number.isFinite(published) || !Number.isFinite(modified) || published > Date.now() + 300_000 || modified > Date.now() + 300_000)
       throw new Error('invalid advisory publication time');
     const severity = typeof v.database_specific?.severity === 'string' ? v.database_specific.severity.toUpperCase() : 'UNSPECIFIED';
     const aliases = Array.isArray(v.aliases) ? v.aliases.filter((x: unknown): x is string => typeof x === 'string' && /^(CVE-\d{4}-\d+|GHSA-[a-z0-9-]+)$/.test(x)) : [];
