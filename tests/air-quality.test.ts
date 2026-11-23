@@ -51,6 +51,14 @@ describe("AIR_QUALITY_INDEX_GENERAL", () => {
     const over = JSON.parse(cairo); over.current.us_aqi = 101;
     expect(parseAirQuality(JSON.stringify(over)).us_aqi).toBe(101);
   });
+  it("pins the 100 threshold: a 150-AQI body is not acceptable and says so", async () => {
+    const bad = JSON.parse(cairo); bad.current.us_aqi = 150;
+    stub(JSON.stringify(bad));
+    const result = await handleAirQuality({ lat: "30.0444", lon: "31.2357" });
+    expect(result.aqi).toBe(150);
+    expect(result.acceptable).toBe(false);
+    expect(String(result.answer)).toContain("above 100");
+  });
   it("a missing current AQI is an honest 422", async () => {
     const edited = JSON.parse(cairo); delete edited.current.us_aqi;
     stub(JSON.stringify(edited));
