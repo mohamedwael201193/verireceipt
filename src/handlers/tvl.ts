@@ -2332,8 +2332,25 @@ export function __getTvlListsRefreshTimerForTests(): NodeJS.Timeout | null {
 // Handler
 // ---------------------------------------------------------------------------
 
+const MAGNITUDE_UNITS: [number, string][] = [[1e12, 'T'], [1e9, 'B'], [1e6, 'M']];
+
+/**
+ * Display formatting (slice B, 2026-11-23): the prose leads with a rounded
+ * magnitude ("$16.46B") for readability and keeps the full-decimal value
+ * in parentheses ("($16457788464.11173)") — the measured number is never
+ * rounded away or dropped, and the typed envelope fields stay raw.
+ * Magnitudes kick in at $1M; smaller values are plain dollars.
+ */
 function formatUsd(value: number): string {
-  return '$' + plainDecimal(value);
+  const full = '$' + plainDecimal(value);
+  const abs = Math.abs(value);
+  for (const [unit, suffix] of MAGNITUDE_UNITS) {
+    if (abs >= unit) {
+      const mag = parseFloat((value / unit).toFixed(2)).toString();
+      return `$${mag}${suffix} (${full})`;
+    }
+  }
+  return full;
 }
 
 /**

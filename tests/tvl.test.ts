@@ -859,7 +859,7 @@ describe('handleTvl with fixture transport', () => {
     expect(Math.abs(Date.now() - asOfMs)).toBeLessThan(60_000);
     const today = new Date().toISOString().slice(0, 10);
     expect((out.as_of as string).slice(0, 10)).toBe(today);
-    expect(out.answer).toBe(`Aave V3 has a total value locked of $15121752429 as of ${today}.`);
+    expect(out.answer).toBe(`Aave V3 has a total value locked of $15.12B ($15121752429) as of ${today}.`);
     expect(out.verdict).toBe('verified');
     expect(out.confidence).toBe(1.0);
     expect(out.source).toBe('DeFiLlama API (https://api.llama.fi/tvl/aave-v3)');
@@ -991,7 +991,7 @@ describe('handleTvl chain-scoped queries ("X on Y")', () => {
     expect(out.scoped_chain).toBe('Ethereum');
     const today = new Date().toISOString().slice(0, 10);
     expect(out.answer).toBe(
-      `Aave V3 has a total value locked of $15121752429 as of ${today}, of which $12931958948.41916 is on Ethereum.`,
+      `Aave V3 has a total value locked of $15.12B ($15121752429) as of ${today}, of which $12.93B ($12931958948.41916) is on Ethereum.`,
     );
     expect(out.verdict).toBe('verified');
     const receipt = out.receipt as Record<string, unknown>;
@@ -1005,6 +1005,10 @@ describe('handleTvl chain-scoped queries ("X on Y")', () => {
     // the named chain, not the dominant, is served.
     expect(out.chain_tvl_usd).toBe(415494303.8637);
     expect(out.scoped_chain).toBe('Arbitrum');
+    const today = new Date().toISOString().slice(0, 10);
+    expect(out.answer).toBe(
+      `Aave V3 has a total value locked of $15.12B ($15121752429) as of ${today}, of which $415.49M ($415494303.8637) is on Arbitrum.`,
+    );
   });
 
   it('multi-word chain: "aave v3 on op mainnet" resolves the chain, refuses with no TVL there', async () => {
@@ -1157,7 +1161,7 @@ describe('handleTvl chain-scoped queries ("X on Y")', () => {
     expect(out.chain_tvl_usd).toBe(12931958948.41916);
     expect(out.scoped_chain).toBe('Ethereum');
     expect(out.source).toBe('DeFiLlama API (https://api.llama.fi/protocol/aave-v3)');
-    expect(String(out.answer)).toContain('of which $12931958948.41916 is on Ethereum.');
+    expect(String(out.answer)).toContain('of which $12.93B ($12931958948.41916) is on Ethereum.');
   });
 
   it('fallback path refuses honestly when the payload split has no TVL on the named chain', async () => {
@@ -3308,7 +3312,7 @@ describe('handleTvl round-4 (answer carries the as_of date)', () => {
       return fixtureFetch(payload)(u);
     }) as typeof fetch;
     const out = await handleTvl({ protocol: 'lido' }, { fetchImpl });
-    expect(out.answer).toBe(`Lido has a total value locked of $123456789 as of ${dateStr}.`);
+    expect(out.answer).toBe(`Lido has a total value locked of $123.46M ($123456789) as of ${dateStr}.`);
     expect(out.as_of).toBe(new Date(threeDaysAgo * 1000).toISOString());
   });
 
@@ -3364,7 +3368,7 @@ describe('handleTvl round-4 (answer carries the as_of date)', () => {
       return new Response('not found', { status: 404 });
     }) as typeof fetch;
     const out = await handleTvl({ protocol: 'ethereum' }, { fetchImpl });
-    expect(out.answer).toBe(`Ethereum has a total value locked of $35974180659 as of ${dateStr}.`);
+    expect(out.answer).toBe(`Ethereum has a total value locked of $35.97B ($35974180659) as of ${dateStr}.`);
   });
 });
 
