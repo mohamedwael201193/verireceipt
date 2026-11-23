@@ -617,6 +617,9 @@ export function selectAnchorServing(sorted: SourceQuote[]): { serving: SourceQuo
   }
   anchor ??= sorted;
   const median = anchor[Math.floor((anchor.length - 1) / 2)].rate;
+  // Exact-median ties: when two sources quote the identical median rate,
+  // the NAMED winner is whichever sorts first by rate order — the served
+  // rate is identical either way (review nuance 2026-11-23).
   const serving = sorted.filter((q) => q.rate === median);
   let clusterDetail = "";
   if (anchor !== sorted) {
