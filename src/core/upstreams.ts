@@ -90,6 +90,8 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "query1.finance.yahoo.com": "yahoo-finance",
   "sanctionslistservice.ofac.treas.gov": "ofac",
   "scsanctions.un.org": "un-sanctions",
+  "ipwho.is": "ipwhois",
+  "ip-api.com": "ip-api",
 };
 
 /** Hostname suffixes shared by every CHAIN_RPCS host family. */
@@ -206,6 +208,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "code-patch": "github",
   "stock-price": "yahoo-finance",
   "sanctions-screen": "ofac",
+  "ip-geolocation": "ipwhois",
 };
 
 /**

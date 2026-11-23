@@ -26,6 +26,7 @@ import { handleAcademicSearch } from "./handlers/academicSearch";
 import { handleCodePatchVerify } from "./handlers/codePatchVerify";
 import { handleStockPrice } from "./handlers/stockPrice";
 import { handleSanctionsScreen } from "./handlers/sanctionsScreening";
+import { handleIpGeolocation } from "./handlers/ipGeolocation";
 import { handleEmailSecurity } from "./handlers/emailSecurity";
 import { exactQuery } from "./core/exactQuery";
 import { diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
@@ -236,6 +237,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/code-patch", async (request) => trackIntent("code-patch", () => handleCodePatchVerify(asQuery(request.query))));
   app.get("/v1/stock-price", async (request) => trackIntent("stock-price", () => handleStockPrice(asQuery(request.query))));
   app.get("/v1/sanctions-screen", async (request) => trackIntent("sanctions-screen", () => handleSanctionsScreen(asQuery(request.query))));
+  app.get("/v1/ip-geolocation", async (request) => trackIntent("ip-geolocation", () => handleIpGeolocation(asQuery(request.query))));
   app.get("/v1/email-security", async (request) => trackIntent("email-security", () => handleEmailSecurity(exactQuery(request.raw.url ?? "", ["domain", "record_type"])), "dns.google"));
   app.get("/v1/filings", async (request) =>
     trackIntent("filings", () => {
