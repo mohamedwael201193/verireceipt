@@ -3,7 +3,7 @@
 // Stubbed tests drive the fetch seam; LIVE tests hit the real keyless
 // Blockscout indexers. Hermetic DB via a unique scratch SQLITE_PATH.
 
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join, resolve } from "path";
 
@@ -48,6 +48,7 @@ function indexerBody(holders: number, symbol: string): string {
 
 afterEach(() => {
   setTokenHoldersFetchForTests(null);
+  vi.useRealTimers();
 });
 
 describe("validation", () => {
@@ -186,6 +187,7 @@ describe("GeckoTerminal holder coverage", () => {
     it(`${token} on ${chain} uses recorded per-chain token-info evidence`, async () => {
       const raw = readFileSync(join(__dirname, "fixtures/holder-gecko", fixture + ".json"), "utf8");
       const a = JSON.parse(raw).data.attributes;
+      vi.useFakeTimers(); vi.setSystemTime(new Date(Date.parse(a.holders.last_updated) + 1000));
       let called = "";
       setTokenHoldersFetchForTests(async (url) => { called = url; return raw; });
       const r = await handleTokenHolders({ chain, token });
@@ -203,11 +205,16 @@ describe("GeckoTerminal holder coverage", () => {
     for (const mutation of [
       (d: any) => { d.data.id = d.data.id.replace("base_", "bsc_"); },
       (d: any) => { d.data.attributes.address = USDC_ETH; },
+      (d: any) => { d.data.type = "pool"; },
+      (d: any) => { d.data.attributes.holders.count = -1; },
+      (d: any) => { d.data.attributes.holders.last_updated = "2099-01-01T00:00:00Z"; },
+      (d: any) => { d.data.attributes.symbol = ""; },
       (d: any) => { d.data.attributes.holders.count = null; },
       (d: any) => { d.data.attributes.holders.count = 1.5; },
       (d: any) => { d.data.attributes.holders.count = 10000000001; },
       (d: any) => { d.data.attributes.holders.last_updated = "2000-01-01T00:00:00Z"; },
     ]) {
+      vi.useFakeTimers(); vi.setSystemTime(new Date(Date.parse(original.data.attributes.holders.last_updated) + 1000));
       const body = structuredClone(original); mutation(body);
       setTokenHoldersFetchForTests(async () => JSON.stringify(body));
       await expectApiError(handleTokenHolders({ chain: "base", token: "USDC" }), 502, "INDEXER_UNREACHABLE");
