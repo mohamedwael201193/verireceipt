@@ -46,16 +46,21 @@ const CATALOG_TTL_MS = 60 * 60 * 1000;
 const SUPPORTED_INDICATOR = "unemployment rate";
 
 /** Normalized spellings of the ONE contract-enum indicator. Matching
- * lowercases, collapses whitespace and removes only unit asides such
- * as "(%)" — other parentheticals stay in the text, so a phrase that
- * merely CONTAINS an aside cannot smuggle a different statistic past
- * the alias check. Anything outside the alias set stays 422
+ * lowercases, collapses whitespace, removes only unit asides such
+ * as "(%)" and drops a single leading article "the" — other
+ * parentheticals stay in the text, so a phrase that merely CONTAINS
+ * an aside cannot smuggle a different statistic past the alias check.
+ * "SL.UEM.TOTL.ZS" is the World Bank indicator code for exactly this
+ * statistic, so it resolves to the enum value the same way a spelling
+ * variant does. Anything outside the alias set stays 422
  * UNSUPPORTED_INDICATOR; the registered surface is unchanged. A served
  * normalization is always disclosed. */
 const INDICATOR_ALIASES = new Set([
   "unemployment rate",
   "unemployment",
   "jobless rate",
+  "rate of unemployment",
+  "sl.uem.totl.zs",
   "unemployment % of total labor force",
   "unemployment rate % of total labor force",
   "unemployment total",
@@ -69,7 +74,8 @@ export function normalizeIndicator(input: string): string | null {
     .toLowerCase()
     .replace(/\(\s*(%|percent|percentage)\s*\)/g, " ")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+    .replace(/^the\s+/, "");
   return INDICATOR_ALIASES.has(stripped) ? SUPPORTED_INDICATOR : null;
 }
 

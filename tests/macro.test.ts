@@ -176,7 +176,7 @@ describe("handleMacro validation (stubbed, no network use)", () => {
 });
 
 describe("M1 indicator normalization (stubbed World Bank)", () => {
-  it.each(["Unemployment", "unemployment rate (%)", "jobless rate", "UNEMPLOYMENT   RATE", "unemployment rate (percent)", "unemployment % of total labor force"])(
+  it.each(["Unemployment", "unemployment rate (%)", "jobless rate", "UNEMPLOYMENT   RATE", "unemployment rate (percent)", "unemployment % of total labor force", "the unemployment rate", "the jobless rate", "The Unemployment", "rate of unemployment", "SL.UEM.TOTL.ZS"])(
     "serves the variant %j as the contract enum, disclosed", async (variant) => {
       stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2024, 5.2) });
       const out = await handleMacro({ indicator: variant, country: "Egypt", year: "2024" });
@@ -203,6 +203,7 @@ describe("M1 indicator normalization (stubbed World Bank)", () => {
 
   it("a non-unit parenthetical is NOT stripped (no smuggling a different statistic past the alias check)", async () => {
     await expectApiError(handleMacro({ indicator: "unemployment (youth, ages 15-24)", country: "Egypt" }), 422, "UNSUPPORTED_INDICATOR");
+    await expectApiError(handleMacro({ indicator: "the unemployment (youth, ages 15-24)", country: "Egypt" }), 422, "UNSUPPORTED_INDICATOR");
   });
 });
 
