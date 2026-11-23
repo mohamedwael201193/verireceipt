@@ -142,9 +142,14 @@ for (const item of cases) describe(item.name, () => {
     const result = await outcome; expect(result.error).toMatchObject(expected); expect(result.value).toBeUndefined();
   });
 });
-it("keeps the publisher's actual empty Aruba series as NO_DATA before any save", async () => {
+it("persists the publisher's empty Aruba bytes as disclosed no-data, never a numeric answer", async () => {
   vi.setSystemTime(new Date(fixture.scenarios.macro_latest.clock));
   const id = fixture.provenance.selection.macro_skipped_no_data[0].id;
-  await expect(handleMacro({ indicator: "unemployment rate", country: id })).rejects.toMatchObject({ status: 422, code: "NO_DATA" });
-  expect(saveReceipt).not.toHaveBeenCalled();
+  const out = await handleMacro({ indicator: "unemployment rate", country: id });
+  expect(out).toMatchObject({ rate_pct: null, verdict: "no_data", confidence: 0 });
+  expect(out.answer).toContain("no data"); expect(saveReceipt).toHaveBeenCalledTimes(1);
+  const [receipt, evidence] = vi.mocked(saveReceipt).mock.calls[0];
+  expect(sha256Hex(evidence!)).toBe(receipt.raw_response_sha256);
+  vi.mocked(saveReceipt).mockRejectedValueOnce(new Error("private-no-data-storage-error"));
+  await expect(handleMacro({ indicator: "unemployment rate", country: id })).rejects.toMatchObject(expected);
 });

@@ -70,7 +70,7 @@
         "country": "AFG"
       },
       "expected_fields": {
-        "answer": "Afghanistan latest published unemployment rate in 2025: 13.351% of the total labour force (World Bank SL.UEM.TOTL.ZS).",
+        "answer": "Mapping: unemployment rate -> World Bank SL.UEM.TOTL.ZS. Afghanistan latest published observation in 2025: 13.351 % of total labour force.",
         "rate_pct": 13.351,
         "indicator": "unemployment rate",
         "indicator_id": "SL.UEM.TOTL.ZS",
@@ -158,7 +158,7 @@
         "year": "2025"
       },
       "expected_fields": {
-        "answer": "Afghanistan unemployment rate in 2025: 13.351% of the total labour force (World Bank SL.UEM.TOTL.ZS).",
+        "answer": "Mapping: unemployment rate -> World Bank SL.UEM.TOTL.ZS. Afghanistan in 2025: 13.351 % of total labour force.",
         "rate_pct": 13.351,
         "indicator": "unemployment rate",
         "indicator_id": "SL.UEM.TOTL.ZS",
