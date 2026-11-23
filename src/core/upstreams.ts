@@ -94,6 +94,7 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "air-quality-api.open-meteo.com": "open-meteo",
   "api.weather.gov": "nws",
   "hn.algolia.com": "hn-algolia",
+  "router.project-osrm.org": "osrm",
   "feeds.bbci.co.uk": "bbc-rss",
   "ip-api.com": "ip-api",
   "site.api.espn.com": "espn",
@@ -219,6 +220,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "storm-alert": "nws",
   "news-headlines": "hn-algolia",
   "news-search": "hn-algolia",
+  "route-eta": "osrm",
 };
 
 /**

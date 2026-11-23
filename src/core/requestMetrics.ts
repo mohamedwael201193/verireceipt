@@ -20,13 +20,14 @@ const ROUTE_INTENTS: Record<string, string> = {
   "/v1/storm-alert": "STORM_ALERT_GENERAL",
   "/v1/news-headlines": "NEWS_HEADLINES_GENERAL",
   "/v1/news-search": "NEWS_SEARCH_GENERAL",
+  "/v1/route-eta": "ROUTE_ETA_GENERAL",
 };
 // Only known parameter NAMES are emitted, including rejected aliases. Never values
 // or unknown names: callers can put a credential into an arbitrary query key.
 const KNOWN_QUERY_KEYS = [
   "address", "amount", "base", "block", "chain", "country", "cve", "domain",
-  "company", "entity", "form_type", "game", "jurisdiction", "host", "indicator", "lat", "location", "lon", "window_hours", "ip", "interval_start", "node_or_zone",
-  "pair", "period", "protocol", "query", "question", "quote", "record_type",
+  "company", "entity", "form_type", "game", "jurisdiction", "destination", "host", "indicator", "lat", "location", "lon", "window_hours", "ip", "interval_start", "node_or_zone",
+  "origin", "pair", "period", "protocol", "query", "question", "quote", "record_type",
   "ticker", "token", "topic", "tx_hash", "validator_index", "year",
 ] as const;
 // Fixed internal categories only. A regex alone could admit a secret-looking code.
