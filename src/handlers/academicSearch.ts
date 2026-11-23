@@ -12,8 +12,8 @@
 //
 // SOURCE: Crossref REST API (api.crossref.org) — keyless, public,
 // free; used from the public pool with a project User-Agent, no mailto
-// (owner decision 2026-11-23: no personal address in this public repo
-// or third-party logs). Probed live 2026-11-23. OpenAlex was evaluated
+// (maintainer decision 2026-11-23: no personal address in a public
+// repo or third-party logs). Probed live 2026-11-23. OpenAlex was evaluated
 // first and rejected for now: its anonymous search was rate-limited
 // cluster-wide (HTTP 429 "search cluster under elevated load") at probe
 // time, so it cannot be the dependable primary.
@@ -50,8 +50,8 @@ const SOURCE_TIMEOUT_MS = 5000;
 const ROWS = 5;
 /** Onchain request slot caps query at 256 bytes. */
 const MAX_QUERY_BYTES = 256;
-/** Public pool, no mailto: the owner does not want a personal address
- * in this public repo or in a third party's logs (2026-11-23). The
+/** Public pool, no mailto (maintainer decision 2026-11-23: no
+ * personal address in a public repo or third-party logs). The
  * User-Agent identifies the project by its public site instead. */
 const UA = "VeriReceipt/2.0 academic-search observer (+https://verireceipt.vercel.app)";
 
@@ -109,7 +109,7 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
   const brief = Array.from(briefRaw).slice(0, 80).join("");
   const evidence = JSON.stringify({ query: q, as_of: asOf, total_matches: total,
     papers, skipped_items: skipped,
-    source_policy: "Crossref REST API, keyless public pool (no mailto by owner decision 2026-11-23; project User-Agent instead); single source, Crossref relevance order",
+    source_policy: "Crossref REST API, keyless public pool (no mailto: maintainer decision 2026-11-23; project User-Agent instead); single source, Crossref relevance order",
     raw_body: raw, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, url, evidence, "Crossref bibliographic search; relevance order and match count are Crossref's own");
   receipt.fetched_at = fetchedAt;
