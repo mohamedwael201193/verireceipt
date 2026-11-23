@@ -147,6 +147,8 @@ export interface SettlementSnapshot {
 }
 
 export interface SpendLedger {
+  /** Optional crash-durable journal writer, required by the local Research Desk. */
+  writeReservation?: (reservation: SpendReservation) => void;
   reservationsFile: string;
   lockFile: string;
   readSettlementSnapshot: () => SettlementSnapshot;
@@ -219,7 +221,8 @@ export function reserveSpend(
       );
     }
     const r: SpendReservation = { kind, nonce, amount_uusdc: amountUusdc.toString(), reserved_at: now.toISOString() };
-    appendFileSync(spend.reservationsFile, JSON.stringify(r) + "\n");
+    if(spend.writeReservation)spend.writeReservation(r);
+    else appendFileSync(spend.reservationsFile, JSON.stringify(r) + "\n");
   });
 }
 

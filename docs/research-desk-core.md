@@ -106,3 +106,26 @@ also disabled in the local adapter until the ranking endpoint supplies a
 verified selection contract. There is no automatic retry after a failure,
 and unknown signed outcomes remain fully reserved. Thus the maximum-one
 escalation ceiling is honored conservatively with zero escalation here.
+
+### Private evidence and crash safety
+
+Local evidence directories must be owner-only 0700, with regular owner-only
+0600 files. Existing nonprivate, symlinked or noncanonical paths are refused,
+not silently repaired. The local CLI checks evidence and ledger locations
+before loading its payer. Operators must inspect and deliberately migrate
+an older shared ledger to a private location; the CLI does not change its
+permissions or discard its spending history.
+
+The Research Desk installs a shared reservation writer that syncs the journal
+file and parent directory while the existing spend lock is held. It also
+syncs the per-note reservation file and directory before signature. Failure
+at either write or sync refuses signing. The ordinary legacy Gate path is
+unchanged unless this crash-durable writer is explicitly installed.
+
+Raw response, accounting and packet writes also sync. A write/sync error
+after signing stops the run without retry. The already-synced shared and
+per-note reservation records preserve full uncertain exposure for recovery.
+A partial ledger line may prevent later runs until an operator reconciles
+it; that is a fail-closed audit stop, not permission to clear the journal.
+Filesystem fsync semantics still depend on the underlying operating system
+and storage. There is no claim of protection from storage hardware failure.

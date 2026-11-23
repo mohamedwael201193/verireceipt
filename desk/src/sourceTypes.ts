@@ -47,6 +47,6 @@ export async function readPrimaryJson(url: string, r: SourceVerification, option
   if (Buffer.byteLength(text) > 8_000_000) throw new Error('primary response exceeds evidence limit');
   if (r.sources.reduce((n,s) => n + Buffer.byteLength(s.raw_text),0) + Buffer.byteLength(text) > 16_000_000) throw new Error('primary evidence bundle exceeds limit');
   const parsed = object(JSON.parse(text));
-  r.sources.push({ url: response.url || url, sha256: createHash('sha256').update(text).digest('hex'), retrieved_at: new Date().toISOString(), raw_text: text });
+  r.sources.push({ url: response.url || url, sha256: createHash('sha256').update(text).digest('hex'), retrieved_at: (options.now ?? new Date()).toISOString(), raw_text: text });
   return parsed;
 }

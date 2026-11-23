@@ -1,6 +1,7 @@
 // Local CLI adapter only. Hosted mode has no route to this module.
-import {appendFileSync,writeFileSync,mkdirSync} from 'node:fs';
-import {join} from 'node:path';
+import {existsSync,lstatSync} from 'node:fs';
+import {durableWrite,privateDirectory,privateFile,type SyncIO} from './privateEvidence.js';
+import {join,dirname} from 'node:path';
 import {executeVerifiedPurchase,type SpendLedger} from './gate.js';
 import type {Fetch,Payer,RawResponse} from './client.js';
 import {ENGINE_URL,VERIRECEIPT_ONCHAIN_MINER_IDS} from './constants.js';
@@ -9,7 +10,7 @@ import type {ResearchAdapter,Acquisition,RunStore} from './researchDeskRunner.js
 import snapshot from '../policy/m13-intents.snapshot.json';
 import {verifyResearchPrimary} from './researchPrimary.js';
 const layer=(ok:boolean,name:string,detail:string):Layer=>({status:ok?'passed':'failed',checks:[{name,ok,detail}]});
-export interface LiveOptions {payer:Payer;spend:SpendLedger;evidence_dir:string;run_ledger:string;f?:Fetch;now?:()=>Date;secUserAgent?:string}
+export interface LiveOptions {payer:Payer;spend:SpendLedger;evidence_dir:string;run_ledger:string;f?:Fetch;now?:()=>Date;secUserAgent?:string;io?:SyncIO}
 interface SchemaCheck {ok:boolean;checks:Layer['checks'];schema_hash:string}
 export async function validateLiveFact(fact:FactSpec,f:Fetch=fetch):Promise<SchemaCheck>{
  const response=await f(`${ENGINE_URL}/v1/intents/${encodeURIComponent(fact.intent)}`,{redirect:'error',signal:AbortSignal.timeout(20000)});
@@ -33,11 +34,16 @@ export async function validateLiveFact(fact:FactSpec,f:Fetch=fetch):Promise<Sche
  return {ok:checks.every(c=>c.ok),checks,schema_hash:hash(j)};
 }
 export function localResearchStore(directory:string):RunStore {
- mkdirSync(directory,{recursive:true});
- return {freeze:async(spec,spec_hash)=>{writeFileSync(join(directory,'frozen-spec.json'),JSON.stringify({spec,spec_hash},null,2),{flag:'wx'});},append:async(a)=>{appendFileSync(join(directory,'acquisitions.jsonl'),JSON.stringify(a)+'\n');},finish:async(packet)=>{writeFileSync(join(directory,'research-packet.json'),JSON.stringify(packet,null,2),{flag:'wx'});}};
+ privateDirectory(directory);
+ return {freeze:async(spec,spec_hash)=>{durableWrite(join(directory,'frozen-spec.json'),JSON.stringify({spec,spec_hash},null,2));},append:async(a)=>{durableWrite(join(directory,'acquisitions.jsonl'),JSON.stringify(a)+'\n',true);},finish:async(packet)=>{durableWrite(join(directory,'research-packet.json'),JSON.stringify(packet,null,2));}};
 }
 export function liveResearchAdapter(options:LiveOptions):ResearchAdapter {
- const f=options.f??fetch,now=options.now??(()=>new Date());mkdirSync(options.evidence_dir,{recursive:true});
+ const f=options.f??fetch,now=options.now??(()=>new Date());
+ privateDirectory(options.evidence_dir,options.io);
+ for(const path of [options.run_ledger,options.spend.reservationsFile])privateFile(path,options.io);
+ privateDirectory(dirname(options.spend.lockFile),options.io);
+ if(existsSync(options.spend.lockFile)||(()=>{try{return lstatSync(options.spend.lockFile).isSymbolicLink();}catch{return false;}})())throw new Error('existing spend lock requires operator inspection before wallet work');
+ options.spend.writeReservation=r=>durableWrite(options.spend.reservationsFile,JSON.stringify(r)+'\n',true,options.io);
  // Each successful buy stores its public proof inputs for read-only revalidation.
  return {
   allowEscalation:false,
@@ -52,13 +58,13 @@ export function liveResearchAdapter(options:LiveOptions):ResearchAdapter {
       if(notice.amountUusdc>BigInt(context.remaining_uusdc))throw new Error('quote exceeds frozen note remainder');
       // Gate already wrote the shared reservation. This write binds the note
       // commitment and quote before the signer is reached. Failure refuses sign.
-      writeFileSync(join(options.evidence_dir,`${fact.id}-reservation.json`),JSON.stringify({spec_hash:context.spec_hash,fact_hash:factHash(fact),nonce:notice.authorization.nonce,amount_uusdc:notice.amountUusdc.toString()}),{flag:'wx'});reserved=notice.amountUusdc;
+      durableWrite(join(options.evidence_dir,`${fact.id}-reservation.json`),JSON.stringify({spec_hash:context.spec_hash,fact_hash:factHash(fact),nonce:notice.authorization.nonce,amount_uusdc:notice.amountUusdc.toString()}),false,options.io);reserved=notice.amountUusdc;
     },
-    onRawResponse:async raw=>{writeFileSync(rawFile,JSON.stringify(raw,null,2),{flag:'wx'});rawCapture=raw;},
+    onRawResponse:async raw=>{durableWrite(rawFile,JSON.stringify(raw,null,2),false,options.io);rawCapture=raw;},
    });
    // The shared Gate ledger shape counts this exact charge/reservation and nonce.
-   appendFileSync(options.run_ledger,JSON.stringify({evaluated_at:now().toISOString(),purchase:result.purchase,spec_hash:context.spec_hash,fact_hash:factHash(fact)})+'\n');
-   writeFileSync(join(options.evidence_dir,`${fact.id}-gate.json`),JSON.stringify(result,null,2),{flag:'wx'});
+   durableWrite(options.run_ledger,JSON.stringify({evaluated_at:now().toISOString(),purchase:result.purchase,spec_hash:context.spec_hash,fact_hash:factHash(fact)})+'\n',true,options.io);
+   durableWrite(join(options.evidence_dir,`${fact.id}-gate.json`),JSON.stringify(result,null,2),false,options.io);
    const p=result.purchase;
    if(!p.nonce||reserved===0n)throw new Error('purchase refused before signing; no adapter retry');
    const expense:Acquisition['expense']={fact_id:fact.id,attempt:0,nonce:p.nonce,reserved_uusdc:reserved.toString(),reported_charge_uusdc:p.paid_uusdc,settled_uusdc:null,status:p.paid_uusdc===null?'reserved-uncertain':'receipted-unsettled',receipt_hash:p.receipt_hash,useful:false};

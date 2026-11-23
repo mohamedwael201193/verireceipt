@@ -33,8 +33,8 @@ describe('live schema revalidation, unit transport',()=>{
 });
 
 describe('source-byte replay, injected unit transports',()=>{
- it('reparses source bytes with fixed parser and rejects changed byte',async()=>{const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(macro,'4.123457',{f:transport([{},[macroRow]]),now});const o={source:r.source,value:'4.123457'} as any;expect(await replayPrimaryBytes(macro,o,now().toISOString())).toBe(true);o.source.raw_text+='x';expect(await replayPrimaryBytes(macro,o,now().toISOString())).toBe(false);});
- it('will not fetch a source URL chosen by a packet',async()=>{const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(macro,'4.123457',{f:transport([{},[macroRow]]),now});const reads=JSON.parse(r.source!.raw_text);reads[0].url='https://example.invalid/attacker';r.source!.raw_text=JSON.stringify(reads);const {createHash}=await import('node:crypto');r.source!.content_sha256=createHash('sha256').update(r.source!.raw_text).digest('hex');expect(await replayPrimaryBytes(macro,{source:r.source,value:'4.123457'} as any,now().toISOString())).toBe(false);});
+ it('reparses source bytes with fixed parser and rejects changed byte',async()=>{const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(macro,'4.123457',{f:transport([{},[macroRow]]),now});const o={source:r.source,value:'4.123457',as_of:r.as_of} as any;expect(await replayPrimaryBytes(macro,o,now().toISOString())).toBe(true);o.source.raw_text+='x';expect(await replayPrimaryBytes(macro,o,now().toISOString())).toBe(false);});
+ it('will not fetch a source URL chosen by a packet',async()=>{const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(macro,'4.123457',{f:transport([{},[macroRow]]),now});const reads=JSON.parse(r.source!.raw_text);reads[0].url='https://example.invalid/attacker';r.source!.raw_text=JSON.stringify(reads);const {createHash}=await import('node:crypto');r.source!.content_sha256=createHash('sha256').update(r.source!.raw_text).digest('hex');expect(await replayPrimaryBytes(macro,{source:r.source,value:'4.123457',as_of:r.as_of} as any,now().toISOString())).toBe(false);});
 });
 
 describe('chain-bound token supply primary, unit RPC transport only',()=>{
@@ -50,5 +50,11 @@ describe('chain-bound token supply primary, unit RPC transport only',()=>{
  it('requires two chain-bound matching finalized block/supply/decimal reads',async()=>{const t=rpc();const r=await verifyResearchPrimary(supply,'100',{f:t.f,now});expect(r.ok).toBe(true);expect(t.calls).toBe(9);expect(r.source!.raw_text).toContain('eth_chainId');expect(r.source!.raw_text).toContain('0x18160ddd');});
  it.each(['chain','block','decimals','supply'] as const)('rejects RPC %s mismatch',async mutant=>expect((await verifyResearchPrimary(supply,'100',{f:rpc(mutant).f,now})).ok).toBe(false));
  it('does not silently treat base units as whole tokens',async()=>expect((await verifyResearchPrimary(supply,'100000000',{f:rpc().f,now})).ok).toBe(false));
- it('source replay preserves method/body selectors for RPC calls',async()=>{const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(supply,'100',{f:rpc().f,now});expect(await replayPrimaryBytes(supply,{source:r.source,value:'100'} as any,now().toISOString())).toBe(true);});
+ it('source replay preserves method/body selectors for RPC calls',async()=>{const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(supply,'100',{f:rpc().f,now});expect(await replayPrimaryBytes(supply,{source:r.source,value:'100',as_of:r.as_of} as any,now().toISOString())).toBe(true);});
+});
+
+it('replay binds derived timestamp, source URL, parser, scope and observation metadata',async()=>{
+ const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(macro,'4.123457',{f:transport([{},[macroRow]]),now});
+ for(const change of ['as_of','url','parser','scope_hash','observed_at'] as const){const o={source:structuredClone(r.source),value:'4.123457',as_of:r.as_of} as any;if(change==='as_of')o.as_of='2026-11-23T00:00:00Z';else o.source[change]=change==='observed_at'?'2020-01-01T00:00:00Z':'changed';expect(await replayPrimaryBytes(macro,o,now().toISOString())).toBe(false);}
+ expect(await replayPrimaryBytes(macro,{source:r.source,value:'4.123457',as_of:r.as_of} as any,'2026-11-23T02:00:00Z')).toBe(false);
 });

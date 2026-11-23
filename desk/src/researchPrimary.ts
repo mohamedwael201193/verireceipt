@@ -84,7 +84,7 @@ export async function verifyResearchPrimary(fact:FactSpec,value:string,options:{
     const result=await verifyFilingSource({params:fact.params,result:{filing_count:Number(value)}},{f,now:now(),secUserAgent:options.secUserAgent});
     if(result.status!=='verified')fail(result.checks.filter(c=>!c.ok).map(c=>c.detail).join('; '));
     for(const s of result.sources)reads.push({url:s.url,raw_text:s.raw_text,observed_at:s.retrieved_at,json:null});
-    as_of=now().toISOString();parser='sec-independent-full-history-form-recount-v1';break;
+    as_of=reads.at(-1)!.observed_at;parser='sec-independent-full-history-form-recount-v1';break;
    }
    case 'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL':{
     const match=/^(\S+) on (ethereum|base|arbitrum|optimism|polygon)$/.exec(fact.params.token);if(!match)throw new Error('supply primary requires token on chain');
@@ -107,6 +107,6 @@ export async function verifyResearchPrimary(fact:FactSpec,value:string,options:{
   if(!reads.length)fail('primary evidence empty');
   // Multiple reads remain exact embedded bytes in an ordered JSON container.
   const raw_text=JSON.stringify(reads.map(({url,raw_text,observed_at,method,body})=>({url,raw_text,observed_at,method:method??'GET',...(body?{body}: {})})));
-  return {ok:true,as_of,source:{url:reads[0].url,raw_text,content_sha256:sha(raw_text),observed_at:now().toISOString(),scope_hash:factHash(fact),value,parser},reasons:[]};
+  return {ok:true,as_of,source:{url:reads[0].url,raw_text,content_sha256:sha(raw_text),observed_at:reads.at(-1)!.observed_at,scope_hash:factHash(fact),value,parser},reasons:[]};
  }catch(error){return {ok:false,source:null,as_of,reasons:[error instanceof Error?error.message:String(error)]};}
 }

@@ -15,10 +15,10 @@ export async function replayPrimaryBytes(fact:FactSpec,o:Observation,historical_
   const reads=JSON.parse(o.source.raw_text);if(!Array.isArray(reads)||!reads.length)return false;let cursor=0;
   const f:Fetch=async(input,init)=>{
    const r=reads[cursor++];const url=String(input);if(!r||r.url!==url||(r.method??'GET')!==(init?.method??'GET')||(r.body??null)!==(init?.body??null))throw new Error('stored primary request does not match parser request');
-   if(typeof r.raw_text!=='string')throw new Error('stored bytes missing');return new Response(r.raw_text,{status:200});
+   if(typeof r.raw_text!=='string'||!Number.isFinite(Date.parse(r.observed_at))||Date.parse(r.observed_at)>Date.parse(historical_at))throw new Error('stored bytes/time missing or future');return new Response(r.raw_text,{status:200});
   };
-  const result=await verifyResearchPrimary(fact,o.value,{f,now:()=>new Date(historical_at),secUserAgent:'Historical replay replay@example.invalid'});
-  return result.ok&&result.source?.parser===o.source.parser&&cursor===reads.length;
+  const result=await verifyResearchPrimary(fact,o.value,{f,now:()=>new Date(reads[Math.max(0,cursor-1)]?.observed_at??historical_at),secUserAgent:'Historical replay replay@example.invalid'});
+  return result.ok&&result.as_of===o.as_of&&Number.isFinite(Date.parse(o.as_of))&&Date.parse(o.as_of)<=Date.parse(historical_at)&&Date.parse(historical_at)-Date.parse(o.as_of)<=fact.max_age_seconds*1000&&JSON.stringify(result.source)===JSON.stringify(o.source)&&cursor===reads.length;
  }catch{return false;}
 }
 export async function replayResearchDeskPublic(packet:ResearchPacket,expected_spec_hash:string,loadRaw:(factId:string)=>RawResponse,f:Fetch=fetch):Promise<{ok:boolean;checks:{name:string;ok:boolean;detail:string}[]}>{

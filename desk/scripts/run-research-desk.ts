@@ -1,5 +1,6 @@
 // Local operator CLI. Testnet only. Review this adapter before any paid run.
-import {mkdirSync} from 'node:fs';
+import {privateDirectory,privateFile} from '../src/privateEvidence.js';
+import {existsSync,lstatSync} from 'node:fs';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {privateKeyToAccount} from 'viem/accounts';
@@ -13,9 +14,11 @@ if(!['A','B'].includes(id)||!out||extra.length)throw new Error('Usage: run-resea
 const secrets=process.env.DESK_SECRETS_FILE;if(!secrets)throw new Error('DESK_SECRETS_FILE is required');
 const expected=process.env.DESK_PAYER_ADDRESS?.toLowerCase();if(!expected||!/^0x[0-9a-f]{40}$/.test(expected))throw new Error('explicit DESK_PAYER_ADDRESS required');
 const ledgerDir=resolve(process.env.DESK_LEDGER_DIR??join(dirname(fileURLToPath(import.meta.url)),'../ledger'));
-const dir=resolve(out);mkdirSync(dir,{recursive:false});mkdirSync(ledgerDir,{recursive:true});
-const run_ledger=join(ledgerDir,'research-desk-runs.jsonl');
+const dir=resolve(out);if(out!==dir)throw new Error('output path must be absolute canonical');if(existsSync(dir))throw new Error('output directory must be new');privateDirectory(dir);privateDirectory(ledgerDir);
+for(const name of ['purchases.jsonl','gate-runs.jsonl','benchmark-runs.jsonl','reservations.jsonl'])privateFile(join(ledgerDir,name));
+const run_ledger=join(ledgerDir,'research-desk-runs.jsonl');privateFile(run_ledger);
 const spend=spendLedgerFromFiles({reservationsFile:join(ledgerDir,'reservations.jsonl'),lockFile:join(ledgerDir,'spend.lock'),purchasesFile:join(ledgerDir,'purchases.jsonl'),runLedgerFiles:[join(ledgerDir,'gate-runs.jsonl'),join(ledgerDir,'benchmark-runs.jsonl'),run_ledger]});
+try{lstatSync(join(ledgerDir,'spend.lock'));throw new Error('existing spend lock requires operator inspection');}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
 const account=privateKeyToAccount(normalizePrivateKey(readSecret(secrets,'private_key')));if(account.address.toLowerCase()!==expected)throw new Error('payer binding mismatch');
 const payer={address:account.address,signMessage:(message:string)=>account.signMessage({message})};
 const {spec,claims}=researchTemplate(id as 'A'|'B',new Date().toISOString());
