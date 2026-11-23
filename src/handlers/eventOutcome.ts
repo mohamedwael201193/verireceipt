@@ -14,15 +14,18 @@
 //
 // FAIL CLOSED (maintainer ruling 2026-11-23): exactly one market must
 // match the question (normalized exact match, or a unique normalized
-// containment); zero is a 422, several is a 422 with the candidates
+// containment); zero enables a narrowly supported Wikipedia fallback,
+// otherwise a 422; several is a 422 with the candidates
 // named. A matched market that is not closed AND uma-resolved with a
 // clean 1/0 price pair is a 422 — never inferred from prices, never
 // served as "unresolved" despite the contract allowing it. A matched
 // market whose outcomes are not Yes/No is a 422 because the contract's
 // enum cannot carry its winner.
-import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
+import { ApiError, badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+
+import { wikipediaEventOutcome } from './eventWikipedia';
 
 const SOURCE_TIMEOUT_MS = 8000;
 const UA = "VeriReceipt/2.0 event-resolution observer (+https://verireceipt.vercel.app)";
@@ -112,7 +115,13 @@ export async function handleEventOutcome(query: Record<string, string | undefine
     throw upstreamUnavailable("POLYMARKET_UNREACHABLE", "the Polymarket gamma API could not be reached");
   }
   const markets = parseSearch(body);
-  const market = matchMarket(markets, event);
+  let market: PmMarket;
+  try { market = matchMarket(markets, event); }
+  catch (error) {
+    // Only a genuine no-match enables fallback; ambiguity and unresolved matches stay refused.
+    if (error instanceof ApiError && error.code === 'EVENT_NOT_FOUND') return wikipediaEventOutcome(event, body, url);
+    throw error;
+  }
   const r = resolveMarket(market);
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({ event, as_of: asOf,
