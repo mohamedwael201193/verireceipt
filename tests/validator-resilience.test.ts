@@ -125,6 +125,15 @@ function scripted(script: Array<Step[] | undefined>): {
           }),
       } as unknown as Response;
     }
+    // Performance-enrichment probes (headers/finalized, validator_balances)
+    // are best-effort calls made AFTER the verdict; like /root probes they
+    // do not consume scripted validator steps and are not recorded in
+    // count(), so 429/retry call-count tests keep their meaning. Here they
+    // behave as an unsupported endpoint (network error), so the section is
+    // simply omitted.
+    if (/\/eth\/v1\/beacon\/headers\/finalized/.test(u) || /\/validator_balances/.test(u)) {
+      throw new Error("stub: performance endpoints unsupported on this fixture source");
+    }
     calls.push({ src, at: Date.now() });
     const steps = script[src];
     if (!steps || steps.length === 0) throw new Error("stub: source " + src + " down");

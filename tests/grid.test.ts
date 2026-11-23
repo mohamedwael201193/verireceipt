@@ -138,29 +138,38 @@ describe("handleGridPrice validation", () => {
     await expectApiError(handleGridPrice({}), 400, "INVALID_NODE");
   });
 
-  it("future interval -> 422 FUTURE_INTERVAL with retry_after_sec", async () => {
-    const err = await expectApiError(
-      handleGridPrice({ node_or_zone: "EE", interval_start: futureIso(2) }),
-      422,
-      "FUTURE_INTERVAL",
-    );
-    expect(typeof err.retryAfterSec).toBe("number");
-    expect(err.retryAfterSec as number).toBeGreaterThan(0);
-    // 2h ahead + 15-min Elering window: retry is roughly 2h15m in seconds.
-    expect(err.retryAfterSec as number).toBeGreaterThan(2 * 3600);
-    expect(err.retryAfterSec as number).toBeLessThan(3 * 3600);
+  it("future interval -> latest finished interval served, honestly labelled", async () => {
+    // Ruling (owner, 2026-11-23 02:17 EET): serve the latest FINISHED
+    // interval instead of 422 FUTURE_INTERVAL; the answer names the
+    // interval actually served and states the requested one was still in
+    // progress.
+    const servedMs = Math.floor(Date.now() / 900_000) * 900_000 - 900_000;
+    const served = new Date(servedMs).toISOString();
+    saveGridPrice("EE", served, 88.5, "Elering EE");
+    const requested = futureIso(2);
+    const res = await handleGridPrice({ node_or_zone: "EE", interval_start: requested });
+    expect(res.verdict).toBe("verified");
+    expect(res.lmp_usd_per_mwh).toBe(88.5);
+    expect(res.interval_start).toBe(served);
+    expect(res.requested_interval_start).toBe(requested);
+    expect(res.interval_substitution).toBe("latest_finished");
+    expect(String(res.answer)).toContain("still in progress");
+    expect(String(res.answer)).toContain(served);
+    // The served interval is never presented as the asked one.
+    expect(String(res.answer)).toContain(requested);
   });
 
-  it("unfinished interval (started, not yet settled) -> 422 FUTURE_INTERVAL", async () => {
+  it("unfinished interval (started, not yet settled) -> latest finished interval served", async () => {
     // EE window is 15 min: an interval that started 5 min ago has not finished.
-    const started = new Date(Date.now() - 5 * 60_000).toISOString();
-    const err = await expectApiError(
-      handleGridPrice({ node_or_zone: "EE", interval_start: started }),
-      422,
-      "FUTURE_INTERVAL",
-    );
-    expect(err.retryAfterSec as number).toBeGreaterThan(0);
-    expect(err.retryAfterSec as number).toBeLessThanOrEqual(10 * 60);
+    const servedMs = Math.floor(Date.now() / 900_000) * 900_000 - 900_000;
+    const served = new Date(servedMs).toISOString();
+    saveGridPrice("EE", served, 77.25, "Elering EE");
+    const started = new Date(Math.floor((Date.now() - 5 * 60_000) / 1000) * 1000).toISOString();
+    const res = await handleGridPrice({ node_or_zone: "EE", interval_start: started });
+    expect(res.verdict).toBe("verified");
+    expect(res.interval_start).toBe(served);
+    expect(res.requested_interval_start).toBe(started);
+    expect(String(res.answer)).toContain("latest finished interval starting " + served);
   });
 
   it("unsupported zone -> 422 UNSUPPORTED_ZONE", async () => {
@@ -2270,9 +2279,22 @@ describe("GRID-NP15: a CAISO request with no node is answered for the NP15 hub (
     }
   });
 
-  it("a CAISO system request for an unfinished hour is still 422 FUTURE_INTERVAL; off-boundary still 422", async () => {
+  it("a CAISO system request for an unfinished hour substitutes the latest finished hour and fails closed when it is not cached; off-boundary still 422", async () => {
     const future = futureIso(3);
-    await expectApiError(handleGridPrice({ node_or_zone: "CAISO", interval_start: future }), 422, "FUTURE_INTERVAL");
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new Error("stubbed upstream failure");
+    }) as typeof fetch;
+    try {
+      // No usable cached row for the latest finished hour and the live
+      // fetch is down: the request fails closed, never a guess, and never
+      // the old FUTURE_INTERVAL refusal.
+      await expect(
+        handleGridPrice({ node_or_zone: "CAISO", interval_start: future }),
+      ).rejects.toMatchObject({ status: 502, code: expect.stringMatching(/^GRID_CACHE_(MISS|STALE)$/) });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
     await expectApiError(
       handleGridPrice({ node_or_zone: "CAISO", interval_start: "2026-09-13T14:15:00Z" }),
       422,

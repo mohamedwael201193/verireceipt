@@ -196,12 +196,43 @@ describe("handleFx answers (stubbed sources)", () => {
       fawaz: fawazBody(0.91158, "2026-11-22"),
     });
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
-    // Median of [0.909918, 0.90992, 0.90995, 0.911256, 0.91158] is 0.90995 (floatrates' fix quote).
-    expect(result.rate).toBeCloseTo(0.90995, 6);
-    expect(result.converted_amount).toBeCloseTo(90.995, 6);
+    // The tight fix cluster {0.909918, 0.90992, 0.90995} anchors (the two
+    // recomputed sources drift 15-25bps on the weekend); its median 0.90992
+    // serves - closer to the fix than the old full-pool median 0.90995.
+    expect(result.rate).toBeCloseTo(0.90992, 6);
+    expect(result.converted_amount).toBeCloseTo(90.992, 6);
     expect(result.verdict).toBe("verified");
     expect(result.confidence).toBe(1.0);
     expect(result.sources_used).toHaveLength(5);
+  });
+
+  it("weekend live shape (measured 2026-11-23): the ECB fix pair anchors over a recomputed pair", async () => {
+    // Measured live: every top-ranked miner serves the ECB fix (0.909918,
+    // dated Friday). The recomputed sources drift 15-25bps on Sunday and a
+    // late-GMT Friday quote sits between them, so the full-pool median
+    // lands ~9bps off the fix. The tight fix pair must anchor instead.
+    stubFxSources({
+      frankfurter: frankfurterBody(0.90992, "2026-11-20"),
+      openEr: openErBody(0.911256, "Sun, 22 Nov 2026 00:02:32 +0000"),
+      fawaz: fawazBody(0.91158, "2026-11-22"),
+      vatcomply: vatcomplyBody(0.909918, "2026-11-20"),
+      floatrates: floatratesBody(0.910744, "Fri, 20 Nov 2026 23:59:00 GMT"),
+    });
+    const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
+    expect(result.verdict).toBe("verified");
+    expect(result.rate).toBe(0.909918);
+    expect(result.converted_amount).toBeCloseTo(90.9918, 4);
+    // The answer must disclose the anchor cluster and the excluded quotes
+    // with their distances - never silently pool (review, 2026-11-23).
+    const ans = String(result.answer);
+    expect(ans).toContain("anchored on the tightest agreeing cluster");
+    expect(ans).toContain("vatcomply=0.909918");
+    expect(ans).toContain("Frankfurter (ECB reference rates)=0.90992");
+    expect(ans).toContain("excluded floatrates=0.910744 (+9bps)");
+    expect(ans).toContain("open.er-api.com=0.911256 (+15bps)");
+    expect(ans).toContain("fawaz currency-api=0.91158 (+18bps)");
+    expect(String(result.source)).toContain("single-linkage");
+    vi.unstubAllGlobals();
   });
 
   it("kill-each-source failover: any one source down -> the remaining four answer", async () => {

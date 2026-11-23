@@ -403,6 +403,10 @@ export async function handleFx(
   let degradedReasons: string[] = [];
   let straddledUpdate = false;
   let straddleDetail = "";
+  // Set when a tight anchor cluster (not the full pool) chose the served
+  // rate: names the anchor sources and every excluded quote with its
+  // distance. Printed in the answer; never silently pooled.
+  let clusterDetail = "";
   if (quotes.length >= 2) {
     const sorted = [...quotes].sort((a, b) => a.rate - b.rate);
     const lo = sorted[0].rate;
@@ -436,8 +440,80 @@ export async function handleFx(
         );
       }
     } else {
-      const median = sorted[Math.floor((sorted.length - 1) / 2)].rate;
+      // Anchor cluster (2026-11-23, measured live): the network's
+      // reference median lands on the ECB daily fix — every top-ranked
+      // miner serves exactly it. When the pool splits into a tight fix
+      // cluster and drifted recomputed quotes (weekend: 15-25bps apart),
+      // the full-pool median lands BETWEEN them (~9bps off the fix,
+      // measured). Serve the median of the largest tight cluster, where
+      // "tight" is SINGLE-LINKAGE: two quotes merge when they differ by
+      // at most 5bps, so a cluster's members can span more than 5bps
+      // end to end through a chain. When the largest size is tied, the
+      // fix-dated cluster anchors — a conscious choice: the reference is
+      // documented and measured fix-heavy, so the cluster whose newest
+      // quote is OLDEST is the fix snapshot. Identical dates or no tight
+      // pair fall back to the full-pool median (previous rule). On
+      // weekdays all sources sit within a few bps, so a single cluster
+      // forms and the full-pool median serves exactly as before; the
+      // rule only bites when the pool has an internal gap over 5bps.
+      const TIGHT_REL = 0.0005; // 5bps
+      const parent = sorted.map((_, i) => i);
+      const find = (i: number): number => {
+        while (parent[i] !== i) {
+          parent[i] = parent[parent[i]];
+          i = parent[i];
+        }
+        return i;
+      };
+      for (let i = 0; i < sorted.length; i++) {
+        for (let j = i + 1; j < sorted.length; j++) {
+          if ((sorted[j].rate - sorted[i].rate) / sorted[i].rate <= TIGHT_REL) {
+            parent[find(j)] = find(i);
+          }
+        }
+      }
+      const clusters = new Map<number, typeof sorted>();
+      for (let i = 0; i < sorted.length; i++) {
+        const root = find(i);
+        const group = clusters.get(root) ?? [];
+        group.push(sorted[i]);
+        clusters.set(root, group);
+      }
+      const groups = [...clusters.values()].sort((a, b) => b.length - a.length);
+      let anchor: typeof sorted | undefined;
+      if (groups.length > 0 && groups[0].length >= 2) {
+        if (groups.length === 1 || groups[0].length > groups[1].length) {
+          anchor = groups[0];
+        } else {
+          // Tied cluster sizes (weekend shape: a fix pair and a recomputed
+          // pair): the reference is fix-heavy, so the cluster whose newest
+          // quote is OLDEST — the fix snapshot — anchors. Identical dates
+          // fall back to the full-pool median.
+          const tied = groups.filter((g) => g.length === groups[0].length);
+          const newestKey = (g: typeof sorted): number =>
+            Math.max(...g.map((q) => rateDayKey(q.rateDate)));
+          const keys = tied.map(newestKey);
+          const oldest = Math.min(...keys);
+          anchor = keys.filter((k) => k === oldest).length === 1
+            ? tied[keys.indexOf(oldest)]
+            : undefined;
+        }
+      }
+      anchor ??= sorted;
+      const median = anchor[Math.floor((anchor.length - 1) / 2)].rate;
       serving = quotes.filter((q) => q.rate === median);
+      if (anchor !== sorted) {
+        const anchorRates = new Set(anchor.map((q) => q.rate));
+        const excluded = sorted
+          .filter((q) => !anchorRates.has(q.rate))
+          .map((q) => {
+            const bps = Math.round(((q.rate - median) / median) * 10000);
+            return `${q.source}=${q.rate} (${bps >= 0 ? "+" : ""}${bps}bps)`;
+          });
+        clusterDetail =
+          `anchored on the tightest agreeing cluster ${anchor.map((q) => `${q.source}=${q.rate}`).join(", ")}` +
+          (excluded.length ? `; excluded ${excluded.join(", ")}` : "");
+      }
       if (failedSources.length > 0) {
         degradedReasons = [`sources unavailable or not covering: ${failedSources.join(", ")}`];
       }
@@ -501,7 +577,9 @@ export async function handleFx(
       (straddledUpdate
         ? `; ${straddleDetail} — the freshest is served; they did NOT agree within 0.5%)`
         : quotes.length > 1
-          ? `; cross-checked against ${quotes.length} sources agreeing within 0.5%)`
+          ? `; cross-checked against ${quotes.length} sources agreeing within 0.5%` +
+            (clusterDetail ? `; ${clusterDetail}` : "") +
+            ")"
           : "; single covering source)") +
       ".",
     verdict: "verified",
@@ -510,6 +588,9 @@ export async function handleFx(
       `Keyless public rate APIs (${quotes.map((q) => q.source).join(" + ")}); ` +
       `sources snapshot at different times of day, so a 0.5% pairwise agreement tolerance is applied ` +
       `and a wider split on the same snapshot date is refused, never averaged` +
+      (clusterDetail
+        ? `; the served rate is the median of the tightest single-linkage agreeing cluster (5bps), not the full pool`
+        : "") +
       (degradedReasons.length ? `; degraded: ${degradedReasons.join("; ")}` : ""),
   });
 }
