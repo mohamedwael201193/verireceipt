@@ -144,7 +144,8 @@ it("aggregator-enabled path binds observation and reports median separately from
     expect(r.amount_out).toBe(3200000000);
     expect(r.best_amount_out_base_units).toBe("3210000000");
     expect(String(r.answer)).toContain("before gas");
-    expect(String(r.answer)).toContain("lower median");
+    expect(String(r.answer)).toMatch(/^Reported amount_out: 3200000000 USDC base units \(3200 USDC\), before gas\. Convention: lower median/);
+    expect(String(r.answer)).toContain("lower actual quote, not their average");
     expect(String(r.answer)).toContain("not hash-pinned");
     const calls = vi.mocked(saveReceipt).mock.calls;
     const ev = JSON.parse(String(calls[calls.length - 1][1]));

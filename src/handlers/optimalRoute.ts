@@ -3001,6 +3001,8 @@ async function handleRouteInner(
   const summary = aggregator ? aggregatorSummary(best.amountOut, aggregator) : null;
   const servedAmount = summary?.median ?? best.amountOut;
   if (aggregator) {
+    answer = `Reported amount_out: ${servedAmount} USDC base units (${Number(servedAmount) / 1e6} USDC), before gas. ` +
+      `Convention: lower median of surviving source observations, using the block-pinned venue baseline as one observation and an eligible Velora quote as the other; with two observations this means the lower actual quote, not their average. ` + answer;
     answer += ` Source observations: block-pinned venue baseline ${best.amountOut} base units (${Number(best.amountOut) / 1e6} USDC); ` +
       (aggregator.excluded ? `Velora/ParaSwap excluded: ${aggregator.excluded}. ` :
         `Velora/ParaSwap ${aggregator.amount_out} base units (${Number(aggregator.amount_out) / 1e6} USDC), block ${aggregator.block_number}. `) +
