@@ -215,13 +215,14 @@ export function resolveCaisoHubAlias(spelling: string): string | undefined {
  * so prose "caiso" or "np15 hub" resolves). The longest matching
  * candidate wins; ties break to the earliest occurrence.
  */
-const QUESTION_ZONE_CANDIDATES: ReadonlyArray<{ re: RegExp; spelling: string }> = (() => {
+const QUESTION_ZONE_CANDIDATES: ReadonlyArray<{ re: RegExp; spelling: string; exact: boolean }> = (() => {
   const esc = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const out: Array<{ re: RegExp; spelling: string }> = [];
+  const out: Array<{ re: RegExp; spelling: string; exact: boolean }> = [];
   for (const key of Object.keys(SUPPORTED_ZONES)) {
     out.push({
       re: new RegExp("(?<![A-Za-z0-9_.])" + esc(key) + "(?![A-Za-z0-9_])"),
       spelling: key,
+      exact: true,
     });
   }
   for (const spelling of [
@@ -234,25 +235,61 @@ const QUESTION_ZONE_CANDIDATES: ReadonlyArray<{ re: RegExp; spelling: string }> 
     out.push({
       re: new RegExp("(?<![A-Za-z0-9_.])" + esc(spelling) + "(?![A-Za-z0-9_])", "i"),
       spelling,
+      exact: false,
     });
   }
   return out;
 })();
 
-function questionZone(question: string): string | undefined {
-  let best: { spelling: string; index: number } | undefined;
-  for (const { re, spelling } of QUESTION_ZONE_CANDIDATES) {
+/** Resolve one candidate spelling to its canonical supported zone. */
+function resolveZoneSpelling(spelling: string): string | undefined {
+  const req = spelling.trim().replace(/\s+/g, " ");
+  if (Object.hasOwn(CAISO_SYSTEM_REQUESTS, req.toLowerCase())) {
+    return CAISO_SYSTEM_NODE;
+  }
+  const hub = resolveCaisoHubAlias(req);
+  if (hub) return hub;
+  const natural = resolveNaturalZoneAlias(req);
+  if (natural) return natural;
+  const zk = req.replace(/[a-z]/g, (ch) => ch.toUpperCase());
+  return Object.hasOwn(SUPPORTED_ZONES, zk) ? zk : undefined;
+}
+
+/**
+ * Every zone candidate the question names, longest/earliest first.
+ * Exact supported identifiers (matched case-sensitively) outrank
+ * natural-name and alias candidates regardless of length: "the EE
+ * price for my New York office" serves EE, not N.Y.C. (reviewer
+ * follow-up, 2026-11-23).
+ */
+function questionZoneSpellings(question: string): string[] {
+  const exact: Array<{ spelling: string; index: number }> = [];
+  const loose: Array<{ spelling: string; index: number }> = [];
+  for (const { re, spelling, exact: isExactKey } of QUESTION_ZONE_CANDIDATES) {
     const m = re.exec(question);
     if (!m) continue;
-    if (
-      !best ||
-      spelling.length > best.spelling.length ||
-      (spelling.length === best.spelling.length && m.index < best.index)
-    ) {
-      best = { spelling, index: m.index };
-    }
+    (isExactKey ? exact : loose).push({ spelling, index: m.index });
   }
-  return best?.spelling;
+  const pool = exact.length > 0 ? exact : loose;
+  pool.sort(
+    (a, b) => b.spelling.length - a.spelling.length || a.index - b.index,
+  );
+  return pool.map((c) => c.spelling);
+}
+
+/**
+ * The distinct canonical zones a question names, in candidate order.
+ * More than one distinct zone is an ambiguity the caller refuses
+ * honestly (a comparison question served for one zone would be a
+ * disclosed wrong-zone answer — reviewer follow-up, 2026-11-23).
+ */
+function questionZones(question: string): string[] {
+  const out: string[] = [];
+  for (const spelling of questionZoneSpellings(question)) {
+    const zone = resolveZoneSpelling(spelling);
+    if (zone !== undefined && !out.includes(zone)) out.push(zone);
+  }
+  return out;
 }
 
 const QUESTION_INTERVAL_ISO_RE =
@@ -284,10 +321,19 @@ function questionInterval(question: string): string | undefined {
 export function parseGridQuestion(question: string): {
   nodeOrZone?: string;
   intervalStart?: string;
+  ambiguousZones?: string[];
 } {
-  const out: { nodeOrZone?: string; intervalStart?: string } = {};
-  const zone = questionZone(question);
-  if (zone !== undefined) out.nodeOrZone = zone;
+  const out: { nodeOrZone?: string; intervalStart?: string; ambiguousZones?: string[] } = {};
+  const zones = questionZones(question);
+  if (zones.length > 1) {
+    out.ambiguousZones = zones;
+  } else if (zones.length === 1) {
+    // Pass the question's own spelling downstream so its disclosure
+    // rules (CAISO system, hub short name, natural alias) still apply.
+    out.nodeOrZone = questionZoneSpellings(question).find(
+      (sp) => resolveZoneSpelling(sp) === zones[0],
+    );
+  }
   const interval = questionInterval(question);
   if (interval !== undefined) out.intervalStart = interval;
   return out;
@@ -398,6 +444,16 @@ export async function handleGridPrice(
   // question does not yield falls through to the strict 400s below.
   const question = typeof query.question === "string" ? query.question : "";
   const fromQuestion = question.trim() ? parseGridQuestion(question) : {};
+  // Honest refusal beats a disclosed wrong-zone answer: a question
+  // naming two distinct zones (a comparison) is not served for one.
+  if (query.node_or_zone === undefined && fromQuestion.ambiguousZones) {
+    throw badRequest(
+      "AMBIGUOUS_ZONE",
+      "question names more than one zone (" +
+        fromQuestion.ambiguousZones.join(", ") +
+        "); ask for one zone at a time",
+    );
+  }
   const nodeOrZone = query.node_or_zone ?? fromQuestion.nodeOrZone;
   // A4: only an ABSENT param is 400 — an explicitly empty or
   // whitespace-only value is an empty-ish CAISO system request

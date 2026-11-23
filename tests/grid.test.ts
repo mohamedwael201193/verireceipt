@@ -4471,3 +4471,61 @@ describe("handleGridPrice natural-name aliases", () => {
     expect(res.lmp_usd_per_mwh).toBe(29.99);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Reviewer follow-up (2026-11-23): exact identifiers outrank natural-name
+// candidates regardless of length; a question naming two distinct zones is
+// refused honestly rather than served for one.
+describe("handleGridPrice question zone precedence + ambiguity", () => {
+  it("an exact identifier outranks a longer natural name (EE ... New York office)", async () => {
+    const interval = pastIso(3);
+    saveGridPrice("EE", interval, 61.25, "Elering EE");
+    const res = await handleGridPrice({
+      question: "What was the EE price for my New York office at " + interval + "?",
+    });
+    expect(res.node_or_zone).toBe("EE");
+    expect(res.lmp_usd_per_mwh).toBe(61.25);
+  });
+
+  it("two distinct zones named -> 400 AMBIGUOUS_ZONE listing both", async () => {
+    const err = await expectApiError(
+      handleGridPrice({ question: "Compare the EE and FI prices at 2026-11-19T03:00:00Z" }),
+      400,
+      "AMBIGUOUS_ZONE",
+    );
+    expect(err.message).toContain("EE");
+    expect(err.message).toContain("FI");
+  });
+
+  it("distinct zones across markets -> 400 AMBIGUOUS_ZONE", async () => {
+    await expectApiError(
+      handleGridPrice({
+        question: "What was the price difference between NP15 and New York City at 2026-11-19T03:00:00Z?",
+      }),
+      400,
+      "AMBIGUOUS_ZONE",
+    );
+  });
+
+  it("one zone mentioned twice (exact + natural) is not ambiguous", async () => {
+    const interval = pastIso(4);
+    saveGridPrice("N.Y.C.", interval, 28.05, "NYISO");
+    const res = await handleGridPrice({
+      question: "Was the N.Y.C. price at " + interval + " normal for New York?",
+    });
+    expect(res.node_or_zone).toBe("N.Y.C.");
+    expect(res.lmp_usd_per_mwh).toBe(28.05);
+  });
+
+  it("explicit node_or_zone wins even when the question names two zones", async () => {
+    const interval = pastIso(5);
+    saveGridPrice("EE", interval, 47.6, "Elering EE");
+    const res = await handleGridPrice({
+      node_or_zone: "EE",
+      interval_start: interval,
+      question: "Compare the EE and FI prices",
+    });
+    expect(res.node_or_zone).toBe("EE");
+    expect(res.lmp_usd_per_mwh).toBe(47.6);
+  });
+});
