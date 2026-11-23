@@ -1,23 +1,10 @@
 // MACRO_ECONOMIC_INDICATOR_GENERAL — GET /v1/macro?indicator=&country=&year=
 //
-// Zero-LLM. Answers a country's unemployment rate (% of total labour
-// force) for one calendar year from the World Bank's keyless public API
-// (api.worldbank.org, indicator SL.UEM.TOTL.ZS), with a SHA-256 receipt
-// over the exact raw response bytes of the indicator call. The World
-// Bank IS the authoritative publisher of this statistic — the same
-// single-authoritative-source shape as the SEC EDGAR filings lane.
-// Fails closed: an API outage throws 502; a year with no published
-// value is 422 NO_DATA, never an invented number.
-//
-// Intent contract (https://devnode.telegraphprotocol.com/engine/v1/intents/MACRO_ECONOMIC_INDICATOR_GENERAL,
-// read 2026-11-22): inputs indicator (enum, ONLY "unemployment rate"
-// allowed), country (string), optional year (integer 1960..2100; absent
-// means latest nonempty published year); scored output
-// `rate_pct` (percent, 6 decimals). The contract itself names the
-// source: "World Bank SL.UEM.TOTL.ZS". Other statistics named in the
-// intent description (policy rate, CPI, GDP) have no schema entry yet,
-// so they are 422 UNSUPPORTED_INDICATOR — declared support stays
-// exactly as wide as the served surface.
+// Published World Bank annual observations with receipts over raw source bytes.
+// Endpoint aliases name their series in the answer. The registered YAML remains
+// unemployment-only. Missing observations and values outside the scored 0..100
+// percent range are disclosed with rate_pct null, never clamped or invented.
+// Unknown indicators refuse rather than silently changing the question.
 //
 // COUNTRY RESOLUTION: the input is matched against the World Bank's own
 // country catalog (GET /v2/country?format=json&per_page=400 — the same
@@ -38,23 +25,19 @@ export const INTENT = "MACRO_ECONOMIC_INDICATOR_GENERAL";
 
 const WB_BASE = "https://api.worldbank.org/v2";
 const INDICATOR_ID = "SL.UEM.TOTL.ZS";
+const SERIES: Record<string, { id: string; unit: string }> = {
+  "unemployment rate": { id: INDICATOR_ID, unit: "% of total labour force" },
+  "inflation": { id: "FP.CPI.TOTL.ZG", unit: "% annual consumer-price change" },
+  "gdp growth": { id: "NY.GDP.MKTP.KD.ZG", unit: "% annual GDP growth" },
+  "current account": { id: "BN.CAB.XOKA.GD.ZS", unit: "% of GDP" },
+  "gdp per capita": { id: "NY.GDP.PCAP.CD", unit: "current US dollars per person" },
+  "population": { id: "SP.POP.TOTL", unit: "people" },
+};
 const HTTP_TIMEOUT_MS = 12000;
 const CATALOG_TTL_MS = 60 * 60 * 1000;
 
-/** Indicator spellings the contract's enum allows (exact enum value is
- * "unemployment rate"; matching is case/whitespace-insensitive). */
 const SUPPORTED_INDICATOR = "unemployment rate";
-
-/** Normalized spellings of the ONE contract-enum indicator. Matching
- * lowercases, collapses whitespace, removes only unit asides such
- * as "(%)" and drops a single leading article "the" — other
- * parentheticals stay in the text, so a phrase that merely CONTAINS
- * an aside cannot smuggle a different statistic past the alias check.
- * "SL.UEM.TOTL.ZS" is the World Bank indicator code for exactly this
- * statistic, so it resolves to the enum value the same way a spelling
- * variant does. Anything outside the alias set stays 422
- * UNSUPPORTED_INDICATOR; the registered surface is unchanged. A served
- * normalization is always disclosed. */
+// Exact aliases only; unsupported requests keep a disclosed refusal.
 const INDICATOR_ALIASES = new Set([
   "unemployment rate",
   "unemployment",
@@ -76,7 +59,15 @@ export function normalizeIndicator(input: string): string | null {
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^the\s+/, "");
-  return INDICATOR_ALIASES.has(stripped) ? SUPPORTED_INDICATOR : null;
+  if (INDICATOR_ALIASES.has(stripped)) return SUPPORTED_INDICATOR;
+  const aliases: Record<string, string> = {
+    inflation: "inflation", cpi: "inflation", "consumer prices": "inflation",
+    "fp.cpi.totl.zg": "inflation", "gdp growth": "gdp growth",
+    "ny.gdp.mktp.kd.zg": "gdp growth", "current account": "current account",
+    "bn.cab.xoka.gd.zs": "current account", "gdp per capita": "gdp per capita",
+    "ny.gdp.pcap.cd": "gdp per capita", population: "population", "sp.pop.totl": "population",
+  };
+  return Object.hasOwn(aliases, stripped) ? aliases[stripped] : null;
 }
 
 /**
@@ -220,9 +211,10 @@ export async function handleMacro(
   if (indicator === null) {
     throw unprocessable(
       "UNSUPPORTED_INDICATOR",
-      `unsupported indicator: ${query.indicator}; this miner serves "${SUPPORTED_INDICATOR}" (World Bank ${INDICATOR_ID})`,
+      `unsupported indicator: ${query.indicator}; no default is substituted. Supported endpoint indicators: ${Object.keys(SERIES).join(", ")}`,
     );
   }
+  const series = SERIES[indicator];
   const indicatorNormalized = indicatorInput !== undefined && indicatorInput !== SUPPORTED_INDICATOR;
   if (yearRaw !== undefined && !/^\d{4}$/.test(yearRaw)) {
     throw badRequest("INVALID_YEAR", "year must be a 4-digit calendar year (1960-2100)");
@@ -255,7 +247,7 @@ export async function handleMacro(
   // the current calendar year already has an annual observation.
   // https://datahelpdesk.worldbank.org/knowledgebase/articles/898581-api-basic-call-structures
   const selector = requestedYear === undefined ? "mrnev=1" : `date=${requestedYear}`;
-  const url = `${WB_BASE}/country/${encodeURIComponent(iso)}/indicator/${INDICATOR_ID}?${selector}&format=json&per_page=100`;
+  const url = `${WB_BASE}/country/${encodeURIComponent(iso)}/indicator/${series.id}?${selector}&format=json&per_page=100`;
   let rawText: string;
   try {
     rawText = await fetchText(url);
@@ -268,17 +260,10 @@ export async function handleMacro(
   } catch {
     throw upstreamUnavailable("WORLD_BANK_UNAVAILABLE", "World Bank indicator API returned invalid JSON");
   }
-  if (!Array.isArray(parsed) || parsed[1] === null || parsed[1] === undefined) {
-    // WB answers [meta, null] for a series with no rows at all.
-    throw unprocessable(
-      "NO_DATA",
-      `World Bank has no ${INDICATOR_ID} data for ${country.name}${requestedYear === undefined ? "" : ` in ${requestedYear}`}`,
-    );
-  }
-  if (!Array.isArray(parsed[1])) {
+  if (!Array.isArray(parsed) || (parsed[1] !== null && !Array.isArray(parsed[1]))) {
     throw upstreamUnavailable("WORLD_BANK_UNAVAILABLE", "World Bank indicator API returned an unexpected row shape");
   }
-  const rows = parsed[1] as Array<Record<string, unknown>>;
+  const rows = (parsed[1] ?? []) as Array<Record<string, unknown>>;
   const row = requestedYear === undefined
     ? rows.filter((r) => /^\d{4}$/.test(String(r?.date)) && Number(r.date) >= 1960 &&
         Number(r.date) <= 2100 && r.value !== null && r.value !== undefined)
@@ -286,25 +271,17 @@ export async function handleMacro(
     : rows.find((r) => String(r?.date) === String(requestedYear));
   const year = requestedYear ?? (row ? Number(row.date) : undefined);
   const value = row?.value;
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw unprocessable(
-      "NO_DATA",
-      `World Bank has no published value for ${country.name}${year === undefined ? "" : ` in ${year}`}`,
-    );
+  if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value))) {
+    throw upstreamUnavailable("WORLD_BANK_UNAVAILABLE", "World Bank returned a nonnumeric observation");
   }
-  if (value < 0 || value > 100) {
-    throw upstreamUnavailable(
-      "WORLD_BANK_UNAVAILABLE",
-      `World Bank returned an out-of-range rate (${value}); refusing to serve it`,
-    );
-  }
-
-  const ratePct = Math.round(value * 1e6) / 1e6;
+  const hasValue = typeof value === "number" && Number.isFinite(value);
+  const percentSeries = !["gdp per capita", "population"].includes(indicator);
+  const ratePct = hasValue && percentSeries && value >= 0 && value <= 100 ? Math.round(value * 1e6) / 1e6 : null;
   const asOf = new Date().toISOString();
   const fields: Record<string, unknown> = {
     rate_pct: ratePct,
-    indicator: SUPPORTED_INDICATOR,
-    indicator_id: INDICATOR_ID,
+    indicator,
+    indicator_id: series.id,
     indicator_input: indicatorInput,
     country: country.name,
     country_iso3: country.iso3 || country.id,
@@ -324,9 +301,9 @@ export async function handleMacro(
   }
 
   return envelope(INTENT, fields, receiptDoc, {
-    answer: `${indicatorNormalized ? `"${indicatorInput}" read as "${SUPPORTED_INDICATOR}" (the contract's only enum value; the normalization is disclosed). ` : ""}${country.name} ${requestedYear === undefined ? "latest published " : ""}unemployment rate in ${year}: ${ratePct}% of the total labour force (World Bank ${INDICATOR_ID}).`,
-    verdict: "verified",
-    confidence: 1.0,
+    answer: `${indicatorNormalized ? `"${indicatorInput}" read as "${indicator}". ` : ""}Mapping: ${indicator} -> World Bank ${series.id}. ${country.name}${requestedYear === undefined ? " latest published observation" : ""}${year === undefined ? "" : ` in ${year}`}: ${hasValue ? `${value} ${series.unit}.${ratePct === null ? " rate_pct is null: this observation is outside the scored 0..100 percent field or is not a percentage." : ""}` : "no data published for the requested observation; rate_pct is null, not zero."}`,
+    verdict: hasValue ? "verified" : "no_data",
+    confidence: hasValue ? 1.0 : 0,
     source: "World Bank API (api.worldbank.org, authoritative publisher)",
   });
 }
