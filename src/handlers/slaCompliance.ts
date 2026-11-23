@@ -60,7 +60,10 @@ interface Incident {
 
 function parsePeriod(raw: string | undefined): { days: number } {
   if (!raw) throw badRequest("MISSING_PARAM", "period is required: a number of days as Nd, e.g. 30d");
-  const m = /^(\d{1,3})d$/.exec(raw.trim().toLowerCase());
+  // AUDIT S2: the contract's own example is "last 30 days", so accept the
+  // natural phrasings too — "last N days", "past N days", "N days" — all
+  // mapping to the same Nd window; bounds and refusals are unchanged.
+  const m = /^(?:(?:the\s+)?(?:last|past)\s+)?(\d{1,3})\s*(?:d|days?)$/.exec(raw.trim().toLowerCase());
   if (!m) throw badRequest("INVALID_PERIOD", "period must be Nd days, e.g. 7d, 30d, 90d");
   const days = Number(m[1]);
   if (days < 1 || days > 90) throw badRequest("INVALID_PERIOD", "period must be between 1d and 90d; longer windows exceed what a statuspage incident log covers");

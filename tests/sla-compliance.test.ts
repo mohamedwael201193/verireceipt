@@ -127,4 +127,25 @@ describe("SLA_COMPLIANCE_GENERAL", () => {
     expect(res.json().code).toBe("INCIDENT_LOG_SHALLOW");
     await app.close();
   });
+
+  it("AUDIT S2: natural period phrasings map to the Nd window", async () => {
+    stub();
+    const app = buildServer();
+    for (const p of ["last 30 days", "the past 7 days", "90 days", "30 day", "30D"]) {
+      const res = await app.inject({
+        method: "GET",
+        url: `/v1/sla-compliance?service=github&period=${encodeURIComponent(p)}`,
+      });
+      expect(res.statusCode, p).toBe(200);
+    }
+    for (const bad of ["0d", "91 days", "last month", "30"]) {
+      const res = await app.inject({
+        method: "GET",
+        url: `/v1/sla-compliance?service=github&period=${encodeURIComponent(bad)}`,
+      });
+      expect(res.statusCode, bad).toBe(400);
+      expect(res.json().code).toBe("INVALID_PERIOD");
+    }
+    await app.close();
+  });
 });
