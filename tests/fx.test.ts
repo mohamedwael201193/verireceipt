@@ -442,7 +442,10 @@ describe("keyed ExchangeRate-API sixth leg (EGP panel + NO_DATA fallback only)",
       counts,
     );
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
-    expect(result.rate).toBeCloseTo(0.90995, 6);
+    // Anchor-cluster rule (merged 2026-11-23): the tight fix cluster
+    // {0.909918, 0.90992, 0.90995} anchors, median 0.90992 — the keyed
+    // leg staying out of USD/EUR must not change that outcome.
+    expect(result.rate).toBeCloseTo(0.90992, 6);
     expect(result.confidence).toBe(1.0);
     expect(result.sources_used).toHaveLength(5);
     expect(counts.exchangeRateApi ?? 0).toBe(0);

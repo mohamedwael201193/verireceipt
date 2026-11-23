@@ -135,6 +135,26 @@ describe("handleFxNow answers (stubbed sources)", () => {
     stubFxSources(bodies("EUR", 0.00001));
     await expectApiError(handleFxNow({ currency: "EUR" }), 502, "FX_RATE_OUT_OF_RANGE");
   });
+  it("adopts the same anchor-cluster rule as /v1/fx: the tight fix cluster anchors over drifted recomputed quotes", async () => {
+    // The weekend shape from the fx anchor-cluster review (measured
+    // 2026-11-23): a fix pair and a late-GMT Friday quote vs two drifted
+    // recomputed quotes. /v1/fx serves 0.909918 here; /v1/fx-now must
+    // serve the SAME value so the routes never diverge.
+    const b = bodies("EUR", 0.91);
+    b.frankfurter = JSON.stringify({ amount: 1.0, base: "USD", date: "2026-11-20", rates: { EUR: 0.90992 } });
+    b.vatcomply = JSON.stringify({ date: "2026-11-20", base: "USD", rates: { EUR: 0.909918 } });
+    b.floatrates = JSON.stringify({ eur: { code: "EUR", rate: "0.910744", date: "Fri, 20 Nov 2026 23:59:00 GMT", inverseRate: "1" } });
+    b.openEr = JSON.stringify({ result: "success", time_last_update_utc: "Sun, 22 Nov 2026 00:02:32 +0000", rates: { EUR: 0.911256 } });
+    b.fawaz = JSON.stringify({ date: "2026-11-22", usd: { eur: 0.91158 } });
+    stubFxSources(b);
+    const result = await handleFxNow({ currency: "EUR" });
+    expect(result.rate).toBe(0.909918);
+    expect(result.confidence).toBe(1.0);
+    const ans = String(result.answer);
+    expect(ans).toContain("anchored on the tightest agreeing cluster");
+    expect(ans).toContain("excluded");
+    expect(String(result.source)).toContain("single-linkage");
+  });
 });
 
 describe("/v1/fx-now route", () => {
