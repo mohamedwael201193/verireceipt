@@ -1,4 +1,6 @@
-// Canonical declarations from miner.yaml, verified against registration6174 on2026-11-22.
+// Canonical declarations from miner.yaml (45: the registered 14 plus the 31
+// verified new intents pending the next updateMiner for registration 6174;
+// lib/minerRegistration.ts keeps the on-chain registered truth of 14).
 // Six homepage demos are a selected subset, not the full declared contract.
 export const DECLARED_INTENTS = [
   "ONCHAIN_TX_LOOKUP_GENERAL",
@@ -14,6 +16,42 @@ export const DECLARED_INTENTS = [
   "DNS_RECORD_LOOKUP_GENERAL",
   "CURRENCY_EXCHANGE_CONVERT",
   "SSL_VERIFICATION_CERT",
-  "EMAIL_SECURITY_GENERAL"
+  "EMAIL_SECURITY_GENERAL",
+  "ACADEMIC_SEARCH_GENERAL",
+  "ASSET_RESERVE_ATTESTATION_GENERAL",
+  "CODE_PATCH_VERIFY_GENERAL",
+  "CORPORATE_REGISTRY_LOOKUP_GENERAL",
+  "CROSS_CHAIN_STATE_VERIFY_GENERAL",
+  "CVE_LOOKUP_CVSS",
+  "EVENT_OUTCOME_RESOLUTION_GENERAL",
+  "FINANCIAL_DATA_GENERAL",
+  "FX_NOW_CAD",
+  "FX_NOW_EUR",
+  "FX_NOW_SEK",
+  "IP_GEOLOCATION_GENERAL",
+  "LIQUIDITY_DEPTH_VERIFY_GENERAL",
+  "MALWARE_DETECTION_HASH",
+  "NEWS_HEADLINES_GENERAL",
+  "NEWS_SEARCH_GENERAL",
+  "PAYMENT_METHOD_VERIFY_GENERAL",
+  "ROUTE_ETA_GENERAL",
+  "SANCTIONS_SCREENING_MATCH_GENERAL",
+  "SLA_COMPLIANCE_GENERAL",
+  "SPORTS_SCORE_GENERAL",
+  "STOCK_PRICE_US_EQUITY",
+  "THREAT_INTELLIGENCE_INDICATOR",
+  "TOKEN_HOLDER_COUNT_GENERAL",
+  "TRANSACTION_RISK_GENERAL",
+  "TRAVEL_DISRUPTION_GENERAL",
+  "URL_SAFE_GENERAL",
+  "URL_SCAN_VERDICT",
+  "VENDOR_VERIFY_GENERAL",
+  "VULNERABILITY_TRIAGE_GENERAL",
+  "WEATHER_FORECAST_GENERAL"
 ] as const;
 export const DECLARED_INTENT_COUNT = DECLARED_INTENTS.length;
+export const MINER_YAML_SHA256 = "0x8a2951fab0826cc16c4468a61c1d44a11b66565ccf9ad0c871608d66120f095a";
+
+/** SHA-256 of the repo-root miner.yaml bytes (45 intents). It becomes the
+ * on-chain yaml_hash of registration 6174 when the pending updateMiner lands;
+ * SEPOLIA_YAML_HASH in lib/minerRegistration.ts stays the registered truth. */

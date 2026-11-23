@@ -25,10 +25,10 @@
 //   the miner.yaml tab above) is committed first and can be ahead of that pin
 //   until the tx lands; the pin is then moved in minerRegistration.ts only.
 
-import { DECLARED_INTENTS } from "../../lib/minerManifest";
 
 import {
   SEPOLIA_PREVIOUS_REGISTRATION_ID,
+  SEPOLIA_REGISTERED_INTENTS,
   SEPOLIA_REGISTRATION_ID,
   SEPOLIA_YAML_HASH,
   SEPOLIA_YAML_PIN,
@@ -54,7 +54,7 @@ const CONFIRMED_TX =
  * amount (addresses-and-params.md: bonds are paid in USDC on this Diamond).
  */
 export const REGISTRATION_CAST_SNIPPET =
-  "# VeriReceipt on Ethereum Sepolia: the official Telegraph flow\n# (miners/miner-registration.md Step 4 + \"Updating your miner\";\n# protocol/addresses-and-params.md: on this Diamond bonds are paid in USDC).\n# Display-only reference, not executed by this site. Review live terms before signing.\n# Set $PRIVATE_KEY yourself (testnet key only). Nothing below contains a key.\nexport DIAMOND=\"0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b\"\nexport USDC=\"0xcc194e1a843B658526D0D5C431f670028582Ae17\"   # Sepolia Test USDC, 6 decimals\nexport RPC=\"https://ethereum-sepolia-rpc.publicnode.com\"\nexport YAML_URL=\"https://raw.githubusercontent.com/mohamedwael201193/verireceipt/" + SEPOLIA_YAML_PIN + "/miner.yaml\"\nexport YAML_HASH=\"" + SEPOLIA_YAML_HASH + "\"\nexport FEE_ADDRESS=\"$(cast wallet address --private-key \"$PRIVATE_KEY\")\"   # payout address = your wallet\nexport MIN_PRICE=10000   # 0.01 USDC in 6-decimal units (minimum allowed)\nexport INTENTS='" + JSON.stringify(DECLARED_INTENTS) + "'\n\n# 0. The hash must be SHA-256 (not keccak256) of the raw bytes at YAML_URL.\n#    This must print exactly $YAML_HASH:\necho \"0x$(curl -s \"$YAML_URL\" | sha256sum | awk '{print $1}')\"\n\n# 1. Bond: quote it for the 14 declared intents and approve exactly that amount of Test USDC.\n#    (Read live; on 2026-11-22 quoteMinerBond(14) returned 2150000 = $2.15.)\nexport BOND=$(cast call \"$DIAMOND\" \"quoteMinerBond(uint256)(uint256,uint256)\" 14 --rpc-url \"$RPC\" | head -n1 | awk '{print $1}')\ncast send \"$USDC\" \"approve(address,uint256)\" \"$DIAMOND\" \"$BOND\" \\\n  --rpc-url \"$RPC\" --private-key \"$PRIVATE_KEY\"\n\n# 2. Dry run (free): returns the registrationId you would get, or the exact revert.\ncast call \"$DIAMOND\" \\\n  \"registerMiner(string,bytes32,address,uint256,string[])(uint256)\" \\\n  \"$YAML_URL\" \"$YAML_HASH\" \"$FEE_ADDRESS\" \"$MIN_PRICE\" \"$INTENTS\" \\\n  --from \"$(cast wallet address --private-key \"$PRIVATE_KEY\")\" --rpc-url \"$RPC\"\n\n# 3. Register.\ncast send \"$DIAMOND\" \\\n  \"registerMiner(string,bytes32,address,uint256,string[])\" \\\n  \"$YAML_URL\" \"$YAML_HASH\" \"$FEE_ADDRESS\" \"$MIN_PRICE\" \"$INTENTS\" \\\n  --rpc-url \"$RPC\" --private-key \"$PRIVATE_KEY\"\n\n# Update path: change the YAML / price / fee address / intents of an existing\n# registration. Never re-register. It creates a NEW registrationId; the old one ends.\n# VeriReceipt's current registrationId is " + SEPOLIA_REGISTRATION_ID + " (updateMiner of " + SEPOLIA_PREVIOUS_REGISTRATION_ID + ").\nexport OLD_REGISTRATION_ID=" + SEPOLIA_REGISTRATION_ID + "\ncast call \"$DIAMOND\" \\\n  \"updateMiner(uint256,string,bytes32,address,uint256,string[])(uint256)\" \\\n  \"$OLD_REGISTRATION_ID\" \"$YAML_URL\" \"$YAML_HASH\" \"$FEE_ADDRESS\" \"$MIN_PRICE\" \"$INTENTS\" \\\n  --from \"$(cast wallet address --private-key \"$PRIVATE_KEY\")\" --rpc-url \"$RPC\"\ncast send \"$DIAMOND\" \\\n  \"updateMiner(uint256,string,bytes32,address,uint256,string[])\" \\\n  \"$OLD_REGISTRATION_ID\" \"$YAML_URL\" \"$YAML_HASH\" \"$FEE_ADDRESS\" \"$MIN_PRICE\" \"$INTENTS\" \\\n  --rpc-url \"$RPC\" --private-key \"$PRIVATE_KEY\"\n\n# Then read the node verdict ~10-15 min after the tx. Use the registrationId the\n# dry run printed (registerMiner or updateMiner):\nexport NEW_REGISTRATION_ID=\"REPLACE_WITH_ID_FROM_DRY_RUN\"\ncurl -s \"https://devnode.telegraphprotocol.com/api/miners/$NEW_REGISTRATION_ID\"\n";
+  "# VeriReceipt on Ethereum Sepolia: the official Telegraph flow\n# (miners/miner-registration.md Step 4 + \"Updating your miner\";\n# protocol/addresses-and-params.md: on this Diamond bonds are paid in USDC).\n# Display-only reference, not executed by this site. Review live terms before signing.\n# Set $PRIVATE_KEY yourself (testnet key only). Nothing below contains a key.\nexport DIAMOND=\"0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b\"\nexport USDC=\"0xcc194e1a843B658526D0D5C431f670028582Ae17\"   # Sepolia Test USDC, 6 decimals\nexport RPC=\"https://ethereum-sepolia-rpc.publicnode.com\"\nexport YAML_URL=\"https://raw.githubusercontent.com/mohamedwael201193/verireceipt/" + SEPOLIA_YAML_PIN + "/miner.yaml\"\nexport YAML_HASH=\"" + SEPOLIA_YAML_HASH + "\"\nexport FEE_ADDRESS=\"$(cast wallet address --private-key \"$PRIVATE_KEY\")\"   # payout address = your wallet\nexport MIN_PRICE=10000   # 0.01 USDC in 6-decimal units (minimum allowed)\nexport INTENTS='" + JSON.stringify(SEPOLIA_REGISTERED_INTENTS) + "'\n\n# 0. The hash must be SHA-256 (not keccak256) of the raw bytes at YAML_URL.\n#    This must print exactly $YAML_HASH:\necho \"0x$(curl -s \"$YAML_URL\" | sha256sum | awk '{print $1}')\"\n\n# 1. Bond: quote it for the 14 declared intents and approve exactly that amount of Test USDC.\n#    (Read live; on 2026-11-22 quoteMinerBond(14) returned 2150000 = $2.15.)\nexport BOND=$(cast call \"$DIAMOND\" \"quoteMinerBond(uint256)(uint256,uint256)\" 14 --rpc-url \"$RPC\" | head -n1 | awk '{print $1}')\ncast send \"$USDC\" \"approve(address,uint256)\" \"$DIAMOND\" \"$BOND\" \\\n  --rpc-url \"$RPC\" --private-key \"$PRIVATE_KEY\"\n\n# 2. Dry run (free): returns the registrationId you would get, or the exact revert.\ncast call \"$DIAMOND\" \\\n  \"registerMiner(string,bytes32,address,uint256,string[])(uint256)\" \\\n  \"$YAML_URL\" \"$YAML_HASH\" \"$FEE_ADDRESS\" \"$MIN_PRICE\" \"$INTENTS\" \\\n  --from \"$(cast wallet address --private-key \"$PRIVATE_KEY\")\" --rpc-url \"$RPC\"\n\n# 3. Register.\ncast send \"$DIAMOND\" \\\n  \"registerMiner(string,bytes32,address,uint256,string[])\" \\\n  \"$YAML_URL\" \"$YAML_HASH\" \"$FEE_ADDRESS\" \"$MIN_PRICE\" \"$INTENTS\" \\\n  --rpc-url \"$RPC\" --private-key \"$PRIVATE_KEY\"\n\n# Update path: change the YAML / price / fee address / intents of an existing\n# registration. Never re-register. It creates a NEW registrationId; the old one ends.\n# VeriReceipt's current registrationId is " + SEPOLIA_REGISTRATION_ID + " (updateMiner of " + SEPOLIA_PREVIOUS_REGISTRATION_ID + ").\nexport OLD_REGISTRATION_ID=" + SEPOLIA_REGISTRATION_ID + "\ncast call \"$DIAMOND\" \\\n  \"updateMiner(uint256,string,bytes32,address,uint256,string[])(uint256)\" \\\n  \"$OLD_REGISTRATION_ID\" \"$YAML_URL\" \"$YAML_HASH\" \"$FEE_ADDRESS\" \"$MIN_PRICE\" \"$INTENTS\" \\\n  --from \"$(cast wallet address --private-key \"$PRIVATE_KEY\")\" --rpc-url \"$RPC\"\ncast send \"$DIAMOND\" \\\n  \"updateMiner(uint256,string,bytes32,address,uint256,string[])\" \\\n  \"$OLD_REGISTRATION_ID\" \"$YAML_URL\" \"$YAML_HASH\" \"$FEE_ADDRESS\" \"$MIN_PRICE\" \"$INTENTS\" \\\n  --rpc-url \"$RPC\" --private-key \"$PRIVATE_KEY\"\n\n# Then read the node verdict ~10-15 min after the tx. Use the registrationId the\n# dry run printed (registerMiner or updateMiner):\nexport NEW_REGISTRATION_ID=\"REPLACE_WITH_ID_FROM_DRY_RUN\"\ncurl -s \"https://devnode.telegraphprotocol.com/api/miners/$NEW_REGISTRATION_ID\"\n";
 
 export const DOC_SNIPPETS: Record<DocTabId, string> = {
   curl:
@@ -158,7 +158,13 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '  supported CAISO/NYISO/Elering grid prices, and finalized-root Ethereum validator effective balances. Unsupported,\n' +
     '  ambiguous or unavailable evidence is refused rather than guessed. Additional receipt-backed endpoints provide\n' +
     '  named-chain gas and balances, explicit-chain ERC20 supply, World Bank unemployment, DNS record observations,\n' +
-    '  dated currency conversion, TLS certificate validity and DNS response status. Declared source, scope and\n' +
+    '  dated currency conversion, TLS certificate validity and DNS response status. Thirty-one further receipt-backed\n' +
+    '  endpoints provide academic search, Chainlink reserve attestations, GitHub CI patch verification, SEC corporate\n' +
+    '  registry lookup, cross-chain transaction-state agreement, CVE records, resolved prediction-market outcomes, market\n' +
+    '  data, current FX rates, IP geolocation, pool liquidity, malware and threat-intelligence blocklist reads, news\n' +
+    '  headlines and search, card BIN lookup, driving ETAs, sanctions screening, delivered-uptime reads, sports scores,\n' +
+    '  US equity quotes, token holder counts, transaction risk reads, US airport disruption status, URL safety reads, EU\n' +
+    '  VAT verification, CVE triage and weather forecasts. Declared source, scope and\n' +
     '  freshness limits apply.\'\n' +
     'base_url: https://verireceipt.onrender.com\n' +
     '\n' +
@@ -215,6 +221,37 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - CURRENCY_EXCHANGE_CONVERT\n' +
     '    - SSL_VERIFICATION_CERT\n' +
     '    - EMAIL_SECURITY_GENERAL\n' +
+    '    - ACADEMIC_SEARCH_GENERAL\n' +
+    '    - ASSET_RESERVE_ATTESTATION_GENERAL\n' +
+    '    - CODE_PATCH_VERIFY_GENERAL\n' +
+    '    - CORPORATE_REGISTRY_LOOKUP_GENERAL\n' +
+    '    - CROSS_CHAIN_STATE_VERIFY_GENERAL\n' +
+    '    - CVE_LOOKUP_CVSS\n' +
+    '    - EVENT_OUTCOME_RESOLUTION_GENERAL\n' +
+    '    - FINANCIAL_DATA_GENERAL\n' +
+    '    - FX_NOW_CAD\n' +
+    '    - FX_NOW_EUR\n' +
+    '    - FX_NOW_SEK\n' +
+    '    - IP_GEOLOCATION_GENERAL\n' +
+    '    - LIQUIDITY_DEPTH_VERIFY_GENERAL\n' +
+    '    - MALWARE_DETECTION_HASH\n' +
+    '    - NEWS_HEADLINES_GENERAL\n' +
+    '    - NEWS_SEARCH_GENERAL\n' +
+    '    - PAYMENT_METHOD_VERIFY_GENERAL\n' +
+    '    - ROUTE_ETA_GENERAL\n' +
+    '    - SANCTIONS_SCREENING_MATCH_GENERAL\n' +
+    '    - SLA_COMPLIANCE_GENERAL\n' +
+    '    - SPORTS_SCORE_GENERAL\n' +
+    '    - STOCK_PRICE_US_EQUITY\n' +
+    '    - THREAT_INTELLIGENCE_INDICATOR\n' +
+    '    - TOKEN_HOLDER_COUNT_GENERAL\n' +
+    '    - TRANSACTION_RISK_GENERAL\n' +
+    '    - TRAVEL_DISRUPTION_GENERAL\n' +
+    '    - URL_SAFE_GENERAL\n' +
+    '    - URL_SCAN_VERDICT\n' +
+    '    - VENDOR_VERIFY_GENERAL\n' +
+    '    - VULNERABILITY_TRIAGE_GENERAL\n' +
+    '    - WEATHER_FORECAST_GENERAL\n' +
     '  signal_mapping:\n' +
     '    confidence_field: confidence\n' +
     '    label_field: answer\n' +
@@ -608,6 +645,520 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          description: Copy the requested record_type without inventing or silently defaulting identity\n' +
     '            or scope.\n' +
     '\n' +
+    '  - path: /v1/academic-search\n' +
+    '    external_path: /v1/academic-search\n' +
+    '    method: GET\n' +
+    '    description: Searches the Crossref scholarly index for works matching a topic and returns the top\n' +
+    '      titles with their DOIs, with a SHA-256 receipt over the exact upstream body.\n' +
+    '    intents:\n' +
+    '    - ACADEMIC_SEARCH_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: query\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - ACADEMIC_SEARCH_GENERAL\n' +
+    '          description: Topic or question to search scholarly papers for\n' +
+    '\n' +
+    '  - path: /v1/reserve-attestation\n' +
+    '    external_path: /v1/reserve-attestation\n' +
+    '    method: GET\n' +
+    '    description: The latest Chainlink Proof-of-Reserve attestation for a supported asset, read on\n' +
+    '      ethereum mainnet through the RPC quorum, with a SHA-256 receipt.\n' +
+    '    intents:\n' +
+    '    - ASSET_RESERVE_ATTESTATION_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: asset\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - ASSET_RESERVE_ATTESTATION_GENERAL\n' +
+    '          description: The tokenized asset: its symbol or contract address\n' +
+    '\n' +
+    '  - path: /v1/code-patch\n' +
+    '    external_path: /v1/code-patch\n' +
+    '    method: GET\n' +
+    '    description: Verifies a GitHub patch by reading its real CI results from the GitHub API: check\n' +
+    '      runs plus the combined commit status for the exact ref. GitHub patches only.\n' +
+    '    intents:\n' +
+    '    - CODE_PATCH_VERIFY_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: patch\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - CODE_PATCH_VERIFY_GENERAL\n' +
+    '          description: Repository and commit, pull request or CI run to check\n' +
+    '\n' +
+    '  - path: /v1/corporate-registry\n' +
+    '    external_path: /v1/corporate-registry\n' +
+    '    method: GET\n' +
+    '    description: Looks up a US public company in the SEC\'s EDGAR registry, the only jurisdiction this\n' +
+    '      endpoint covers. Active means a filing within the last 400 days.\n' +
+    '    intents:\n' +
+    '    - CORPORATE_REGISTRY_LOOKUP_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: company\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - CORPORATE_REGISTRY_LOOKUP_GENERAL\n' +
+    '          description: Company name or registry identifier\n' +
+    '        - name: jurisdiction\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - CORPORATE_REGISTRY_LOOKUP_GENERAL\n' +
+    '          description: Country or jurisdiction of registration\n' +
+    '\n' +
+    '  - path: /v1/cross-chain-state\n' +
+    '    external_path: /v1/cross-chain-state\n' +
+    '    method: GET\n' +
+    '    description: Resolves one transaction hash independently on each listed chain through the 2-of-N\n' +
+    '      RPC quorum and reports per-chain agreement; disagreement is reported, never averaged.\n' +
+    '    intents:\n' +
+    '    - CROSS_CHAIN_STATE_VERIFY_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: reference\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - CROSS_CHAIN_STATE_VERIFY_GENERAL\n' +
+    '          description: Address, transfer or transaction to check\n' +
+    '        - name: chains\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - CROSS_CHAIN_STATE_VERIFY_GENERAL\n' +
+    '          description: Source and destination chains\n' +
+    '\n' +
+    '  - path: /v1/cve\n' +
+    '    external_path: /v1/cve\n' +
+    '    method: GET\n' +
+    '    description: The published CVSS v3.1 assessment for a CVE from the CVE record, with assessor,\n' +
+    '      version and vector disclosed. NVD is opt-in only and off by default.\n' +
+    '    intents:\n' +
+    '    - CVE_LOOKUP_CVSS\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: cve_id\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - CVE_LOOKUP_CVSS\n' +
+    '          description: CVE identifier, e.g. CVE-2024-3094\n' +
+    '\n' +
+    '  - path: /v1/event-outcome\n' +
+    '    external_path: /v1/event-outcome\n' +
+    '    method: GET\n' +
+    '    description: The resolved outcome of a prediction-market event from the Polymarket gamma API:\n' +
+    '      closed and UMA-resolved binary Yes/No markets with a clean 1/0 price pair only. One venue\'s\n' +
+    '      resolution record, not an independent determination of the underlying event.\n' +
+    '    intents:\n' +
+    '    - EVENT_OUTCOME_RESOLUTION_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: event\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - EVENT_OUTCOME_RESOLUTION_GENERAL\n' +
+    '          description: The event or question to resolve\n' +
+    '\n' +
+    '  - path: /v1/financial-data\n' +
+    '    external_path: /v1/financial-data\n' +
+    '    method: GET\n' +
+    '    description: Market capitalisation and trading volume for a supported asset from named, keyless,\n' +
+    '      measured sources, with a SHA-256 receipt over the exact upstream bodies.\n' +
+    '    intents:\n' +
+    '    - FINANCIAL_DATA_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: asset\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - FINANCIAL_DATA_GENERAL\n' +
+    '          description: Company, token or market\n' +
+    '\n' +
+    '  - path: /v1/fx-now\n' +
+    '    external_path: /v1/fx-now\n' +
+    '    method: GET\n' +
+    '    description: The current CAD, EUR and SEK rates vs the US dollar from named keyless sources\n' +
+    '      with quoted observation times, with a SHA-256 receipt.\n' +
+    '    intents:\n' +
+    '    - FX_NOW_CAD\n' +
+    '    - FX_NOW_EUR\n' +
+    '    - FX_NOW_SEK\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: currency\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - FX_NOW_CAD\n' +
+    '          - FX_NOW_EUR\n' +
+    '          - FX_NOW_SEK\n' +
+    '          description: Currency code priced against the US dollar, one of CAD, EUR, SEK\n' +
+    '\n' +
+    '\n' +
+    '  - path: /v1/ip-geolocation\n' +
+    '    external_path: /v1/ip-geolocation\n' +
+    '    method: GET\n' +
+    '    description: Resolves an IP address to its approximate location from two keyless public\n' +
+    '      geolocation services. Approximate network geography, not a physical address.\n' +
+    '    intents:\n' +
+    '    - IP_GEOLOCATION_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: ip\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - IP_GEOLOCATION_GENERAL\n' +
+    '          description: IP address\n' +
+    '\n' +
+    '  - path: /v1/liquidity\n' +
+    '    external_path: /v1/liquidity\n' +
+    '    method: GET\n' +
+    '    description: Total reserve liquidity in USD for a named pool and chain from the pinned-block\n' +
+    '      indexed observation, not executable depth at a slippage threshold.\n' +
+    '    intents:\n' +
+    '    - LIQUIDITY_DEPTH_VERIFY_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: pool\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - LIQUIDITY_DEPTH_VERIFY_GENERAL\n' +
+    '          description: DEX pool address or name\n' +
+    '        - name: chain\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - LIQUIDITY_DEPTH_VERIFY_GENERAL\n' +
+    '          description: Chain of the pool\n' +
+    '\n' +
+    '  - path: /v1/malware-hash\n' +
+    '    external_path: /v1/malware-hash\n' +
+    '    method: GET\n' +
+    '    description: Whether a file hash, domain or IP is flagged as malicious by the named keyless\n' +
+    '      threat-intelligence sources. Absence from a blocklist is not clearance, and an unknown hash is\n' +
+    '      not a clean verdict.\n' +
+    '    intents:\n' +
+    '    - MALWARE_DETECTION_HASH\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: indicator\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - MALWARE_DETECTION_HASH\n' +
+    '          description: Domain, IP address or file hash\n' +
+    '\n' +
+    '  - path: /v1/news-headlines\n' +
+    '    external_path: /v1/news-headlines\n' +
+    '    method: GET\n' +
+    '    description: The top headline for a topic from the two named indexes (Hacker News via Algolia,\n' +
+    '      current BBC News World RSS) inside the requested window; no matching item is an honest refusal.\n' +
+    '    intents:\n' +
+    '    - NEWS_HEADLINES_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: topic\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - NEWS_HEADLINES_GENERAL\n' +
+    '          description: Topic or region\n' +
+    '\n' +
+    '  - path: /v1/news-search\n' +
+    '    external_path: /v1/news-search\n' +
+    '    method: GET\n' +
+    '    description: A deterministic digest of what the two named news indexes carry for a query, with a\n' +
+    '      SHA-256 receipt over the exact upstream bodies.\n' +
+    '    intents:\n' +
+    '    - NEWS_SEARCH_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: query\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - NEWS_SEARCH_GENERAL\n' +
+    '          description: Topic, entity or event\n' +
+    '\n' +
+    '  - path: /v1/payment-method\n' +
+    '    external_path: /v1/payment-method\n' +
+    '    method: GET\n' +
+    '    description: Verifies a card BIN (bank identification number, the first 6-8 digits of a card\n' +
+    '      number) against a public BIN database. A recognized BIN is not a card validity or funds check.\n' +
+    '    intents:\n' +
+    '    - PAYMENT_METHOD_VERIFY_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: bin\n' +
+    '          type: integer\n' +
+    '          intents:\n' +
+    '          - PAYMENT_METHOD_VERIFY_GENERAL\n' +
+    '          description: Card number prefix (BIN, the first 6 to 8 digits); a job\'s params are public,\n' +
+    '            so never a full card number\n' +
+    '\n' +
+    '  - path: /v1/route-eta\n' +
+    '    external_path: /v1/route-eta\n' +
+    '    method: GET\n' +
+    '    description: Driving ETA between two coordinates from the public OSRM demo server, with a SHA-256\n' +
+    '      receipt over the exact upstream response body.\n' +
+    '    intents:\n' +
+    '    - ROUTE_ETA_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: origin\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - ROUTE_ETA_GENERAL\n' +
+    '          description: Start point\n' +
+    '        - name: destination\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - ROUTE_ETA_GENERAL\n' +
+    '          description: End point\n' +
+    '\n' +
+    '  - path: /v1/sanctions-screen\n' +
+    '    external_path: /v1/sanctions-screen\n' +
+    '    method: GET\n' +
+    '    description: Screens a person or entity name against two keyless public sanctions lists, the OFAC\n' +
+    '      SDN list with its published aliases and a second named list. A non-match is not clearance.\n' +
+    '    intents:\n' +
+    '    - SANCTIONS_SCREENING_MATCH_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: name\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - SANCTIONS_SCREENING_MATCH_GENERAL\n' +
+    '          description: Person or entity name\n' +
+    '\n' +
+    '  - path: /v1/sla-compliance\n' +
+    '    external_path: /v1/sla-compliance\n' +
+    '    method: GET\n' +
+    '    description: The delivered uptime for a named service over a period from its public status\n' +
+    '      history. Where no machine-readable SLA target is published, sla_target_pct and compliant are\n' +
+    '      null rather than guessed.\n' +
+    '    intents:\n' +
+    '    - SLA_COMPLIANCE_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: service\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - SLA_COMPLIANCE_GENERAL\n' +
+    '          description: The service\n' +
+    '        - name: period\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - SLA_COMPLIANCE_GENERAL\n' +
+    '          description: Period to measure, e.g. last 30 days\n' +
+    '\n' +
+    '  - path: /v1/sports-score\n' +
+    '    external_path: /v1/sports-score\n' +
+    '    method: GET\n' +
+    '    description: The score of a game from the official league scoreboards for the dates searched (NHL\n' +
+    '      and MLB). A game not found on those scoreboards is refused, not approximated.\n' +
+    '    intents:\n' +
+    '    - SPORTS_SCORE_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: game\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - SPORTS_SCORE_GENERAL\n' +
+    '          description: Teams or fixture\n' +
+    '\n' +
+    '  - path: /v1/stock-price\n' +
+    '    external_path: /v1/stock-price\n' +
+    '    method: GET\n' +
+    '    description: The latest quote for a US-listed equity from the Yahoo Finance chart API, with a\n' +
+    '      SHA-256 receipt over the exact upstream body.\n' +
+    '    intents:\n' +
+    '    - STOCK_PRICE_US_EQUITY\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: ticker\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - STOCK_PRICE_US_EQUITY\n' +
+    '          description: Stock ticker, e.g. AAPL\n' +
+    '\n' +
+    '  - path: /v1/threat-indicator\n' +
+    '    external_path: /v1/threat-indicator\n' +
+    '    method: GET\n' +
+    '    description: Whether an IP, domain, URL or file hash appears on the named keyless public\n' +
+    '      threat-intelligence blocklists. Absence from those lists is not clearance.\n' +
+    '    intents:\n' +
+    '    - THREAT_INTELLIGENCE_INDICATOR\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: indicator\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - THREAT_INTELLIGENCE_INDICATOR\n' +
+    '          description: IP address, domain, hash, CVE or actor\n' +
+    '\n' +
+    '  - path: /v1/token-holders\n' +
+    '    external_path: /v1/token-holders\n' +
+    '    method: GET\n' +
+    '    description: The number of distinct addresses holding an ERC-20 token from a keyless public block\n' +
+    '      indexer, with a SHA-256 receipt over the exact upstream body.\n' +
+    '    intents:\n' +
+    '    - TOKEN_HOLDER_COUNT_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: token\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - TOKEN_HOLDER_COUNT_GENERAL\n' +
+    '          description: Token contract address or name\n' +
+    '        - name: chain\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - TOKEN_HOLDER_COUNT_GENERAL\n' +
+    '          description: Chain of the token\n' +
+    '\n' +
+    '  - path: /v1/transaction-risk\n' +
+    '    external_path: /v1/transaction-risk\n' +
+    '    method: GET\n' +
+    '    description: A deterministic, fully-disclosed risk read of an ethereum mainnet transaction from\n' +
+    '      named in-repo-verified sources. A low score is not a safety guarantee.\n' +
+    '    intents:\n' +
+    '    - TRANSACTION_RISK_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: transaction\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - TRANSACTION_RISK_GENERAL\n' +
+    '          description: Transaction hash or details\n' +
+    '\n' +
+    '  - path: /v1/travel-disruption\n' +
+    '    external_path: /v1/travel-disruption\n' +
+    '    method: GET\n' +
+    '    description: US airport-level disruption status from the FAA NAS status feed, with a SHA-256\n' +
+    '      receipt over the exact upstream body.\n' +
+    '    intents:\n' +
+    '    - TRAVEL_DISRUPTION_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: route_or_flight\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - TRAVEL_DISRUPTION_GENERAL\n' +
+    '          description: Flight, route or station\n' +
+    '\n' +
+    '  - path: /v1/url-safe\n' +
+    '    external_path: /v1/url-safe\n' +
+    '    method: GET\n' +
+    '    description: Safety verdict for a URL from the named keyless public threat-intelligence\n' +
+    '      blocklists. Absence from those lists is not clearance.\n' +
+    '    intents:\n' +
+    '    - URL_SAFE_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: url\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - URL_SAFE_GENERAL\n' +
+    '          description: The URL\n' +
+    '\n' +
+    '  - path: /v1/url-scan\n' +
+    '    external_path: /v1/url-scan\n' +
+    '    method: GET\n' +
+    '    description: Whether a URL is safe to visit, with no phishing or malware, per the named keyless\n' +
+    '      blocklists screening the exact URL and its host. Absence from those lists is not clearance.\n' +
+    '    intents:\n' +
+    '    - URL_SCAN_VERDICT\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: url\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - URL_SCAN_VERDICT\n' +
+    '          description: The URL\n' +
+    '\n' +
+    '  - path: /v1/vendor-verify\n' +
+    '    external_path: /v1/vendor-verify\n' +
+    '    method: GET\n' +
+    '    description: Verifies an EU VAT registration number against the European Commission\'s VIES\n' +
+    '      service. A valid VAT number is not proof of the vendor\'s identity.\n' +
+    '    intents:\n' +
+    '    - VENDOR_VERIFY_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: vendor\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - VENDOR_VERIFY_GENERAL\n' +
+    '          description: Vendor or company\n' +
+    '        - name: vat_number\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - VENDOR_VERIFY_GENERAL\n' +
+    '          description: VAT or tax identifier\n' +
+    '\n' +
+    '  - path: /v1/vulnerability-triage\n' +
+    '    external_path: /v1/vulnerability-triage\n' +
+    '    method: GET\n' +
+    '    description: A deterministic triage read for a CVE from the published record: severity, vector\n' +
+    '      and references, with a SHA-256 receipt.\n' +
+    '    intents:\n' +
+    '    - VULNERABILITY_TRIAGE_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: cve_id\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - VULNERABILITY_TRIAGE_GENERAL\n' +
+    '          description: CVE identifier\n' +
+    '\n' +
+    '  - path: /v1/weather-forecast\n' +
+    '    external_path: /v1/weather-forecast\n' +
+    '    method: GET\n' +
+    '    description: Forecast high and low temperature, peak precipitation probability and dominant\n' +
+    '      condition for a place over a forward window from the Open-Meteo API, with a SHA-256 receipt.\n' +
+    '    intents:\n' +
+    '    - WEATHER_FORECAST_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: location\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - WEATHER_FORECAST_GENERAL\n' +
+    '          description: City or place name\n' +
+    '        optional:\n' +
+    '        - name: window_hours\n' +
+    '          type: integer\n' +
+    '          intents:\n' +
+    '          - WEATHER_FORECAST_GENERAL\n' +
+    '          description: Forecast window\n' +
+    '\n' +
     'intent_mapping:\n' +
     '  ONCHAIN_TX_LOOKUP_GENERAL:\n' +
     '    endpoint: /v1/tx\n' +
@@ -812,6 +1363,479 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '        from: record_type\n' +
     '    output:\n' +
     '      lookup_ok:\n' +
-    '        path: lookup_ok\n',
+    '        path: lookup_ok\n' +
+    '  ACADEMIC_SEARCH_GENERAL:\n' +
+    '    endpoint: /v1/academic-search\n' +
+    '    input:\n' +
+    '      query:\n' +
+    '        from: query\n' +
+    '    output:\n' +
+    '      answer:\n' +
+    '        path: answer\n' +
+    '      paper_titles:\n' +
+    '        path: paper_titles\n' +
+    '      dois:\n' +
+    '        path: dois\n' +
+    '      total_matches:\n' +
+    '        path: total_matches\n' +
+    '\n' +
+    '  ASSET_RESERVE_ATTESTATION_GENERAL:\n' +
+    '    endpoint: /v1/reserve-attestation\n' +
+    '    input:\n' +
+    '      asset:\n' +
+    '        from: asset\n' +
+    '    output:\n' +
+    '      attested_reserve:\n' +
+    '        path: attested_reserve\n' +
+    '        unit: "micro-units of the underlying asset"\n' +
+    '      asset:\n' +
+    '        path: asset\n' +
+    '      block:\n' +
+    '        path: block\n' +
+    '      source:\n' +
+    '        path: source\n' +
+    '\n' +
+    '  CODE_PATCH_VERIFY_GENERAL:\n' +
+    '    endpoint: /v1/code-patch\n' +
+    '    input:\n' +
+    '      patch:\n' +
+    '        from: patch\n' +
+    '    output:\n' +
+    '      passed:\n' +
+    '        path: passed\n' +
+    '      commit:\n' +
+    '        path: commit\n' +
+    '      pipeline:\n' +
+    '        path: pipeline\n' +
+    '\n' +
+    '  CORPORATE_REGISTRY_LOOKUP_GENERAL:\n' +
+    '    endpoint: /v1/corporate-registry\n' +
+    '    input:\n' +
+    '      company:\n' +
+    '        from: company\n' +
+    '      jurisdiction:\n' +
+    '        from: jurisdiction\n' +
+    '    output:\n' +
+    '      legal_name:\n' +
+    '        path: legal_name\n' +
+    '      registration_id:\n' +
+    '        path: registration_id\n' +
+    '      active:\n' +
+    '        path: active\n' +
+    '      jurisdiction:\n' +
+    '        path: jurisdiction\n' +
+    '      registered_address:\n' +
+    '        path: registered_address\n' +
+    '      incorporated:\n' +
+    '        path: incorporated\n' +
+    '\n' +
+    '  CROSS_CHAIN_STATE_VERIFY_GENERAL:\n' +
+    '    endpoint: /v1/cross-chain-state\n' +
+    '    input:\n' +
+    '      reference:\n' +
+    '        from: reference\n' +
+    '      chains:\n' +
+    '        from: chains\n' +
+    '    output:\n' +
+    '      address:\n' +
+    '        path: address\n' +
+    '      status:\n' +
+    '        path: status\n' +
+    '      chains:\n' +
+    '        path: chains\n' +
+    '      consistent:\n' +
+    '        path: consistent\n' +
+    '      summary:\n' +
+    '        path: summary\n' +
+    '\n' +
+    '  CVE_LOOKUP_CVSS:\n' +
+    '    endpoint: /v1/cve\n' +
+    '    input:\n' +
+    '      cve_id:\n' +
+    '        from: cve_id\n' +
+    '    output:\n' +
+    '      cve_id:\n' +
+    '        path: cve_id\n' +
+    '      cvss_score:\n' +
+    '        path: cvss_score\n' +
+    '        unit: "CVSS score (0-10)"\n' +
+    '      description:\n' +
+    '        path: description\n' +
+    '      published:\n' +
+    '        path: published\n' +
+    '      references:\n' +
+    '        path: references\n' +
+    '\n' +
+    '  EVENT_OUTCOME_RESOLUTION_GENERAL:\n' +
+    '    endpoint: /v1/event-outcome\n' +
+    '    input:\n' +
+    '      event:\n' +
+    '        from: event\n' +
+    '    output:\n' +
+    '      event:\n' +
+    '        path: event\n' +
+    '      resolved_yes:\n' +
+    '        path: resolved_yes\n' +
+    '      winner:\n' +
+    '        path: winner\n' +
+    '      resolved_at:\n' +
+    '        path: resolved_at\n' +
+    '      sources:\n' +
+    '        path: sources\n' +
+    '\n' +
+    '  FINANCIAL_DATA_GENERAL:\n' +
+    '    endpoint: /v1/financial-data\n' +
+    '    input:\n' +
+    '      asset:\n' +
+    '        from: asset\n' +
+    '    output:\n' +
+    '      asset:\n' +
+    '        path: asset\n' +
+    '      market_cap_usd:\n' +
+    '        path: market_cap_usd\n' +
+    '        unit: "USD"\n' +
+    '      volume_24h_usd:\n' +
+    '        path: volume_24h_usd\n' +
+    '        unit: "USD"\n' +
+    '      metrics:\n' +
+    '        path: metrics\n' +
+    '      as_of:\n' +
+    '        path: as_of\n' +
+    '\n' +
+    '  FX_NOW_CAD:\n' +
+    '    endpoint: /v1/fx-now\n' +
+    '    input:\n' +
+    '      currency:\n' +
+    '        from: currency\n' +
+    '    output:\n' +
+    '      rate:\n' +
+    '        path: rate\n' +
+    '        unit: "{key} per USD"\n' +
+    '\n' +
+    '  FX_NOW_EUR:\n' +
+    '    endpoint: /v1/fx-now\n' +
+    '    input:\n' +
+    '      currency:\n' +
+    '        from: currency\n' +
+    '    output:\n' +
+    '      rate:\n' +
+    '        path: rate\n' +
+    '        unit: "{key} per USD"\n' +
+    '\n' +
+    '  FX_NOW_SEK:\n' +
+    '    endpoint: /v1/fx-now\n' +
+    '    input:\n' +
+    '      currency:\n' +
+    '        from: currency\n' +
+    '    output:\n' +
+    '      rate:\n' +
+    '        path: rate\n' +
+    '        unit: "{key} per USD"\n' +
+    '\n' +
+    '  IP_GEOLOCATION_GENERAL:\n' +
+    '    endpoint: /v1/ip-geolocation\n' +
+    '    input:\n' +
+    '      ip:\n' +
+    '        from: ip\n' +
+    '    output:\n' +
+    '      ip:\n' +
+    '        path: ip\n' +
+    '      country:\n' +
+    '        path: country\n' +
+    '      city:\n' +
+    '        path: city\n' +
+    '      latitude:\n' +
+    '        path: latitude\n' +
+    '        unit: "degrees"\n' +
+    '      longitude:\n' +
+    '        path: longitude\n' +
+    '        unit: "degrees"\n' +
+    '      isp:\n' +
+    '        path: isp\n' +
+    '\n' +
+    '  LIQUIDITY_DEPTH_VERIFY_GENERAL:\n' +
+    '    endpoint: /v1/liquidity\n' +
+    '    input:\n' +
+    '      pool:\n' +
+    '        from: pool\n' +
+    '      chain:\n' +
+    '        from: chain\n' +
+    '    output:\n' +
+    '      liquidity_usd:\n' +
+    '        path: liquidity_usd\n' +
+    '        unit: "USD"\n' +
+    '\n' +
+    '  MALWARE_DETECTION_HASH:\n' +
+    '    endpoint: /v1/malware-hash\n' +
+    '    input:\n' +
+    '      indicator:\n' +
+    '        from: indicator\n' +
+    '    output:\n' +
+    '      malicious:\n' +
+    '        path: malicious\n' +
+    '\n' +
+    '  NEWS_HEADLINES_GENERAL:\n' +
+    '    endpoint: /v1/news-headlines\n' +
+    '    input:\n' +
+    '      topic:\n' +
+    '        from: topic\n' +
+    '    output:\n' +
+    '      topic:\n' +
+    '        path: topic\n' +
+    '      headlines:\n' +
+    '        path: headlines\n' +
+    '      urls:\n' +
+    '        path: urls\n' +
+    '      window:\n' +
+    '        path: window\n' +
+    '      top_headline:\n' +
+    '        path: top_headline\n' +
+    '\n' +
+    '  NEWS_SEARCH_GENERAL:\n' +
+    '    endpoint: /v1/news-search\n' +
+    '    input:\n' +
+    '      query:\n' +
+    '        from: query\n' +
+    '    output:\n' +
+    '      answer:\n' +
+    '        path: answer\n' +
+    '      result_count:\n' +
+    '        path: result_count\n' +
+    '      sources:\n' +
+    '        path: sources\n' +
+    '\n' +
+    '  PAYMENT_METHOD_VERIFY_GENERAL:\n' +
+    '    endpoint: /v1/payment-method\n' +
+    '    input:\n' +
+    '      bin:\n' +
+    '        from: bin\n' +
+    '    output:\n' +
+    '      network:\n' +
+    '        path: network\n' +
+    '      issuing_bank:\n' +
+    '        path: issuing_bank\n' +
+    '      issuing_country:\n' +
+    '        path: issuing_country\n' +
+    '      valid:\n' +
+    '        path: valid\n' +
+    '      card_type:\n' +
+    '        path: card_type\n' +
+    '\n' +
+    '  ROUTE_ETA_GENERAL:\n' +
+    '    endpoint: /v1/route-eta\n' +
+    '    input:\n' +
+    '      origin:\n' +
+    '        from: origin\n' +
+    '      destination:\n' +
+    '        from: destination\n' +
+    '    output:\n' +
+    '      duration:\n' +
+    '        path: duration\n' +
+    '        unit: "seconds"\n' +
+    '\n' +
+    '  SANCTIONS_SCREENING_MATCH_GENERAL:\n' +
+    '    endpoint: /v1/sanctions-screen\n' +
+    '    input:\n' +
+    '      name:\n' +
+    '        from: name\n' +
+    '    output:\n' +
+    '      name:\n' +
+    '        path: name\n' +
+    '      matched:\n' +
+    '        path: matched\n' +
+    '      matches:\n' +
+    '        path: matches\n' +
+    '      lists:\n' +
+    '        path: lists\n' +
+    '      match_score:\n' +
+    '        path: match_score\n' +
+    '        unit: "fraction (0-1)"\n' +
+    '\n' +
+    '  SLA_COMPLIANCE_GENERAL:\n' +
+    '    endpoint: /v1/sla-compliance\n' +
+    '    input:\n' +
+    '      service:\n' +
+    '        from: service\n' +
+    '      period:\n' +
+    '        from: period\n' +
+    '    output:\n' +
+    '      service:\n' +
+    '        path: service\n' +
+    '      uptime_pct:\n' +
+    '        path: uptime_pct\n' +
+    '        unit: "percent"\n' +
+    '      sla_target_pct:\n' +
+    '        path: sla_target_pct\n' +
+    '        unit: "percent"\n' +
+    '      compliant:\n' +
+    '        path: compliant\n' +
+    '      period:\n' +
+    '        path: period\n' +
+    '\n' +
+    '  SPORTS_SCORE_GENERAL:\n' +
+    '    endpoint: /v1/sports-score\n' +
+    '    input:\n' +
+    '      game:\n' +
+    '        from: game\n' +
+    '    output:\n' +
+    '      home_team:\n' +
+    '        path: home_team\n' +
+    '      away_team:\n' +
+    '        path: away_team\n' +
+    '      home_score:\n' +
+    '        path: home_score\n' +
+    '        unit: "points"\n' +
+    '      away_score:\n' +
+    '        path: away_score\n' +
+    '        unit: "points"\n' +
+    '      status:\n' +
+    '        path: status\n' +
+    '      date:\n' +
+    '        path: date\n' +
+    '\n' +
+    '  STOCK_PRICE_US_EQUITY:\n' +
+    '    endpoint: /v1/stock-price\n' +
+    '    input:\n' +
+    '      ticker:\n' +
+    '        from: ticker\n' +
+    '    output:\n' +
+    '      price_usd:\n' +
+    '        path: price_usd\n' +
+    '        unit: "US dollars"\n' +
+    '\n' +
+    '  THREAT_INTELLIGENCE_INDICATOR:\n' +
+    '    endpoint: /v1/threat-indicator\n' +
+    '    input:\n' +
+    '      indicator:\n' +
+    '        from: indicator\n' +
+    '    output:\n' +
+    '      malicious:\n' +
+    '        path: malicious\n' +
+    '\n' +
+    '  TOKEN_HOLDER_COUNT_GENERAL:\n' +
+    '    endpoint: /v1/token-holders\n' +
+    '    input:\n' +
+    '      token:\n' +
+    '        from: token\n' +
+    '      chain:\n' +
+    '        from: chain\n' +
+    '    output:\n' +
+    '      token:\n' +
+    '        path: token\n' +
+    '      chain:\n' +
+    '        path: chain\n' +
+    '      holders_count:\n' +
+    '        path: holders_count\n' +
+    '        unit: "addresses"\n' +
+    '      token_symbol:\n' +
+    '        path: token_symbol\n' +
+    '\n' +
+    '  TRANSACTION_RISK_GENERAL:\n' +
+    '    endpoint: /v1/transaction-risk\n' +
+    '    input:\n' +
+    '      transaction:\n' +
+    '        from: transaction\n' +
+    '    output:\n' +
+    '      risk_score:\n' +
+    '        path: risk_score\n' +
+    '        unit: "fraction (0-1)"\n' +
+    '      signals:\n' +
+    '        path: signals\n' +
+    '      summary:\n' +
+    '        path: summary\n' +
+    '\n' +
+    '  TRAVEL_DISRUPTION_GENERAL:\n' +
+    '    endpoint: /v1/travel-disruption\n' +
+    '    input:\n' +
+    '      route_or_flight:\n' +
+    '        from: route_or_flight\n' +
+    '    output:\n' +
+    '      route_or_flight:\n' +
+    '        path: route_or_flight\n' +
+    '      disrupted:\n' +
+    '        path: disrupted\n' +
+    '      status:\n' +
+    '        path: status\n' +
+    '      delay_minutes:\n' +
+    '        path: delay_minutes\n' +
+    '        unit: "minutes"\n' +
+    '      reason:\n' +
+    '        path: reason\n' +
+    '\n' +
+    '  URL_SAFE_GENERAL:\n' +
+    '    endpoint: /v1/url-safe\n' +
+    '    input:\n' +
+    '      url:\n' +
+    '        from: url\n' +
+    '    output:\n' +
+    '      url:\n' +
+    '        path: url\n' +
+    '      detections:\n' +
+    '        path: detections\n' +
+    '        unit: "detections"\n' +
+    '      summary:\n' +
+    '        path: summary\n' +
+    '\n' +
+    '  URL_SCAN_VERDICT:\n' +
+    '    endpoint: /v1/url-scan\n' +
+    '    input:\n' +
+    '      url:\n' +
+    '        from: url\n' +
+    '    output:\n' +
+    '      safe:\n' +
+    '        path: safe\n' +
+    '\n' +
+    '  VENDOR_VERIFY_GENERAL:\n' +
+    '    endpoint: /v1/vendor-verify\n' +
+    '    input:\n' +
+    '      vendor:\n' +
+    '        from: vendor\n' +
+    '      vat_number:\n' +
+    '        from: vat_number\n' +
+    '    output:\n' +
+    '      vendor:\n' +
+    '        path: vendor\n' +
+    '      vat_number:\n' +
+    '        path: vat_number\n' +
+    '      valid:\n' +
+    '        path: valid\n' +
+    '      registered_name:\n' +
+    '        path: registered_name\n' +
+    '      registered_address:\n' +
+    '        path: registered_address\n' +
+    '\n' +
+    '  VULNERABILITY_TRIAGE_GENERAL:\n' +
+    '    endpoint: /v1/vulnerability-triage\n' +
+    '    input:\n' +
+    '      cve_id:\n' +
+    '        from: cve_id\n' +
+    '    output:\n' +
+    '      cvss_base_score:\n' +
+    '        path: cvss_base_score\n' +
+    '        unit: "CVSS score (0-10)"\n' +
+    '\n' +
+    '  WEATHER_FORECAST_GENERAL:\n' +
+    '    endpoint: /v1/weather-forecast\n' +
+    '    input:\n' +
+    '      location:\n' +
+    '        from: location\n' +
+    '      window_hours:\n' +
+    '        from: window_hours\n' +
+    '    output:\n' +
+    '      location:\n' +
+    '        path: location\n' +
+    '      when:\n' +
+    '        path: when\n' +
+    '      temp_max_c:\n' +
+    '        path: temp_max_c\n' +
+    '        unit: "degrees Celsius"\n' +
+    '      temp_min_c:\n' +
+    '        path: temp_min_c\n' +
+    '        unit: "degrees Celsius"\n' +
+    '      precipitation_probability_pct:\n' +
+    '        path: precipitation_probability_pct\n' +
+    '        unit: "percent"\n' +
+    '      condition:\n' +
+    '        path: condition\n',
   cast: REGISTRATION_CAST_SNIPPET,
 };

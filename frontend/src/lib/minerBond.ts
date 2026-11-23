@@ -18,10 +18,12 @@
  */
 
 import { SEPOLIA_REGISTRATION_ID } from "./minerRegistration";
-import { DECLARED_INTENT_COUNT } from "./minerManifest";
 
 export const BOND_REGISTRATION_ID = SEPOLIA_REGISTRATION_ID;
-export const BOND_INTENT_COUNT = DECLARED_INTENT_COUNT;
+/** On-chain registered intent count for registration 6174 (14 today).
+ * It equals DECLARED_INTENT_COUNT again once the pending 45-intent
+ * updateMiner lands; the working miner.yaml already declares those 45. */
+export const BOND_INTENT_COUNT = 14;
 /** 6-decimal Test USDC base units: on-chain minerBond(6174) == quoteMinerBond(14). */
 export const MINER_BOND_BASE_UNITS = 2_150_000;
 export const MINER_BOND_SOURCE =
