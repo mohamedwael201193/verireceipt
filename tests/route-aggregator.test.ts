@@ -1,7 +1,7 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseVelora, aggregatorSummary, observeVelora } from "../src/handlers/routeAggregator";
+import { parseVelora, aggregatorSummary, observeVelora, veloraUrl } from "../src/handlers/routeAggregator";
 const body = readFileSync(join(__dirname, "fixtures/route-aggregator/velora-eth-usdc.json"), "utf8");
 const pin = JSON.parse(body).priceRoute.blockNumber;
 afterEach(() => vi.unstubAllGlobals());
@@ -38,5 +38,22 @@ describe("Velora provider-block quote", () => {
   });
   const c=new AbortController(); const pending=observeVelora(pin,c.signal); c.abort();
   expect((await pending).excluded).toContain("aborted");
+ });
+});
+
+
+describe("generic aggregator identity from actual quotes", () => {
+ it.each(["link-usdc", "usdc-weth"])("preserves %s direction and output decimals", async (name) => {
+  const raw = readFileSync(join(__dirname, `fixtures/route-aggregator/velora-${name}.json`), "utf8");
+  const p = JSON.parse(raw).priceRoute;
+  const identity = { sellToken: p.srcToken, buyToken: p.destToken, amountIn: BigInt(p.srcAmount), sellDecimals: p.srcDecimals, buyDecimals: p.destDecimals };
+  expect(parseVelora(raw, p.blockNumber, identity).amount.toString()).toBe(p.destAmount);
+  expect(() => parseVelora(raw, p.blockNumber, { ...identity, sellToken: p.destToken, buyToken: p.srcToken })).toThrow();
+  expect(() => parseVelora(raw, p.blockNumber, { ...identity, buyDecimals: p.destDecimals + 1 })).toThrow();
+  const u = new URL(veloraUrl(identity)); expect(u.searchParams.get("srcToken")).toBe(p.srcToken);
+  expect(u.searchParams.get("destToken")).toBe(p.destToken); expect(u.searchParams.get("amount")).toBe(p.srcAmount);
+  vi.stubGlobal("fetch", async () => new Response(raw));
+  const observed = await observeVelora(p.blockNumber, undefined, identity);
+  expect(observed.amount_out).toBe(p.destAmount); expect(observed.body).toBe(raw);
  });
 });

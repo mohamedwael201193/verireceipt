@@ -1388,7 +1388,7 @@ async function quoteCurveStEthAtBlock(
 // scored epoch since (e34 WBNB/SafeMoon, e35 DAI/USDC). Refusing off-enum
 // pairs scored 0 while real quoted answers scored up to 0.5. Each entry
 // below quotes EXACTLY 1 unit of the sell token on verified Ethereum
-// mainnet venues only. 2026-11-22 (owner decision, review-gated): a
+// mainnet venues only. A
 // well-formed pair OUTSIDE the registry — and malformed input too —
 // is answered with the HTTP 400 unavailable envelope
 // ({"status":"unavailable","error":{code,message},"summary","source":
@@ -1771,8 +1771,7 @@ export type PairResolution =
     }
   | { kind: "malformed" };
 
-/** Classify a raw pair string for the no-route path (2026-11-22, owner
- * decision). A well-formed pair that does not resolve to the verified
+/** Classify a raw pair string for the no-route path. A well-formed pair that does not resolve to the verified
  * registry is answered with an HTTP 400 unavailable envelope (the
  * no-route refusal); malformed input stays 422 INVALID_PAIR. */
 export function classifyPair(raw: string): PairResolution {
@@ -1810,7 +1809,7 @@ export function classifyPair(raw: string): PairResolution {
 }
 
 /** Single revert switch for the unavailable-envelope refusal path
- * (owner decision 2026-11-22): ROUTE_NO_ROUTE_ENVELOPE=0 (or false/off)
+ * ROUTE_NO_ROUTE_ENVELOPE=0 (or false/off)
  * restores the legacy 422 INVALID_PAIR for every refused pair. Default
  * ON. Read at call time so tests and ops can toggle it without a
  * rebuild. */
@@ -1982,6 +1981,12 @@ class HeaderGarbageError extends Error {}
 // ---------------------------------------------------------------------------
 // Handler.
 // ---------------------------------------------------------------------------
+
+export function normalizeRoutePhrase(raw: string | undefined): string | undefined {
+  if (raw === undefined || /[\x00-\x1f]/.test(raw)) return raw;
+  const phrase = raw.match(/^ *(?:1 +)?([A-Za-z0-9.]+|0x[0-9a-fA-F]{40}) +(?:to|for) +([A-Za-z0-9.]+|0x[0-9a-fA-F]{40}) *$/i);
+  return phrase ? `${phrase[1]}/${phrase[2]}` : raw;
+}
 
 export async function handleRoute(
   query: Record<string, string | undefined>,
@@ -2410,7 +2415,10 @@ async function handleRouteInner(
       );
     }
   }
-  const pair = query.pair;
+  const requestedPair = query.pair;
+  // Accept only explicit one-unit language; do not silently change quantities.
+  const pair = normalizeRoutePhrase(requestedPair);
+  const pairNormalization = pair !== requestedPair ? `Requested "${requestedPair}" resolved explicitly to ${pair}; quotes sell exactly one unit of the first token, never reverse the direction. ` : "";
   if (pair === undefined) {
     throw badRequest("MISSING_PARAM", `pair is required; supported pairs: ${SUPPORTED_PAIRS.join(", ")}`);
   }
@@ -2825,8 +2833,8 @@ async function handleRouteInner(
   // grace expires serves nothing, whenever it reports later. The two
   // waits are different mechanisms with different purposes, and the
   // grace is bounded at 1 s and deadline-aware, not 4.5 s.
-  const aggregatorPending = ctx.includeAggregator && spec.pair === "ETH/USDC" && remainingBudgetMs(ctx) > 1500
-    ? observeVelora(blockNumber, ctx.signal) : null;
+  const aggregatorPending = ctx.includeAggregator && remainingBudgetMs(ctx) > 1500
+    ? observeVelora(blockNumber, ctx.signal, { sellToken: spec.sellToken, buyToken: spec.buyToken, amountIn: spec.amountIn, sellDecimals: spec.amountIn.toString().length - 1, buyDecimals: spec.buyDecimals ?? (spec.buyToken.toLowerCase() === USDC.toLowerCase() || spec.buyToken.toLowerCase() === USDT.toLowerCase() ? 6 : spec.buyToken.toLowerCase() === WBTC.toLowerCase() ? 8 : 18) }) : null;
   const venueResults = await Promise.allSettled(
     venueAttempts.map((attempt) =>
       tryVenue(rotatedOrder(attempt.offset), blockHex, attempt.quoter, ctx.signal),
@@ -2997,17 +3005,19 @@ async function handleRouteInner(
       `calls at the pinned block.`;
   }
 
+  answer = pairNormalization + answer;
+  const outputDecimals = spec.buyDecimals ?? (spec.buyToken.toLowerCase() === USDC.toLowerCase() || spec.buyToken.toLowerCase() === USDT.toLowerCase() ? 6 : spec.buyToken.toLowerCase() === WBTC.toLowerCase() ? 8 : 18);
   const aggregator = aggregatorPending ? await aggregatorPending : null;
   const summary = aggregator ? aggregatorSummary(best.amountOut, aggregator) : null;
   const servedAmount = summary?.median ?? best.amountOut;
   if (aggregator) {
-    answer = `Reported amount_out: ${servedAmount} USDC base units (${Number(servedAmount) / 1e6} USDC), before gas. ` +
+    answer = `Reported amount_out: ${servedAmount} ${spec.buySymbol} base units (${Number(servedAmount) / 10 ** outputDecimals} ${spec.buySymbol}), before gas. ` +
       `Convention: lower median of surviving source observations, using the block-pinned venue baseline as one observation and an eligible Velora quote as the other; with two observations this means the lower actual quote, not their average. ` + answer;
-    answer += ` Source observations: block-pinned venue baseline ${best.amountOut} base units (${Number(best.amountOut) / 1e6} USDC); ` +
+    answer += ` Source observations: block-pinned venue baseline ${best.amountOut} base units (${Number(best.amountOut) / 10 ** outputDecimals} ${spec.buySymbol}); ` +
       (aggregator.excluded ? `Velora/ParaSwap excluded: ${aggregator.excluded}. ` :
-        `Velora/ParaSwap ${aggregator.amount_out} base units (${Number(aggregator.amount_out) / 1e6} USDC), block ${aggregator.block_number}. `) +
-      `Reported amount_out is the lower median of surviving source observations: ${servedAmount} base units (${Number(servedAmount) / 1e6} USDC). ` +
-      `Best single route is ${summary!.bestSource} at ${summary!.best} base units (${Number(summary!.best) / 1e6} USDC), before gas. ` +
+        `Velora/ParaSwap ${aggregator.amount_out} base units (${Number(aggregator.amount_out) / 10 ** outputDecimals} ${spec.buySymbol}), block ${aggregator.block_number}. `) +
+      `Reported amount_out is the lower median of surviving source observations: ${servedAmount} base units (${Number(servedAmount) / 10 ** outputDecimals} ${spec.buySymbol}). ` +
+      `Best single route is ${summary!.bestSource} at ${summary!.best} base units (${Number(summary!.best) / 10 ** outputDecimals} ${spec.buySymbol}), before gas. ` +
       `The aggregator is a provider-block observation, not hash-pinned by our RPC quorum. KyberSwap unavailable (403); no second aggregator claimed.`;
   }
   // 4. Receipt over the exact winning quoter call, pinned to the block.
@@ -3060,6 +3070,9 @@ async function handleRouteInner(
       ...(summary ? { best_route: summary.bestSource, best_amount_out_base_units: summary.best.toString(), baseline_amount_out_base_units: best.amountOut.toString() } : {}),
       block_number: blockNumber,
       winning_venue: best.venue,
+      ...(aggregator && !aggregator.excluded && aggregator.amount_out ? {
+        source_spread_pct: Number((BigInt(aggregator.amount_out) > best.amountOut ? BigInt(aggregator.amount_out) - best.amountOut : best.amountOut - BigInt(aggregator.amount_out)) * 1000000n / best.amountOut) / 10000,
+      } : {}),
     },
     receipt,
     {

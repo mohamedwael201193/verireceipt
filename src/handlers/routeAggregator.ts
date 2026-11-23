@@ -8,30 +8,36 @@ export interface AggregatorObservation {
   source: string; url: string; body: string; fetched_at: string;
   amount_out?: string; block_number?: number; excluded?: string;
 }
-export function parseVelora(body: string, pin: number): { amount: bigint; block: number } {
+export interface RouteIdentity { sellToken: string; buyToken: string; amountIn: bigint; sellDecimals: number; buyDecimals: number }
+const DEFAULT_IDENTITY: RouteIdentity = { sellToken: WETH, buyToken: USDC, amountIn: 10n ** 18n, sellDecimals: 18, buyDecimals: 6 };
+export function veloraUrl(identity: RouteIdentity): string {
+  const p = new URLSearchParams({ srcToken: identity.sellToken, destToken: identity.buyToken, amount: identity.amountIn.toString(), srcDecimals: String(identity.sellDecimals), destDecimals: String(identity.buyDecimals), side: "SELL", network: "1", version: "6.2" });
+  return `https://api.paraswap.io/prices?${p}`;
+}
+export function parseVelora(body: string, pin: number, identity: RouteIdentity = DEFAULT_IDENTITY): { amount: bigint; block: number } {
   const p = JSON.parse(body)?.priceRoute;
-  if (p?.network !== 1 || p?.srcToken?.toLowerCase() !== WETH || p?.destToken?.toLowerCase() !== USDC ||
-      p?.srcAmount !== "1000000000000000000" || p?.srcDecimals !== 18 || p?.destDecimals !== 6 ||
+  if (p?.network !== 1 || p?.srcToken?.toLowerCase() !== identity.sellToken.toLowerCase() || p?.destToken?.toLowerCase() !== identity.buyToken.toLowerCase() ||
+      p?.srcAmount !== identity.amountIn.toString() || p?.srcDecimals !== identity.sellDecimals || p?.destDecimals !== identity.buyDecimals ||
       typeof p?.destAmount !== "string" || !/^\d+$/.test(p.destAmount)) throw new Error("quote identity, units or amount mismatch");
   if (!Number.isSafeInteger(p.blockNumber) || p.blockNumber < pin || p.blockNumber > pin + 2) {
     throw new Error("aggregator block outside pinned block..pinned block+2 freshness window");
   }
   const amount = BigInt(p.destAmount);
-  if (amount <= 0n || amount >= 10000000000n) throw new Error("amount outside ETH/USDC plausibility bounds");
+  if (amount <= 0n || amount >= 2n ** 256n) throw new Error("invalid positive uint256-scale amount");
   return { amount, block: p.blockNumber };
 }
-export async function observeVelora(pin: number, parent?: AbortSignal): Promise<AggregatorObservation> {
+export async function observeVelora(pin: number, parent?: AbortSignal, identity: RouteIdentity = DEFAULT_IDENTITY): Promise<AggregatorObservation> {
   const controller = new AbortController();
   const abort = () => controller.abort();
   parent?.addEventListener("abort", abort, { once: true });
   if (parent?.aborted) controller.abort();
   const timer = setTimeout(abort, 1200);
-  const observation: AggregatorObservation = { source: "Velora/ParaSwap", url: VELORA_URL, body: "", fetched_at: new Date().toISOString() };
+  const observation: AggregatorObservation = { source: "Velora/ParaSwap", url: veloraUrl(identity), body: "", fetched_at: new Date().toISOString() };
   try {
-    const response = await fetch(VELORA_URL, { signal: controller.signal, headers: { Accept: "application/json" } });
+    const response = await fetch(observation.url, { signal: controller.signal, headers: { Accept: "application/json" } });
     observation.body = await response.text();
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const quote = parseVelora(observation.body, pin);
+    const quote = parseVelora(observation.body, pin, identity);
     observation.amount_out = quote.amount.toString();
     observation.block_number = quote.block;
   } catch (e) {

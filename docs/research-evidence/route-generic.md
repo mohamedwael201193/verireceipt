@@ -1,0 +1,5 @@
+# Generic route source binding
+
+Captured 2026-11-23 from the keyless Velora prices endpoint. Raw LINK/USDC and USDC/WETH bodies are in tests/fixtures/route-aggregator. Exact source and destination addresses, one-unit input, decimals, chain and provider block are validated before including a quote. Requests use https://api.paraswap.io/prices with srcToken,destToken,amount,srcDecimals,destDecimals,side=SELL,network=1,version=6.2. This is a provider-block observation within pinned block..pinned+2, not hash-pinned by the RPC quorum. The existing 5% baseline agreement gate and lower-median rule stay unchanged. KyberSwap remains excluded after its prior403; no workaround or second aggregator is claimed.
+
+The existing generic V3/V2 venue engine is reused. One-unit phrases normalize explicitly without changing direction. Other quantities, ambiguous multiple-token phrases and unknown tokens do not silently remap. Output prose uses the actual buy-token decimals, and source_spread_pct compares the two surviving observations. Live local smoke covered LINK to USDC and1 USDC to ETH; no swap submission.
