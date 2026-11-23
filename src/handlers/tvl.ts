@@ -2344,10 +2344,19 @@ const MAGNITUDE_UNITS: [number, string][] = [[1e12, 'T'], [1e9, 'B'], [1e6, 'M']
 function formatUsd(value: number): string {
   const full = '$' + plainDecimal(value);
   const abs = Math.abs(value);
-  for (const [unit, suffix] of MAGNITUDE_UNITS) {
+  for (let i = MAGNITUDE_UNITS.length - 1; i >= 0; i--) {
+    const [unit, suffix] = MAGNITUDE_UNITS[i];
     if (abs >= unit) {
-      const mag = parseFloat((value / unit).toFixed(2)).toString();
-      return `$${mag}${suffix} (${full})`;
+      // A rounded magnitude must never render as four digits ("$1000M" for
+      // 999,999,999): promote to the next unit until it fits (reviewer nit,
+      // 2026-11-23).
+      let chosen = i;
+      let mag = parseFloat((value / unit).toFixed(2));
+      while (Math.abs(mag) >= 1000 && chosen > 0) {
+        chosen--;
+        mag = parseFloat((value / MAGNITUDE_UNITS[chosen][0]).toFixed(2));
+      }
+      return `$${mag}${MAGNITUDE_UNITS[chosen][1]} (${full})`;
     }
   }
   return full;

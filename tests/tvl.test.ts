@@ -1094,6 +1094,33 @@ describe('handleTvl chain-scoped queries ("X on Y")', () => {
     expect(out.scoped_chain).toBe('Ethereum');
   });
 
+  it('magnitude promotes at the 1000 boundary: $999,999,999 renders "$1B", never "$1000M"', async () => {
+    // Reviewer nit on 127efafc: a rounded magnitude reaching four digits
+    // must promote to the next unit. The 999,999,999 value is a formatting
+    // boundary fixture, not a market claim; everything else reuses the
+    // suite's captured aave-v3 shape with the value swapped at both reads.
+    const boundary = 999999999;
+    __seedTvlCachesForTests(
+      PROTOCOLS_FIXTURE.map((entry) => (entry.slug === 'aave-v3' ? { ...entry, tvl: boundary } : entry)),
+      CHAINS_FIXTURE,
+    );
+    const payload = {
+      ...AAVE_PROTOCOL_FIXTURE,
+      tvl: [{ date: LATEST_S, totalLiquidityUSD: boundary }],
+      currentChainTvls: { Ethereum: boundary },
+    };
+    const fetchImpl = (async (url: string | URL | Request): Promise<Response> => {
+      const u = String(url);
+      if (u === 'https://api.llama.fi/tvl/aave-v3') return new Response(String(boundary), { status: 200 });
+      if (u === 'https://api.llama.fi/protocol/aave-v3') return new Response(JSON.stringify(payload), { status: 200 });
+      return new Response('not found in stub transport', { status: 404 });
+    }) as typeof fetch;
+    const out = await handleTvl({ protocol: 'aave-v3' }, { fetchImpl });
+    expect(out.tvl_usd).toBe(boundary);
+    const today = new Date().toISOString().slice(0, 10);
+    expect(out.answer).toBe(`Aave V3 has a total value locked of $1B ($999999999) as of ${today}.`);
+  });
+
   it('whole-query resolution wins: "sushi on base" is the protocol sushi-on-base (reviewer pin)', async () => {
     // Reviewer pin for b90784fc: with a protocol literally named
     // "Sushi On Base" AND a chain "Base" both in the lists, the exact
