@@ -360,8 +360,64 @@ export async function handleFx(
         );
       }
     } else {
-      const median = sorted[Math.floor((sorted.length - 1) / 2)].rate;
+      // Anchor cluster (2026-11-23, measured live): the network's
+      // reference median lands on the ECB daily fix — every top-ranked
+      // miner serves exactly it. When the pool splits into a tight fix
+      // cluster and drifted recomputed quotes (weekend: 15-25bps apart),
+      // the full-pool median lands BETWEEN them (~9bps off the fix,
+      // measured). Serve the median of the largest pairwise-tight
+      // cluster (within 5bps) when one is uniquely largest; ties or no
+      // tight pair fall back to the full-pool median (previous rule).
+      const TIGHT_REL = 0.0005; // 5bps
+      const parent = sorted.map((_, i) => i);
+      const find = (i: number): number => {
+        while (parent[i] !== i) {
+          parent[i] = parent[parent[i]];
+          i = parent[i];
+        }
+        return i;
+      };
+      for (let i = 0; i < sorted.length; i++) {
+        for (let j = i + 1; j < sorted.length; j++) {
+          if ((sorted[j].rate - sorted[i].rate) / sorted[i].rate <= TIGHT_REL) {
+            parent[find(j)] = find(i);
+          }
+        }
+      }
+      const clusters = new Map<number, typeof sorted>();
+      for (let i = 0; i < sorted.length; i++) {
+        const root = find(i);
+        const group = clusters.get(root) ?? [];
+        group.push(sorted[i]);
+        clusters.set(root, group);
+      }
+      const groups = [...clusters.values()].sort((a, b) => b.length - a.length);
+      let anchor: typeof sorted | undefined;
+      if (groups.length > 0 && groups[0].length >= 2) {
+        if (groups.length === 1 || groups[0].length > groups[1].length) {
+          anchor = groups[0];
+        } else {
+          // Tied cluster sizes (weekend shape: a fix pair and a recomputed
+          // pair): the reference is fix-heavy, so the cluster whose newest
+          // quote is OLDEST — the fix snapshot — anchors. Identical dates
+          // fall back to the full-pool median.
+          const tied = groups.filter((g) => g.length === groups[0].length);
+          const newestKey = (g: typeof sorted): number =>
+            Math.max(...g.map((q) => rateDayKey(q.rateDate)));
+          const keys = tied.map(newestKey);
+          const oldest = Math.min(...keys);
+          anchor = keys.filter((k) => k === oldest).length === 1
+            ? tied[keys.indexOf(oldest)]
+            : undefined;
+        }
+      }
+      anchor ??= sorted;
+      const median = anchor[Math.floor((anchor.length - 1) / 2)].rate;
       serving = quotes.filter((q) => q.rate === median);
+      if (anchor !== sorted) {
+        straddleDetail =
+          `tightest agreeing cluster served: ${anchor.map((q) => `${q.source}=${q.rate}`).join(", ")}`;
+      }
       if (failedSources.length > 0) {
         degradedReasons = [`sources unavailable or not covering: ${failedSources.join(", ")}`];
       }
