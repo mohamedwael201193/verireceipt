@@ -27,6 +27,10 @@
 // Sanity bound (intent contract range): a leg above 100000 gwei is
 // absurd on every supported chain and is dropped as malformed, so the
 // served answer is always inside the contract range by construction.
+// G3: on mainnet chains an agreeing pair at exactly 0 gwei (raw wei
+// hex, pre-rounding) is implausible and fails closed with 502
+// IMPLAUSIBLE_ZERO instead of serving a verified zero; sepolia and
+// base-sepolia serve 0 honestly (true state, inside the contract range).
 import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { CHAIN_RPCS } from "../config/chains";
@@ -37,6 +41,9 @@ import { normalizeChain } from "./txLookup";
 export const INTENT = "GAS_PRICE_GENERAL";
 
 /** Same chains txLookup serves — every CHAIN_RPCS key. */
+/** Mainnet chains where an agreeing 0 gwei is implausible (G3). */
+const MAINNET_CHAINS = new Set(["ethereum", "base", "arbitrum", "optimism", "polygon"]);
+
 const SUPPORTED_CHAINS = [
   "ethereum",
   "base",
@@ -155,6 +162,21 @@ export async function handleGasPrice(
     throw upstreamUnavailable(
       "QUORUM_UNREACHABLE",
       `quorum unreachable: only ${round.successes.length} of ${total} sources answered eth_gasPrice on ${chain}`,
+    );
+  }
+
+  // G3: on a MAINNET chain an agreeing pair at exactly 0 gwei is an
+  // implausible fee level — fail closed rather than serve a verified 0.
+  // The comparison is on the raw wei hex, before the 6dp gwei rounding.
+  // Sepolia and base-sepolia are excluded: 0x0 is a true state there
+  // (live 2026-11-23: every sepolia leg serves 0x0) and the contract
+  // range admits 0, so testnets answer honestly. A partial-zero split
+  // still fails closed via the quorum rules above or serves the
+  // non-zero agreement.
+  if (MAINNET_CHAINS.has(chain) && pair.weiHex === "0x0") {
+    throw upstreamUnavailable(
+      "IMPLAUSIBLE_ZERO",
+      `implausible eth_gasPrice 0 gwei on ${chain}: ${pair.count} of ${total} sources agreed on exactly zero; refusing to serve an implausible fee level`,
     );
   }
 
