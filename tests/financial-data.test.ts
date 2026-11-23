@@ -179,6 +179,7 @@ describe("financial fail-closed boundaries", () => {
   ] as const) {
     it(`rejects ${label}`, async () => {
       const d = JSON.parse(crypto);
+      vi.useFakeTimers(); vi.setSystemTime(new Date(d.ethereum.last_updated_at * 1000 + 1000));
       d.ethereum[key] = value;
       vi.stubGlobal("fetch", async () => new Response(JSON.stringify(d)));
       await expect(handleFinancialData({ asset: "ETH" })).rejects.toMatchObject({ status: 502, code: "BAD_MARKET_DATA" });
@@ -194,4 +195,14 @@ describe("financial fail-closed boundaries", () => {
       await expect(handleFinancialData({ asset: "AAPL" })).rejects.toMatchObject({ status: 502 });
     });
   }
+});
+
+
+describe("SEC ticker container validation", () => {
+ for (const body of ["null", "[]", "{}", '{"0":null}', '{"0":"invalid"}']) {
+  it(`rejects invalid ticker container ${body}`, async () => {
+   vi.stubGlobal("fetch", async () => new Response(body));
+   await expect(handleFinancialData({ asset: "AAPL" })).rejects.toMatchObject({ status:502, code:"SEC_MALFORMED" });
+  });
+ }
 });
