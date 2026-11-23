@@ -64,3 +64,19 @@ describe("ROUTE_ETA_GENERAL", () => {
     await app.close();
   });
 });
+
+describe("route-eta duration clamp (reviewer follow-up)", () => {
+  const withDuration = (d: number) => {
+    const body = JSON.parse(corpus);
+    body.routes[0].duration = d;
+    return JSON.stringify(body);
+  };
+  it("a 0s duration is clamped up to 1 and 20,000,000s down to 1,000,000 (contract range)", async () => {
+    stub(withDuration(0));
+    const lo = await handleRouteEta({ origin: "27.345,-97.225", destination: "27.8006,-97.3961" });
+    expect(lo.duration).toBe(1);
+    stub(withDuration(20000000));
+    const hi = await handleRouteEta({ origin: "27.345,-97.225", destination: "27.8006,-97.3961" });
+    expect(hi.duration).toBe(1000000);
+  });
+});
