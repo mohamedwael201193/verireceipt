@@ -48,6 +48,38 @@ describe("CROSS_CHAIN_STATE_VERIFY_GENERAL", () => {
     expect(sha256Hex(stored.evidence)).toBe(receipt.raw_response_sha256);
     expect(String(stored.evidence)).toContain("narrowing");
   });
+  it("present with success on one chain and reverted on the other is NOT consistent", async () => {
+    const reverted = { ...receiptResult, status: "0x0" };
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const isPolygon = String(url).includes("polygon");
+      return new Response(rpcBody(isPolygon ? reverted : receiptResult), { status: 200 });
+    });
+    const result = await handleCrossChainState({ reference: TX_HASH, chains: "ethereum,polygon" });
+    expect(result.consistent).toBe(false);
+    const ans = String(result.answer);
+    expect(ans).toContain("NOT consistent");
+    expect(ans).toContain("reverted");
+  });
+  it("a pre-Byzantium root-only receipt follows the effectiveStatus doctrine, never a default success", async () => {
+    const preByzantium = { ...receiptResult } as Record<string, unknown>;
+    delete preByzantium.status;
+    preByzantium.root = "0x" + "ab".repeat(32);
+    const broken = { ...receiptResult } as Record<string, unknown>;
+    delete broken.status;
+    delete broken.root;
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const isPolygon = String(url).includes("polygon");
+      return new Response(rpcBody(isPolygon ? broken : preByzantium), { status: 200 });
+    });
+    const result = await handleCrossChainState({ reference: TX_HASH, chains: "ethereum,polygon" });
+    // root-only means success; neither field means failure, so these differ.
+    expect(result.consistent).toBe(false);
+    const stored = await getReceiptEvidence(String((result.receipt as { receipt_id: string }).receipt_id));
+    if (!stored.evidence) throw new Error("missing evidence");
+    const perChain = (JSON.parse(String(stored.evidence)).per_chain ?? []) as { chain: string; status: number }[];
+    expect(perChain.find((c) => c.chain === "ethereum")?.status).toBe(1);
+    expect(perChain.find((c) => c.chain === "polygon")?.status).toBe(0);
+  });
   it("present with the same status on both chains is consistent", async () => {
     stub({ polygon: "found" });
     const result = await handleCrossChainState({ reference: TX_HASH, chains: "ethereum,polygon" });

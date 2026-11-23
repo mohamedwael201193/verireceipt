@@ -67,8 +67,12 @@ export async function chainState(chain: string, rpcs: string[], txHash: string):
     throw upstreamUnavailable("RPC_QUORUM_DISAGREEMENT", `the ${chain} RPC legs disagree on the receipt; no consistency claim from a split read`);
   }
   if (best.result === null) return { chain, found: false, status: null, bodies: best.bodies };
-  const statusHex = String((best.result as Record<string, unknown>).status ?? "0x1");
-  return { chain, found: true, status: statusHex === "0x0" ? 0 : 1, bodies: best.bodies };
+  // txLookup's effectiveStatus doctrine: a pre-Byzantium receipt carries
+  // `root` instead of `status` and means success; neither field means
+  // failure. Never default a missing status to success.
+  const r = best.result as Record<string, unknown>;
+  const status = typeof r.status === "string" ? (r.status === "0x0" ? 0 : 1) : typeof r.root === "string" ? 1 : 0;
+  return { chain, found: true, status, bodies: best.bodies };
 }
 
 export async function handleCrossChainState(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
