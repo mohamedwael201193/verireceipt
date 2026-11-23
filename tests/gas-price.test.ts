@@ -104,8 +104,31 @@ afterEach(() => {
 const ETH = CHAIN_RPCS.ethereum; // 3 legs
 
 describe("handleGasPrice validation (stubbed fetch, no network)", () => {
-  it("rejects a missing chain with 400 MISSING_PARAM", async () => {
-    await expectApiError(handleGasPrice({}), 400, "MISSING_PARAM");
+  it("G1: a missing chain defaults to ethereum with disclosure", async () => {
+    for (const query of [{}, { chain: "" }, { chain: "   " }]) {
+      stubGasFetch("ethereum", {
+        [ETH[0]]: { kind: "ok", value: "0x3b9aca00" },
+        [ETH[1]]: { kind: "ok", value: "0x3b9aca00" },
+        [ETH[2]]: { kind: "ok", value: "0x3b9aca00" },
+      });
+      const res = (await handleGasPrice(query)) as Record<string, unknown>;
+      expect(res.chain).toBe("ethereum");
+      expect(res.gas_price_gwei).toBe(1);
+      expect(res.verdict).toBe("verified");
+      expect(String(res.answer)).toContain("no chain given; defaulted to ethereum");
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("an explicit chain answers without the default disclosure", async () => {
+    stubGasFetch("ethereum", {
+      [ETH[0]]: { kind: "ok", value: "0x3b9aca00" },
+      [ETH[1]]: { kind: "ok", value: "0x3b9aca00" },
+      [ETH[2]]: { kind: "ok", value: "0x3b9aca00" },
+    });
+    const res = (await handleGasPrice({ chain: "ethereum" })) as Record<string, unknown>;
+    expect(res.chain).toBe("ethereum");
+    expect(String(res.answer)).not.toContain("defaulted");
   });
 
   it("rejects an unsupported chain with 400 UNSUPPORTED_CHAIN", async () => {

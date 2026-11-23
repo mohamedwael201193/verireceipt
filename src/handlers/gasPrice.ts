@@ -119,7 +119,11 @@ export async function handleGasPrice(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
   const chainRaw = query.chain?.trim();
-  const chain = normalizeChain(chainRaw);
+  // G1: an absent or blank chain defaults to ethereum, the canonical
+  // reading of a chain-less gas question; the default is disclosed in
+  // the answer text, never silent.
+  const defaulted = !chainRaw;
+  const chain = defaulted ? "ethereum" : normalizeChain(chainRaw);
   if (!chain) {
     throw badRequest("MISSING_PARAM", "chain is a required query parameter");
   }
@@ -176,7 +180,9 @@ export async function handleGasPrice(
   }
 
   return envelope(INTENT, fields, receiptDoc, {
-    answer: `Current gas price on ${chain}: ${gasPriceGwei} gwei (${votes}).`,
+    answer: defaulted
+      ? `Current gas price on ethereum: ${gasPriceGwei} gwei (no chain given; defaulted to ethereum. ${votes}).`
+      : `Current gas price on ${chain}: ${gasPriceGwei} gwei (${votes}).`,
     verdict: "verified",
     confidence: pair.count === total ? 1.0 : 0.9,
     source: `EVM RPC quorum (${chain}, 2-of-${total})`,
