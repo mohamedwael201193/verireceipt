@@ -160,6 +160,98 @@ export function resolveCaisoHubAlias(spelling: string): string | undefined {
   return Object.hasOwn(CAISO_HUB_ALIASES, key) ? CAISO_HUB_ALIASES[key] : undefined;
 }
 
+/**
+ * Free-text `question` fallback: the router may hand us the verbatim
+ * question instead of canonical params. When node_or_zone or
+ * interval_start is ABSENT, try to recover it from the question text.
+ * An explicit param always wins over the question; a question that
+ * yields no candidate falls through to the same strict 400
+ * INVALID_NODE / INVALID_INTERVAL as an absent param — nothing is
+ * guessed, and every recovered spelling flows through the same
+ * validation, alias and refusal pipeline below as a typed param.
+ *
+ * Zone candidates are the exact supported identifiers (matched as
+ * case-SENSITIVE tokens, so "fi" inside "final", "ee" inside
+ * "between" or "west" inside "western" cannot hit) plus the CAISO
+ * system spellings and hub short names (matched case-insensitively,
+ * so prose "caiso" or "np15 hub" resolves). The longest matching
+ * candidate wins; ties break to the earliest occurrence.
+ */
+const QUESTION_ZONE_CANDIDATES: ReadonlyArray<{ re: RegExp; spelling: string }> = (() => {
+  const esc = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const out: Array<{ re: RegExp; spelling: string }> = [];
+  for (const key of Object.keys(SUPPORTED_ZONES)) {
+    out.push({
+      re: new RegExp("(?<![A-Za-z0-9_.])" + esc(key) + "(?![A-Za-z0-9_])"),
+      spelling: key,
+    });
+  }
+  for (const spelling of [
+    ...Object.keys(CAISO_HUB_ALIASES),
+    ...Object.keys(CAISO_SYSTEM_REQUESTS).filter((k) => k.length > 0),
+  ]) {
+    out.push({
+      re: new RegExp("(?<![A-Za-z0-9_.])" + esc(spelling) + "(?![A-Za-z0-9_])", "i"),
+      spelling,
+    });
+  }
+  return out;
+})();
+
+function questionZone(question: string): string | undefined {
+  let best: { spelling: string; index: number } | undefined;
+  for (const { re, spelling } of QUESTION_ZONE_CANDIDATES) {
+    const m = re.exec(question);
+    if (!m) continue;
+    if (
+      !best ||
+      spelling.length > best.spelling.length ||
+      (spelling.length === best.spelling.length && m.index < best.index)
+    ) {
+      best = { spelling, index: m.index };
+    }
+  }
+  return best?.spelling;
+}
+
+const QUESTION_INTERVAL_ISO_RE =
+  /(\d{4}-\d{2}-\d{2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(?:Z\b|UTC\b)/i;
+const QUESTION_INTERVAL_TIME_FIRST_RE =
+  /\b(\d{1,2}):(\d{2})\s*UTC\b[^0-9]{0,60}?(\d{4}-\d{2}-\d{2})/i;
+const QUESTION_INTERVAL_DATE_FIRST_RE =
+  /(\d{4}-\d{2}-\d{2})[^0-9]{0,60}?\b(\d{1,2}):(\d{2})\s*UTC\b/i;
+
+function questionInterval(question: string): string | undefined {
+  const iso = QUESTION_INTERVAL_ISO_RE.exec(question);
+  if (iso) {
+    return (
+      iso[1] + "T" + iso[2].padStart(2, "0") + ":" + iso[3] + ":" + (iso[4] ?? "00") + "Z"
+    );
+  }
+  const timeFirst = QUESTION_INTERVAL_TIME_FIRST_RE.exec(question);
+  if (timeFirst) {
+    return timeFirst[3] + "T" + timeFirst[1].padStart(2, "0") + ":" + timeFirst[2] + ":00Z";
+  }
+  const dateFirst = QUESTION_INTERVAL_DATE_FIRST_RE.exec(question);
+  if (dateFirst) {
+    return dateFirst[1] + "T" + dateFirst[2].padStart(2, "0") + ":" + dateFirst[3] + ":00Z";
+  }
+  return undefined;
+}
+
+/** Recover absent canonical params from a verbatim question string. */
+export function parseGridQuestion(question: string): {
+  nodeOrZone?: string;
+  intervalStart?: string;
+} {
+  const out: { nodeOrZone?: string; intervalStart?: string } = {};
+  const zone = questionZone(question);
+  if (zone !== undefined) out.nodeOrZone = zone;
+  const interval = questionInterval(question);
+  if (interval !== undefined) out.intervalStart = interval;
+  return out;
+}
+
 type GridCacheRow = NonNullable<Awaited<ReturnType<typeof getGridPrice>>>;
 
 /**
@@ -260,14 +352,19 @@ function hhmmUtc(ms: number): string {
 export async function handleGridPrice(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
-  const nodeOrZone = query.node_or_zone;
+  // Free-text `question` fallback: fill only ABSENT params from the
+  // verbatim question; explicit params always win. Whatever the
+  // question does not yield falls through to the strict 400s below.
+  const question = typeof query.question === "string" ? query.question : "";
+  const fromQuestion = question.trim() ? parseGridQuestion(question) : {};
+  const nodeOrZone = query.node_or_zone ?? fromQuestion.nodeOrZone;
   // A4: only an ABSENT param is 400 — an explicitly empty or
   // whitespace-only value is an empty-ish CAISO system request
   // (resolved below), not a missing param.
   if (nodeOrZone === undefined) {
     throw badRequest("INVALID_NODE", "node_or_zone is required");
   }
-  const rawInterval = query.interval_start;
+  const rawInterval = query.interval_start ?? fromQuestion.intervalStart;
   if (!rawInterval) {
     throw badRequest("INVALID_INTERVAL", "interval_start is required");
   }

@@ -4249,3 +4249,135 @@ describe("A9 r3: NYISO post-close revalidation from the dated MIS CSV", () => {
     }
   }, 8000);
 });
+
+// ---------------------------------------------------------------------------
+// Free-text `question` fallback: the router may supply the verbatim question
+// instead of canonical params. Absent params are recovered from the text;
+// explicit params always win; unrecoverable params keep the strict 400s.
+// Includes the live production failures observed 2026-11-23 (~06:22Z):
+//   ?question=What was the LMP at NP15 for the hour starting ...Z -> 400
+//   natural zone names in prose -> 422 / 400.
+describe("handleGridPrice question fallback", () => {
+  it("question supplies zone + interval when both params are absent (EE)", async () => {
+    const interval = pastIso(3);
+    saveGridPrice("EE", interval, 91.75, "Elering EE");
+    const res = await handleGridPrice({
+      question: "What was the LMP for EE for the interval starting " + interval + "?",
+    });
+    expect(res.verdict).toBe("verified");
+    expect(res.lmp_usd_per_mwh).toBe(91.75);
+    expect(res.node_or_zone).toBe("EE");
+    expect(res.interval_start).toBe(interval);
+  });
+
+  it("question supplies only the missing interval (explicit zone wins)", async () => {
+    const interval = pastIso(4);
+    saveGridPrice("EE", interval, 66.1, "Elering EE");
+    const res = await handleGridPrice({
+      node_or_zone: "EE",
+      question: "What was the EE price at " + interval + "?",
+    });
+    expect(res.lmp_usd_per_mwh).toBe(66.1);
+    expect(res.interval_start).toBe(interval);
+  });
+
+  it("question supplies only the missing zone (explicit interval wins)", async () => {
+    const interval = pastIso(5);
+    saveGridPrice("EE", interval, 55.5, "Elering EE");
+    const res = await handleGridPrice({
+      interval_start: interval,
+      question: "What was the EE LMP then?",
+    });
+    expect(res.lmp_usd_per_mwh).toBe(55.5);
+    expect(res.node_or_zone).toBe("EE");
+  });
+
+  it("live failure 2026-11-23: 'What was the LMP at NP15 for the hour starting <iso>Z' resolves the NP15 hub", async () => {
+    const interval = "2026-11-19T03:00:00.000Z";
+    saveGridPrice("TH_NP15_GEN-APND", interval, 67.57, "CAISO", minutesAgoIso(10), "");
+    const res = await handleGridPrice({
+      question: "What was the LMP at NP15 for the hour starting 2026-11-19T03:00:00Z?",
+    });
+    expect(res.node_or_zone).toBe("TH_NP15_GEN-APND");
+    expect(res.market).toBe("CAISO");
+    expect(res.lmp_usd_per_mwh).toBe(67.57);
+    expect(res.interval_start).toBe(interval);
+  });
+
+  it("lowercase prose hub spelling resolves (np15 hub)", async () => {
+    const interval = "2026-11-19T03:00:00.000Z";
+    saveGridPrice("TH_NP15_GEN-APND", interval, 67.57, "CAISO", minutesAgoIso(10), "");
+    const res = await handleGridPrice({
+      question: "what was the np15 hub price for the hour starting 2026-11-19T03:00:00Z?",
+    });
+    expect(res.node_or_zone).toBe("TH_NP15_GEN-APND");
+    expect(res.lmp_usd_per_mwh).toBe(67.57);
+  });
+
+  it("explicit params win over conflicting question text", async () => {
+    const interval = pastIso(6);
+    saveGridPrice("EE", interval, 44.4, "Elering EE");
+    const res = await handleGridPrice({
+      node_or_zone: "EE",
+      interval_start: interval,
+      question: "What was the ZONE_J price at 2020-01-01T00:00:00Z?",
+    });
+    expect(res.node_or_zone).toBe("EE");
+    expect(res.interval_start).toBe(interval);
+    expect(res.lmp_usd_per_mwh).toBe(44.4);
+  });
+
+  it("question with no zone candidate -> 400 INVALID_NODE (same as absent param)", async () => {
+    await expectApiError(
+      handleGridPrice({ question: "What was the grid power price at 2026-11-19T03:00:00Z?" }),
+      400,
+      "INVALID_NODE",
+    );
+  });
+
+  it("question with a zone but no parseable datetime -> 400 INVALID_INTERVAL", async () => {
+    await expectApiError(
+      handleGridPrice({ question: "What is the EE LMP right now?" }),
+      400,
+      "INVALID_INTERVAL",
+    );
+  });
+
+  it("question naming a nonexistent calendar date -> 400 INVALID_INTERVAL (rollover-hardened path)", async () => {
+    await expectApiError(
+      handleGridPrice({ question: "What was the EE LMP at 2026-02-30T05:00:00Z?" }),
+      400,
+      "INVALID_INTERVAL",
+    );
+  });
+
+  it("case guard: lowercase english words containing zone tokens extract nothing", async () => {
+    // "final" contains fi, "between" contains ee, "western" contains west:
+    // none may resolve to FI / EE / WEST.
+    await expectApiError(
+      handleGridPrice({ question: "what is the final fee between western nodes at 2026-11-19T03:00:00Z?" }),
+      400,
+      "INVALID_NODE",
+    );
+  });
+
+  it("time-first phrasing: '05:00 UTC on 2026-11-19' recovers the interval", async () => {
+    const interval = "2026-11-19T05:00:00.000Z";
+    saveGridPrice("EE", interval, 38.25, "Elering EE");
+    const res = await handleGridPrice({
+      question: "What was the EE LMP at 05:00 UTC on 2026-11-19?",
+    });
+    expect(res.lmp_usd_per_mwh).toBe(38.25);
+    expect(res.interval_start).toBe(interval);
+  });
+
+  it("date-first phrasing: 'on 2026-11-19 at 05:00 UTC' recovers the interval", async () => {
+    const interval = "2026-11-19T05:00:00.000Z";
+    saveGridPrice("EE", interval, 38.25, "Elering EE");
+    const res = await handleGridPrice({
+      question: "EE LMP on 2026-11-19 at 05:00 UTC please",
+    });
+    expect(res.lmp_usd_per_mwh).toBe(38.25);
+    expect(res.interval_start).toBe(interval);
+  });
+});
