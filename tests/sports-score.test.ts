@@ -57,7 +57,7 @@ describe("SPORTS_SCORE_GENERAL", () => {
     const stored = await getReceiptEvidence(receipt.receipt_id);
     if (!stored.evidence) throw new Error("missing evidence");
     expect(sha256Hex(stored.evidence)).toBe(receipt.raw_response_sha256);
-    expect(String(stored.evidence)).toContain("NHL and MLB only");
+    expect(String(stored.evidence)).toContain("NHL and MLB official scoreboards");
   });
   it("matches an MLB game by a distinctive team word", async () => {
     stub();
@@ -85,7 +85,8 @@ describe("SPORTS_SCORE_GENERAL", () => {
     const res = await app.inject({ method: "GET", url: "/v1/sports-score?game=Lakers%20vs%20Celtics" });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe("GAME_NOT_FOUND");
-    expect(res.body).toContain("NHL and MLB only");
+    expect(res.body).toContain("NHL and MLB official scoreboards");
+    expect(res.body).not.toContain("ESPN");
     await app.close();
   });
   it("a matched game with no recorded score is a 502, never an estimate", async () => {

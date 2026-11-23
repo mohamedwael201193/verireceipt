@@ -11,9 +11,9 @@
 //   NHL: api-web.nhle.com/v1/score/{date} — keyless official endpoint,
 //   probed live 2026-11-23. MLB: statsapi.mlb.com/api/v1/schedule
 //   (hydrate=linescore) — keyless official endpoint, probed live
-//   2026-11-23; its body carries an MLB copyright banner, which is
-//   accepted for this testnet project under the maintainer's lifted
-//   licence/terms filter and is never copied into answer text.
+//   2026-11-23; its body carries an MLB copyright banner. The banner
+//   is preserved only inside the receipted raw evidence bytes and is
+//   never copied into answer text.
 //   ESPN stays blocked (HTTP 403) and is NOT used; NBA/NFL/soccer
 //   have no keyless official feed and are NOT answered here.
 //
@@ -165,7 +165,7 @@ export async function handleSportsScore(query: Record<string, string | undefined
   if (matches.length === 0) {
     throw badRequest(
       "GAME_NOT_FOUND",
-      `no NHL or MLB game on ${dates[0]} or ${dates[1]} matches "${game.slice(0, 80)}". This endpoint covers NHL and MLB only (ESPN is blocked and not used); other leagues cannot be answered`,
+      `no NHL or MLB game on ${dates[0]} or ${dates[1]} matches "${game.slice(0, 80)}". Scope: NHL and MLB official scoreboards for the dates searched`,
     );
   }
   if (matches.length > 1) {
@@ -179,7 +179,7 @@ export async function handleSportsScore(query: Record<string, string | undefined
 
   const evidence = JSON.stringify({
     game_query: game, matched: { league: m.league, home_team: m.home_team, away_team: m.away_team, home_score: m.home_score, away_score: m.away_score, status: m.status, date: m.date },
-    scope: "NHL and MLB only; ESPN is blocked and unused; other leagues have no keyless official feed and are not answered",
+    scope: "NHL and MLB official scoreboards for the dates searched; other leagues are not answered by this endpoint",
     as_of: asOf,
     upstream_bodies: bodies,
     honesty: "the score is the league's own published number for the uniquely matched game; a non-final game is an error, never an estimate",
