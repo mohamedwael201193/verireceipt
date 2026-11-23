@@ -92,9 +92,9 @@ describe("CROSS_CHAIN_STATE_VERIFY_GENERAL", () => {
     expect(result.consistent).toBe(true);
     expect(String(result.answer)).toContain("absent");
   });
-  it("one chain's quorum down fails closed, never a partial consistency claim", async () => {
+  it("one chain's quorum down returns explicit incomplete evidence, never a consistency claim", async () => {
     stub({ polygon: "down" });
-    await expect(handleCrossChainState({ reference: TX_HASH, chains: "ethereum,polygon" })).rejects.toMatchObject({ status: 502, code: "RPC_QUORUM_UNREACHABLE" });
+    const out=await handleCrossChainState({reference:TX_HASH,chains:"ethereum,polygon"});expect(out.consistent).toBe(false);expect(out.complete).toBe(false);expect(String(out.answer)).toContain("not a proven state mismatch");
   });
   it("GET /v1/cross-chain-state is wired", async () => {
     const app = buildServer();

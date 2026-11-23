@@ -17,10 +17,9 @@
 // funds moving between chains is a different question and is not
 // claimed here.
 //
-// Fail closed: any chain whose quorum cannot answer (outage or
-// disagreement) is a typed 502 — a partial read never produces a
-// consistency claim.
-import { badRequest, upstreamUnavailable } from "../core/errors";
+// Unreadable chains remain explicit unknowns. consistent=false with
+// complete=false means consistency was not established, not a proven mismatch.
+import { ApiError, badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { CHAIN_RPCS } from "../config/chains";
@@ -39,13 +38,15 @@ async function rpcCall(url: string, method: string, params: unknown[]): Promise<
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.text();
-    return { body, result: (JSON.parse(body) as { result?: unknown }).result ?? null };
+    const parsed=JSON.parse(body);
+    if(parsed.error || !Object.prototype.hasOwnProperty.call(parsed,'result'))throw new Error('invalid RPC response');
+    return { body, result: parsed.result };
   } finally {
     clearTimeout(timer);
   }
 }
 
-export interface ChainState { chain: string; found: boolean; status: number | null; bodies: Record<string, string> }
+export interface ChainState { chain: string; found: boolean | null; status: number | null; bodies: Record<string, string>; code?:string; code_present?:boolean; error?:string }
 
 /** Terminal state of a tx hash on one chain via 2-of-N receipt quorum. */
 export async function chainState(chain: string, rpcs: string[], txHash: string): Promise<ChainState> {
@@ -75,10 +76,23 @@ export async function chainState(chain: string, rpcs: string[], txHash: string):
   return { chain, found: true, status, bodies: best.bodies };
 }
 
+/** Exact runtime-code comparison only; not balance, nonce, ownership or bridge state. */
+export async function addressState(chain:string,rpcs:string[],address:string):Promise<ChainState> {
+ const settled=await Promise.allSettled(rpcs.map(url=>rpcCall(url,'eth_getCode',[address,'latest'])));
+ const groups=new Map<string,{n:number;bodies:Record<string,string>}>();
+ settled.forEach((r,i)=>{if(r.status!=='fulfilled'||typeof r.value.result!=='string'||!/^0x(?:[0-9a-f]{2})*$/i.test(r.value.result))return;
+  const code=r.value.result.toLowerCase();const g=groups.get(code)??{n:0,bodies:{}};g.n++;g.bodies[chain+'-leg'+i]=r.value.body;groups.set(code,g);
+ });
+ const best=[...groups.entries()].sort((a,b)=>b[1].n-a[1].n)[0];
+ if(!best||best[1].n<2)throw upstreamUnavailable('RPC_CODE_QUORUM_UNREACHABLE',chain+' runtime code has no exact two-source agreement');
+ return {chain,found:null,code_present:best[0]!=='0x',status:null,code:best[0],bodies:best[1].bodies};
+}
+
 export async function handleCrossChainState(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const reference = query.reference?.trim().toLowerCase();
   if (!reference) throw badRequest("MISSING_PARAM", "reference is required as a tx hash (0x + 64 hex)");
-  if (!/^0x[0-9a-f]{64}$/.test(reference)) throw badRequest("INVALID_REFERENCE", "reference must be a tx hash: 0x followed by 64 hex characters");
+  if (!/^0x(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(reference)) throw badRequest('INVALID_REFERENCE','reference must be a 0x-prefixed EVM address or transaction hash');
+  const mode=reference.length===42?'address-runtime-code':'transaction-receipt-status';
   const chainsRaw = query.chains?.trim();
   if (!chainsRaw) throw badRequest("MISSING_PARAM", `chains is required as a comma-separated list of at least two of: ${Object.keys(CHAIN_RPCS).join(", ")}`);
   const chains = [...new Set(chainsRaw.split(",").map((c) => c.trim().toLowerCase()).filter(Boolean))];
@@ -88,14 +102,20 @@ export async function handleCrossChainState(query: Record<string, string | undef
   }
   const fetchedAt = new Date().toISOString();
   const states: ChainState[] = [];
-  for (const c of chains) states.push(await chainState(c, CHAIN_RPCS[c], reference));
+  const reads=await Promise.all(chains.map(async c=>{
+    try{return mode==='address-runtime-code'?await addressState(c,CHAIN_RPCS[c],reference):await chainState(c,CHAIN_RPCS[c],reference);}
+    catch(error){return {chain:c,found:null,status:null,bodies:{},error:error instanceof ApiError?error.code:'RPC_UNREADABLE'} as ChainState;}
+  }));
+  states.push(...reads);
   const first = states[0];
-  const consistent = states.every((s) => s.found === first.found && s.status === first.status);
+  const complete=states.every(s=>!s.error);
+  const consistent = complete && states.every((s) => s.found === first.found && s.status === first.status && s.code===first.code);
   const asOf = new Date().toISOString();
-  const statusDesc = (s: ChainState) => s.found ? `present, status ${s.status === 1 ? "success" : "reverted"}` : "absent";
-  const evidence = JSON.stringify({ reference, chains, as_of: asOf,
+  const statusDesc = (s: ChainState) => s.error?'unreadable ('+s.error+')':mode==='address-runtime-code'?(s.code==='0x'?'empty runtime code (not proof of account absence)':'nonempty runtime code, '+((s.code!.length-2)/2)+' bytes'):s.found ? `present, status ${s.status === 1 ? "success" : "reverted"}` : "absent";
+  const evidence = JSON.stringify({ reference, chains, mode, complete, as_of: asOf,
     narrowing: "consistent means only that the reference resolves to the same terminal state on every listed chain, each checked independently via its own 2-of-N RPC quorum; bridge-transfer completion is NOT verified or claimed",
-    per_chain: states.map((s) => ({ chain: s.chain, found: s.found, status: s.status })),
+    address_scope:'Address mode compares exact runtime code at independent latest snapshots only, not ownership, balances, nonce, token identity or bridge state; no synchronized-height guarantee. Empty code is not account absence.',
+    per_chain: states.map(({bodies,...state}) => state),
     consistent, raw_bodies: Object.assign({}, ...states.map((s) => s.bodies)), fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, "per-chain 2-of-N RPC quorums", evidence, "independent per-chain RPC quorums; narrowing disclosed");
   receipt.fetched_at = fetchedAt;
@@ -105,17 +125,21 @@ export async function handleCrossChainState(query: Record<string, string | undef
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
   const perChain = states.map((s) => `${s.chain}: ${statusDesc(s)}`).join("; ");
-  const summary = consistent
+  const baseSummary = consistent
     ? `CONSISTENT: ${reference.slice(0, 10)}… resolves to the same terminal state on ${chains.join(", ")} (${perChain}). ` +
       `This means only that every listed chain independently reports the same state; it does NOT verify any bridge transfer between them.`
     : `NOT consistent: ${reference.slice(0, 10)}… differs across chains (${perChain}). ` +
       `Each chain was checked independently via its own RPC quorum; this says nothing about why the states differ and does NOT verify or refute a bridge transfer.`;
+  const summary=!complete?`Consistency NOT established: unreadable chain(s) (${perChain}). consistent=false means incomplete evidence, not a proven state mismatch. No bridge transfer is verified or refuted.`:mode==='address-runtime-code'?`${consistent?'CONSISTENT':'NOT consistent'} runtime-code snapshots: ${perChain}. Exact runtime code only, independent latest heights; not balance, nonce, ownership or bridge verification. Empty code does not mean account absence.`:baseSummary;
   return envelope(INTENT, {
     consistent,
+    complete,
+    reference_type:mode,
+    per_chain:states.map(({bodies,...state})=>state),
     address: reference,
     status: states.map((s) => `${s.chain}: ${statusDesc(s)}`).join("; "),
     chains,
     summary,
-  }, receipt, { answer: summary, verdict: "verified", confidence: 0.9,
+  }, receipt, { answer: summary, verdict: complete?"verified":"unverified", confidence: complete?0.9:0,
     source: `per-chain 2-of-N RPC quorums over ${chains.join(", ")}; fetched ${fetchedAt}` });
 }
