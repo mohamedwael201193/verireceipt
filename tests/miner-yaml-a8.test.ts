@@ -291,10 +291,15 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, Outpu
     inputs: ["location", "window_hours"],
     outputs: { location: null, when: null, temp_max_c: "degrees Celsius", temp_min_c: "degrees Celsius", precipitation_probability_pct: "percent", condition: null },
   },
+  ONCHAIN_METRIC_VERIFY_GENERAL: {
+    endpoint: "/v1/onchain-metric",
+    inputs: ["address", "block", "chain", "metric"],
+    outputs: { balance_gwei: "Gwei", address: null, block: null, chain: null, tx_count: null },
+  },
 };
 
 describe("A8 miner.yaml vs the official intent schemas", () => {
-  it("declares exactly the forty-nine reviewed intents, each on its own endpoint", () => {
+  it("declares exactly the fifty reviewed intents, each on its own endpoint", () => {
     const si = block("  supported_intents:").map((l) => l.trim().replace(/^- /, "")).filter(Boolean);
     expect(si).toEqual(Object.keys(OFFICIAL));
     for (const [intent, o] of Object.entries(OFFICIAL)) {
