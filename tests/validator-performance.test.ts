@@ -39,7 +39,15 @@ function handleValidator(
   ...args: Parameters<typeof handleValidatorImpl>
 ): ReturnType<typeof handleValidatorImpl> {
   resetValidatorCachesForTests();
-  return handleValidatorImpl(...args);
+  // Perf probes share the ChainSafe token bucket with the verified legs,
+  // so by probe time the leg has drained it. A clock that jumps past one
+  // refill interval per read lets the bucket refill between the leg and
+  // the probes, the same wall-clock gap a quiet production request has.
+  // Tests that need a drained bucket pass their own frozen nowMs.
+  let t = Date.now();
+  const jumpingNowMs = () => (t += 2100);
+  const deps = { nowMs: jumpingNowMs, ...args[1] };
+  return handleValidatorImpl(args[0], deps);
 }
 
 function validatorBody(): string {
@@ -64,10 +72,10 @@ function validatorBody(): string {
   });
 }
 
-function balancesBody(balance: string): string {
+function balancesBody(balance: string, finalized = true): string {
   return JSON.stringify({
     execution_optimistic: false,
-    finalized: true,
+    finalized,
     data: [{ index: INDEX, balance }],
   });
 }
@@ -77,11 +85,16 @@ interface PerfOpts {
   oldBalances: (string | undefined)[];
   newBalance?: string;
   headersDown?: boolean;
+  /** Source index whose OLD-slot sample claims finalized: false. */
+  unfinalizedOldIdx?: number;
+  /** Records every requested URL (call-order) when supplied. */
+  calls?: string[];
 }
 
 function makeStubFetch(opts: PerfOpts): typeof fetch {
   const impl = async (url: string | URL | Request): Promise<Response> => {
     const urlStr = String(url);
+    opts.calls?.push(urlStr);
     const idx = BEACON_SOURCES.findIndex((base) => urlStr.startsWith(base));
     if (idx < 0) throw new Error("stub fetch got unexpected URL: " + urlStr);
     const jsonRes = (body: string): Response =>
@@ -116,7 +129,8 @@ function makeStubFetch(opts: PerfOpts): typeof fetch {
       const isOld = urlStr.includes(`/states/${SLOT_OLD}/`);
       const bal = isOld ? opts.oldBalances[idx] : (opts.newBalance ?? BALANCE_NEW);
       if (bal === undefined) throw new Error("balances down");
-      return jsonRes(balancesBody(bal));
+      const finalized = !(isOld && idx === opts.unfinalizedOldIdx);
+      return jsonRes(balancesBody(bal, finalized));
     }
     if (/\/eth\/v1\/beacon\/states\/[^/]+\/validators\//.test(urlStr)) {
       // Only the first two sources carry staged validator legs.
@@ -155,7 +169,39 @@ describe("handleValidator epoch balance-delta performance section", () => {
     const evidence = await getReceiptEvidence(perfReceipt.receipt_id);
     expect(evidence.found).toBe(true);
     expect(sha256Hex(evidence.evidence!)).toBe(perfReceipt.raw_response_sha256);
-    expect(JSON.parse(evidence.evidence!.toString("utf8"))).toEqual(JSON.parse(balancesBody(BALANCE_OLD)));
+    // The stored evidence covers all four samples (2 sources x 2 slots),
+    // so a judge can recompute the delta and the agreement from it alone.
+    const doc = JSON.parse(evidence.evidence!.toString("utf8")) as {
+      kind: string;
+      validator_index: string;
+      slot_old: string;
+      slot_new: string;
+      samples: Array<{ source: string; url: string; slot: string; raw_body: string }>;
+    };
+    expect(doc.kind).toBe("validator_epoch_balance_delta");
+    expect(doc.validator_index).toBe(INDEX);
+    expect(doc.slot_old).toBe(String(SLOT_OLD));
+    expect(doc.slot_new).toBe(String(SLOT_NEW));
+    expect(doc.samples).toHaveLength(4);
+    expect(doc.samples.map((s) => s.slot)).toEqual([
+      String(SLOT_OLD), String(SLOT_NEW), String(SLOT_OLD), String(SLOT_NEW),
+    ]);
+    for (const s of doc.samples) {
+      expect(s.url).toContain(`/eth/v1/beacon/states/${s.slot}/validator_balances?id=${INDEX}`);
+      expect(s.url.startsWith(s.source)).toBe(true);
+    }
+    const bodies = doc.samples.map((s) => JSON.parse(s.raw_body) as {
+      finalized: boolean;
+      data: Array<{ index: string; balance: string }>;
+    });
+    for (const b of bodies) expect(b.finalized).toBe(true);
+    const atSlot = (slot: string) =>
+      bodies.filter((_, i) => doc.samples[i].slot === slot).map((b) => b.data[0].balance);
+    const oldSet = new Set(atSlot(String(SLOT_OLD)));
+    const newSet = new Set(atSlot(String(SLOT_NEW)));
+    expect([...oldSet]).toEqual([BALANCE_OLD]);
+    expect([...newSet]).toEqual([BALANCE_NEW]);
+    expect(BigInt(BALANCE_NEW) - BigInt(BALANCE_OLD)).toBe(8161n);
     // Fresh scratch DB per run: the balance receipt plus the performance receipt.
     expect(await countReceipts()).toBe(2);
   });
@@ -179,5 +225,40 @@ describe("handleValidator epoch balance-delta performance section", () => {
     );
     expect(result.verdict).toBe("verified");
     expect(result).not.toHaveProperty("recent_epoch_balance_delta");
+  });
+
+  it("omits the section when a balance sample is not finalized", async () => {
+    const result = await handleValidator(
+      { validator_index: INDEX },
+      { fetchImpl: makeStubFetch({ oldBalances: [BALANCE_OLD, BALANCE_OLD], unfinalizedOldIdx: 1 }) },
+    );
+    expect(result.verdict).toBe("verified");
+    expect(result.effective_balance).toBe(32000000000);
+    expect(result).not.toHaveProperty("recent_epoch_balance_delta");
+    expect(result).not.toHaveProperty("performance_receipt");
+    expect(String(result.answer)).not.toContain("one epoch apart");
+  });
+
+  it("never probes a rate-drained ChainSafe: frozen clock leaves one eligible source, section omitted", async () => {
+    // Pins the review follow-up: perf probes share the sources' rate
+    // budgets with the verified legs. With a frozen clock the leg drains
+    // the ChainSafe token and it never refills, so ChainSafe must NOT be
+    // probed; only one eligible state source remains and the section is
+    // omitted rather than burning the verified path's budget.
+    const frozen = Date.now();
+    const calls: string[] = [];
+    const result = await handleValidator(
+      { validator_index: INDEX },
+      {
+        fetchImpl: makeStubFetch({ oldBalances: [BALANCE_OLD, BALANCE_OLD], calls }),
+        nowMs: () => frozen,
+      },
+    );
+    expect(result.verdict).toBe("verified");
+    expect(result).not.toHaveProperty("recent_epoch_balance_delta");
+    const chainsafeProbes = calls.filter(
+      (u) => u.startsWith(BEACON_SOURCES[0]) && u.includes("/validator_balances"),
+    );
+    expect(chainsafeProbes).toEqual([]);
   });
 });

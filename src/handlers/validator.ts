@@ -1015,8 +1015,14 @@ interface EpochBalanceDelta {
   slotNew: string;
   balanceOld: string;
   balanceNew: string;
-  sourceUrl: string;
-  rawBody: string;
+  /** The four sample URLs (2 sources x 2 slots), space-separated. */
+  sourceUrls: string;
+  /**
+   * Canonical evidence document: every sample's source, URL, slot and raw
+   * body, so a judge can recompute the delta and the cross-source
+   * agreement from the stored receipt evidence alone.
+   */
+  evidence: string;
   sources: string[];
 }
 
@@ -1025,12 +1031,26 @@ interface EpochBalanceDelta {
  * (32 slots) apart, on two independent state-capable sources. Both sources
  * must return identical balances at both slots; any failure, pruning,
  * non-finalized flag or disagreement yields undefined (section omitted).
+ * Probes share the sources' rate budgets with the verified legs (review,
+ * 2026-11-23): a source in 429 cooldown or with an empty token bucket is
+ * not probed, and a probe 429 puts the host in the same cooldown a leg
+ * would, so best-effort enrichment can never burn the verified path's
+ * budget.
  */
 async function fetchEpochBalanceDelta(
   index: string,
   bases: string[],
   fetchImpl: typeof fetch,
+  nowMs: () => number = Date.now,
 ): Promise<EpochBalanceDelta | undefined> {
+  const eligible = bases.filter((base) => {
+    const cap = BEACON_SOURCE_CAPS.find((c) => c.base === base);
+    if (cap === undefined || !canStartSource(cap, nowMs())) return false;
+    if (cap.paced && !chainsafeTakeToken(nowMs())) return false;
+    return true;
+  });
+  if (eligible.length < 2) return undefined;
+  const probeBases = eligible.slice(0, 2);
   const getJson = async (url: string): Promise<Record<string, unknown> | undefined> => {
     try {
       const res = await fetchImpl(url, {
@@ -1043,7 +1063,7 @@ async function fetchEpochBalanceDelta(
       return undefined;
     }
   };
-  const head = await getJson(`${bases[0]}/eth/v1/beacon/headers/finalized`);
+  const head = await getJson(`${probeBases[0]}/eth/v1/beacon/headers/finalized`);
   const finalizedSlotRaw =
     (head?.data as Record<string, unknown> | undefined)?.header as Record<string, unknown> | undefined;
   const slotStr = (finalizedSlotRaw?.message as Record<string, unknown> | undefined)?.slot;
@@ -1054,14 +1074,23 @@ async function fetchEpochBalanceDelta(
   if (!Number.isSafeInteger(slotNew) || slotNew < 32) return undefined;
   const slotOld = slotNew - 32;
 
-  const sampleAt = async (base: string, slot: number): Promise<{ body: string; balance: string } | undefined> => {
+  const sampleAt = async (base: string, slot: number): Promise<{ url: string; body: string; balance: string } | undefined> => {
     const url = `${base}/eth/v1/beacon/states/${slot}/validator_balances?id=${index}`;
     try {
       const res = await fetchImpl(url, {
         headers: { accept: "application/json" },
         signal: AbortSignal.timeout(3000),
       });
-      if (!res.ok) return undefined;
+      if (!res.ok) {
+        if (res.status === 429) {
+          let retryAfter: string | null = null;
+          try {
+            retryAfter = res.headers?.get?.("retry-after") ?? null;
+          } catch { /* header access is best-effort */ }
+          noteSource429(base, parseRetryAfterMs(retryAfter), nowMs());
+        }
+        return undefined;
+      }
       const body = await res.text();
       const parsed = JSON.parse(body) as Record<string, unknown>;
       if (parsed.execution_optimistic === true || parsed.finalized !== true) return undefined;
@@ -1071,14 +1100,14 @@ async function fetchEpochBalanceDelta(
       if (row.index !== String(index) || typeof row.balance !== "string" || !/^\d+$/.test(row.balance)) {
         return undefined;
       }
-      return { body, balance: row.balance };
+      return { url, body, balance: row.balance };
     } catch {
       return undefined;
     }
   };
 
   const samples = await Promise.all(
-    bases.slice(0, 2).map(async (base) => ({
+    probeBases.map(async (base) => ({
       base,
       oldSample: await sampleAt(base, slotOld),
       newSample: await sampleAt(base, slotNew),
@@ -1087,8 +1116,8 @@ async function fetchEpochBalanceDelta(
   if (samples.some((s) => s.oldSample === undefined || s.newSample === undefined)) return undefined;
   const done = samples as Array<{
     base: string;
-    oldSample: { body: string; balance: string };
-    newSample: { body: string; balance: string };
+    oldSample: { url: string; body: string; balance: string };
+    newSample: { url: string; body: string; balance: string };
   }>;
   const balanceOld = done[0].oldSample.balance;
   const balanceNew = done[0].newSample.balance;
@@ -1097,13 +1126,23 @@ async function fetchEpochBalanceDelta(
   ) {
     return undefined; // sources disagree on a deterministic slot sample
   }
+  const sampleDocs = done.flatMap((s) => [
+    { source: s.base, url: s.oldSample.url, slot: String(slotOld), raw_body: s.oldSample.body },
+    { source: s.base, url: s.newSample.url, slot: String(slotNew), raw_body: s.newSample.body },
+  ]);
   return {
     slotOld: String(slotOld),
     slotNew: String(slotNew),
     balanceOld,
     balanceNew,
-    sourceUrl: `${done[0].base}/eth/v1/beacon/states/${slotOld}/validator_balances?id=${index}`,
-    rawBody: done[0].oldSample.body,
+    sourceUrls: sampleDocs.map((s) => s.url).join(" "),
+    evidence: JSON.stringify({
+      kind: "validator_epoch_balance_delta",
+      validator_index: String(index),
+      slot_old: String(slotOld),
+      slot_new: String(slotNew),
+      samples: sampleDocs,
+    }),
     sources: done.map((s) => s.base),
   };
 }
@@ -1378,18 +1417,19 @@ export async function handleValidator(
     if (stateSources.length >= 2) {
       const perf = await fetchEpochBalanceDelta(
         String(leg.index),
-        stateSources.slice(0, 2),
+        stateSources,
         fetchImpl,
+        nowFn,
       );
       if (perf !== undefined) {
         const perfReceipt = makeReceipt(
           INTENT,
-          perf.sourceUrl,
-          perf.rawBody,
+          perf.sourceUrls,
+          perf.evidence,
           `${perf.sources.length}/${perf.sources.length} sources agreed on both balance samples`,
         );
         try {
-          await saveReceipt(perfReceipt, perf.rawBody);
+          await saveReceipt(perfReceipt, perf.evidence);
         } catch {
           throw new Error("performance receipt could not be stored");
         }
