@@ -26,6 +26,7 @@ import {
   parseChainReading,
   parseProtocolReading,
   parseTvlValue,
+  resolveProtocolOnChain,
   resolveTvlTarget,
   startTvlListsRefreshTimer,
   stripProtocolEntries,
@@ -969,6 +970,184 @@ describe('handleTvl with fixture transport', () => {
     const out = await handleTvl({ protocol: 'aave-v3' }, { fetchImpl: combined });
     expect(out.protocol_or_chain).toBe('aave-v3');
     expect(out.tvl_usd).toBe(15121752429);
+  });
+});
+
+
+describe('handleTvl chain-scoped queries ("X on Y")', () => {
+  // Chain-scoped slice (2026-11-23): "aave v3 on ethereum" serves the
+  // protocol total plus the NAMED chain's share from the per-chain split,
+  // and refuses honestly (never the dominant chain, never an invented
+  // number) when the named chain carries no TVL or the split is unknown.
+  beforeEach(() => {
+    __seedTvlCachesForTests(PROTOCOLS_FIXTURE, CHAINS_FIXTURE);
+  });
+
+  it('"aave v3 on ethereum" serves the named chain value from the lists split', async () => {
+    const out = await handleTvl({ protocol: 'aave v3 on ethereum' }, { fetchImpl: fixtureFetch() });
+    expect(out.protocol_or_chain).toBe('aave-v3');
+    expect(out.tvl_usd).toBe(15121752429);
+    expect(out.chain_tvl_usd).toBe(12931958948.41916);
+    expect(out.scoped_chain).toBe('Ethereum');
+    const today = new Date().toISOString().slice(0, 10);
+    expect(out.answer).toBe(
+      `Aave V3 has a total value locked of $15121752429 as of ${today}, of which $12931958948.41916 is on Ethereum.`,
+    );
+    expect(out.verdict).toBe('verified');
+    const receipt = out.receipt as Record<string, unknown>;
+    expect((receipt.receipt_id as string).startsWith('rcpt_')).toBe(true);
+  });
+
+  it('"aave v3 on arbitrum" serves the non-dominant named chain, never the dominant', async () => {
+    const out = await handleTvl({ protocol: 'aave v3 on arbitrum' }, { fetchImpl: fixtureFetch() });
+    expect(out.protocol_or_chain).toBe('aave-v3');
+    // Arbitrum is NOT the dominant chain (Ethereum is) — the value proves
+    // the named chain, not the dominant, is served.
+    expect(out.chain_tvl_usd).toBe(415494303.8637);
+    expect(out.scoped_chain).toBe('Arbitrum');
+  });
+
+  it('multi-word chain: "aave v3 on op mainnet" resolves the chain, refuses with no TVL there', async () => {
+    const target = resolveProtocolOnChain('aave v3 on op mainnet', PROTOCOLS_FIXTURE, CHAINS_FIXTURE);
+    expect(target).toMatchObject({
+      kind: 'protocol_on_chain',
+      slug: 'aave-v3',
+      chainDisplayName: 'OP Mainnet',
+    });
+    try {
+      await handleTvl({ protocol: 'aave v3 on op mainnet' }, { fetchImpl: fixtureFetch() });
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expectApiError(err, 422, 'CHAIN_TVL_NONE');
+    }
+  });
+
+  it('"aave v3 on solana" refuses honestly: the split records no TVL on Solana', async () => {
+    try {
+      await handleTvl({ protocol: 'aave v3 on solana' }, { fetchImpl: fixtureFetch() });
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expectApiError(err, 422, 'CHAIN_TVL_NONE');
+    }
+  });
+
+  it('"lido on ethereum" refuses honestly while the split is unknown (502 + retry)', async () => {
+    // The lido lists entry carries no chainTvls and no fill has run, so no
+    // per-chain split exists anywhere; the handler kicks the background
+    // fill and fails closed with a retry hint, exactly like the cold-lists
+    // warm. The fill then lands with a null split (the lido /protocol
+    // fixture has no currentChainTvls — note fixtureFetch defaults the
+    // /protocol payload to the AAVE fixture, so the lido payload must be
+    // passed explicitly), so a retry still refuses.
+    try {
+      await handleTvl({ protocol: 'lido on ethereum' }, { fetchImpl: fixtureFetch(LIDO_PROTOCOL_FIXTURE) });
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expectApiError(err, 502, 'CHAIN_SPLIT_UNAVAILABLE');
+      expect((err as ApiError).retryAfterSec).toBe(65);
+    }
+    await __awaitTvlProtocolFillForTests('lido');
+    try {
+      await handleTvl({ protocol: 'lido on ethereum' }, { fetchImpl: fixtureFetch(LIDO_PROTOCOL_FIXTURE) });
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expectApiError(err, 502, 'CHAIN_SPLIT_UNAVAILABLE');
+    }
+  });
+
+  it('whole-query resolution wins: "sushi on base" is the protocol sushi-on-base (reviewer pin)', async () => {
+    // Reviewer pin for b90784fc: with a protocol literally named
+    // "Sushi On Base" AND a chain "Base" both in the lists, the exact
+    // whole-query protocol match must win and the chain-scoped path
+    // must never fire (it only runs when the whole query resolves to
+    // nothing).
+    const protocols = [
+      ...PROTOCOLS_FIXTURE,
+      { slug: 'sushi', name: 'Sushi', symbol: 'SUSHI', tvl: 987654321 },
+      { slug: 'sushi-on-base', name: 'Sushi On Base', symbol: 'SUSHI', tvl: 123456789 },
+    ];
+    const chains = [
+      ...CHAINS_FIXTURE,
+      { name: 'Base', gecko_id: 'base', tokenSymbol: 'ETH', tvl: 5000000000 },
+    ];
+    // Resolver level: the whole query resolves as the protocol...
+    expect(resolveTvlTarget('sushi on base', protocols, chains)).toMatchObject({
+      kind: 'protocol',
+      slug: 'sushi-on-base',
+    });
+    // ...and the handler serves it unscoped.
+    __seedTvlCachesForTests(protocols, chains);
+    const base = fixtureFetch();
+    const fetchImpl = (async (url: string | URL | Request): Promise<Response> => {
+      const u = String(url);
+      if (u === 'https://api.llama.fi/tvl/sushi-on-base') {
+        return new Response('123456789', { status: 200 });
+      }
+      return base(url);
+    }) as typeof fetch;
+    const out = await handleTvl({ protocol: 'sushi on base' }, { fetchImpl });
+    expect(out.protocol_or_chain).toBe('sushi-on-base');
+    expect(out.scoped_chain).toBeUndefined();
+    expect(out.tvl_usd).toBe(123456789);
+  });
+
+  it('unresolvable chain side falls through to the ordinary 422', async () => {
+    try {
+      await handleTvl({ protocol: 'aave v3 on zzzznotreal' }, { fetchImpl: fixtureFetch() });
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expectApiError(err, 422, 'PROTOCOL_NOT_FOUND');
+    }
+  });
+
+  it('a whole-query resolution keeps winning: "aave v3" is not scoped', async () => {
+    const out = await handleTvl({ protocol: 'aave v3' }, { fetchImpl: fixtureFetch() });
+    expect(out.protocol_or_chain).toBe('aave-v3');
+    expect(out.scoped_chain).toBeUndefined();
+  });
+
+  it('fallback path serves the named chain from the /protocol payload', async () => {
+    // /tvl fails definitively (404) -> the /protocol fallback serves the
+    // scoped value from the same payload's currentChainTvls.
+    const base = fixtureFetch();
+    const fetchImpl = (async (url: string | URL | Request): Promise<Response> => {
+      const u = String(url);
+      if (u === 'https://api.llama.fi/tvl/aave-v3') {
+        return new Response('definitive failure', { status: 404 });
+      }
+      return base(url);
+    }) as typeof fetch;
+    const out = await handleTvl({ protocol: 'aave v3 on ethereum' }, { fetchImpl });
+    expect(out.tvl_usd).toBe(15121752429);
+    expect(out.chain_tvl_usd).toBe(12931958948.41916);
+    expect(out.scoped_chain).toBe('Ethereum');
+    expect(out.source).toBe('DeFiLlama API (https://api.llama.fi/protocol/aave-v3)');
+    expect(String(out.answer)).toContain('of which $12931958948.41916 is on Ethereum.');
+  });
+
+  it('fallback path refuses honestly when the payload split has no TVL on the named chain', async () => {
+    const base = fixtureFetch();
+    const fetchImpl = (async (url: string | URL | Request): Promise<Response> => {
+      const u = String(url);
+      if (u === 'https://api.llama.fi/tvl/aave-v3') {
+        return new Response('definitive failure', { status: 404 });
+      }
+      return base(url);
+    }) as typeof fetch;
+    try {
+      await handleTvl({ protocol: 'aave v3 on solana' }, { fetchImpl });
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expectApiError(err, 422, 'CHAIN_TVL_NONE');
+    }
+  });
+
+  it('the borrowed metric bucket is never a chain: "aave v3 on ethereum" excludes Ethereum-borrowed', async () => {
+    // The fixture split carries Ethereum-borrowed 8788295065.67177; the
+    // served Ethereum value is the plain chain bucket only.
+    const out = await handleTvl({ protocol: 'aave v3 on ethereum' }, { fetchImpl: fixtureFetch() });
+    expect(out.chain_tvl_usd).toBe(12931958948.41916);
+    expect(out.chain_tvl_usd).not.toBe(12931958948.41916 + 8788295065.67177);
   });
 });
 

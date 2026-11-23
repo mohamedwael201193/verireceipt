@@ -22,7 +22,7 @@ import { handleCrossChainState } from "./handlers/crossChainState";
 import { handleReserveAttestation } from "./handlers/reserveAttestation";
 import { handleBalance } from "./handlers/walletBalance";
 import { handleTokenSupply } from "./handlers/tokenSupply";
-import { handleFx, handleFxNow } from "./handlers/currencyConvert";
+import { fxLogLine, handleFx, handleFxNow } from "./handlers/currencyConvert";
 import { handleDns } from "./handlers/dnsLookup";
 import { handleSsl } from "./handlers/sslVerification";
 import { handleCve, handleVulnTriage } from "./handlers/cveLookup";
@@ -337,9 +337,26 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/macro", async (request) =>
     trackIntent("macro", () => handleMacro(asQuery(request.query))),
   );
-  app.get("/v1/fx", async (request) =>
-    trackIntent("fx", () => handleFx(asQuery(request.query))),
-  );
+  app.get("/v1/fx", async (request) => {
+    // Scoring-window observability (2026-11-23, epoch-41 postmortem): one
+    // structured line per FX request so a scoring pass is reconstructable
+    // from Render logs. Currency codes and amount only, whitelisted by
+    // fxLogLine against log injection; no caller identity (no PII).
+    const started = Date.now();
+    const query = asQuery(request.query);
+    try {
+      const result = await trackIntent("fx", () => handleFx(query));
+      console.log(fxLogLine(query, { ok: true }, started, Date.now()));
+      return result;
+    } catch (err) {
+      const outcome =
+        err instanceof ApiError
+          ? { ok: false as const, status: err.status, code: err.code }
+          : { ok: false as const, status: 500, code: "INTERNAL" };
+      console.log(fxLogLine(query, outcome, started, Date.now()));
+      throw err;
+    }
+  });
   app.get("/v1/fx-now", async (request) =>
     trackIntent("fx-now", () => handleFxNow(asQuery(request.query))),
   );

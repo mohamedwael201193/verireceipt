@@ -296,6 +296,28 @@ export function settleWithStragglerGrace<T>(
   });
 }
 
+/**
+ * One structured, injection-safe log line per /v1/fx request
+ * (2026-11-23, epoch-41 postmortem): a scoring pass must be
+ * reconstructable from Render logs. Only the currency codes and the
+ * amount are echoed, each whitelisted - anything else (including
+ * newline-bearing or oversized caller input) logs as "-". No caller
+ * identity is logged (no PII). `ms` is the route-level wall time.
+ */
+export function fxLogLine(
+  query: Record<string, string | undefined>,
+  outcome: { ok: true } | { ok: false; status: number; code: string },
+  startedMs: number,
+  endedMs: number,
+): string {
+  const code = (v: string | undefined): string =>
+    v !== undefined && /^[A-Za-z]{2,8}$/.test(v) ? v.toUpperCase() : "-";
+  const amount = (v: string | undefined): string =>
+    v !== undefined && /^[0-9]{1,15}(\.[0-9]{1,8})?$/.test(v) ? v : "-";
+  const result = outcome.ok ? "ok" : `error ${outcome.status} ${outcome.code}`;
+  return `verireceipt: fx_request at=${new Date(startedMs).toISOString()} from=${code(query.from_currency)} to=${code(query.to_currency)} amount=${amount(query.amount)} result=${result} ms=${Math.max(0, endedMs - startedMs)}`;
+}
+
 export async function handleFx(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
@@ -596,23 +618,46 @@ export function selectAnchorServing(sorted: SourceQuote[]): { serving: SourceQuo
     clusters.set(root, group);
   }
   const groups = [...clusters.values()].sort((a, b) => b.length - a.length);
+  // Fix-cluster preference (2026-11-23, epoch-41 postmortem, merged from
+  // main): the network's reference is the ECB daily fix and a recomputed
+  // cluster can outnumber the fix pair on a weekend, so raw size alone
+  // can anchor on the drifted side. Among tight clusters of at least 2,
+  // the cluster with the most ECB-fix republications (frankfurter,
+  // vatcomply) anchors first, then size, then the oldest-newest
+  // tie-break. When NO cluster carries a fix republication (both down
+  // or not covering), the rule reduces to the previous largest-cluster
+  // rule. Exact source-name strings as set by the source adapters; a
+  // renamed adapter must update this set or the preference silently
+  // stops applying.
+  const FIX_REPUBLISHERS = new Set(["Frankfurter (ECB reference rates)", "vatcomply"]);
+  const fixCount = (g: typeof sorted): number =>
+    g.filter((q) => FIX_REPUBLISHERS.has(q.source)).length;
+  const candidates = groups.filter((g) => g.length >= 2);
   let anchor: typeof sorted | undefined;
-  if (groups.length > 0 && groups[0].length >= 2) {
-    if (groups.length === 1 || groups[0].length > groups[1].length) {
-      anchor = groups[0];
+  if (candidates.length > 0) {
+    const maxFix = Math.max(...candidates.map(fixCount));
+    const fixBest = candidates.filter((g) => fixCount(g) === maxFix);
+    if (fixBest.length === 1) {
+      anchor = fixBest[0];
     } else {
-      // Tied cluster sizes (weekend shape: a fix pair and a recomputed
-      // pair): the reference is fix-heavy, so the cluster whose newest
-      // quote is OLDEST — the fix snapshot — anchors. Identical dates
+      // Tied fix counts: the larger cluster anchors. Tied sizes
+      // (weekend shape: a fix pair and a recomputed pair): the
+      // reference is fix-heavy, so the cluster whose newest quote is
+      // OLDEST — the fix snapshot — anchors. Identical dates
       // fall back to the full-pool median.
-      const tied = groups.filter((g) => g.length === groups[0].length);
-      const newestKey = (g: typeof sorted): number =>
-        Math.max(...g.map((q) => rateDayKey(q.rateDate)));
-      const keys = tied.map(newestKey);
-      const oldest = Math.min(...keys);
-      anchor = keys.filter((k) => k === oldest).length === 1
-        ? tied[keys.indexOf(oldest)]
-        : undefined;
+      const maxLen = Math.max(...fixBest.map((g) => g.length));
+      const tied = fixBest.filter((g) => g.length === maxLen);
+      if (tied.length === 1) {
+        anchor = tied[0];
+      } else {
+        const newestKey = (g: typeof sorted): number =>
+          Math.max(...g.map((q) => rateDayKey(q.rateDate)));
+        const keys = tied.map(newestKey);
+        const oldest = Math.min(...keys);
+        anchor = keys.filter((k) => k === oldest).length === 1
+          ? tied[keys.indexOf(oldest)]
+          : undefined;
+      }
     }
   }
   anchor ??= sorted;

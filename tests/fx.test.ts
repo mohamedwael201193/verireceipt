@@ -19,7 +19,7 @@ afterAll(() => {
 import { ApiError } from "../src/core/errors";
 import { sha256Hex } from "../src/core/receipt";
 import { getReceiptEvidence } from "../src/core/storage";
-import { AGREEMENT_TOLERANCE, INTENT, handleFx, quoteExchangeRateApi, settleWithStragglerGrace } from "../src/handlers/currencyConvert";
+import { AGREEMENT_TOLERANCE, INTENT, fxLogLine, handleFx, quoteExchangeRateApi, settleWithStragglerGrace } from "../src/handlers/currencyConvert";
 
 describe("settleWithStragglerGrace coverage accounting", () => {
   it("pending results are dense, explicit undefined slots and late completions cannot mutate the snapshot", async () => {
@@ -134,6 +134,63 @@ async function expectApiError(p: Promise<unknown>, status: number, code: string)
   throw new Error("expected ApiError " + status + " " + code);
 }
 
+describe("fxLogLine (unit, no network)", () => {
+  const T0 = Date.parse("2026-11-23T01:16:59.000Z");
+  it("ok line: codes uppercased, amount echoed, wall time in ms", () => {
+    const line = fxLogLine(
+      { from_currency: "usd", to_currency: "eur", amount: "100" },
+      { ok: true },
+      T0,
+      T0 + 1234,
+    );
+    expect(line).toBe(
+      "verireceipt: fx_request at=2026-11-23T01:16:59.000Z from=USD to=EUR amount=100 result=ok ms=1234",
+    );
+  });
+
+  it("error line carries the ApiError status and code", () => {
+    const line = fxLogLine(
+      { from_currency: "USD", to_currency: "EUR" },
+      { ok: false, status: 502, code: "FX_SOURCES_DISAGREE" },
+      T0,
+      T0 + 42,
+    );
+    expect(line).toContain("result=error 502 FX_SOURCES_DISAGREE");
+    expect(line).toContain("amount=-");
+    expect(line).toContain("ms=42");
+  });
+
+  it("caller input is whitelisted: long, malformed or newline-bearing values log as -", () => {
+    const line = fxLogLine(
+      {
+        from_currency: "USD\nforged: admin",
+        to_currency: "EUROPEANCENTRALBANK",
+        amount: "1; drop table--",
+      },
+      { ok: true },
+      T0,
+      T0,
+    );
+    expect(line).toContain("from=-");
+    expect(line).toContain("to=-");
+    expect(line).toContain("amount=-");
+    expect(line).not.toContain("\n");
+    expect(line).not.toContain("forged");
+    expect(line).not.toContain("drop");
+  });
+
+  it("no caller identity fields are present even if supplied", () => {
+    const line = fxLogLine(
+      { from_currency: "USD", to_currency: "EUR", amount: "5", ip: "203.0.113.7", authorization: "Bearer x" },
+      { ok: true },
+      T0,
+      T0 + 1,
+    );
+    expect(line).not.toContain("203.0.113.7");
+    expect(line).not.toContain("Bearer");
+  });
+});
+
 describe("handleFx validation (stubbed, no network use)", () => {
   it("missing from/to -> 400 MISSING_PARAM", async () => {
     await expectApiError(handleFx({}), 400, "MISSING_PARAM");
@@ -232,6 +289,73 @@ describe("handleFx answers (stubbed sources)", () => {
     expect(ans).toContain("open.er-api.com=0.911256 (+15bps)");
     expect(ans).toContain("fawaz currency-api=0.91158 (+18bps)");
     expect(String(result.source)).toContain("single-linkage");
+    vi.unstubAllGlobals();
+  });
+
+  it("epoch-41 live shape (measured 2026-11-23 00:41Z): a larger recomputed cluster no longer outvotes the fix pair", async () => {
+    // Measured live in epoch 41: the Monday-recomputed sources formed a
+    // THREE-member tight cluster (er-api 0.911134 fresh Monday 00:02:32Z,
+    // fawaz 0.91158016, floatrates 0.91074399) against the Friday ECB fix
+    // pair (frankfurter 0.90992, vatcomply 0.909918). Raw size anchored on
+    // the recomputed side; the reference is fix-heavy (the truth sources
+    // are frankfurter + er-api and every top-ranked miner serves the fix),
+    // so the fix republication pair must anchor. Both sides sit inside the
+    // scorer's 50bps tolerance, so this is alignment, not a score trick.
+    stubFxSources({
+      frankfurter: frankfurterBody(0.90992, "2026-11-20"),
+      openEr: openErBody(0.911134, "Mon, 23 Nov 2026 00:02:32 +0000"),
+      fawaz: fawazBody(0.91158016, "2026-11-23"),
+      vatcomply: vatcomplyBody(0.909918, "2026-11-20"),
+      floatrates: floatratesBody(0.91074399, "Fri, 20 Nov 2026 23:59:00 GMT"),
+    });
+    const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
+    expect(result.verdict).toBe("verified");
+    expect(result.rate).toBe(0.909918);
+    expect(result.converted_amount).toBeCloseTo(90.9918, 4);
+    const ans = String(result.answer);
+    expect(ans).toContain("anchored on the tightest agreeing cluster");
+    expect(ans).toContain("vatcomply=0.909918");
+    expect(ans).toContain("Frankfurter (ECB reference rates)=0.90992");
+    expect(ans).toContain("excluded floatrates=0.91074399");
+    expect(ans).toContain("open.er-api.com=0.911134");
+    expect(ans).toContain("fawaz currency-api=0.91158016");
+    vi.unstubAllGlobals();
+  });
+
+  it("all-singleton pool (incl. a fix republication) -> no cluster anchors, pool median serves", async () => {
+    // Reviewer pin (727496d follow-up): the >=2-member gate must hold -
+    // a lone fix republication among mutually distant quotes is not a
+    // cluster, so the full-pool median serves, never the fix value.
+    stubFxSources({
+      frankfurter: frankfurterBody(0.90992, "2026-11-20"),
+      openEr: openErBody(0.911134, "Mon, 23 Nov 2026 00:02:32 +0000"),
+      fawaz: fawazBody(0.9124, "2026-11-23"),
+      vatcomply: "ERR",
+      floatrates: "ERR",
+    });
+    const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
+    expect(result.verdict).toBe("verified");
+    // Median of {0.90992, 0.911134, 0.9124}, all >5bps apart.
+    expect(result.rate).toBe(0.911134);
+    expect(String(result.answer)).not.toContain("anchored on the tightest agreeing cluster");
+    vi.unstubAllGlobals();
+  });
+
+  it("no fix republication in the pool -> the largest tight cluster anchors, as before", async () => {
+    // frankfurter + vatcomply down: the rule must reduce to the previous
+    // largest-cluster behaviour, never refuse and never invent a fix.
+    stubFxSources({
+      frankfurter: "ERR",
+      openEr: openErBody(0.911134, "Mon, 23 Nov 2026 00:02:32 +0000"),
+      fawaz: fawazBody(0.91158016, "2026-11-23"),
+      vatcomply: "ERR",
+      floatrates: floatratesBody(0.91074399, "Fri, 20 Nov 2026 23:59:00 GMT"),
+    });
+    const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
+    expect(result.verdict).toBe("verified");
+    // The recomputed trio anchors; its median (lower-middle of
+    // {0.91074399, 0.911134, 0.91158016}) is 0.911134.
+    expect(result.rate).toBe(0.911134);
     vi.unstubAllGlobals();
   });
 
