@@ -52,7 +52,8 @@ function acceptedFieldEntries(lines: string[]): Array<{ value: string; lines: st
   });
 }
 
-const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, string | null>; inputs: string[] }> = {
+type OutputSpec = string | null | { unit: string | null; path: string };
+const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, OutputSpec>; inputs: string[] }> = {
   ONCHAIN_TX_LOOKUP_GENERAL: {
     endpoint: "/v1/tx",
     inputs: ["tx_hash", "chain"],
@@ -263,7 +264,7 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, strin
   URL_SAFE_GENERAL: {
     endpoint: "/v1/url-safe",
     inputs: ["url"],
-    outputs: { url: null, detections: "detections", summary: null },
+    outputs: { url: null, verdict: { unit: null, path: "url_check.verdict" }, detections: "detections", summary: null },
   },
   URL_SCAN_VERDICT: {
     endpoint: "/v1/url-scan",
@@ -309,10 +310,15 @@ describe("A8 miner.yaml vs the official intent schemas", () => {
       const outStart = m.indexOf("    output:");
       const outLines = m.slice(outStart + 1);
       expect(keysAt(outLines, 6)).toEqual(Object.keys(o.outputs));
-      for (const [field, unit] of Object.entries(o.outputs)) {
+      for (const [field, rawSpec] of Object.entries(o.outputs)) {
+        // Value: the unit string, null for unitless, or {unit, path} when the
+        // mapped dot path is not the bare field name (e.g. URL_SAFE verdict,
+        // nested because the envelope reserves the top-level key).
+        const unit = rawSpec !== null && typeof rawSpec === "object" ? rawSpec.unit : rawSpec;
+        const wantPath = rawSpec !== null && typeof rawSpec === "object" ? rawSpec.path : field;
         const f = outLines.slice(outLines.indexOf(`      ${field}:`) + 1);
         const own = f.slice(0, f.findIndex((l) => /^ {6}\S/.test(l)) === -1 ? f.length : f.findIndex((l) => /^ {6}\S/.test(l)));
-        expect(own).toContain(`        path: ${field}`);
+        expect(own).toContain(`        path: ${wantPath}`);
         const unitLine = own.find((l) => l.startsWith("        unit:"));
         if (unit === null) expect(unitLine).toBeUndefined();
         else expect(unitLine?.trim().replace(/^unit:\s*/, "").replace(/^"(.*)"$/, "$1")).toBe(unit);

@@ -41,7 +41,7 @@ describe("URL_SAFE_GENERAL", () => {
   it("an unflagged URL answers verdict Safe with detections 0, and names that absence is not clearance", async () => {
     stub();
     const result = await handleUrlSafe({ url: "https://example.com/" });
-    expect(result.safety_verdict).toBe("Safe");
+    expect((result.url_check as { verdict: string }).verdict).toBe("Safe");
     expect(result.detections).toBe(0);
     expect(String(result.summary)).toContain("absence is not clearance");
     expect(String(result.answer)).toContain("not a guarantee");
@@ -49,7 +49,7 @@ describe("URL_SAFE_GENERAL", () => {
   it("a malware host answers verdict Malicious with detections >= 1 and the matching feeds", async () => {
     stub();
     const result = await handleUrlSafe({ url: "http://malware.wicar.org/data/eicar.com" });
-    expect(result.safety_verdict).toBe("Malicious");
+    expect((result.url_check as { verdict: string }).verdict).toBe("Malicious");
     expect(Number(result.detections)).toBeGreaterThanOrEqual(1);
     expect(String(result.summary)).toContain("Malicious");
     const matches = result.matches as { feed: string; matched_entry: string }[];
@@ -66,7 +66,7 @@ describe("URL_SAFE_GENERAL", () => {
   it("a URL whose host is a blocklisted IP is Malicious", async () => {
     stub();
     const result = await handleUrlSafe({ url: "http://185.220.101.4/login" });
-    expect(result.safety_verdict).toBe("Malicious");
+    expect((result.url_check as { verdict: string }).verdict).toBe("Malicious");
     const matches = result.matches as { feed: string }[];
     expect(matches.some((m) => m.feed === "stamparm ipsum")).toBe(true);
   });
@@ -95,10 +95,10 @@ describe("URL_SAFE_GENERAL", () => {
     const app = await buildServer();
     const res = await app.inject({ method: "GET", url: "/v1/url-safe?url=https%3A%2F%2Fexample.com%2F" });
     expect(res.statusCode).toBe(200);
-    const body = res.json() as { receipt: { intent: string }; url: string; safety_verdict: string; detections: number; summary: string };
+    const body = res.json() as { receipt: { intent: string }; url: string; url_check: { verdict: string }; detections: number; summary: string };
     expect(body.receipt.intent).toBe("URL_SAFE_GENERAL");
     expect(body.url).toBe("https://example.com/");
-    expect(body.safety_verdict).toBe("Safe");
+    expect(body.url_check.verdict).toBe("Safe");
     expect(body.detections).toBe(0);
     expect(typeof body.summary).toBe("string");
     await app.close();

@@ -236,6 +236,7 @@ export const OUTPUT_MAPPING: Record<string, Record<string, OutputMapping>> = {
   },
   URL_SAFE_GENERAL: {
     url: { path: "url" },
+    verdict: { path: "url_check.verdict" },
     detections: { path: "detections", unit: "detections" },
     summary: { path: "summary" },
   },
@@ -500,6 +501,7 @@ export const FIELD_FORMAT: Record<string, Record<string, FieldFormat>> = {
   },
   URL_SAFE_GENERAL: {
     url: { type: "string" },
+    verdict: { type: "enum", allowed: ["Safe", "Suspicious", "Malicious", "Unknown"] },
     detections: { type: "number" },
     summary: { type: "string" },
   },

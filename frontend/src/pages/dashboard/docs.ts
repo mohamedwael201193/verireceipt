@@ -1846,6 +1846,8 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    output:\n' +
     '      url:\n' +
     '        path: url\n' +
+    '      verdict:\n' +
+    '        path: url_check.verdict\n' +
     '      detections:\n' +
     '        path: detections\n' +
     '        unit: "detections"\n' +

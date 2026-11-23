@@ -1699,6 +1699,8 @@ intent_mapping:
     output:
       url:
         path: url
+      verdict:
+        path: url_check.verdict
       detections:
         path: detections
         unit: "detections"

@@ -54,7 +54,7 @@ export const DECLARED_INTENTS = [
   "WEATHER_FORECAST_GENERAL"
 ] as const;
 export const DECLARED_INTENT_COUNT = DECLARED_INTENTS.length;
-export const MINER_YAML_SHA256 = "0x46f25a601bfe9f314eddf3eecaf8d1942b8a530210c30f6205c5aa1376cc1d90";
+export const MINER_YAML_SHA256 = "0x0a3458df32c547ced4e7c4eda4d0f252fd18321d814725ccae599fe3c4390efb";
 
 /** SHA-256 of the repo-root miner.yaml bytes (49 intents). It becomes the
  * on-chain yaml_hash of registration 6177's successor when the 49-intent
