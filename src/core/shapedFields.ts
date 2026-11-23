@@ -282,6 +282,47 @@ export const OUTPUT_MAPPING: Record<string, Record<string, OutputMapping>> = {
   WEATHER_CHECK_TEMPERATURE: {
     temperature_c: { path: "temperature_c", unit: "degrees Celsius" },
   },
+  ONCHAIN_METRIC_VERIFY_GENERAL: {
+    balance_gwei: {"path":"balance_gwei","unit":"Gwei"},
+    address: {"path":"address"},
+    block: {"path":"block"},
+    chain: {"path":"chain"},
+    tx_count: {"path":"tx_count"},
+  },
+  AIR_QUALITY_INDEX_GENERAL: {
+    aqi: {"path":"aqi"},
+    aqi_scale: {"path":"aqi_scale"},
+    acceptable: {"path":"acceptable"},
+    european_aqi: {"path":"european_aqi"},
+    pm2_5_ugm3: {"path":"pm2_5_ugm3","unit":"micrograms per cubic metre"},
+    pm10_ugm3: {"path":"pm10_ugm3","unit":"micrograms per cubic metre"},
+    nitrogen_dioxide_ugm3: {"path":"nitrogen_dioxide_ugm3","unit":"micrograms per cubic metre"},
+    ozone_ugm3: {"path":"ozone_ugm3","unit":"micrograms per cubic metre"},
+    carbon_monoxide_ugm3: {"path":"carbon_monoxide_ugm3","unit":"micrograms per cubic metre"},
+    latitude: {"path":"latitude","unit":"degrees"},
+    longitude: {"path":"longitude","unit":"degrees"},
+    upstream_hour: {"path":"upstream_hour"},
+  },
+  API_HEALTH_CHECK_GENERAL: {
+    url: {"path":"url"},
+    healthy: {"path":"healthy"},
+    reachable: {"path":"reachable"},
+    http_status: {"path":"http_status"},
+    latency_ms: {"path":"latency_ms","unit":"milliseconds"},
+  },
+  SERVER_UPTIME_MONITOR_GENERAL: {
+    host: {"path":"host"},
+    reachable_now: {"path":"reachable_now"},
+    http_status: {"path":"http_status"},
+    latency_ms: {"path":"latency_ms","unit":"milliseconds"},
+  },
+  SECURITY_REVIEW_GENERAL: {
+    verdict: {"path":"verdict"},
+    vulnerability_count: {"path":"vulnerability_count","unit":"vulnerabilities"},
+    issues: {"path":"issues"},
+    summary: {"path":"summary"},
+  },
+
 };
 
 /** Official intent response field types (GET /engine/v1/intents/{intent} → response.fields), pinned here so the fill does not depend on a live fetch. `number` fields are never filled from raw, even if a future mapping omits `unit`. */
@@ -548,6 +589,47 @@ export const FIELD_FORMAT: Record<string, Record<string, FieldFormat>> = {
   WEATHER_CHECK_TEMPERATURE: {
     temperature_c: { type: "number" },
   },
+  ONCHAIN_METRIC_VERIFY_GENERAL: {
+    balance_gwei: { type: "number" },
+    address: { type: "string" },
+    block: { type: "string" },
+    chain: { type: "string" },
+    tx_count: { type: "number" },
+  },
+  AIR_QUALITY_INDEX_GENERAL: {
+    aqi: { type: "number" },
+    aqi_scale: { type: "string" },
+    acceptable: { type: "bool" },
+    european_aqi: { type: "number" },
+    pm2_5_ugm3: { type: "number" },
+    pm10_ugm3: { type: "number" },
+    nitrogen_dioxide_ugm3: { type: "number" },
+    ozone_ugm3: { type: "number" },
+    carbon_monoxide_ugm3: { type: "number" },
+    latitude: { type: "number" },
+    longitude: { type: "number" },
+    upstream_hour: { type: "datetime" },
+  },
+  API_HEALTH_CHECK_GENERAL: {
+    url: { type: "string" },
+    healthy: { type: "bool" },
+    reachable: { type: "bool" },
+    http_status: { type: "number" },
+    latency_ms: { type: "number" },
+  },
+  SERVER_UPTIME_MONITOR_GENERAL: {
+    host: { type: "string" },
+    reachable_now: { type: "bool" },
+    http_status: { type: "number" },
+    latency_ms: { type: "number" },
+  },
+  SECURITY_REVIEW_GENERAL: {
+    verdict: { type: "string" },
+    vulnerability_count: { type: "number" },
+    issues: { type: "list" },
+    summary: { type: "string" },
+  },
+
 };
 
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
