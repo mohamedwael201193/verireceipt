@@ -175,6 +175,33 @@ describe("handleMacro validation (stubbed, no network use)", () => {
   });
 });
 
+describe("M1 indicator normalization (stubbed World Bank)", () => {
+  it.each(["Unemployment", "unemployment rate (%)", "jobless rate", "UNEMPLOYMENT   RATE", "unemployment (% of total labor force)"])(
+    "serves the variant %j as the contract enum, disclosed", async (variant) => {
+      stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2024, 5.2) });
+      const out = await handleMacro({ indicator: variant, country: "Egypt", year: "2024" });
+      expect(out.indicator).toBe("unemployment rate");
+      expect(out.indicator_input).toBe(variant);
+      expect(out.rate_pct).toBe(5.2);
+      const ans = String(out.answer);
+      if (variant !== "unemployment rate") {
+        expect(ans).toContain(`"${variant}" read as "unemployment rate"`);
+      }
+    },
+  );
+
+  it("the exact enum value carries no normalization disclosure", async () => {
+    stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2024, 5.2) });
+    const out = await handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2024" });
+    expect(String(out.answer)).not.toContain("read as");
+  });
+
+  it("indicators beyond the enum still refuse (GDP, CPI)", async () => {
+    await expectApiError(handleMacro({ indicator: "GDP", country: "Egypt" }), 422, "UNSUPPORTED_INDICATOR");
+    await expectApiError(handleMacro({ indicator: "CPI", country: "Egypt" }), 422, "UNSUPPORTED_INDICATOR");
+  });
+});
+
 describe("handleMacro answers (stubbed World Bank)", () => {
   it("uses the source's latest nonempty year when year is absent", async () => {
     const bodies = [indicatorJson(2021, 4.1), indicatorJson(2024, 5.2), indicatorJson(2025, null)].map((text) => JSON.parse(text)[1][0]);
