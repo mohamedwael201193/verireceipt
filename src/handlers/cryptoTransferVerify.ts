@@ -72,6 +72,11 @@ export function findMatchingTransfer(
       if (l.address !== token || l.topics[0] !== TRANSFER_TOPIC || l.topics.length < 3) continue;
       const from = `0x${l.topics[1].slice(26)}`;
       const to = `0x${l.topics[2].slice(26)}`;
+      // A Transfer-topic log with empty or malformed data ("0x") must
+      // fail typed, never as a generic 500.
+      if (!/^0x[0-9a-f]+$/.test(l.data)) {
+        throw unprocessable("MALFORMED_LOG", "a Transfer-topic log from the requested token carried no parseable amount; never guessed");
+      }
       const amount = BigInt(l.data).toString(10);
       if (want.from && from !== want.from.toLowerCase()) continue;
       if (want.to && to !== want.to.toLowerCase()) continue;

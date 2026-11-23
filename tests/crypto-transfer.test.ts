@@ -88,3 +88,20 @@ describe("CRYPTO_TRANSFER_VERIFY_GENERAL", () => {
     await app.close();
   });
 });
+
+describe("crypto-transfer malformed log data (reviewer nit)", () => {
+  it("a Transfer-topic log with empty 0x data is a typed 422, never a generic 500", () => {
+    const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+    const projection = {
+      status: 1,
+      from: T_FROM.toLowerCase(), to: T_TO.toLowerCase(),
+      logs: [{
+        address: USDC.toLowerCase(),
+        topics: [TRANSFER_TOPIC, `0x${"0".repeat(24)}${T_FROM.slice(2)}`, `0x${"0".repeat(24)}${T_TO.slice(2)}`],
+        data: "0x",
+      }],
+    };
+    expect(() => findMatchingTransfer(projection, T_TO.toLowerCase(), "0x0", { token: USDC }))
+      .toThrowError(expect.objectContaining({ status: 422, code: "MALFORMED_LOG" }));
+  });
+});
