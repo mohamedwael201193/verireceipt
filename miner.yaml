@@ -528,13 +528,12 @@ endpoints:
           type: string
           intents:
           - ASSET_RESERVE_ATTESTATION_GENERAL
-          description: The tokenized asset: its symbol or contract address
+          description: "The tokenized asset: its symbol or contract address"
 
   - path: /v1/code-patch
     external_path: /v1/code-patch
     method: GET
-    description: Verifies a GitHub patch by reading its real CI results from the GitHub API: check
-      runs plus the combined commit status for the exact ref. GitHub patches only.
+    description: "Verifies a GitHub patch by reading its real CI results from the GitHub API: check runs plus the combined commit status for the exact ref. GitHub patches only."
     intents:
     - CODE_PATCH_VERIFY_GENERAL
     params:
@@ -607,9 +606,7 @@ endpoints:
   - path: /v1/event-outcome
     external_path: /v1/event-outcome
     method: GET
-    description: The resolved outcome of a prediction-market event from the Polymarket gamma API:
-      closed and UMA-resolved binary Yes/No markets with a clean 1/0 price pair only. One venue's
-      resolution record, not an independent determination of the underlying event.
+    description: "The resolved outcome of a prediction-market event from the Polymarket gamma API: closed and UMA-resolved binary Yes/No markets with a clean 1/0 price pair only. One venue's resolution record, not an independent determination of the underlying event."
     intents:
     - EVENT_OUTCOME_RESOLUTION_GENERAL
     params:
@@ -977,8 +974,7 @@ endpoints:
   - path: /v1/vulnerability-triage
     external_path: /v1/vulnerability-triage
     method: GET
-    description: A deterministic triage read for a CVE from the published record: severity, vector
-      and references, with a SHA-256 receipt.
+    description: "A deterministic triage read for a CVE from the published record: severity, vector and references, with a SHA-256 receipt."
     intents:
     - VULNERABILITY_TRIAGE_GENERAL
     params:

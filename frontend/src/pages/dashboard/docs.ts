@@ -675,13 +675,12 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          type: string\n' +
     '          intents:\n' +
     '          - ASSET_RESERVE_ATTESTATION_GENERAL\n' +
-    '          description: The tokenized asset: its symbol or contract address\n' +
+    '          description: "The tokenized asset: its symbol or contract address"\n' +
     '\n' +
     '  - path: /v1/code-patch\n' +
     '    external_path: /v1/code-patch\n' +
     '    method: GET\n' +
-    '    description: Verifies a GitHub patch by reading its real CI results from the GitHub API: check\n' +
-    '      runs plus the combined commit status for the exact ref. GitHub patches only.\n' +
+    '    description: "Verifies a GitHub patch by reading its real CI results from the GitHub API: check runs plus the combined commit status for the exact ref. GitHub patches only."\n' +
     '    intents:\n' +
     '    - CODE_PATCH_VERIFY_GENERAL\n' +
     '    params:\n' +
@@ -754,9 +753,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '  - path: /v1/event-outcome\n' +
     '    external_path: /v1/event-outcome\n' +
     '    method: GET\n' +
-    '    description: The resolved outcome of a prediction-market event from the Polymarket gamma API:\n' +
-    '      closed and UMA-resolved binary Yes/No markets with a clean 1/0 price pair only. One venue\'s\n' +
-    '      resolution record, not an independent determination of the underlying event.\n' +
+    '    description: "The resolved outcome of a prediction-market event from the Polymarket gamma API: closed and UMA-resolved binary Yes/No markets with a clean 1/0 price pair only. One venue\'s resolution record, not an independent determination of the underlying event."\n' +
     '    intents:\n' +
     '    - EVENT_OUTCOME_RESOLUTION_GENERAL\n' +
     '    params:\n' +
@@ -1124,8 +1121,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '  - path: /v1/vulnerability-triage\n' +
     '    external_path: /v1/vulnerability-triage\n' +
     '    method: GET\n' +
-    '    description: A deterministic triage read for a CVE from the published record: severity, vector\n' +
-    '      and references, with a SHA-256 receipt.\n' +
+    '    description: "A deterministic triage read for a CVE from the published record: severity, vector and references, with a SHA-256 receipt."\n' +
     '    intents:\n' +
     '    - VULNERABILITY_TRIAGE_GENERAL\n' +
     '    params:\n' +
