@@ -310,3 +310,16 @@ it("GDELT timeout breaker expires at five minutes and recovered source is retrie
  clock.mockReturnValue(now+300000);const recovered=await fetchIndex("https://api.gdeltproject.org/api/v2/doc/doc?query=test");expect(f).toHaveBeenCalledTimes(2);expect(recovered.body).toBe(gdelt);
  }finally{clock.mockRestore();warn.mockRestore();resetNewsCircuitForTests()}
 });
+it('headline answer starts with up to five unique captured dated outlet-attributed items, retaining scored top',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(FROZEN);stub();
+ const out=await handleNewsHeadlines({topic:'openai',window_hours:'168'});
+ const items=out.headline_details as {title:string;outlet:string;published:string;url:string}[];
+ expect(items).toHaveLength(5);expect(new Set(items.map(i=>i.url)).size).toBe(5);
+ const lead=items.map(h=>`"${h.title}" (${h.outlet}, ${h.published}).`).join(' ');
+ expect(String(out.answer).startsWith(lead)).toBe(true);expect(items[0].title).toBe(out.top_headline);
+ for(const item of items)expect(item.published).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+});
+it('one available headline is not padded or duplicated to three',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(FROZEN);stub({hn:JSON.stringify({hits:[]}),gdelt:JSON.stringify({articles:[]}),bbc:'<rss><channel></channel></rss>'});
+ const out=await handleNewsHeadlines({topic:'openai',window_hours:'168'});expect((out.headline_details as any[]).length).toBe(1);
+});

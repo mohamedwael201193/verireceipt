@@ -117,16 +117,19 @@ export async function handleNewsHeadlines(query: Record<string, string | undefin
     }, receipt, { answer, verdict: "verified", confidence: 0.5,
       source: `${searched.join(" + ") || "no source reachable"}; named sources only; fetched ${fetchedAt}` });
   }
-  const answer =
-    `Top headline for "${topic}" (last ${windowHours}h): "${top.title}" — ${top.index}` +
-    `${top.outlet ? ` (${top.outlet})` : ""}` +
-    `${top.points !== null ? `, ${top.points} points` : ""}, published ${top.published}. ` +
-    `${headlines.length - 1} other matching headline(s) across the named sources. ` +
-    `Coverage: ${INDEXES.join("; ")} — named sources, never comprehensive news coverage` +
-    `${degraded}.`;
+  const seen = new Set<string>();
+  const leadItems = [top, ...headlines].filter(h => {
+    const key=h.url || h.title.toLowerCase();
+    if(seen.has(key))return false;seen.add(key);return true;
+  }).slice(0,5);
+  const lead=leadItems.map(h=>`"${h.title}" (${h.outlet ?? h.index}, ${h.published}).`).join(' ');
+  const answer = lead + ` Topic "${topic}", last ${windowHours}h. ` +
+    `Top rule: highest-points matching HN story, else most recent named-source match. ` +
+    `Coverage: ${INDEXES.join('; ')}; named sources, never comprehensive news coverage${degraded}.`;
   return envelope(INTENT, {
     topic, top_headline: top.title,
     headlines: headlines.map((h) => h.title),
+    headline_details: leadItems.map(h=>({title:h.title,outlet:h.outlet??h.index,published:h.published,url:h.url})),
     urls: headlines.map((h) => h.url),
     window: `${windowHours}h`,
   }, receipt, { answer, verdict: "verified", confidence: 0.8,
