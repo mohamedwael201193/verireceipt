@@ -17,6 +17,7 @@
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+import { cachedHolderBody, holderBodyFetchedAt, resetHolderCacheForTests } from "./holderSourceCache";
 import { normalizeChain } from "./txLookup";
 import { ADDRESS_RE, TOKEN_CONTRACTS, isNativeSymbol, labeledTokenContract, tokenContractFor } from "./tokenContracts";
 
@@ -45,6 +46,7 @@ type FetchText = (url: string) => Promise<string>;
 let fetchImpl: FetchText | null = null;
 export function setTokenHoldersFetchForTests(impl: FetchText | null): void {
   fetchImpl = impl;
+  resetHolderCacheForTests();
 }
 
 async function fetchText(url: string): Promise<string> {
@@ -56,7 +58,15 @@ async function fetchText(url: string): Promise<string> {
       signal: controller.signal,
       headers: { accept: "application/json" },
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+    if (!res.ok) {
+      const error = Object.assign(new Error(`HTTP ${res.status} from ${url}`), { status: res.status, retryAfterMs: undefined as number | undefined });
+      const retry = res.headers.get("retry-after");
+      if (retry) {
+        const millis = /^\d+$/.test(retry.trim()) ? Number(retry) * 1000 : Date.parse(retry) - Date.now();
+        if (Number.isFinite(millis) && millis >= 0) error.retryAfterMs = millis;
+      }
+      throw error;
+    }
     return await res.text();
   } finally {
     clearTimeout(timer);
@@ -182,7 +192,9 @@ export async function handleTokenHolders(
   const sourceName = network ? "GeckoTerminal" : "Blockscout";
   let info: IndexerTokenInfo;
   try {
-    const body = await fetchText(url);
+    const body = network
+      ? await cachedHolderBody(url, () => fetchText(url), (raw) => { parseGecko(raw, network, contract); })
+      : await fetchText(url);
     info = network ? parseGecko(body, network, contract) : parseIndexerResponse(body, url, contract);
   } catch (err) {
     throw upstreamUnavailable(
@@ -212,6 +224,7 @@ export async function handleTokenHolders(
   };
 
   const receiptDoc: Receipt = makeReceipt(INTENT, url, info.rawBody, `1/1 indexer of record (${sourceName})`);
+  if (network) receiptDoc.fetched_at = holderBodyFetchedAt(url) ?? receiptDoc.fetched_at;
   try {
     await saveReceipt(receiptDoc, info.rawBody);
   } catch {
@@ -223,6 +236,6 @@ export async function handleTokenHolders(
     answer: `${symbol} (${contract}) on ${chain} has ${info.holdersCount} distinct holder addresses (${sourceName} indexer, as of ${asOf}).`,
     verdict: "verified",
     confidence: 0.9,
-    source: `${sourceName} indexer (${url}, keyless, receipted); holder aggregate, not RPC state`,
+    source: `${sourceName} indexer (${url}, keyless, receipted); holder aggregate, not RPC state${network ? "; original body may be reused for up to 30s; as_of is provider holders.last_updated" : ""}`,
   });
 }

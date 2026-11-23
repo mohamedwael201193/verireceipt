@@ -221,3 +221,20 @@ describe("GeckoTerminal holder coverage", () => {
     }
   });
 });
+
+
+it("deduplicated Gecko requests each persist the original body with provider as_of", async () => {
+ const raw=readFileSync(join(__dirname,"fixtures/holder-gecko/base-usdc.json"),"utf8");
+ const updated=JSON.parse(raw).data.attributes.holders.last_updated;
+ vi.useFakeTimers();vi.setSystemTime(new Date(Date.parse(updated)+1000));
+ let count=0;setTokenHoldersFetchForTests(async()=>{count++;return raw;});
+ const results=await Promise.all(Array.from({length:4},()=>handleTokenHolders({token:"USDC",chain:"base"})));
+ expect(count).toBe(1);
+ const ids=new Set<string>();
+ for(const r of results){
+  expect(r.as_of).toBe(updated);
+  const id=(r.receipt as {receipt_id:string}).receipt_id;ids.add(id);
+  expect((await getReceiptEvidence(id)).evidence!.toString()).toBe(raw);
+ }
+ expect(ids.size).toBe(4);
+});
