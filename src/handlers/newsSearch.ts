@@ -17,9 +17,22 @@ import { saveReceipt } from "../core/storage";
 import { BBC_INDEX, HN_INDEX, INDEXES, NewsItem, bothDown, fetchIndex, hnSearchUrl, parseBbcRss, parseHn, topicMatches } from "./newsSources";
 
 const BBC_URL = "https://feeds.bbci.co.uk/news/world/rss.xml";
-const BRIEF_MAX = 256;
+// The contract budget is BYTES (response brief max_bytes 256), not
+// characters: multi-byte titles must never overflow it.
+const BRIEF_MAX_BYTES = 256;
 
 export const INTENT = "NEWS_SEARCH_GENERAL";
+
+/** Truncate to at most maxBytes UTF-8 bytes, ending with an ellipsis and never splitting a multi-byte character. */
+export function capBytes(text: string, maxBytes: number): string {
+  const enc = new TextEncoder();
+  if (enc.encode(text).length <= maxBytes) return text;
+  const ellipsis = "…"; // 3 UTF-8 bytes
+  const budget = maxBytes - enc.encode(ellipsis).length;
+  const truncated = new TextDecoder("utf-8").decode(enc.encode(text).slice(0, budget));
+  // The tolerant decoder maps a split code point to U+FFFD; drop any trailing partial.
+  return truncated.replace(/\uFFFD+$/, "") + ellipsis;
+}
 
 export function buildBrief(hn: NewsItem[], bbc: NewsItem[], failed: string[]): string {
   const parts: string[] = [];
@@ -27,8 +40,7 @@ export function buildBrief(hn: NewsItem[], bbc: NewsItem[], failed: string[]): s
   parts.push(bbc.length ? `BBC World current feed: ${bbc.length} items, top "${bbc[0].title}"` : "BBC World current feed: no matching items");
   let brief = parts.join("; ") + ". Named indexes only.";
   if (failed.length) brief += ` Degraded: ${failed.join(", ")} unavailable.`;
-  if (brief.length > BRIEF_MAX) brief = `${brief.slice(0, BRIEF_MAX - 1)}…`;
-  return brief;
+  return capBytes(brief, BRIEF_MAX_BYTES);
 }
 
 export async function handleNewsSearch(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {

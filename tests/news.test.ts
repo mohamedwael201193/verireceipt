@@ -7,7 +7,7 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 import { handleNewsHeadlines } from "../src/handlers/newsHeadlines";
 import { handleNewsSearch, buildBrief } from "../src/handlers/newsSearch";
-import { parseHn, parseBbcRss, topicMatches } from "../src/handlers/newsSources";
+import { parseHn, parseBbcRss, topicMatches, HN_INDEX, BBC_INDEX, NewsItem } from "../src/handlers/newsSources";
 import { buildServer } from "../src/server";
 import { getReceiptEvidence } from "../src/core/storage";
 import { sha256Hex } from "../src/core/receipt";
@@ -119,5 +119,33 @@ describe("NEWS_SEARCH_GENERAL", () => {
     const res = await app.inject({ method: "GET", url: "/v1/news-search?query=openai" });
     expect(res.statusCode).toBe(200);
     await app.close();
+  });
+});
+
+describe("news brief byte cap and topic tokens (reviewer follow-up)", () => {
+  it("the brief never exceeds the 256-byte contract budget, even with multi-byte titles", () => {
+    // A long CJK title: each character is 3 UTF-8 bytes, so a naive
+    // character-length cap would overflow the byte budget.
+    const cjkTitle = "人工知能企業が大型資金調達を発表、世界市場で注目を集める".repeat(4);
+    const hn: NewsItem[] = [{ index: HN_INDEX, title: cjkTitle, url: "https://example.com/1", published: "2026-11-23T00:00:00.000Z", points: 42 }];
+    const bbc: NewsItem[] = [{ index: BBC_INDEX, title: cjkTitle, url: "https://example.com/2", published: "2026-11-23T00:00:00.000Z", points: null }];
+    const brief = buildBrief(hn, bbc, []);
+    const bytes = new TextEncoder().encode(brief);
+    expect(bytes.length).toBeLessThanOrEqual(256);
+    expect(brief.endsWith("…")).toBe(true);
+    // Truncation never splits a multi-byte character: no replacement char.
+    expect(brief).not.toContain("�");
+  });
+  it("a short brief is untouched", () => {
+    const hn: NewsItem[] = [{ index: HN_INDEX, title: "Acme Robotics raises funding", url: "https://example.com/3", published: "2026-11-23T00:00:00.000Z", points: 7 }];
+    const brief = buildBrief(hn, [], []);
+    expect(brief).toContain("Acme Robotics raises funding");
+    expect(new TextEncoder().encode(brief).length).toBeLessThanOrEqual(256);
+    expect(brief.endsWith("…")).toBe(false);
+  });
+  it("topic match requires every token, not just some", () => {
+    expect(topicMatches("acme robotics", "Acme raises a large funding round")).toBe(false);
+    expect(topicMatches("acme robotics", "Robotics sector rallies on strong demand")).toBe(false);
+    expect(topicMatches("acme robotics", "Acme Robotics raises a large funding round")).toBe(true);
   });
 });
