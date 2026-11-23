@@ -437,8 +437,8 @@ describe("handleFx answers (stubbed sources)", () => {
       frankfurter: frankfurterBody(0.91, "2026-11-21"),
       openEr: openErBody(0.85, "Sat, 21 Nov 2026 00:02:32 +0000"), // 6.6% split, same day
       fawaz: fawazBody(0.92, "2026-11-21"),
-      vatcomply: vatcomplyBody(0.91, "2026-11-21"),
-      floatrates: floatratesBody(0.92, "Sat, 21 Nov 2026 23:59:00 GMT"),
+      vatcomply: vatcomplyBody(0.93, "2026-11-21"),
+      floatrates: floatratesBody(0.94, "Sat, 21 Nov 2026 23:59:00 GMT"),
     });
     await expectApiError(handleFx({ from_currency: "USD", to_currency: "EUR" }), 502, "FX_SOURCES_DISAGREE");
   });
@@ -473,7 +473,7 @@ describe("handleFx answers (stubbed sources)", () => {
     expect(straddledAnswer).toContain("0.95");
     expect(straddledAnswer).toContain("2026-11-21"); // the stale date is named too
     expect(straddledAnswer).toContain("did NOT agree within 0.5%");
-    expect(String(straddled.source)).toContain("on the same snapshot date is refused");
+    expect(String(straddled.source)).toContain("otherwise refused, never averaged across clusters");
 
     vi.unstubAllGlobals();
     stubFxSources({
