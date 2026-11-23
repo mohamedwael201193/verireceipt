@@ -1010,6 +1010,104 @@ async function fetchValidatorFromSource(
   }
 }
 
+interface EpochBalanceDelta {
+  slotOld: string;
+  slotNew: string;
+  balanceOld: string;
+  balanceNew: string;
+  sourceUrl: string;
+  rawBody: string;
+  sources: string[];
+}
+
+/**
+ * Sample the validator's balance at two finalized slots exactly one epoch
+ * (32 slots) apart, on two independent state-capable sources. Both sources
+ * must return identical balances at both slots; any failure, pruning,
+ * non-finalized flag or disagreement yields undefined (section omitted).
+ */
+async function fetchEpochBalanceDelta(
+  index: string,
+  bases: string[],
+  fetchImpl: typeof fetch,
+): Promise<EpochBalanceDelta | undefined> {
+  const getJson = async (url: string): Promise<Record<string, unknown> | undefined> => {
+    try {
+      const res = await fetchImpl(url, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!res.ok) return undefined;
+      return (await res.json()) as Record<string, unknown>;
+    } catch {
+      return undefined;
+    }
+  };
+  const head = await getJson(`${bases[0]}/eth/v1/beacon/headers/finalized`);
+  const finalizedSlotRaw =
+    (head?.data as Record<string, unknown> | undefined)?.header as Record<string, unknown> | undefined;
+  const slotStr = (finalizedSlotRaw?.message as Record<string, unknown> | undefined)?.slot;
+  if (head?.execution_optimistic === true || typeof slotStr !== "string" || !/^\d+$/.test(slotStr)) {
+    return undefined;
+  }
+  const slotNew = Number(slotStr);
+  if (!Number.isSafeInteger(slotNew) || slotNew < 32) return undefined;
+  const slotOld = slotNew - 32;
+
+  const sampleAt = async (base: string, slot: number): Promise<{ body: string; balance: string } | undefined> => {
+    const url = `${base}/eth/v1/beacon/states/${slot}/validator_balances?id=${index}`;
+    try {
+      const res = await fetchImpl(url, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!res.ok) return undefined;
+      const body = await res.text();
+      const parsed = JSON.parse(body) as Record<string, unknown>;
+      if (parsed.execution_optimistic === true || parsed.finalized !== true) return undefined;
+      const rows = parsed.data;
+      if (!Array.isArray(rows) || rows.length !== 1) return undefined;
+      const row = rows[0] as Record<string, unknown>;
+      if (row.index !== String(index) || typeof row.balance !== "string" || !/^\d+$/.test(row.balance)) {
+        return undefined;
+      }
+      return { body, balance: row.balance };
+    } catch {
+      return undefined;
+    }
+  };
+
+  const samples = await Promise.all(
+    bases.slice(0, 2).map(async (base) => ({
+      base,
+      oldSample: await sampleAt(base, slotOld),
+      newSample: await sampleAt(base, slotNew),
+    })),
+  );
+  if (samples.some((s) => s.oldSample === undefined || s.newSample === undefined)) return undefined;
+  const done = samples as Array<{
+    base: string;
+    oldSample: { body: string; balance: string };
+    newSample: { body: string; balance: string };
+  }>;
+  const balanceOld = done[0].oldSample.balance;
+  const balanceNew = done[0].newSample.balance;
+  if (
+    done.some((s) => s.oldSample.balance !== balanceOld || s.newSample.balance !== balanceNew)
+  ) {
+    return undefined; // sources disagree on a deterministic slot sample
+  }
+  return {
+    slotOld: String(slotOld),
+    slotNew: String(slotNew),
+    balanceOld,
+    balanceNew,
+    sourceUrl: `${done[0].base}/eth/v1/beacon/states/${slotOld}/validator_balances?id=${index}`,
+    rawBody: done[0].oldSample.body,
+    sources: done.map((s) => s.base),
+  };
+}
+
 export async function handleValidator(
   query: Record<string, string | undefined>,
   deps: ValidatorDeps = {},
@@ -1261,6 +1359,74 @@ export async function handleValidator(
       "receipt evidence could not be stored; answer unavailable",
     );
   }
+  // Attestation-performance proxy (best-effort enrichment): the net
+  // balance change between two finalized states exactly 32 slots (one
+  // epoch) apart. Beacon REST attestation-rewards endpoints need pruned
+  // historical states that no keyless source serves (verified live
+  // 2026-11-23), and beaconcha.in performance APIs need an API key, so
+  // the verifiable keyless signal is the on-ledger balance delta itself:
+  // for an active validator it is dominated by attestation rewards and
+  // turns negative under inactivity penalties. Both samples must agree
+  // across two independent state-capable sources or the section is
+  // omitted; it never blocks or degrades the verified balance answer.
+  let perfFields: Record<string, unknown> = {};
+  let perfSentence = "";
+  try {
+    const stateSources = agreeingSources.filter(
+      (base) => !base.includes("blockreq"), // blockreq: 501 on states/{root}/*
+    );
+    if (stateSources.length >= 2) {
+      const perf = await fetchEpochBalanceDelta(
+        String(leg.index),
+        stateSources.slice(0, 2),
+        fetchImpl,
+      );
+      if (perf !== undefined) {
+        const perfReceipt = makeReceipt(
+          INTENT,
+          perf.sourceUrl,
+          perf.rawBody,
+          `${perf.sources.length}/${perf.sources.length} sources agreed on both balance samples`,
+        );
+        try {
+          await saveReceipt(perfReceipt, perf.rawBody);
+        } catch {
+          throw new Error("performance receipt could not be stored");
+        }
+        const delta = BigInt(perf.balanceNew) - BigInt(perf.balanceOld);
+        const annualizedBps =
+          BigInt(perf.balanceNew) === 0n
+            ? 0n
+            : (delta * 82125n * 10000n) / BigInt(perf.balanceNew);
+        const aprPct = (Number(annualizedBps) / 100).toFixed(2);
+        const direction = delta > 0n ? "gained" : delta < 0n ? "lost" : "did not change";
+        perfFields = {
+          recent_epoch_balance_delta: {
+            from_slot: perf.slotOld,
+            to_slot: perf.slotNew,
+            balance_from_gwei: perf.balanceOld,
+            balance_to_gwei: perf.balanceNew,
+            net_change_gwei: delta.toString(),
+            annualized_rate_estimate_pct: aprPct,
+            basis:
+              "net balance change between two finalized states 32 slots (one epoch) apart; " +
+              "dominated by attestation rewards, may include proposal or sync-committee rewards; " +
+              "annualized from this single-epoch sample only",
+          },
+          performance_receipt: perfReceipt,
+        };
+        perfSentence =
+          ` Between finalized slots ${perf.slotOld} and ${perf.slotNew} (one epoch apart) its balance ` +
+          `${direction}${delta === 0n ? "" : ` ${delta < 0n ? -delta : delta} gwei`} ` +
+          `(from ${perf.balanceOld} to ${perf.balanceNew}), an annualized rate of about ${aprPct}% ` +
+          `from this single-epoch sample; the change is dominated by attestation rewards and may ` +
+          `include proposal or sync-committee rewards.`;
+      }
+    }
+  } catch {
+    perfFields = {};
+    perfSentence = "";
+  }
   const hasFarFutureEpoch = [
     leg.activationEligibilityEpoch,
     leg.activationEpoch,
@@ -1276,7 +1442,8 @@ export async function handleValidator(
     `activation eligibility epoch ${leg.activationEligibilityEpoch}; activation epoch ${leg.activationEpoch}; ` +
     `exit epoch ${leg.exitEpoch}; withdrawable epoch ${leg.withdrawableEpoch}. ` +
     sentinelNote +
-    `Verified by ${votes} at finalized state root ${agreedRoot}.`;
+    `Verified by ${votes} at finalized state root ${agreedRoot}.` +
+    perfSentence;
   const result = envelope(
     INTENT,
     {
@@ -1292,6 +1459,7 @@ export async function handleValidator(
       effective_balance: leg.effectiveBalance,
       status: leg.status,
       finalized_state_root: agreedRoot,
+      ...perfFields,
     },
     receipt,
     { answer, verdict: "verified", confidence: 1.0, source: agreeingSources.join(" + ") },
