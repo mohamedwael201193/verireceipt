@@ -14,3 +14,5 @@ describe('Research Desk local inspector',()=>{
 it('retains failed-attempt exposure on withheld fact cards',()=>{const p={version:'research-desk-v1',spec:{network:'eip155:11155111',facts:[{id:'tvl'}],assumptions:[]},observations:[],expenses:[{fact_id:'tvl',reserved_uusdc:'10000',settled_uusdc:null,status:'receipted-unsettled',receipt_hash:'unit'}],calculations:{},claim_results:{},accounting:{},reasons:[],outcome:'HOLD'};const v=inspectDeskPacket(JSON.stringify(p));expect(v.facts[0].exposure).toBe('10000');expect(v.facts[0].observation).toEqual({});});
 
 it('discloses auto-route fallback without claiming a live ranking check',()=>{render(<ResearchDesk/>);expect(screen.getByText(/Client-ranked direct selection and provider escalation are not enabled/)).toBeInTheDocument();expect(screen.getByText(/does not fetch live rankings/)).toBeInTheDocument();});
+
+it('labels contract valuation without claiming aggregate FDV',()=>{render(<ResearchDesk/>);expect(screen.getByText(/Ethereum-contract implied valuation, not aggregate economic FDV/)).toBeInTheDocument();});

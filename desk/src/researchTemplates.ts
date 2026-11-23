@@ -4,11 +4,11 @@ import type {ThesisSpec,Claim} from './researchDesk.js';
 export function researchTemplate(id:'A'|'B',frozen_at:string):{spec:ThesisSpec;claims:Claim[]}{
  const base={version:'research-desk-v1' as const,network:'eip155:11155111' as const,frozen_at,budget_uusdc:'60000',max_call_uusdc:'10000' as const,max_escalations:1 as const};
  if(id==='A')return {
-  spec:{...base,template:'onchain-valuation',question:'Is UNI implied FDV below the declared analyst ceiling, with protocol TVL context?',facts:[
+  spec:{...base,template:'onchain-valuation',question:'Is UNI Ethereum-contract implied valuation below the declared analyst ceiling, with protocol TVL context?',facts:[
    {id:'price',intent:'CRYPTO_PRICE_USD',params:{symbol:'UNI'},field:'price_usd',unit:'USD/token',max_age_seconds:900},
    {id:'supply',intent:'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL',params:{token:'UNI on ethereum'},field:'total_supply',unit:'token',max_age_seconds:1800},
    {id:'tvl',intent:'TVL_LOOKUP_GENERAL',params:{protocol:'uniswap'},field:'tvl_usd',unit:'USD',max_age_seconds:900},
-  ],assumptions:[{id:'fdv_ceiling',value:'10000000000',unit:'USD',rationale:'Declared illustrative analyst ceiling, not a verified market forecast or investment recommendation.'}],calculations:[{id:'implied_fdv',op:'multiply',left:'price',right:'supply',unit:'USD'},{id:'fdv_to_tvl',op:'divide',left:'implied_fdv',right:'tvl',unit:'ratio'}]},
+  ],assumptions:[{id:'fdv_ceiling',value:'10000000000',unit:'USD',rationale:'Declared illustrative Ethereum-contract valuation ceiling, not aggregate economic FDV, a verified market forecast or investment recommendation.'}],calculations:[{id:'implied_fdv',op:'multiply',left:'price',right:'supply',unit:'USD'},{id:'fdv_to_tvl',op:'divide',left:'implied_fdv',right:'tvl',unit:'ratio'}]},
   claims:[{id:'fdv_below_ceiling',fact_refs:['price','supply'],assumption_refs:['fdv_ceiling'],calculation_ref:'implied_fdv',predicate:{left:'implied_fdv',op:'<',right:'fdv_ceiling'}},{id:'valuation_to_tvl_context',fact_refs:['price','supply','tvl'],assumption_refs:[],calculation_ref:'fdv_to_tvl'}],
  };
  return {

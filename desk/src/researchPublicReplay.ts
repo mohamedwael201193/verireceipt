@@ -2,6 +2,8 @@
 // and our receipt-origin GET endpoints may be contacted for proof rechecks.
 import {createHash} from 'node:crypto';
 import {replayPacket,type ResearchPacket,type FactSpec,type Observation} from './researchDesk.js';
+import {verifyFilingSource} from './filingSource.js';
+import {reconcilePrimaryAnswer} from './sourceTypes.js';
 import {verifyResearchPrimary} from './researchPrimary.js';
 import {verifyNodeLevel} from './gate.js';
 import {decodeReceipt} from './escrow.js';
@@ -21,6 +23,16 @@ export async function replayPrimaryBytes(fact:FactSpec,o:Observation,historical_
   return result.ok&&result.as_of===o.as_of&&Number.isFinite(Date.parse(o.as_of))&&Date.parse(o.as_of)<=Date.parse(historical_at)&&Date.parse(historical_at)-Date.parse(o.as_of)<=fact.max_age_seconds*1000&&JSON.stringify(result.source)===JSON.stringify(o.source)&&cursor===reads.length;
  }catch{return false;}
 }
+// Re-evaluate provider assertions against fixed stored SEC bytes, never a paid fetch.
+export async function replayFilingAssertionsBytes(fact:FactSpec,o:Observation,answer:Record<string,unknown>,completed_at:string):Promise<boolean>{
+ try{
+  if(!o.source||createHash('sha256').update(o.source.raw_text).digest('hex')!==o.source.content_sha256)return false;
+  const reads=JSON.parse(o.source.raw_text);if(!Array.isArray(reads)||!reads.length)return false;let cursor=0;
+  const stored:Fetch=async(input,init)=>{const row=reads[cursor++];if(!row||row.url!==String(input)||(row.method??'GET')!==(init?.method??'GET')||!Number.isFinite(Date.parse(row.observed_at))||Date.parse(row.observed_at)>Date.parse(completed_at))throw new Error('SEC assertion replay source mismatch');return new Response(row.raw_text,{status:200});};
+  const source=await verifyFilingSource({params:fact.params,result:answer},{f:stored,now:new Date(completed_at),secUserAgent:'Historical replay replay@example.invalid'});
+  return source.status==='verified'&&cursor===reads.length;
+ }catch{return false;}
+}
 export async function replayResearchDeskPublic(packet:ResearchPacket,expected_spec_hash:string,loadRaw:(factId:string)=>RawResponse,f:Fetch=fetch):Promise<{ok:boolean;checks:{name:string;ok:boolean;detail:string}[]}>{
  const checks:{name:string;ok:boolean;detail:string}[]=[];const add=(name:string,ok:boolean,detail:string)=>checks.push({name,ok,detail});
  const core=replayPacket(packet,expected_spec_hash);add('offline packet/spec replay',core.ok,core.reasons.join('; ')||'exact calculations and stored digests agree');
@@ -38,6 +50,12 @@ export async function replayResearchDeskPublic(packet:ResearchPacket,expected_sp
    if(body.signal_hash!==o.signal_hash||String(body.result?.[fact.field])!==o.value)throw new Error('saved signal/value binding mismatch');
    const verified=await verifyNodeLevel({exactNumericTransport:true,payer:auth.from,signalHash:o.signal_hash,intent:fact.intent,askedParams:fact.params,valueField:fact.field,engineResult:body.result??{},fieldStatus:body.field_status,receipt:{receipt_hash:receipt.receipt_hash,amount_uusdc:receipt.amount_uusdc,epoch_id:receipt.epoch_id,timestamp:receipt.timestamp,miner:String(receipt.miner)},runStartedMs:Date.parse(packet.spec.frozen_at),verifiedAtMs:Date.parse(packet.completed_at)},publicGet);
    add(`${fact.id}: current public node proof`,verified.ok,verified.checks.filter(x=>!x.ok).map(x=>x.name).join('; ')||'signal rederived, payer/intent/params/value/delivery/epoch match');
+   if(fact.intent==='REGULATORY_FILING_MONITOR_GENERAL'){
+    if(!verified.ok||!verified.providerResponse)throw new Error('SEC assertion replay needs verified provider bytes');
+    const answer=reconcilePrimaryAnswer(fact.intent,body.result??{},body.field_status??{},verified.providerResponse,true).result;
+    add(`${fact.id}: provider filing assertions replay`,await replayFilingAssertionsBytes(fact,o,answer,packet.completed_at),'Rechecked complete provider assertions against stored primary rows with distinct filing and report dates');
+   }
+
    const own=VERIRECEIPT_ONCHAIN_MINER_IDS.includes(String(receipt.miner));
    add(`${fact.id}: supply label`,o.supply===(own?'own':'external'),'serving registration controls own/external label');
    if(o.integrity_level==='L2_RAW_BYTES'){

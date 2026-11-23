@@ -88,3 +88,8 @@ This pair: adapter-reported acceptance3/6, not independent truth or receipt cert
 Post-run live account snapshot observed available1420000, unbilled60000, rootbalance1480000 micro testUSDC; not a claim of final settlement. Today's A1+A2+A3+B1 research reserved/reported total120000 micro testUSDC. Existing shared ledger remains intact.
 
 Private run directories: /home/sandbox/research-evidence/template-a3-20261123T1538Z and template-b1-20261123T1539Z. Raw paid replies include signed transport material, do not publish. Sanitized final packets, failures, receipt hashes and replay outputs were transferred to main as research-ab-public.tar.gz. No more spending to chase READY is planned. Next: read-only diagnosis of supply definition and filing-assertion binding, followed by independently reviewed changes only if justified.
+
+
+## Unreviewed parser slice, 17:50 EET
+
+Implementation pending independent review: SEC reportDate retained/validated separately from filingDate, anchored issuer+CIK and report-period title grammar, structured recent assertion binding, duplicate report-date consistency, public replay rechecks hash-bound provider assertions against stored SEC bytes. Template/UI label tightened to Ethereum-contract implied valuation, not aggregate economic FDV. No paid run or retroactive result change. Existing real packets remain unchanged.
