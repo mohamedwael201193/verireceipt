@@ -205,6 +205,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "grid-price": "caiso-oasis",
   validator: "beacon-api",
   "gas-price": "evm-rpc",
+  "transaction-risk": "evm-rpc",
   balance: "evm-rpc",
   "token-supply": "evm-rpc",
   macro: "worldbank",
