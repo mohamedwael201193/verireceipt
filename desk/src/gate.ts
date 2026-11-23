@@ -10,6 +10,7 @@
 // the desk/gate/benchmark ledgers share one daily cap, and any attempt that
 // reached a signature records worst-case spend when the outcome is unknown.
 import { appendFileSync, closeSync, existsSync, openSync, readFileSync, rmSync } from "node:fs";
+import {exactNumericEqual} from './exactNumeric.js';
 import { createHash } from "node:crypto";
 import { DESK_DAILY_CAP_UUSDC, ENGINE_URL, MAX_WINDOW_SECONDS, VERIRECEIPT_ONCHAIN_MINER_IDS } from "./constants.js";
 import { escrowAskAuto, type Fetch, type Payer, type RawResponse, type SignNotice } from "./client.js";
@@ -352,6 +353,7 @@ export async function verifyNodeLevel(
     engineResult: Record<string, unknown>;
     /** Node field_status from the paid reply; the decision field must be shaped "ok". */
     fieldStatus?: Record<string, string>;
+    exactNumericTransport?: boolean;
     receipt: { receipt_hash: string; amount_uusdc: string; epoch_id: number; timestamp: number; miner: string };
     runStartedMs: number;
     verifiedAtMs: number;
@@ -406,7 +408,7 @@ export async function verifyNodeLevel(
   const response = sig.payload?.response ?? {};
   value = response[input.valueField];
   const engineValue = input.engineResult[input.valueField];
-  add("engine value equals provider answer", engineValue !== undefined && engineValue !== null && engineValue === value,
+  add("engine value equals provider answer", engineValue !== undefined && engineValue !== null && (input.exactNumericTransport ? exactNumericEqual(engineValue,value) : engineValue === value),
     `${input.valueField}: engine=${JSON.stringify(engineValue)} provider=${JSON.stringify(value)}`);
   // A numeric answer whose field the node marked unavailable/missing/rejected
   // is not evidence (a placeholder 0 must never satisfy a <= rule).
@@ -436,7 +438,7 @@ export async function verifyNodeLevel(
     d.status === "included" ? "included" : `${d.status}: ${d.detail} (previous epoch ${prev ? `${prev.status}${prevWindowOk ? " with recorded window" : ", window missing or inconsistent"}` : "none"})`);
   add("receipt time belongs to recorded epoch", epoch.ok, epoch.failures.join("; ") || "epoch window agrees");
 
-  return { ok: checks.every((c) => c.ok), checks, value, minerSlug, delivery: d.status, providerResponse: response };
+  return { ok: checks.every((c) => c.ok), checks, value:input.exactNumericTransport?engineValue:value, minerSlug, delivery: d.status, providerResponse: response };
 }
 
 interface VerifiedCore {
@@ -462,7 +464,7 @@ interface VerifiedCore {
 export async function executeVerifiedPurchase(
   input: { intent: string; params: Record<string, string>; valueField: string; kind: string },
   payer: Payer,
-  opts: { spend: SpendLedger; now?: () => Date; f?: Fetch; onRawResponse?: (raw: RawResponse) => void | Promise<void>; secUserAgent?: string; durableBeforeSign?: (notice: SignNotice) => Promise<void> },
+  opts: { exactNumericTransport?: boolean; spend: SpendLedger; now?: () => Date; f?: Fetch; onRawResponse?: (raw: RawResponse) => void | Promise<void>; secUserAgent?: string; durableBeforeSign?: (notice: SignNotice) => Promise<void> },
 ): Promise<VerifiedCore> {
   const nowDate = (opts.now ?? (() => new Date()))();
   const f = opts.f ?? fetch;
@@ -535,6 +537,7 @@ export async function executeVerifiedPurchase(
           signalHash: validHash,
           intent: input.intent,
           askedParams: input.params,
+          exactNumericTransport: opts.exactNumericTransport,
           valueField: input.valueField,
           engineResult: body.result ?? {},
           fieldStatus: body.field_status as Record<string, string> | undefined,

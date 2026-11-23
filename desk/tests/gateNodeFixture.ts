@@ -25,7 +25,7 @@ export interface NodeOpts {
   engineResultFields?: Record<string, unknown>;
   minerSlug?: string | null;
   value?: number;
-  payloadValue?: number;
+  payloadValue?: number|string;
   signalHash?: string;
   delivery?: "included" | "pending";
   available?: string;

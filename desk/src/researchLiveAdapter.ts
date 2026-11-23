@@ -53,7 +53,7 @@ export function liveResearchAdapter(options:LiveOptions):ResearchAdapter {
    const rawFile=join(options.evidence_dir,`${fact.id}-paid-response.json`);
    let reserved=0n;let rawCapture:RawResponse|undefined;
    const result=await executeVerifiedPurchase({intent:fact.intent,params:fact.params,valueField:fact.field,kind:'research-desk'},options.payer,{
-    spend:options.spend,f,now,secUserAgent:options.secUserAgent,
+    exactNumericTransport:true,spend:options.spend,f,now,secUserAgent:options.secUserAgent,
     durableBeforeSign:async notice=>{
       if(notice.amountUusdc>BigInt(context.remaining_uusdc))throw new Error('quote exceeds frozen note remainder');
       // Gate already wrote the shared reservation. This write binds the note

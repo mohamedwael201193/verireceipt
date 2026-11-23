@@ -11,10 +11,10 @@ import type {SyncIO} from '../src/privateEvidence.js';
 import type {FactSpec} from '../src/researchDesk.js';
 const dirs:string[]=[];afterEach(()=>{for(const d of dirs.splice(0))rmSync(d,{recursive:true,force:true});});
 const fact:FactSpec={id:'price',intent:'CRYPTO_PRICE_USD',params:{symbol:'UNI'},field:'price_usd',unit:'USD/token',max_age_seconds:300};
-function setup(options:{primaryPrice?:string;paidRejects?:boolean;inactive?:boolean;io?:SyncIO}={}){
+function setup(options:{primaryPrice?:string;paidRejects?:boolean;inactive?:boolean;payloadValue?:number|string;io?:SyncIO}={}){
  const dir=mkdtempSync(join(tmpdir(),'research-adapter-unit-'));dirs.push(dir);const run_ledger=join(dir,'runs.jsonl');
  const spend=spendLedgerFromFiles({reservationsFile:join(dir,'reservations.jsonl'),lockFile:join(dir,'spend.lock'),runLedgerFiles:[run_ledger]});
- const network=node({intent:fact.intent,requestParams:fact.params,valueField:fact.field,value:12,miner:'9999',minerSlug:'unit-external-provider',paidRejects:options.paidRejects}).f;
+ const network=node({intent:fact.intent,requestParams:fact.params,valueField:fact.field,value:12,payloadValue:options.payloadValue,miner:'9999',minerSlug:'unit-external-provider',paidRejects:options.paidRejects}).f;
  const contract=snapshot.schemas.find(s=>s.intent_name===fact.intent)!;
  const f:typeof fetch=async(input,init)=>{const url=String(input);
   if(url.endsWith('/engine/v1/intents/'+fact.intent))return Response.json({intent_name:fact.intent,lifecycle:{state:options.inactive?'paused':'active'},request:contract.request,response:contract.response});
@@ -41,3 +41,9 @@ describe('crash-durable spend ordering',()=>{
  it('per-note reservation fsync failure refuses signature',async()=>{let writes=0,fail=false;const io:SyncIO={sync:fd=>{if(fail)throw new Error('UNIT note fsync fault');fsyncSync(fd);},write:(fd,data)=>{writes++;writeSync(fd,data);if(writes===2)fail=true;}};const {adapter,payer,dir}=setup({io});await expect(adapter.buy(fact,{spec_hash:'a'.repeat(64),remaining_uusdc:'20000',escalation:false})).rejects.toThrow();expect(payer.signMessage).not.toHaveBeenCalled();expect(readFileSync(join(dir,'reservations.jsonl'),'utf8')).toContain('10000');});
  it('post-signing raw sync failure preserves reservation and does not retry',async()=>{let writes=0,fail=false;const io:SyncIO={sync:fd=>{if(fail)throw new Error('UNIT raw fsync fault');fsyncSync(fd);},write:(fd,data)=>{writes++;writeSync(fd,data);if(writes===3)fail=true;}};const {adapter,payer,dir}=setup({io});await expect(adapter.buy(fact,{spec_hash:'a'.repeat(64),remaining_uusdc:'20000',escalation:false})).rejects.toThrow();expect(payer.signMessage).toHaveBeenCalledTimes(1);expect(readFileSync(join(dir,'reservations.jsonl'),'utf8')).toContain('10000');expect(readFileSync(join(dir,'price-reservation.json'),'utf8')).toContain('10000');});
 });
+
+it('the normalization policy still rejects the real TVL rounding mismatch',async()=>{const {exactNumericEqual}=await import('../src/exactNumeric.js');expect(exactNumericEqual(3110285426.77,3110285426.7703633)).toBe(false);expect(exactNumericEqual(1000000000,'1000000000')).toBe(true);});
+
+
+it('credits exact numeric transport strings through the real adapter seam, not raw fallback',async()=>{const {adapter}=setup({payloadValue:'12.000'});const a=await adapter.buy(fact,{spec_hash:'a'.repeat(64),remaining_uusdc:'20000',escalation:false});expect(a.failure).toBeNull();expect(a.observation?.value).toBe('12');});
+it('still refuses mismatching numeric transport values through adapter seam',async()=>{const {adapter}=setup({payloadValue:'12.001'});const a=await adapter.buy(fact,{spec_hash:'a'.repeat(64),remaining_uusdc:'20000',escalation:false});expect(a.observation).toBeNull();expect(a.expense.useful).toBe(false);});

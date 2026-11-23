@@ -129,3 +129,21 @@ A partial ledger line may prevent later runs until an operator reconciles
 it; that is a fail-closed audit stop, not permission to clear the journal.
 Filesystem fsync semantics still depend on the underlying operating system
 and storage. There is no claim of protection from storage hardware failure.
+
+### Forward-only exact numeric transport normalization
+
+The first live Template A run remains an unchanged HOLD. One provider returned
+whole-token supply as a decimal string while the node returned the identical
+numeric value. Future Research Desk runs may compare these representations
+as exact rational decimals. The accepted observation remains the shaped node
+number with `field_status=ok`, never a numeric fill from raw. Missing/rejected
+fields cannot be revived. Legacy Gate/probe equality remains unchanged unless
+the Research Desk explicitly opts into this normalization.
+
+This is no tolerance: 3110285426.77 is not equal to 3110285426.7703633. The first
+TVL answer had that mismatch. The live TVL schema says six decimals, and the
+published answer-shaping documentation does not justify a two-decimal rounding
+allowance. The TVL failure therefore stays HOLD. A future fresh run is a new
+packet and does not rewrite the historical result. The documentation describing
+raw signal coverage and shaped convenience values is at
+https://docs.telegraphprotocol.com/docs/using/engine-ask.md .

@@ -36,7 +36,7 @@ export async function replayResearchDeskPublic(packet:ResearchPacket,expected_sp
    if(receipt.receipt_hash!==o.receipt_hash||String(receipt.miner)!==o.serving_registration)throw new Error('saved receipt binding mismatch');
    const body=JSON.parse(raw.bodyText);
    if(body.signal_hash!==o.signal_hash||String(body.result?.[fact.field])!==o.value)throw new Error('saved signal/value binding mismatch');
-   const verified=await verifyNodeLevel({payer:auth.from,signalHash:o.signal_hash,intent:fact.intent,askedParams:fact.params,valueField:fact.field,engineResult:body.result??{},fieldStatus:body.field_status,receipt:{receipt_hash:receipt.receipt_hash,amount_uusdc:receipt.amount_uusdc,epoch_id:receipt.epoch_id,timestamp:receipt.timestamp,miner:String(receipt.miner)},runStartedMs:Date.parse(packet.spec.frozen_at),verifiedAtMs:Date.parse(packet.completed_at)},publicGet);
+   const verified=await verifyNodeLevel({exactNumericTransport:true,payer:auth.from,signalHash:o.signal_hash,intent:fact.intent,askedParams:fact.params,valueField:fact.field,engineResult:body.result??{},fieldStatus:body.field_status,receipt:{receipt_hash:receipt.receipt_hash,amount_uusdc:receipt.amount_uusdc,epoch_id:receipt.epoch_id,timestamp:receipt.timestamp,miner:String(receipt.miner)},runStartedMs:Date.parse(packet.spec.frozen_at),verifiedAtMs:Date.parse(packet.completed_at)},publicGet);
    add(`${fact.id}: current public node proof`,verified.ok,verified.checks.filter(x=>!x.ok).map(x=>x.name).join('; ')||'signal rederived, payer/intent/params/value/delivery/epoch match');
    const own=VERIRECEIPT_ONCHAIN_MINER_IDS.includes(String(receipt.miner));
    add(`${fact.id}: supply label`,o.supply===(own?'own':'external'),'serving registration controls own/external label');
