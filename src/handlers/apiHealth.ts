@@ -20,7 +20,7 @@ export async function handleApiHealth(query: Record<string, string | undefined>)
   const checkedAt = new Date().toISOString();
   let status = 0; let latency = -1; let reachable = false; let errorClass = "";
   try {
-    const m = await measureGet(target.url, TIMEOUT_MS, UA);
+    const m = await measureGet(target, TIMEOUT_MS, UA);
     status = m.status; latency = m.latency_ms; reachable = true;
   } catch (e) {
     reachable = false;

@@ -1,22 +1,23 @@
-// SSRF guard for the outbound-check intents (API_HEALTH_CHECK_GENERAL,
-// SERVER_UPTIME_MONITOR_GENERAL), hardened per the maintainer ruling
-// 2026-11-23: public hosts only, private/loopback/link-local/metadata
-// ranges blocked, redirects never followed, strict timeouts, a
-// per-target rate limit, and answers only about what was measured from
-// this server's vantage.
-//
-// DNS REBINDING: every hostname is resolved first and EVERY returned
-// address must be public, so a name that mixes a public and a private
-// address is refused outright. A narrow TOCTOU window remains (the
-// resolver answer could change between our check and the connect);
-// it is documented here honestly and narrowed by the short timeout,
-// the redirect refusal, and the port restriction (80/443 only).
+// Public-target probes pin the TCP destination to a validated DNS result.
+// TLS still validates the original hostname. No redirects or ambient
+// connection pools are used. Only ports 80 and 443 are allowed.
 import { lookup } from "node:dns/promises";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { isIP } from "node:net";
 import { badRequest, unprocessable } from "../core/errors";
 import { validatePublicIp } from "./ipGeolocation";
 
 const RATE_LIMIT_MS = 60_000;
 const lastCheck = new Map<string, number>();
+function publicProbeIp(address: string): void {
+  if (!isIP(address)) throw new Error("invalid IP address");
+  validatePublicIp(address);
+  // Restrict IPv6 to ordinary global unicast. Reject mapped/transition
+  // addresses and documentation space instead of risking embedded IPv4.
+  if (isIP(address) === 6 && (!/^[23]/i.test(address) || /^2001:db8:/i.test(address) || /^2002:/i.test(address) || /^2001:0:/i.test(address)))
+    throw new Error("non-global or transition IPv6 address");
+}
 
 // Test hook: deterministic DNS without touching the network.
 let lookupFn: typeof lookup = lookup;
@@ -48,7 +49,7 @@ export async function guardPublicHttpUrl(raw: string | undefined, param: string)
   // Trailing-dot FQDNs (example.com.) are the same host; normalize so
   // the private-name checks and the rate-limit key cannot be bypassed
   // by adding a dot.
-  const hostname = u.hostname.toLowerCase().replace(/\.+$/, "");
+  const hostname = u.hostname.toLowerCase().replace(/\.+$/, "").replace(/^\[|\]$/g, "");
   if (!hostname || hostname.endsWith(".internal") || hostname.endsWith(".local") || hostname.endsWith(".localhost") || hostname === "localhost") {
     throw unprocessable("PRIVATE_HOST", "local and internal names are never checked");
   }
@@ -59,7 +60,13 @@ export async function guardPublicHttpUrl(raw: string | undefined, param: string)
   } else {
     let records: { address: string }[];
     try {
-      records = await lookupFn(hostname, { all: true, verbatim: true });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        records = await Promise.race([
+          lookupFn(hostname, { all: true, verbatim: true }),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("DNS deadline")), 2000); }),
+        ]);
+      } finally { if (timer) clearTimeout(timer); }
     } catch {
       throw unprocessable("DNS_UNRESOLVABLE", `${hostname} does not resolve; nothing is guessed`);
     }
@@ -69,8 +76,7 @@ export async function guardPublicHttpUrl(raw: string | undefined, param: string)
   const blocked: string[] = [];
   for (const a of addresses) {
     try {
-      validatePublicIp(a);
-      if (a.toLowerCase().startsWith("2001:db8")) throw new Error("documentation range");
+      publicProbeIp(a);
     } catch {
       blocked.push(a);
     }
@@ -84,19 +90,44 @@ export async function guardPublicHttpUrl(raw: string | undefined, param: string)
   if (last !== undefined && Date.now() - last < RATE_LIMIT_MS) {
     throw unprocessable("RATE_LIMITED", `${key} was checked less than ${RATE_LIMIT_MS / 1000}s ago; one check per target per minute`);
   }
+  for (const [k, at] of lastCheck) if (Date.now() - at >= RATE_LIMIT_MS) lastCheck.delete(k);
+  if (lastCheck.size >= 1024) throw unprocessable("RATE_LIMITED", "probe capacity reached; retry later");
   lastCheck.set(key, Date.now());
   return { url: u.toString(), hostname, port, addresses };
 }
 
-/** One measured GET, redirects never followed, strict timeout. */
-export async function measureGet(url: string, timeoutMs: number, ua: string): Promise<{ status: number; latency_ms: number }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+/** One measured GET to a validated, pinned address; redirects never followed. */
+export async function measureGet(target: GuardedTarget, timeoutMs: number, ua: string): Promise<{ status: number; latency_ms: number }> {
   const started = Date.now();
-  try {
-    const res = await fetch(url, { signal: controller.signal, redirect: "manual", headers: { "User-Agent": ua } });
-    return { status: res.status, latency_ms: Date.now() - started };
-  } finally {
-    clearTimeout(timer);
-  }
+  const u = new URL(target.url);
+  const selected = target.addresses[0];
+  if (!selected || !isIP(selected)) throw new Error("missing validated address");
+  // Defence in depth for callers constructing a target outside the guard.
+  publicProbeIp(selected);
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (error?: Error, result?: {status: number; latency_ms: number}) => {
+      if (done) return; done = true; clearTimeout(timer);
+      if (error) reject(error); else resolve(result!);
+    };
+    const request = (u.protocol === "https:" ? httpsRequest : httpRequest)(u, {
+      method: "GET", agent: false, headers: { "User-Agent": ua },
+      lookup: ((_host: string, options: any, callback: any) => {
+        const record = { address: selected, family: isIP(selected) };
+        if (options?.all) callback(null, [record]); else callback(null, record.address, record.family);
+      }) as any,
+    }, response => {
+      const status = response.statusCode;
+      // We measure response headers only. Do not download an unbounded body.
+      response.destroy(); request.destroy();
+      if (!status) finish(new Error("missing HTTP status"));
+      else finish(undefined, { status, latency_ms: Date.now() - started });
+    });
+    const timer = setTimeout(() => {
+      const error = new Error("probe deadline exceeded"); error.name = "AbortError";
+      finish(error); request.destroy(error);
+    }, timeoutMs);
+    request.on("error", error => finish(error));
+    request.end();
+  });
 }

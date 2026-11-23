@@ -273,8 +273,8 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/news-headlines", async (request) => trackIntent("news-headlines", () => handleNewsHeadlines(asQuery(request.query))));
   app.get("/v1/news-search", async (request) => trackIntent("news-search", () => handleNewsSearch(asQuery(request.query))));
   app.get("/v1/route-eta", async (request) => trackIntent("route-eta", () => handleRouteEta(asQuery(request.query))));
-  app.get("/v1/api-health", async (request) => trackIntent("api-health", () => handleApiHealth(asQuery(request.query))));
-  app.get("/v1/server-uptime", async (request) => trackIntent("server-uptime", () => handleServerUptime(asQuery(request.query))));
+  app.get("/v1/api-health", async (request) => trackIntent("api-health", () => handleApiHealth(exactQuery(request.raw.url ?? "", ["url"]))));
+  app.get("/v1/server-uptime", async (request) => trackIntent("server-uptime", () => handleServerUptime(exactQuery(request.raw.url ?? "", ["host"]))));
   app.get("/v1/mining-hashprice", async (request) => trackIntent("mining-hashprice", () => handleMiningHashprice(asQuery(request.query))));
   app.get("/v1/crypto-price", async (request) => trackIntent("crypto-price", () => handleCryptoPrice(asQuery(request.query))));
   app.get("/v1/crypto-transfer", async (request) => trackIntent("crypto-transfer", () => handleCryptoTransferVerify(asQuery(request.query))));

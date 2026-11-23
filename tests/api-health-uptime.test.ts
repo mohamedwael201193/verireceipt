@@ -1,10 +1,14 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { EventEmitter } from "node:events";
+import { request as httpsRequest } from "node:https";
+vi.mock("node:https", async importOriginal => ({ ...await importOriginal<typeof import("node:https")>(), request: vi.fn() }));
+vi.mock("node:http", async importOriginal => ({ ...await importOriginal<typeof import("node:http")>(), request: vi.fn() }));
 const scratch = mkdtempSync("/tmp/api-health-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-afterEach(() => { vi.unstubAllGlobals(); __setLookupForTests(null); });
+afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); __setLookupForTests(null); });
 import { handleApiHealth } from "../src/handlers/apiHealth";
 import { handleServerUptime } from "../src/handlers/serverUptime";
 import { guardPublicHttpUrl, __setLookupForTests, __clearRateLimitsForTests } from "../src/handlers/ssrfGuard";
@@ -22,12 +26,17 @@ function fakeDns(table: Record<string, string[] | null>): void {
   __setLookupForTests(fn);
 }
 function stubFetch(status: number | "ABORT" | "FAIL", latencyMs = 5): void {
-  vi.stubGlobal("fetch", async () => {
-    await new Promise((r) => setTimeout(r, latencyMs));
-    if (status === "ABORT") { const e = new Error("aborted"); e.name = "AbortError"; throw e; }
-    if (status === "FAIL") throw new Error("connect ECONNREFUSED");
-    return new Response("ok", { status });
-  });
+  vi.mocked(httpsRequest).mockImplementation(((_url: unknown, _options: unknown, response: any) => {
+    const request = new EventEmitter() as any;
+    request.destroy = vi.fn();
+    request.end = () => setTimeout(() => {
+      if (status === "ABORT" || status === "FAIL") {
+        const error = new Error("connect failed"); if (status === "ABORT") error.name = "AbortError";
+        request.emit("error", error);
+      } else response({statusCode:status,destroy:vi.fn()});
+    }, latencyMs);
+    return request;
+  }) as any);
 }
 describe("SSRF guard", () => {
   it("blocks private, loopback, link-local, metadata and internal names before any fetch", async () => {
@@ -36,7 +45,7 @@ describe("SSRF guard", () => {
       "rebind.example.com": ["93.184.216.34", "169.254.169.254"], // mixed: rebinding refusal
       "metadata.example.com": ["169.254.169.254"],
     });
-    for (const t of ["localhost", "foo.localhost", "db.internal", "10.0.0.1", "192.168.0.1", "127.0.0.1", "169.254.169.254", "100.64.1.1", "192.0.2.4"]) {
+    for (const t of ["localhost", "foo.localhost", "db.internal", "10.0.0.1", "192.168.0.1", "127.0.0.1", "169.254.169.254", "100.64.1.1", "192.0.2.4", "https://[::ffff:127.0.0.1]", "https://[2001:db8::1]", "https://[2002:7f00:1::]"]) {
       await expect(guardPublicHttpUrl(t, "url")).rejects.toMatchObject({ status: 422 });
     }
     await expect(guardPublicHttpUrl("internal.example.com", "url")).rejects.toMatchObject({ code: "PRIVATE_HOST" });
@@ -116,17 +125,33 @@ describe("routes", () => {
 });
 
 describe("SSRF follow-ups (reviewer)", () => {
-  it("measureGet fetches with redirect: manual; a mutant following redirects fails this pin", async () => {
-    const calls: RequestInit[] = [];
-    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
-      calls.push(init ?? {});
-      return new Response("ok", { status: 200 });
-    });
+  it("pins the connect address while preserving the original TLS hostname and stops at redirect headers", async () => {
+    fakeDns({ "example.com": ["93.184.216.34"] });
+    stubFetch(302);
+    const target=await guardPublicHttpUrl("https://example.com/path", "url");
     const { measureGet } = await import("../src/handlers/ssrfGuard");
-    const r = await measureGet("https://example.com", 1000, "test-agent");
-    expect(r.status).toBe(200);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].redirect).toBe("manual");
+    const r=await measureGet(target,1000,"test-agent");
+    expect(r.status).toBe(302);
+    const call=vi.mocked(httpsRequest).mock.calls.at(-1)! as any;
+    expect(call[0].hostname).toBe("example.com");
+    expect(call[1].agent).toBe(false);
+    const callback=vi.fn();call[1].lookup("example.com",{all:true},callback);
+    expect(callback).toHaveBeenCalledWith(null,[{address:"93.184.216.34",family:4}]);
+    // A second lookup can never substitute a private answer after validation.
+    const again=vi.fn();call[1].lookup("example.com",{},again);
+    expect(again).toHaveBeenCalledWith(null,"93.184.216.34",4);
+  });
+  it("bounds a hung socket with an absolute deadline",async()=>{
+    vi.mocked(httpsRequest).mockImplementation((() => {const req=new EventEmitter() as any;req.end=vi.fn();req.destroy=vi.fn();return req;}) as any);
+    const {measureGet}=await import("../src/handlers/ssrfGuard");
+    await expect(measureGet({url:"https://example.com",hostname:"example.com",port:443,addresses:["93.184.216.34"]},10,"test")).rejects.toMatchObject({name:"AbortError"});
+  });
+  it("literal IPv6 uses the same global validation without an extra DNS resolution",async()=>{
+    const target=await guardPublicHttpUrl("https://[2606:4700:4700::1111]", "url");
+    expect(target.addresses).toEqual(["2606:4700:4700::1111"]);
+  });
+  it("route query ambiguity fails before a connection",async()=>{
+    const app=buildServer();try{for(const url of ["/v1/api-health?url=example.com&url=example.org","/v1/server-uptime?host=example.com&extra=1"]){expect((await app.inject({method:"GET",url})).statusCode).toBe(400);}}finally{await app.close();}
   });
   it("a trailing-dot hostname shares the rate-limit key with its plain form", async () => {
     __clearRateLimitsForTests();
