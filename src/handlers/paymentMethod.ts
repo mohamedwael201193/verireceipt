@@ -14,17 +14,14 @@
 // BIN database", and valid=false means "no record in the database",
 // which is not proof the prefix is unallocated. The answer says so.
 //
-// SOURCE: binlist.net lookup API, keyless, probed live 2026-11-23.
-// The free tier is rate-limited (~10 requests/min/IP), so positive and
-// negative lookups are cached in memory for CACHE_TTL_MS and the cache
-// freshness is named. FAIL CLOSED (502) on outage, 429, or 5xx — a
-// throttled guess is a wrong answer. 400/404 is the database's own
-// "no such BIN" and yields valid=false.
+// SOURCES: binlist.net plus api.dharun.dev's CC BY4.0 open BIN list.
+// Results cached up to24h with original acquisition time and raw bytes.
+// Allocation references only; disagreement and source failures are disclosed.
 import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
-const SOURCE_TIMEOUT_MS = 10000;
+const SOURCE_TIMEOUT_MS = 3000;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // BIN allocations change rarely; named in every answer
 const UA = "VeriReceipt/2.0 payment-method observer (+https://verireceipt.vercel.app)";
 
@@ -40,7 +37,7 @@ interface BinlistReply {
 
 interface CacheEntry { at: number; found: boolean; body: string }
 const cache = new Map<string, CacheEntry>();
-export function resetBinCacheForTests(): void { cache.clear(); }
+export function resetBinCacheForTests(): void { cache.clear(); openCache.clear(); }
 
 async function lookupBin(bin: string): Promise<{ found: boolean; body: string; cached: boolean; fetchedAt: string }> {
   const hit = cache.get(bin);
@@ -52,21 +49,22 @@ async function lookupBin(bin: string): Promise<{ found: boolean; body: string; c
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
   let res: Response;
+  let body: string;
   try {
     res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, "Accept-Version": "3", Accept: "application/json" } });
+    body = await res.text();
   } catch (e) {
     throw upstreamUnavailable("BINLIST_UNREACHABLE", `the BIN database could not be reached: ${e instanceof Error ? e.message : String(e)}`);
   } finally {
     clearTimeout(timer);
   }
   if (res.status === 400 || res.status === 404) {
-    cache.set(bin, { at: Date.now(), found: false, body: "" });
-    return { found: false, body: "", cached: false, fetchedAt };
+    cache.set(bin, { at: Date.now(), found: false, body });
+    return { found: false, body, cached: false, fetchedAt };
   }
   if (!res.ok) {
     throw upstreamUnavailable("BINLIST_DEGRADED", `the BIN database answered HTTP ${res.status} (rate limit or outage); refusing to guess`);
   }
-  const body = await res.text();
   let parsed: BinlistReply;
   try { parsed = JSON.parse(body); } catch { throw upstreamUnavailable("BINLIST_MALFORMED", "BIN database returned invalid JSON"); }
   const present = (value: unknown): boolean => typeof value === "string" && value.trim().length > 0;
@@ -75,55 +73,56 @@ async function lookupBin(bin: string): Promise<{ found: boolean; body: string; c
   return { found, body, cached: false, fetchedAt };
 }
 
+interface SourceResult { name: string; url: string; body: string; found: boolean; cached: boolean; fetchedAt: string; info: BinlistReply; error?: string }
+const openCache = new Map<string, SourceResult>();
+const credit = "Card prefixes from BIN List Data by Venelin Kochev (binlookup.io), CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), via api.dharun.dev; fields normalized and merged.";
+const text = (v: unknown): string | undefined => typeof v === "string" && v.trim() ? v.trim() : undefined;
+async function openLookup(bin: string): Promise<SourceResult> {
+  const hit = openCache.get(bin);
+  if (hit && Date.now() - Date.parse(hit.fetchedAt) < CACHE_TTL_MS) return { ...hit, cached: true };
+  const url = `https://api.dharun.dev/v1/bin/${bin}`;
+  const fetchedAt = new Date().toISOString();
+  const response = await fetch(url, { signal: AbortSignal.timeout(3000), headers: { Accept: "application/json" } });
+  const body = await response.text();
+  if (response.status !== 404 && !response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = response.status === 404 ? {} : JSON.parse(body)?.data;
+  if (!data || typeof data !== "object") throw new Error("invalid data object");
+  const info: BinlistReply = { scheme: text(data.network)?.toLowerCase(), type: text(data.type)?.toLowerCase(), bank: { name: text(data.issuer) }, country: { alpha2: text(data.country), name: text(data.country_name) } };
+  const result = { name: "open BIN list", url, body, found: !!(info.scheme || info.country?.alpha2 || info.country?.name), cached: false, fetchedAt, info };
+  openCache.set(bin, result); return result;
+}
 export async function handlePaymentMethod(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const raw = query.bin?.trim();
-  if (!raw) throw badRequest("MISSING_PARAM", "bin is required: the first 6 to 8 digits of the card number — never the full number");
-  if (!/^\d{6,8}$/.test(raw)) throw badRequest("INVALID_BIN", "bin must be exactly 6 to 8 digits; the full card number is never accepted");
-  const { found, body, cached, fetchedAt } = await lookupBin(raw);
+  if (!raw) throw badRequest("MISSING_PARAM", "bin is required: first6 to8 digits, never a full card number");
+  if (!/^\d{6,8}$/.test(raw)) throw badRequest("INVALID_BIN", "bin must be exactly6 to8 digits; never the full number");
+  const binlist = async (): Promise<SourceResult> => {
+    const r = await lookupBin(raw);
+    return { ...r, name: "binlist.net", url: `https://lookup.binlist.net/${raw}`, info: r.found ? JSON.parse(r.body) : {} };
+  };
+  const settled = await Promise.allSettled([binlist(), openLookup(raw)]);
+  const sources: SourceResult[] = settled.map((r, i) => r.status === "fulfilled" ? r.value : ({ name: i === 0 ? "binlist.net" : "open BIN list", url: i === 0 ? `https://lookup.binlist.net/${raw}` : `https://api.dharun.dev/v1/bin/${raw}`, body: "", found: false, cached: false, fetchedAt: new Date().toISOString(), info: {}, error: "source unavailable" }));
+  const successful = sources.filter(s => !s.error);
+  if (!successful.length) throw upstreamUnavailable("BIN_SOURCES_UNAVAILABLE", "both BIN sources unavailable; refusing to guess");
+  const valid = sources.some(s => s.found);
+  if (!valid && successful.length !== 2) throw upstreamUnavailable("BIN_COVERAGE_INCOMPLETE", "one source has no record and the other is unavailable; cannot confirm no-record");
+  const fields = { network: (i: BinlistReply) => i.scheme, issuing_bank: (i: BinlistReply) => i.bank?.name, issuing_country: (i: BinlistReply) => i.country?.name ?? i.country?.alpha2, card_type: (i: BinlistReply) => i.type };
+  const values: Record<string, string | null> = {};
+  const fieldSources: Record<string, string | null> = {};
+  const conflicts: string[] = [];
+  for (const [field, pick] of Object.entries(fields)) {
+    const candidates = successful.map(s => ({ s, v: text(pick(s.info)) })).filter(c => c.v);
+    values[field] = candidates[0]?.v ?? null; fieldSources[field] = candidates[0]?.s.name ?? null;
+    if (new Set(candidates.map(c => c.v!.toLowerCase())).size > 1) conflicts.push(field);
+  }
   const asOf = new Date().toISOString();
-  let info: BinlistReply = {};
-  if (found) {
-    try {
-      info = JSON.parse(body);
-    } catch {
-      throw upstreamUnavailable("BINLIST_MALFORMED", "the BIN database returned a body that is not JSON; refusing to answer");
-    }
-  }
-  const valid = found;
-  const network = info.scheme ?? null;
-  const issuingBank = info.bank?.name ?? null;
-  const issuingCountry = info.country?.name ?? null;
-  const cardType = info.type ?? null;
-  const evidence = JSON.stringify({
-    bin: raw, valid, network, issuing_bank: issuingBank, issuing_country: issuingCountry, card_type: cardType,
-    upstream: { url: `https://lookup.binlist.net/${raw}`, status: body ? 200 : "400/404 (no record)", body: body || null, cached },
-    scope: "a BIN has no checksum (Luhn needs the full card number, which is never received); valid means the prefix is allocated and known to the binlist.net database — valid=false is 'no record', not proof the prefix is unallocated",
-    fetched_at: fetchedAt, as_of: asOf,
-  });
-  const receipt = makeReceipt(INTENT, `https://lookup.binlist.net/${raw}`, evidence, "single keyless BIN database lookup (cached up to 24h); exact upstream body embedded in receipted evidence");
+  const fetchedAt = successful.map(s => s.fetchedAt).sort()[0];
+  const evidence = JSON.stringify({ bin: raw, valid, ...values, field_sources: fieldSources, conflicts, sources, attribution: credit, scope: "no checksum: valid means a known prefix in at least one reference; no guarantee a card is real, active or safe", as_of: asOf });
+  const receipt = makeReceipt(INTENT, sources[0].url, evidence, "two keyless BIN references; exact raw bodies, field provenance, conflicts and original acquisition times; up to24h cache");
   receipt.fetched_at = fetchedAt;
-  try {
-    await saveReceipt(receipt, evidence);
-  } catch {
-    throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
-  }
-  const answer = valid
-    ? `Yes, BIN ${raw} is an allocated, known card prefix: ${network ?? "unknown network"}${cardType ? ` ${cardType}` : ""}` +
-      (issuingBank ? `, issued by ${issuingBank}` : "") + (issuingCountry ? `, ${issuingCountry}` : "") +
-      ` (binlist.net record${cached ? ", served from the 24h cache fetched " + fetchedAt : " fetched " + fetchedAt}). ` +
-      `Scope: a BIN alone has no checksum to verify — this confirms the prefix is allocated, not that any card number with it is real, active, or safe to accept.`
-    : `No record for BIN ${raw} in the binlist.net database (its own "no such BIN" answer, fetched ${fetchedAt}). ` +
-      `That is not proof the prefix is unallocated — the database does not cover every issuer — and a BIN alone carries no checksum to verify.`;
-  return envelope(INTENT, {
-    bin: raw,
-    valid,
-    network,
-    issuing_bank: issuingBank,
-    issuing_country: issuingCountry,
-    card_type: cardType,
-    summary: valid
-      ? `${raw}: known ${network ?? "?"}${cardType ? ` ${cardType}` : ""} prefix${issuingBank ? ` (${issuingBank})` : ""}; allocation-only check.`
-      : `${raw}: no record in the BIN database; not proof of non-allocation.`,
-  }, receipt, { answer, verdict: "verified", confidence: 0.9,
-    source: `binlist.net https://lookup.binlist.net/${raw} (${cached ? "cache, fetched " : "fetched "}${fetchedAt}; exact body in receipt)` });
+  try { await saveReceipt(receipt, evidence); } catch { throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable"); }
+  const { network, issuing_bank, issuing_country, card_type } = values;
+  const answer = (valid ? `Yes, BIN ${raw} is an allocated, known card prefix: ${network ?? "unknown network"}${card_type ? " " + card_type : ""}${issuing_bank ? ", issued by " + issuing_bank : ""}${issuing_country ? ", " + issuing_country : ""}. ` : `No record for BIN ${raw} in either reference. That is not proof the prefix is unallocated. `) +
+    `Allocation-only reference check, no checksum, no guarantee a card is real, active or safe. Sources fetched ${fetchedAt}${sources.some(s => s.cached) ? ", up to24h cache" : ""}.` +
+    (sources.some(s => s.error) ? " One source unavailable; partial coverage." : "") + (conflicts.length ? ` Sources disagree on ${conflicts.join(", ")}; binlist.net non-empty fields take precedence.` : "") + " " + credit;
+  return envelope(INTENT, { bin: raw, valid, ...values, field_sources: fieldSources, source_conflicts: conflicts, attribution: credit, summary: `${raw}: ${valid ? "known prefix" : "no record"}; allocation-only check.` }, receipt, { answer, verdict: "verified", confidence: conflicts.length || sources.some(s => s.error) ? 0.6 : 0.9, source: successful.map(s => `${s.name} ${s.url} fetched ${s.fetchedAt}`).join("; ") });
 }
