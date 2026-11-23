@@ -18,3 +18,43 @@ coverage has been verified. GDELT intermittently returned rate-limit
 notices. An unavailable or malformed source is disclosed as degraded.
 Empty 200 responses require at least one structurally valid search body;
 otherwise both news routes fail closed with 502.
+
+## Holder 429 fallback, slice F
+
+Implementation commit: `e8c19f95a88b0ed5970dac36a692279bcb9277fb`.
+
+- GeckoTerminal observations are retained process-locally, with a five-minute
+  normal cache TTL. Cached body bytes and acquisition time stay paired.
+- HTTP 429 can reuse only an eligible prior real observation. The handler
+  revalidates identity, count and the 24-hour provider source-age bound.
+  Fallback does not refresh the original body, source time or cache age.
+- Answers identify the result as stale and disclose the original source
+  timestamp. Receipts retain the original raw body and disclose the fallback;
+  health records the GeckoTerminal error rather than a Blockscout failure.
+- A cold process has no retained observation to fall back to. Cache is not
+  persisted across restarts. No estimated count or seeded observation is used.
+- A 429 starts a process-wide cooldown of at least 60 seconds. Existing
+  request-budget, queue-cap and pacing protections remain in place.
+
+This slice does not establish that a deployed process has a usable retained
+observation or that upstream rate limiting has ended. Check those separately.
+
+## Route answer ordering, slice D2
+
+Implementation commit: `2ef1f931cc660a258c9425421e5da81dfd299677`.
+
+When an aggregator observation is present, ETH/USDC prose leads with the
+reported `amount_out` in base units and USDC, before gas. It names the lower
+median convention before describing the baseline route: the block-pinned
+venue baseline is one observation and an eligible Velora quote is the other.
+With two surviving observations, use the lower actual quote, not their
+average. Best single route and reported aggregate remain distinct.
+
+This is a prose-only change. Numeric output, source eligibility, receipt
+shape and non-aggregator prose are unchanged. The focused route suite passed
+31 tests across route-aggregator, route-explanation and
+route-persistence-required; TypeScript and diff checks passed.
+
+Both implementation commits were pushed to main after review. Neither slice
+changes `miner.yaml`. Deployment is a separate operation, not performed by
+this handoff update.
