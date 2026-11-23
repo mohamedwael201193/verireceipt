@@ -204,6 +204,7 @@ export function recordUpstreamOkFromReceipt(receipt: unknown): void {
 
 /** Primary upstream service per intent, for the 502 error path. */
 export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
+  "security-review": "api.osv.dev",
   filings: "sec-edgar",
   tvl: "defillama",
   tx: "evm-rpc",
