@@ -154,6 +154,44 @@ const CAISO_HUB_ALIASES: Record<string, string> = (() => {
   return out;
 })();
 
+/**
+ * Natural-name aliases (A11): the name a person uses for a place —
+ * the Elering countries and the NYISO load zones by their common
+ * names — matched on the whitespace-normalised, lower-cased
+ * node_or_zone via Object.hasOwn (no prototype-chain lookup). Each
+ * resolves to the canonical supported zone; the served answer names
+ * that zone (node_or_zone, market, answer prose), the same disclosure
+ * standard as a CAISO hub short name. Bare "nyiso" is answered for
+ * the N.Y.C. load zone, mirroring bare "caiso" -> the NP15 hub.
+ * Places run by operators we have no feed for (ERCOT, PJM, MISO,
+ * SPP, ...) are NOT here: they stay an honest 422 UNSUPPORTED_ZONE.
+ */
+const GRID_NATURAL_ZONE_ALIASES: Record<string, string> = {
+  estonia: "EE",
+  finland: "FI",
+  latvia: "LV",
+  lithuania: "LT",
+  "new york": "N.Y.C.",
+  "new york city": "N.Y.C.",
+  nyc: "N.Y.C.",
+  nyiso: "N.Y.C.",
+  "long island": "LONGIL",
+  genesee: "GENESE",
+  "capital district": "CAPITL",
+  "hudson valley": "HUD VL",
+  millwood: "MILLWD",
+  dunwoodie: "DUNWOD",
+  "mohawk valley": "MHK VL",
+};
+
+/** Canonical supported zone for a natural place name, or undefined. */
+export function resolveNaturalZoneAlias(spelling: string): string | undefined {
+  const key = spelling.trim().replace(/\s+/g, " ").toLowerCase();
+  return Object.hasOwn(GRID_NATURAL_ZONE_ALIASES, key)
+    ? GRID_NATURAL_ZONE_ALIASES[key]
+    : undefined;
+}
+
 /** Canonical CAISO hub for a hub short name, or undefined. */
 export function resolveCaisoHubAlias(spelling: string): string | undefined {
   const key = spelling.trim().replace(/\s+/g, " ").toLowerCase();
@@ -189,6 +227,9 @@ const QUESTION_ZONE_CANDIDATES: ReadonlyArray<{ re: RegExp; spelling: string }> 
   for (const spelling of [
     ...Object.keys(CAISO_HUB_ALIASES),
     ...Object.keys(CAISO_SYSTEM_REQUESTS).filter((k) => k.length > 0),
+    // A11: natural place names are safe case-insensitive candidates
+    // (proper nouns and multi-word names, no english-word collisions).
+    ...Object.keys(GRID_NATURAL_ZONE_ALIASES),
   ]) {
     out.push({
       re: new RegExp("(?<![A-Za-z0-9_.])" + esc(spelling) + "(?![A-Za-z0-9_])", "i"),
@@ -426,13 +467,20 @@ export async function handleGridPrice(
   const systemKey = requestedZone.toLowerCase();
   const isCaisoSystem = Object.hasOwn(CAISO_SYSTEM_REQUESTS, systemKey);
   const hubAlias = isCaisoSystem ? undefined : resolveCaisoHubAlias(requestedZone);
+  // A11: a natural place name resolves to its supported zone after the
+  // CAISO system/hub spellings and before the exact-key lookup.
+  const naturalAlias = isCaisoSystem || hubAlias !== undefined
+    ? undefined
+    : resolveNaturalZoneAlias(requestedZone);
   // Fold ASCII only: Unicode lookalikes, unknown prefixes and near matches
   // must still fail the exact own-property check against SUPPORTED_ZONES.
   const zoneKey = requestedZone.replace(/[a-z]/g, (ch) => ch.toUpperCase());
   // The node every lookup, fetch, cache write, receipt and answer below
   // uses: the NP15 hub for a system request, the canonical hub for a
   // hub short name, else the exact supported-map key.
-  let normalizedZone = isCaisoSystem ? CAISO_SYSTEM_NODE : hubAlias ?? zoneKey;
+  let normalizedZone = isCaisoSystem
+    ? CAISO_SYSTEM_NODE
+    : hubAlias ?? naturalAlias ?? zoneKey;
   // An explicit source qualifier may name only an existing identifier in
   // that same source. Strip it once, never recursively or across markets.
   const qualified = /^(NYISO|ELERING) (.+)$/.exec(zoneKey);

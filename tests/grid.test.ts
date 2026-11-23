@@ -4381,3 +4381,93 @@ describe("handleGridPrice question fallback", () => {
     expect(res.interval_start).toBe(interval);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Natural-name zone aliases (A11): the name a person uses for a place
+// resolves to the canonical supported zone, with the served zone named in
+// the answer. Operators with no feed stay an honest 422.
+describe("handleGridPrice natural-name aliases", () => {
+  it("Estonia resolves to the EE bidding zone", async () => {
+    const interval = pastIso(3);
+    saveGridPrice("EE", interval, 83.1, "Elering EE");
+    const res = await handleGridPrice({ node_or_zone: "Estonia", interval_start: interval });
+    expect(res.verdict).toBe("verified");
+    expect(res.lmp_usd_per_mwh).toBe(83.1);
+    expect(res.node_or_zone).toBe("EE");
+  });
+
+  it("Finland / Latvia / Lithuania resolve to FI / LV / LT", async () => {
+    const interval = pastIso(4);
+    saveGridPrice("FI", interval, 10.5, "Elering FI");
+    saveGridPrice("LV", interval, 84.2, "Elering LV");
+    saveGridPrice("LT", interval, 85.3, "Elering LT");
+    for (const [name, zone, lmp] of [
+      ["Finland", "FI", 10.5],
+      ["latvia", "LV", 84.2],
+      ["LITHUANIA", "LT", 85.3],
+    ] as const) {
+      const res = await handleGridPrice({ node_or_zone: name, interval_start: interval });
+      expect(res.node_or_zone).toBe(zone);
+      expect(res.lmp_usd_per_mwh).toBe(lmp);
+    }
+  });
+
+  it("New York City / nyc resolve to the N.Y.C. load zone", async () => {
+    const interval = pastIso(5);
+    saveGridPrice("N.Y.C.", interval, 30.42, "NYISO");
+    for (const name of ["New York City", "nyc", "New York"]) {
+      const res = await handleGridPrice({ node_or_zone: name, interval_start: interval });
+      expect(res.node_or_zone).toBe("N.Y.C.");
+      expect(res.market).toBe("NYISO");
+      expect(res.lmp_usd_per_mwh).toBe(30.42);
+    }
+  });
+
+  it("bare NYISO is answered for the N.Y.C. load zone (mirrors bare CAISO -> NP15)", async () => {
+    const interval = pastIso(6);
+    saveGridPrice("N.Y.C.", interval, 31.11, "NYISO");
+    const res = await handleGridPrice({ node_or_zone: "NYISO", interval_start: interval });
+    expect(res.node_or_zone).toBe("N.Y.C.");
+    expect(res.market).toBe("NYISO");
+    expect(res.lmp_usd_per_mwh).toBe(31.11);
+  });
+
+  it("Long Island resolves to LONGIL", async () => {
+    const interval = pastIso(7);
+    saveGridPrice("LONGIL", interval, 33.7, "NYISO");
+    const res = await handleGridPrice({ node_or_zone: "Long Island", interval_start: interval });
+    expect(res.node_or_zone).toBe("LONGIL");
+    expect(res.lmp_usd_per_mwh).toBe(33.7);
+  });
+
+  it("operators with no feed stay an honest 422 (ERCOT, PJM, Texas)", async () => {
+    const interval = pastIso(8);
+    for (const name of ["ERCOT", "PJM", "Texas", "MISO"]) {
+      await expectApiError(
+        handleGridPrice({ node_or_zone: name, interval_start: interval }),
+        422,
+        "UNSUPPORTED_ZONE",
+      );
+    }
+  });
+
+  it("question path: 'What was the LMP in Estonia ...' recovers EE", async () => {
+    const interval = pastIso(9);
+    saveGridPrice("EE", interval, 77.7, "Elering EE");
+    const res = await handleGridPrice({
+      question: "What was the LMP in Estonia for the interval starting " + interval + "?",
+    });
+    expect(res.node_or_zone).toBe("EE");
+    expect(res.lmp_usd_per_mwh).toBe(77.7);
+  });
+
+  it("question path: 'power price in New York City at <iso>Z' recovers N.Y.C.", async () => {
+    const interval = pastIso(10);
+    saveGridPrice("N.Y.C.", interval, 29.99, "NYISO");
+    const res = await handleGridPrice({
+      question: "What was the power price in New York City at " + interval + "?",
+    });
+    expect(res.node_or_zone).toBe("N.Y.C.");
+    expect(res.lmp_usd_per_mwh).toBe(29.99);
+  });
+});
