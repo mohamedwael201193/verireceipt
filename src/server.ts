@@ -17,6 +17,7 @@ import { handleGridPrice } from "./handlers/gridPrice";
 import { handleValidator } from "./handlers/validator";
 import { handleGasPrice } from "./handlers/gasPrice";
 import { handleTransactionRisk } from "./handlers/transactionRisk";
+import { handleFinancialData } from "./handlers/financialData";
 import { handleBalance } from "./handlers/walletBalance";
 import { handleTokenSupply } from "./handlers/tokenSupply";
 import { handleFx, handleFxNow } from "./handlers/currencyConvert";
@@ -322,6 +323,7 @@ export function buildServer(): FastifyInstance {
     trackIntent("gas-price", () => handleGasPrice(asQuery(request.query))),
   );
   app.get("/v1/transaction-risk", async (request) => trackIntent("transaction-risk", () => handleTransactionRisk(asQuery(request.query))));
+  app.get("/v1/financial-data", async (request) => trackIntent("financial-data", () => handleFinancialData(asQuery(request.query))));
   app.get("/v1/balance", async (request) =>
     trackIntent("balance", () => handleBalance(asQuery(request.query))),
   );

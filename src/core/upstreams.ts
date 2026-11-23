@@ -206,6 +206,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   validator: "beacon-api",
   "gas-price": "evm-rpc",
   "transaction-risk": "evm-rpc",
+  "financial-data": "sec-edgar",
   balance: "evm-rpc",
   "token-supply": "evm-rpc",
   macro: "worldbank",
