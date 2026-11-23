@@ -3,6 +3,8 @@
 import {buildPacket,expenseSummary,factHash,hash,observationFailures,validateSpec,type ThesisSpec,type FactSpec,type Observation,type Expense,type Claim,type ResearchPacket} from './researchDesk.js';
 export interface Acquisition { observation:Observation|null; expense:Expense; failure:string|null }
 export interface ResearchAdapter {
+  /** False when no independently ranked distinct-provider route is available. */
+  allowEscalation?:boolean;
   // Must reserve against both this note and the shared daily ledger BEFORE signing.
   // escalation=true permits a distinct ranked provider, never unknown-charge retry.
   buy(fact:FactSpec,context:{spec_hash:string;remaining_uusdc:string;escalation:boolean}):Promise<Acquisition>;
@@ -46,7 +48,7 @@ export async function runResearchDesk(spec:ThesisSpec,claims:Claim[],adapter:Res
     let a=await buy(f,false);
     if(!a)continue;
     const valid=(x:Acquisition)=>x.failure===null&&x.observation!==null&&!observationFailures(f,x.observation,now().toISOString()).length;
-    if(!valid(a)&&!escalated&&a.expense.status!=='reserved-uncertain'&&a.escalationAllowed){
+    if(!valid(a)&&adapter.allowEscalation!==false&&!escalated&&a.expense.status!=='reserved-uncertain'&&a.escalationAllowed){
       escalated=true;const second=await buy(f,true);if(second)a=second;
     }
     if(a.observation)observations.push(a.observation);

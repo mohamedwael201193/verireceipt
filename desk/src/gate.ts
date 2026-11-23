@@ -339,7 +339,7 @@ function gateDeliveryOk(d: DeliveryProof, receipt: { receipt_hash: string; amoun
  * recorded answer, the delivery is included with exact identity and proof
  * shape — or legitimately pending — and the receipt time belongs to its epoch.
  */
-async function verifyNodeLevel(
+export async function verifyNodeLevel(
   input: {
     payer: string;
     signalHash: string;
@@ -445,6 +445,7 @@ interface VerifiedCore {
   miner_chain: "passed" | "failed" | "not_applicable";
   miner_checks: Check[];
   source_verification?: SourceVerification;
+  provider_response?: Record<string, unknown>;
   /** Verification failures (purchase refusals included); empty when the evidence stands. */
   reasons: string[];
   evidenceOk: boolean;
@@ -615,6 +616,7 @@ export async function executeVerifiedPurchase(
       miner_checks: minerChecks,
       reasons,
       source_verification: sourceVerification,
+      provider_response: node.providerResponse,
       evidenceOk: node.ok && minerChain !== "failed" && (!sourceVerification || sourceVerification.status === "verified"),
     };
   } catch (e) {

@@ -57,3 +57,52 @@ stage: changed source, unavailable observation, invented numeric claim,
 and revised analyst assumption. Real purchased runs remain to be collected.
 Hosted-mode spending and retention remain disabled. No on-chain transaction,
 public posting, push or deployment is part of this core milestone.
+
+## Local paid adapter milestone
+
+`npx tsx desk/scripts/run-research-desk.ts A|B NEW_PRIVATE_OUTPUT_DIRECTORY`
+requires an explicitly pinned payer address and the existing testnet secret
+path. It reuses the existing escrow Gate path and shared daily reservations.
+The CLI keeps raw paid replies, per-fact reservations and Gate proof details
+in its private output directory. Research expenses are also written in the
+existing shared-ledger row format. No on-chain transaction is sent by this
+CLI: an escrow authorization signature is not an on-chain transaction.
+
+The live schema must match the frozen request and numeric response contract,
+as well as remain active. Independent source adapters use fixed source
+origins, not URLs supplied by a provider. Source bundles preserve literal
+responses and, for RPC reads, the exact method/body. Source matching checks:
+USD spot pair, USD equity identity and trade time, exact protocol TVL slug,
+unique project/symbol/chain base-yield pool, chain/pool reserves, explicit
+World Bank unemployment country/year, full-history SEC form recount, and
+two chain-bound RPC reads of supply/decimals at the same finalized block hash.
+Price, TVL, pool reserves and base APY use a declared 100-bps relative band
+between the paid and independent reads. This is not an exact-source-price
+claim or a scoring guarantee. Other supported numeric matches are exact,
+after the source's stated decimal/unit conversion. Provider raw-byte L2
+remains available only for our known receipt origin; external answers are
+honestly L1 even when independently source-matched.
+
+Template A currently freezes UNI price + Ethereum total supply + Uniswap
+protocol TVL, with implied FDV and FDV/TVL. Optional pool liquidity and yield
+parsers exist but are not purchased by that template. Template B freezes
+TSLA price + Tesla 2024 Form 10-Q count + US 2024 unemployment. The registry
+boolean is not silently coerced into a numeric observation and is not yet
+part of template B. Neither template asserts an economic relationship
+between unemployment and yield. Thresholds are declared analyst assumptions,
+not observations or investment advice.
+
+`npx tsx desk/scripts/judge-desk-packet.ts research-packet.json SPEC_SHA256`
+reparses the stored primary bytes with the fixed source parsers, checks the
+expected frozen spec, and rechecks public signal/delivery/epoch records. It
+uses no wallet or secret and sends no paid request. Current source-origin
+truth, settlement finality and local Merkle-path verification are not claimed.
+The original `judge:verify` command remains unchanged pending live evidence.
+
+Fail-closed limits: live receipt reuse is disabled until a reusable public
+proof record is persisted; the pure core supports reuse but the paid adapter
+never trusts cached layer booleans. Distinct-ranked-provider escalation is
+also disabled in the local adapter until the ranking endpoint supplies a
+verified selection contract. There is no automatic retry after a failure,
+and unknown signed outcomes remain fully reserved. Thus the maximum-one
+escalation ceiling is honored conservatively with zero escalation here.
