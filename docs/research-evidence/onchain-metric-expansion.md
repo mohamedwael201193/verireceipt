@@ -11,7 +11,9 @@ https://devnode.telegraphprotocol.com/engine/v1/intents/ONCHAIN_METRIC_VERIFY_GE
 The schema is active, response format v4. Required inputs are address and
 integer block; optional chain is ethereum, polygon or arbitrum; optional
 metric is balance or tx_count. Scored balance_gwei is in Gwei. Address,
-block, chain and nonce are off-chain fields. No decimal ETH/POL substitution.
+block, chain and nonce are off-chain fields. No decimal ETH/POL substitution. balance_gwei is a JavaScript floating-point
+number and can lose precision at large balances; balance_wei is the exact
+integer string.
 
 The existing handler requires agreement from at least two RPC endpoints
 on finalized block hash, native balance and nonce. It checks chain ID and
@@ -32,7 +34,10 @@ Primary responding RPC: https://eth-mainnet.public.blastapi.io
 Other configured Ethereum endpoints: https://eth.drpc.org and
 https://rpc.mevblocker.io . An agreeing response is not a claim that each
 configured endpoint answered. The 9-second handler budget can end in
-METRIC_QUORUM_UNAVAILABLE when archive/finality reads are unavailable.
+METRIC_QUORUM_UNAVAILABLE when archive/finality reads are unavailable. In
+particular, older Arbitrum blocks can refuse with 502 when configured
+public endpoints do not provide the required archive state. Registration
+must not describe this as universal historical-block coverage.
 
 ## Manifest validation limits
 
