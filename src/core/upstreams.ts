@@ -91,6 +91,7 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "sanctionslistservice.ofac.treas.gov": "ofac",
   "scsanctions.un.org": "un-sanctions",
   "ipwho.is": "ipwhois",
+  "air-quality-api.open-meteo.com": "open-meteo",
   "ip-api.com": "ip-api",
   "site.api.espn.com": "espn",
 };
@@ -211,6 +212,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "sanctions-screen": "ofac",
   "ip-geolocation": "ipwhois",
   "game-result": "espn",
+  "air-quality": "open-meteo",
 };
 
 /**
