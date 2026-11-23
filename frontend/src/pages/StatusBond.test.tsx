@@ -1,5 +1,5 @@
-// pc2-xtab-r4: /status shows the on-chain bond ($4.32 = minerBond(6177) =
-// quoteMinerBond(45)) and its live re-read, and surfaces a mismatch.
+// pc2-xtab-r4: /status shows the on-chain bond ($4.95 = minerBond(6188) =
+// quoteMinerBond(54)) and its live re-read, and surfaces a mismatch.
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -25,12 +25,12 @@ function stubFetch(bondUnits: number) {
 describe("/status bond row", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("shows $4.32 with its on-chain source and a matching live re-read", async () => {
-    stubFetch(4_320_000);
+  it("shows $4.95 with its on-chain source and a matching live re-read", async () => {
+    stubFetch(4_950_000);
     render(<MemoryRouter><Status /></MemoryRouter>);
     expect(await screen.findByText("live re-read matches")).toBeTruthy();
-    expect(screen.getAllByText(/\$4\.32 Test USDC/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/minerBond\(6177\) = quoteMinerBond\(45\) = 4,320,000/)).toBeTruthy();
+    expect(screen.getAllByText(/\$4\.95 Test USDC/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/minerBond\(6188\) = quoteMinerBond\(54\) = 4,950,000/)).toBeTruthy();
     expect(screen.queryByText(/\$1\.40/)).toBeNull();
   });
 
