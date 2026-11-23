@@ -16,7 +16,8 @@
 // 2026-11-23, hashed into the fixture set). Only feeds probed live
 // AND inside the contract's micro-unit range are served: stETH PoR
 // (18 decimals, ~9.7e18 micro-ETH) exceeds the contract range and is
-// refused honestly, as is any unlisted asset. Micro-unit conversion:
+// not enabled. Unlisted assets get a disclosed coverage-only null answer.
+// Micro-unit conversion:
 // answer x 10^(6 - feedDecimals); a non-zero remainder is floored and
 // the remainder disclosed in the receipt.
 //
@@ -46,6 +47,14 @@ export const POR_FEEDS: Record<string, PorFeed> = {
   // The TUSD feed docs name TrueUSD/TrueUSDB tokens and attestor Moore Hong Kong,
   // not an issuer entity, so no issuer name is served for TUSD.
   TUSD: { asset: "TUSD", proxy: "0xBE456fd14720C3aCCc30A2013Bffd782c9Cb75D5", feedName: "TUSD Reserves" },
+};
+
+// Official issuer contract lists, verified 2026-11-23. These contracts
+// measure Ethereum issuance only, not all native chains backed by the feed.
+const ETHEREUM_TOKENS: Record<string, { address: string; decimals: number }> = {
+  WBTC: { address: "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599", decimals: 8 },
+  CBBTC: { address: "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", decimals: 8 },
+  TUSD: { address: "0x0000000000085d4780b73119b644ae5ecd22b376", decimals: 18 },
 };
 
 const DECIMALS_SEL = "0x313ce567";
@@ -106,10 +115,13 @@ export function parseRoundData(hex: string): RoundData {
 export async function handleReserveAttestation(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const assetRaw = query.asset?.trim();
   if (!assetRaw) throw badRequest("MISSING_PARAM", `asset is required, one of: ${Object.values(POR_FEEDS).map((f) => f.asset).join(", ")}`);
-  const feed = POR_FEEDS[assetRaw.toUpperCase()];
+  const key = assetRaw.toUpperCase();
+  const feed = Object.hasOwn(POR_FEEDS, key) ? POR_FEEDS[key] : undefined;
   if (!feed) {
-    throw unprocessable("UNSUPPORTED_ASSET",
-      `"${assetRaw}" has no probed-live Chainlink PoR feed in this slice (served: ${Object.values(POR_FEEDS).map((f) => f.asset).join(", ")}; stETH PoR exceeds the contract's micro-unit range and is refused, not served wrong)`);
+    return { answer: `No probed-live Chainlink PoR feed is enabled for "${assetRaw.slice(0, 80)}". Covered assets: ${Object.values(POR_FEEDS).map(f => f.asset).join(", ")}. No reserve is asserted; this coverage-only response is outside the scored numeric attestation contract.`,
+      asset: assetRaw.slice(0, 80), attested_reserve: null, ethereum_total_supply: null,
+      reserve_vs_ethereum_supply_pct: null, collateral_ratio_pct: null,
+      verdict: "unavailable", confidence: 0, receipt: null };
   }
   const fetchedAt = new Date().toISOString();
   const rpcs = CHAIN_RPCS.ethereum;
@@ -139,6 +151,24 @@ export async function handleReserveAttestation(query: Record<string, string | un
   const stale = ageS > HEARTBEAT_S;
   const asOf = new Date().toISOString();
   const human = Number(data.answer) / 10 ** decimals;
+  let ethereumSupply: number | null = null;
+  let supplyEvidence: unknown = null;
+  const token = ETHEREUM_TOKENS[key];
+  try {
+    const [supply, tokenDec] = await Promise.all([
+      quorumCall(rpcs, "0x18160ddd", token.address, "token totalSupply()"),
+      quorumCall(rpcs, DECIMALS_SEL, token.address, "token decimals()"),
+    ]);
+    if (!/^0x[0-9a-f]{64}$/.test(supply.result) || !/^0x[0-9a-f]{64}$/.test(tokenDec.result) || Number(BigInt(tokenDec.result)) !== token.decimals) throw new Error("token read invalid");
+    ethereumSupply = Number(BigInt(supply.result)) / 10 ** token.decimals;
+    if (!Number.isFinite(ethereumSupply) || ethereumSupply <= 0) throw new Error("token supply invalid");
+    supplyEvidence = { address: token.address, decimals: token.decimals, raw_supply: BigInt(supply.result).toString(), raw_bodies: { supply: supply.bodies, decimals: tokenDec.bodies }, scope: "Ethereum native ERC20 issuance only; excludes other chains" };
+  } catch {
+    ethereumSupply = null;
+    supplyEvidence = { status: "unavailable", reason: "token_supply_quorum_unavailable" };
+  }
+  const computedRatio = ethereumSupply === null ? null : human / ethereumSupply * 100;
+  const ethereumRatio = computedRatio !== null && Number.isFinite(computedRatio) ? computedRatio : null;
   const evidence = JSON.stringify({ asset: feed.asset, feed: feed.feedName, issuer: feed.issuer ?? null, proxy: feed.proxy,
     // The contract's off-chain field "source" is served as source_feed because
     // the response envelope reserves "source"; this key records that mapping.
@@ -148,6 +178,7 @@ export async function handleReserveAttestation(query: Record<string, string | un
     updated_at: updatedIso, age_seconds: ageS, heartbeat_seconds: HEARTBEAT_S, stale,
     micro_units: micro.toString(), micro_remainder: remainder.toString(),
     derivation: "attested_reserve = answer x 10^(6 - feed_decimals), floored with the remainder disclosed",
+    ethereum_supply: supplyEvidence, reserve_vs_ethereum_supply_pct: ethereumRatio, collateral_ratio_pct: null,
     raw_bodies: { decimals: dec.bodies, round: round.bodies }, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, `ethereum RPC quorum, Chainlink PoR ${feed.proxy}`, evidence, "Chainlink Proof of Reserve via 2-of-N RPC quorum; micro-unit derivation disclosed");
   receipt.fetched_at = fetchedAt;
@@ -156,11 +187,16 @@ export async function handleReserveAttestation(query: Record<string, string | un
   } catch {
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
-  const answer = `${feed.asset} attested reserve: ${micro.toString()} micro-units (${human.toLocaleString("en-US", { maximumFractionDigits: decimals })} ${feed.asset}) per the Chainlink ${feed.feedName} feed${feed.issuer ? ` (issuer ${feed.issuer})` : ""}, round ${data.roundId}, attested ${updatedIso} (${Math.floor(ageS / 3600)}h ago${stale ? `, OLDER than the ${HEARTBEAT_S / 3600}h heartbeat` : ""}). ` +
+  const answer = `${feed.asset} attested reserve: ${human.toLocaleString("en-US", { maximumFractionDigits: decimals })} ${feed.asset} (${micro.toString()} micro-units) per the Chainlink ${feed.feedName} feed${feed.issuer ? ` (issuer ${feed.issuer})` : ""}, round ${data.roundId}, attested ${updatedIso} (${Math.floor(ageS / 3600)}h ago${stale ? `, OLDER than the ${HEARTBEAT_S / 3600}h heartbeat` : ""}). ` +
+    `${ethereumSupply === null ? "Ethereum total supply unavailable; no ratio asserted. " : `Ethereum total supply ${ethereumSupply} ${feed.asset}; reserve versus Ethereum-only supply ${ethereumRatio}%. `}This is not a global collateral ratio: the reserve feed covers wider issuance and other native chains are excluded from the supply denominator; collateral_ratio_pct is null. Supply is read at latest while the reserve is the timestamped feed attestation, not a time-matched solvency audit. ` +
     `Read on ethereum mainnet through the RPC quorum; this is the feed's own attestation, not an independent audit.${remainder ? ` Micro-unit remainder floored: ${remainder}.` : ""}`;
   return envelope(INTENT, {
     attested_reserve: Number(micro),
     asset: feed.asset,
+    reserve_units: human, ethereum_total_supply: ethereumSupply,
+    reserve_vs_ethereum_supply_pct: ethereumRatio, collateral_ratio_pct: null,
+    supply_scope: "Ethereum native ERC20 issuance only, excludes other chains",
+    round_id: data.roundId.toString(), updated_at: updatedIso, feed_age_seconds: ageS, heartbeat_seconds: HEARTBEAT_S,
     block: `round ${data.roundId}, attested ${updatedIso}`,
     // The contract's off-chain field is named "source"; the envelope
     // reserves that key, so it is served as source_feed and mapped in
