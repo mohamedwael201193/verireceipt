@@ -224,6 +224,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "news-search": "hn-algolia",
   "route-eta": "osrm",
   "mining-hashprice": "mempool-space",
+  "crypto-price": "coinbase",
 };
 
 /**
