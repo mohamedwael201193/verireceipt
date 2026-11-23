@@ -1,6 +1,6 @@
 // Orchestration only: adapters own purchases and source validation. No signer
 // or key import here. Persist the frozen spec before invoking any paid adapter.
-import {buildPacket,factHash,hash,observationFailures,validateSpec,type ThesisSpec,type FactSpec,type Observation,type Expense,type Claim,type ResearchPacket} from './researchDesk.js';
+import {buildPacket,expenseSummary,factHash,hash,observationFailures,validateSpec,type ThesisSpec,type FactSpec,type Observation,type Expense,type Claim,type ResearchPacket} from './researchDesk.js';
 export interface Acquisition { observation:Observation|null; expense:Expense; failure:string|null }
 export interface ResearchAdapter {
   // Must reserve against both this note and the shared daily ledger BEFORE signing.
@@ -20,29 +20,39 @@ export async function runResearchDesk(spec:ThesisSpec,claims:Claim[],adapter:Res
   spec=structuredClone(spec);claims=structuredClone(claims);const spec_hash=hash(spec);
   // Validate every predicate/reference before the first external purchase.
   buildPacket(spec,[],[],claims,spec.frozen_at);
-  await store.freeze(spec,spec_hash);
+  await store.freeze(structuredClone(spec),spec_hash);
+  if(hash(spec)!==spec_hash)throw new Error('frozen spec changed');
   const observations:Observation[]=[],expenses:Expense[]=[];
   let escalated=false;
   const remaining=()=>BigInt(spec.budget_uusdc)-expenses.reduce((n,e)=>n+BigInt(e.settled_uusdc??e.reserved_uusdc),0n);
   const buy=async(f:FactSpec,escalation:boolean)=>{
     if(remaining()<BigInt(spec.max_call_uusdc))return null;
     // A thrown adapter error is deliberately not retried. It may have signed.
-    const a=await adapter.buy(f,{spec_hash,remaining_uusdc:remaining().toString(),escalation});
+    const a=structuredClone(await adapter.buy(structuredClone(f),{spec_hash,remaining_uusdc:remaining().toString(),escalation}));
+    if(a.failure!==null&&typeof a.failure!=='string')throw new Error('malformed acquisition failure');
     if(a.expense.fact_id!==f.id||a.expense.attempt!==(escalation?1:0))throw new Error('adapter acquisition binding mismatch');
+    // Full validation, including negative amounts and duplicate nonces, precedes
+    // append and any later adapter call. Invalid rows never increase authority.
+    expenseSummary([...expenses,a.expense]);
     if(BigInt(a.expense.reserved_uusdc)>BigInt(spec.max_call_uusdc)||BigInt(a.expense.reserved_uusdc)>remaining())throw new Error('adapter exceeded reserved note authority');
-    await store.append(a);expenses.push(a.expense);return a;
+    if(a.observation&&(a.observation.fact_id!==f.id||a.observation.request_hash!==factHash(f)||a.observation.receipt_hash!==a.expense.receipt_hash))throw new Error('observation/expense binding mismatch');
+    const escalationAllowed=!a.expense.useful;
+    if(a.failure!==null||!a.observation||observationFailures(f,a.observation,now().toISOString()).length){a.observation=null;a.expense.useful=false;}
+    await store.append(structuredClone(a));expenses.push(structuredClone(a.expense));return {...structuredClone(a),escalationAllowed};
   };
   for(const f of spec.facts){
     const cached=cache.find(o=>o.request_hash===factHash(f)&&!observationFailures(f,{...o,fact_id:f.id},now().toISOString()).length);
-    if(cached){const validated=await adapter.revalidate(structuredClone(cached),f,now().toISOString());if(validated&&!observationFailures(f,validated,now().toISOString()).length){observations.push({...validated,reuse:'fresh-receipt-reuse'});continue;}}
+    if(cached){const validated=await adapter.revalidate(structuredClone(cached),structuredClone(f),now().toISOString());if(validated&&!observationFailures(f,validated,now().toISOString()).length){observations.push({...validated,reuse:'fresh-receipt-reuse'});continue;}}
     let a=await buy(f,false);
     if(!a)continue;
     const valid=(x:Acquisition)=>x.failure===null&&x.observation!==null&&!observationFailures(f,x.observation,now().toISOString()).length;
-    if(!valid(a)&&!escalated&&a.expense.status!=='reserved-uncertain'&&!a.expense.useful){
+    if(!valid(a)&&!escalated&&a.expense.status!=='reserved-uncertain'&&a.escalationAllowed){
       escalated=true;const second=await buy(f,true);if(second)a=second;
     }
     if(a.observation)observations.push(a.observation);
   }
+  if(hash(spec)!==spec_hash)throw new Error('frozen spec changed during acquisition');
   const packet=buildPacket(spec,observations,expenses,claims,now().toISOString());
-  await store.finish(packet);return packet;
+  if(packet.spec_hash!==spec_hash)throw new Error('packet spec hash differs from pre-purchase commitment');
+  await store.finish(structuredClone(packet));return packet;
 }

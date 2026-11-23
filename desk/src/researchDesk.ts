@@ -133,7 +133,8 @@ export function expenseSummary(expenses:Expense[]){
   let reserved=0n,reported=0n,settled=0n,exposure=0n,wasted=0n,uncertain=0n;
   const nonces=new Set<string>();
   for(const e of expenses){
-    invariant(e.nonce && !nonces.has(e.nonce),'duplicate/empty expense nonce');nonces.add(e.nonce);
+    invariant(typeof e.useful==='boolean'&&typeof e.fact_id==='string'&&idOk(e.fact_id),'invalid expense shape');
+    invariant(typeof e.nonce==='string'&&e.nonce.length>0&&!nonces.has(e.nonce),'duplicate/empty expense nonce');nonces.add(e.nonce);
     invariant(uint(e.reserved_uusdc)&&BigInt(e.reserved_uusdc)>0n&&BigInt(e.reserved_uusdc)<=10000n,'invalid reservation');
     const r=BigInt(e.reserved_uusdc);reserved+=r;
     for(const x of [e.reported_charge_uusdc,e.settled_uusdc])invariant(x===null||(uint(x)&&BigInt(x)<=r),'invalid charge/settlement');
@@ -169,7 +170,7 @@ export function buildPacket(spec:ThesisSpec,observations:Observation[],expenses:
   if(BigInt(accounting.worst_case_uusdc)>BigInt(spec.budget_uusdc))reasons.push('note budget exceeded');
   const claim_results:ResearchPacket['claim_results']={};
   for(const c of claims){
-    if(!c.predicate){claim_results[c.id]=c.fact_refs.every(id=>values.has(id))?'SUPPORTED':'UNKNOWN';continue;}
+    if(!c.predicate){claim_results[c.id]=c.fact_refs.every(id=>values.has(id))&&c.assumption_refs.every(id=>values.has(id))&&(!c.calculation_ref||values.has(c.calculation_ref))?'SUPPORTED':'UNKNOWN';continue;}
     const p=c.predicate;
     invariant(['<','<=','>','>=','=='].includes(p.op),'invalid predicate operation');
     invariant([p.left,p.right].every(id=>c.fact_refs.includes(id)||c.assumption_refs.includes(id)||id===c.calculation_ref),'predicate uses undeclared input');

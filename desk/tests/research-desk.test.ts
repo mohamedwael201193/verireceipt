@@ -57,3 +57,26 @@ describe('Research Desk orchestration with explicitly injected unit adapters',()
   expect(calls).toBe(2);expect(p.accounting.worst_case_uusdc).toBe('0');expect(p.metrics.reused_acquisition_cost_uusdc).toBe('20000');expect(p.observations.every(o=>o.reuse==='fresh-receipt-reuse')).toBe(true);
  });
 });
+
+describe('reviewer regression pins',()=>{
+ it('store cannot mutate the frozen spec or desynchronize adapter hash',async()=>{
+  const {runResearchDesk}=await import('../src/researchDeskRunner.js');const f=fixture();const original=hash(f.spec);const seen:string[]=[];
+  const p=await runResearchDesk(f.spec,f.claims,{buy:async(fact,context)=>{seen.push(context.spec_hash);const i=f.spec.facts.findIndex(x=>x.id===fact.id);return {observation:f.observations[i],expense:f.expenses[i],failure:null};},revalidate:async()=>null},{freeze:async(spec)=>{spec.assumptions[0].value='1';},append:async()=>{},finish:async()=>{}},[],()=>new Date(at));
+  expect(seen).toEqual([original,original]);expect(p.spec_hash).toBe(original);expect(p.spec.assumptions[0].value).toBe('200');
+ });
+ it('calculation claim is UNKNOWN when division is undefined',()=>{
+  const f=fixture();f.spec.assumptions.push({id:'zero',value:'0',unit:'USD',rationale:'UNIT zero denominator'});f.spec.calculations.push({id:'ratio',op:'divide',left:'implied_fdv',right:'zero',unit:'ratio'});f.claims=[{id:'ratio_claim',fact_refs:['price','supply'],assumption_refs:['zero'],calculation_ref:'ratio'}];
+  const p=buildPacket(f.spec,f.observations,f.expenses,f.claims,at);expect(p.outcome).toBe('HOLD');expect(p.claim_results.ratio_claim).toBe('UNKNOWN');
+ });
+});
+
+describe('immediate acquisition validation',()=>{
+ it.each(['negative','zero','too-large','duplicate-nonce','missing-settlement','wrong-fact','wrong-receipt','invalid-useful','invalid-status'])('refuses %s before append or a subsequent buy',async(kind)=>{
+  const {runResearchDesk}=await import('../src/researchDeskRunner.js');const f=fixture();let buys=0,appends=0;
+  const adapter={buy:async(fact:any)=>{const i=f.spec.facts.findIndex(x=>x.id===fact.id);buys++;const expense=structuredClone(f.expenses[i]);const observation=structuredClone(f.observations[i]);
+   if(kind==='negative')expense.reserved_uusdc='-1';if(kind==='zero')expense.reserved_uusdc='0';if(kind==='too-large')expense.reserved_uusdc='10001';if(kind==='duplicate-nonce')expense.nonce='same-unit-nonce';if(kind==='missing-settlement')expense.status='settled';if(kind==='wrong-fact')expense.fact_id='wrong';if(kind==='wrong-receipt')observation.receipt_hash='f'.repeat(64);if(kind==='invalid-useful')(expense as any).useful='yes';if(kind==='invalid-status')(expense as any).status='invented';
+   return {observation,expense,failure:null};},revalidate:async()=>null};
+  await expect(runResearchDesk(f.spec,f.claims,adapter,{freeze:async()=>{},append:async()=>{appends++;},finish:async()=>{}},[],()=>new Date(at))).rejects.toThrow();
+  expect(buys).toBe(kind==='duplicate-nonce'?2:1);expect(appends).toBe(kind==='duplicate-nonce'?1:0);
+ });
+});
