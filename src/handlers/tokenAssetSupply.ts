@@ -13,5 +13,5 @@ export async function assetSupply(symbol:string) {
  if(typeof supply!=='number'||!Number.isFinite(supply)||supply<=0||!Number.isFinite(updated)||now-updated>300000||updated>now+30000)throw new Error('aggregate supply missing/stale');
  return {total_supply:supply,asset_id:id,source_url:url,source_updated_at:j.last_updated,fetched_at:body.fetchedAt,raw_body:body.raw,
   scope:'CoinGecko provider-reported asset total; not an independently summed or audited all-chain supply; do not add bridged/wrapped token supplies',
-  attribution:'Powered by CoinGecko',terms:{url:COINGECKO_APPROVAL.termsUrl,checked_at:'2026-11-23',commercial_use_confirmed:false,redistribution_confirmed:false,owner_terms_risk_accepted:true,source_message_id:COINGECKO_APPROVAL.ownerRiskAcceptance?.sourceMessageId}};
+  attribution:'Powered by CoinGecko',terms:{url:COINGECKO_APPROVAL.termsUrl,checked_at:'2026-11-23',commercial_use_confirmed:false,redistribution_confirmed:false,owner_terms_risk_accepted:true,source_reference:COINGECKO_APPROVAL.ownerRiskAcceptance?.sourceReference,accepted_at:COINGECKO_APPROVAL.ownerRiskAcceptance?.acceptedAt}};
 }

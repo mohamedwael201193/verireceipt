@@ -8,7 +8,7 @@ export interface SourceApproval {
     commercialUse: boolean;
     redistribution: boolean;
     /** Owner accepts recorded terms risk for this testnet project. Not a licence. */
-    ownerRiskAcceptance?: { sourceMessageId: string; scope: 'testnet-hackathon'; acceptedAt: string };
+    ownerRiskAcceptance?: { sourceReference: string; scope: 'testnet-hackathon'; acceptedAt: string };
 }
 export interface SourceObservation<T> {
     value: T;
@@ -40,7 +40,7 @@ function timestamp(x: string): number { const n = Date.parse(x); if (!Number.isF
 function approved(a: SourceApproval): boolean {
     try {
         // ownerRiskAcceptance is checked for presence only; its authenticity is established out-of-band on the trusted channel. A passing approved() is never citable as proof of approval.
-        return ((a.commercialUse === true && a.redistribution === true) || (a.ownerRiskAcceptance?.scope === 'testnet-hackathon' && !!a.ownerRiskAcceptance.sourceMessageId && Number.isFinite(Date.parse(a.ownerRiskAcceptance.acceptedAt)))) && new URL(a.termsUrl).protocol === 'https:' && Number.isFinite(Date.parse(a.checkedAt));
+        return ((a.commercialUse === true && a.redistribution === true) || (a.ownerRiskAcceptance?.scope === 'testnet-hackathon' && !!a.ownerRiskAcceptance.sourceReference && Number.isFinite(Date.parse(a.ownerRiskAcceptance.acceptedAt)))) && new URL(a.termsUrl).protocol === 'https:' && Number.isFinite(Date.parse(a.checkedAt));
     }
     catch {
         return false;

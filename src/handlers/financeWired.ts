@@ -10,10 +10,9 @@
 // Licence posture: the reviewed terms for every provider below do NOT
 // grant us commercial redistribution, so commercialUse/redistribution
 // stay false. Each source runs under the owner's recorded terms-risk
-// acceptance for this testnet hackathon project, in his own words on the
-// trusted WhatsApp channel 2026-11-23 00:27:23 +02 ("فكك من التراخيص
-// وحط كلو" — drop the licence filter and include everything), message id
-// wamid.HBgMMjAxMTI0NTMyODA3FQIAEhggQUM5NUE2N0ExNjA2MTMwQzA4MTMwNjQyREY4MjM2RDYA.
+// acceptance for this testnet hackathon project, recorded on the trusted
+// WhatsApp channel at 2026-11-23 00:27:23 Cairo. Personal transport
+// identifiers are deliberately excluded from source and receipt metadata.
 // The record below is a presence-only pointer to that out-of-band
 // message; it is not itself proof of approval (see observedSources.ts).
 //
@@ -37,11 +36,11 @@ import { coinGeckoPriceSource, coinMarketCapPriceSource, type CmcTickerBinding, 
 import { MAINNET_RPCS } from '../config/chains';
 import { aaveYieldSource, type AaveReserveBinding } from './aaveYieldSource';
 
-/** Presence-only pointer to the owner's trusted-channel message quoted in
+/** Presence-only pointer to the owner's trusted-channel instruction described in
  * the header. Authenticity is established out-of-band; a passing
  * approved() check is never citable as proof of approval. */
 const OWNER_RISK_ACCEPTANCE = {
-    sourceMessageId: 'wamid.HBgMMjAxMTI0NTMyODA3FQIAEhggQUM5NUE2N0ExNjA2MTMwQzA4MTMwNjQyREY4MjM2RDYA',
+    sourceReference: 'owner-risk-acceptance-2026-11-23',
     scope: 'testnet-hackathon' as const,
     acceptedAt: '2026-11-22T22:27:23.000Z',
 };

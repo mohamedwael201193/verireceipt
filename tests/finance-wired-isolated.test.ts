@@ -10,7 +10,7 @@ import {
 } from '../src/handlers/financeWired';
 import { buildServer } from '../src/server';
 
-const OWNER_MESSAGE_ID = 'wamid.HBgMMjAxMTI0NTMyODA3FQIAEhggQUM5NUE2N0ExNjA2MTMwQzA4MTMwNjQyREY4MjM2RDYA';
+const OWNER_REFERENCE = 'owner-risk-acceptance-2026-11-23';
 afterEach(() => vi.clearAllMocks());
 afterAll(async () => { await closeStorage(); for (const s of ['', '-wal', '-shm']) rmSync(fixture.path + s, { force: true }); });
 
@@ -41,14 +41,14 @@ it('pool binding is the verified Uniswap v3 USDC/WETH 0.05% pool only', () => {
     expect(p.dexId).toBe('uniswap');
 });
 
-it('every configured approval keeps licence booleans false and points at the exact owner risk message', () => {
+it('every configured approval keeps licence booleans false and points at the opaque owner risk reference', () => {
     for (const a of [CHAINLINK_APPROVAL, COINPAPRIKA_APPROVAL, COINGECKO_APPROVAL, COINMARKETCAP_APPROVAL, DEXSCREENER_APPROVAL]) {
         expect(a.commercialUse).toBe(false);
         expect(a.redistribution).toBe(false);
         expect(new URL(a.termsUrl).protocol).toBe('https:');
         expect(Number.isFinite(Date.parse(a.checkedAt))).toBe(true);
         expect(a.ownerRiskAcceptance?.scope).toBe('testnet-hackathon');
-        expect(a.ownerRiskAcceptance?.sourceMessageId).toBe(OWNER_MESSAGE_ID);
+        expect(a.ownerRiskAcceptance?.sourceReference).toBe(OWNER_REFERENCE);
         expect(Date.parse(a.ownerRiskAcceptance!.acceptedAt)).toBe(Date.parse('2026-11-22T22:27:23.000Z'));
     }
 });
