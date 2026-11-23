@@ -64,6 +64,20 @@ afterAll(async () => {
   for (const suffix of ["", "-wal", "-shm"]) rmSync(fixture.path + suffix, { force: true });
 });
 
+function expectSafeSourceWarnings(calls: unknown[][]): void {
+  for (const call of calls) {
+    expect(call).toHaveLength(1);
+    const entry = JSON.parse(String(call[0]));
+    expect(Object.keys(entry).sort()).toEqual(["event", "from", "reason", "source", "to"]);
+    expect(entry).toMatchObject({ event: "fx_source_failure", from: "USD", to: "EUR", reason: "transport_error" });
+    expect(["vatcomply", "floatrates"]).toContain(entry.source);
+  }
+  expect(JSON.stringify(calls)).not.toMatch(/synthetic-storage-diagnostic|STORAGE_TIMEOUT|deadline|sensitive|https?:/);
+}
+it("warning assertion rejects leaked storage diagnostics even inside a source event", () => {
+  expect(() => expectSafeSourceWarnings([[JSON.stringify({ event: "fx_source_failure", from: "USD", to: "EUR", reason: "transport_error", source: "vatcomply", detail: "synthetic-storage-diagnostic" })]])).toThrow();
+  expect(() => expectSafeSourceWarnings([["synthetic-storage-diagnostic"]])).toThrow();
+});
 for (const item of cases) describe(item.name, () => {
   beforeEach(() => { negativeDns = item.name === "DNS negative"; });
   for (const reason of [new Error("synthetic-storage-diagnostic"), Object.assign(new Error("deadline"), { code: "STORAGE_TIMEOUT" }), "untyped persistence rejection"]) {
@@ -71,7 +85,7 @@ for (const item of cases) describe(item.name, () => {
       vi.mocked(saveReceipt).mockRejectedValueOnce(reason);
       await expect(item.call()).rejects.toMatchObject(expectedError);
       expect(saveReceipt).toHaveBeenCalledTimes(1);
-      expect(console.warn).not.toHaveBeenCalled();
+      expectSafeSourceWarnings(vi.mocked(console.warn).mock.calls);
     });
   }
   it("keeps the healthy result and exact receipted evidence hash", async () => {
