@@ -115,10 +115,165 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, strin
   EMAIL_SECURITY_GENERAL: {
     endpoint: "/v1/email-security", inputs: ["domain", "record_type"], outputs: { lookup_ok: null },
   },
+  ACADEMIC_SEARCH_GENERAL: {
+    endpoint: "/v1/academic-search",
+    inputs: ["query"],
+    outputs: { answer: null, paper_titles: null, dois: null, total_matches: null },
+  },
+  ASSET_RESERVE_ATTESTATION_GENERAL: {
+    endpoint: "/v1/reserve-attestation",
+    inputs: ["asset"],
+    outputs: { attested_reserve: "micro-units of the underlying asset", asset: null, block: null, source: null },
+  },
+  CODE_PATCH_VERIFY_GENERAL: {
+    endpoint: "/v1/code-patch",
+    inputs: ["patch"],
+    outputs: { passed: null, commit: null, pipeline: null },
+  },
+  CORPORATE_REGISTRY_LOOKUP_GENERAL: {
+    endpoint: "/v1/corporate-registry",
+    inputs: ["company", "jurisdiction"],
+    outputs: { legal_name: null, registration_id: null, active: null, jurisdiction: null, registered_address: null, incorporated: null },
+  },
+  CROSS_CHAIN_STATE_VERIFY_GENERAL: {
+    endpoint: "/v1/cross-chain-state",
+    inputs: ["reference", "chains"],
+    outputs: { address: null, status: null, chains: null, consistent: null, summary: null },
+  },
+  CVE_LOOKUP_CVSS: {
+    endpoint: "/v1/cve",
+    inputs: ["cve_id"],
+    outputs: { cve_id: null, cvss_score: "CVSS score (0-10)", description: null, published: null, references: null },
+  },
+  EVENT_OUTCOME_RESOLUTION_GENERAL: {
+    endpoint: "/v1/event-outcome",
+    inputs: ["event"],
+    outputs: { event: null, resolved_yes: null, winner: null, resolved_at: null, sources: null },
+  },
+  FINANCIAL_DATA_GENERAL: {
+    endpoint: "/v1/financial-data",
+    inputs: ["asset"],
+    outputs: { asset: null, market_cap_usd: "USD", volume_24h_usd: "USD", metrics: null, as_of: null },
+  },
+  FX_NOW_CAD: {
+    endpoint: "/v1/fx-now",
+    inputs: ["currency"],
+    outputs: { rate: "{key} per USD" },
+  },
+  FX_NOW_EUR: {
+    endpoint: "/v1/fx-now",
+    inputs: ["currency"],
+    outputs: { rate: "{key} per USD" },
+  },
+  FX_NOW_SEK: {
+    endpoint: "/v1/fx-now",
+    inputs: ["currency"],
+    outputs: { rate: "{key} per USD" },
+  },
+  IP_GEOLOCATION_GENERAL: {
+    endpoint: "/v1/ip-geolocation",
+    inputs: ["ip"],
+    outputs: { ip: null, country: null, city: null, latitude: "degrees", longitude: "degrees", isp: null },
+  },
+  LIQUIDITY_DEPTH_VERIFY_GENERAL: {
+    endpoint: "/v1/liquidity",
+    inputs: ["pool", "chain"],
+    outputs: { liquidity_usd: "USD" },
+  },
+  MALWARE_DETECTION_HASH: {
+    endpoint: "/v1/malware-hash",
+    inputs: ["indicator"],
+    outputs: { malicious: null },
+  },
+  NEWS_HEADLINES_GENERAL: {
+    endpoint: "/v1/news-headlines",
+    inputs: ["topic"],
+    outputs: { topic: null, headlines: null, urls: null, window: null, top_headline: null },
+  },
+  NEWS_SEARCH_GENERAL: {
+    endpoint: "/v1/news-search",
+    inputs: ["query"],
+    outputs: { answer: null, result_count: null, sources: null },
+  },
+  PAYMENT_METHOD_VERIFY_GENERAL: {
+    endpoint: "/v1/payment-method",
+    inputs: ["bin"],
+    outputs: { network: null, issuing_bank: null, issuing_country: null, valid: null, card_type: null },
+  },
+  ROUTE_ETA_GENERAL: {
+    endpoint: "/v1/route-eta",
+    inputs: ["origin", "destination"],
+    outputs: { duration: "seconds" },
+  },
+  SANCTIONS_SCREENING_MATCH_GENERAL: {
+    endpoint: "/v1/sanctions-screen",
+    inputs: ["name"],
+    outputs: { name: null, matched: null, matches: null, lists: null, match_score: "fraction (0-1)" },
+  },
+  SLA_COMPLIANCE_GENERAL: {
+    endpoint: "/v1/sla-compliance",
+    inputs: ["service", "period"],
+    outputs: { service: null, uptime_pct: "percent", sla_target_pct: "percent", compliant: null, period: null },
+  },
+  SPORTS_SCORE_GENERAL: {
+    endpoint: "/v1/sports-score",
+    inputs: ["game"],
+    outputs: { home_team: null, away_team: null, home_score: "points", away_score: "points", status: null, date: null },
+  },
+  STOCK_PRICE_US_EQUITY: {
+    endpoint: "/v1/stock-price",
+    inputs: ["ticker"],
+    outputs: { price_usd: "US dollars" },
+  },
+  THREAT_INTELLIGENCE_INDICATOR: {
+    endpoint: "/v1/threat-indicator",
+    inputs: ["indicator"],
+    outputs: { malicious: null },
+  },
+  TOKEN_HOLDER_COUNT_GENERAL: {
+    endpoint: "/v1/token-holders",
+    inputs: ["token", "chain"],
+    outputs: { token: null, chain: null, holders_count: "addresses", token_symbol: null },
+  },
+  TRANSACTION_RISK_GENERAL: {
+    endpoint: "/v1/transaction-risk",
+    inputs: ["transaction"],
+    outputs: { risk_score: "fraction (0-1)", signals: null, summary: null },
+  },
+  TRAVEL_DISRUPTION_GENERAL: {
+    endpoint: "/v1/travel-disruption",
+    inputs: ["route_or_flight"],
+    outputs: { route_or_flight: null, disrupted: null, status: null, delay_minutes: "minutes", reason: null },
+  },
+  URL_SAFE_GENERAL: {
+    endpoint: "/v1/url-safe",
+    inputs: ["url"],
+    outputs: { url: null, detections: "detections", summary: null },
+  },
+  URL_SCAN_VERDICT: {
+    endpoint: "/v1/url-scan",
+    inputs: ["url"],
+    outputs: { safe: null },
+  },
+  VENDOR_VERIFY_GENERAL: {
+    endpoint: "/v1/vendor-verify",
+    inputs: ["vendor", "vat_number"],
+    outputs: { vendor: null, vat_number: null, valid: null, registered_name: null, registered_address: null },
+  },
+  VULNERABILITY_TRIAGE_GENERAL: {
+    endpoint: "/v1/vulnerability-triage",
+    inputs: ["cve_id"],
+    outputs: { cvss_base_score: "CVSS score (0-10)" },
+  },
+  WEATHER_FORECAST_GENERAL: {
+    endpoint: "/v1/weather-forecast",
+    inputs: ["location", "window_hours"],
+    outputs: { location: null, when: null, temp_max_c: "degrees Celsius", temp_min_c: "degrees Celsius", precipitation_probability_pct: "percent", condition: null },
+  },
 };
 
 describe("A8 miner.yaml vs the official intent schemas", () => {
-  it("declares exactly the fourteen reviewed intents, each on its own endpoint", () => {
+  it("declares exactly the forty-five reviewed intents, each on its own endpoint", () => {
     const si = block("  supported_intents:").map((l) => l.trim().replace(/^- /, "")).filter(Boolean);
     expect(si).toEqual(Object.keys(OFFICIAL));
     for (const [intent, o] of Object.entries(OFFICIAL)) {
