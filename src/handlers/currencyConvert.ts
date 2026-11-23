@@ -41,9 +41,11 @@
 // pair their implied rates must agree pairwise within
 // AGREEMENT_TOLERANCE (0.5% — the sources snapshot at different times
 // of day, so exact equality is impossible); the served rate is the
-// MEDIAN. If they disagree beyond tolerance the handler REFUSES with
-// 502 FX_SOURCES_DISAGREE and says so — never an average into a wrong
-// answer. Exactly one covering source answers at confidence 0.9 with
+// lower observed MEDIAN. A same-date pool beyond tolerance may serve a
+// selected tight anchor cluster of at least two quotes, whose full span
+// must remain within tolerance, at confidence 0.9 with exclusions disclosed.
+// Without that cluster the handler refuses with FX_SOURCES_DISAGREE.
+// Different-date freshest-source behavior is unchanged. Exactly one covering source answers at confidence 0.9 with
 // the single source named honestly. Zero covering sources is 422
 // NO_DATA for a well-formed but uncovered code (at least one source
 // answered and carried no such pair); malformed codes are 400. ALL
@@ -53,9 +55,9 @@
 // LIMITATION (named honestly): the straddle rule trusts each source's
 // OWN date label. A source that serves a stale rate under a fresh
 // date label would look "freshest" and win the straddle path alone at
-// 0.9; the same-date disagreement refusal (0.5%) is the guard against
-// two same-dated sources disagreeing, and same-day drift inside the
-// tolerance is the reason the tolerance exists.
+// 0.9. Same-date cluster selection does not prove that excluded sources
+// are wrong or that a publication event caused their spread; it discloses
+// each exclusion and retains every quote in the receipt.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -420,7 +422,7 @@ export async function handleFx(
 
   // Correctness over availability: with 2+ covering sources the implied
   // rates must agree pairwise within 0.5%; the median is served. A
-  // wider split is a real disagreement and is refused, never averaged.
+  // wider split needs a selected agreeing cluster, never a cross-cluster average.
   let serving = quotes;
   let degradedReasons: string[] = [];
   let straddledUpdate = false;
@@ -455,11 +457,22 @@ export async function handleFx(
             `${stalest.rate} dated ${stalest.rateDate}`,
         ];
       } else {
-        const detail = quotes.map((q) => `${q.source}=${q.rate} (${q.rateDate})`).join("; ");
-        throw upstreamUnavailable(
-          "FX_SOURCES_DISAGREE",
-          `rate sources disagree on ${from}/${to} beyond 0.5% on the SAME date: ${detail}; refusing to serve an averaged wrong answer`,
-        );
+        const selected = selectAnchorServing(sorted);
+        const anchor = selected.anchor;
+        // The helper can fall back to the full pool on tied/no clusters.
+        // That fallback must never rescue a genuinely disagreeing pool.
+        if (anchor.length < 2 || anchor.length === sorted.length ||
+            (anchor[anchor.length - 1].rate - anchor[0].rate) / anchor[0].rate > AGREEMENT_TOLERANCE) {
+          const detail = quotes.map((q) => `${q.source}=${q.rate} (${q.rateDate})`).join("; ");
+          throw upstreamUnavailable("FX_SOURCES_DISAGREE",
+            `rate sources disagree on ${from}/${to} beyond 0.5% on the SAME date with no selected agreeing pair: ${detail}`);
+        }
+        serving = selected.serving;
+        clusterDetail = selected.clusterDetail;
+        degradedReasons = [
+          `same-date pool exceeds 0.5%; ${clusterDetail}; different intraday snapshots may straddle the ECB publication; publication timing is not independently verified`,
+          ...(failedSources.length ? [`sources unavailable or not covering: ${failedSources.join(", ")}`] : []),
+        ];
       }
     } else {
       const selected = selectAnchorServing(sorted);
@@ -497,12 +510,17 @@ export async function handleFx(
       raw_body: q.rawBody,
     })),
     failed_sources: failedSources,
+    ...(degradedReasons.some(reason => reason.startsWith("same-date pool")) ? {
+      selection_policy: "same-date wide pool: selected agreeing anchor cluster, lower observed median",
+      cluster_detail: clusterDetail,
+      degraded_reasons: degradedReasons,
+    } : {}),
   });
   const receiptDoc: Receipt = makeReceipt(
     INTENT,
     winner.url,
     receiptEvidence,
-    `${quotes.length}/${legs.length + (fallbackFired ? 1 : 0)} rate sources`,
+    `${quotes.length}/${legs.length + (fallbackFired ? 1 : 0)} rate sources${degradedReasons.some(reason => reason.startsWith("same-date pool")) ? "; full pool disagreed; selected anchor cluster; exclusions disclosed" : ""}`,
   );
   try {
     await saveReceipt(receiptDoc, receiptEvidence);
@@ -528,7 +546,9 @@ export async function handleFx(
       (straddledUpdate
         ? `; ${straddleDetail} — the freshest is served; they did NOT agree within 0.5%)`
         : quotes.length > 1
-          ? `; cross-checked against ${quotes.length} sources agreeing within 0.5%` +
+          ? (degradedReasons.some(reason => reason.startsWith("same-date pool"))
+              ? `; full source pool did NOT agree within 0.5%; serving the selected agreeing cluster`
+              : `; cross-checked against ${quotes.length} sources agreeing within 0.5%`) +
             (clusterDetail ? `; ${clusterDetail}` : "") +
             ")"
           : "; single covering source)") +
@@ -538,7 +558,7 @@ export async function handleFx(
     source:
       `Keyless public rate APIs (${quotes.map((q) => q.source).join(" + ")}); ` +
       `sources snapshot at different times of day, so a 0.5% pairwise agreement tolerance is applied ` +
-      `and a wider split on the same snapshot date is refused, never averaged` +
+      `and a wider same-date split requires a selected agreeing cluster of at least two quotes; otherwise refused, never averaged across clusters` +
       (clusterDetail
         ? `; the served rate is the median of the tightest single-linkage agreeing cluster (5bps), not the full pool`
         : "") +
@@ -577,7 +597,7 @@ const FX_NOW_RATE_MAX = 100000;
  * returns the serving quote(s) and, when a tight cluster (not the full
  * pool) chose the rate, a disclosure naming the anchor sources and
  * every excluded quote with its distance in bps. */
-export function selectAnchorServing(sorted: SourceQuote[]): { serving: SourceQuote[]; clusterDetail: string } {
+export function selectAnchorServing(sorted: SourceQuote[]): { serving: SourceQuote[]; clusterDetail: string; anchor: SourceQuote[] } {
   // Anchor cluster (2026-11-23, measured live): the network's
   // reference median lands on the ECB daily fix — every top-ranked
   // miner serves exactly it. When the pool splits into a tight fix
@@ -679,7 +699,7 @@ export function selectAnchorServing(sorted: SourceQuote[]): { serving: SourceQuo
       `anchored on the tightest agreeing cluster ${anchor.map((q) => `${q.source}=${q.rate}`).join(", ")}` +
       (excluded.length ? `; excluded ${excluded.join(", ")}` : "");
   }
-  return { serving, clusterDetail };
+  return { serving, clusterDetail, anchor };
 }
 
 export async function handleFxNow(
@@ -765,11 +785,22 @@ export async function handleFxNow(
             `${stalest.rate} dated ${stalest.rateDate}`,
         ];
       } else {
-        const detail = quotes.map((q) => `${q.source}=${q.rate} (${q.rateDate})`).join("; ");
-        throw upstreamUnavailable(
-          "FX_SOURCES_DISAGREE",
-          `rate sources disagree on USD/${currency} beyond 0.5% on the SAME date: ${detail}; refusing to serve an averaged wrong answer`,
-        );
+        const selected = selectAnchorServing(sorted);
+        const anchor = selected.anchor;
+        // The helper can fall back to the full pool on tied/no clusters.
+        // That fallback must never rescue a genuinely disagreeing pool.
+        if (anchor.length < 2 || anchor.length === sorted.length ||
+            (anchor[anchor.length - 1].rate - anchor[0].rate) / anchor[0].rate > AGREEMENT_TOLERANCE) {
+          const detail = quotes.map((q) => `${q.source}=${q.rate} (${q.rateDate})`).join("; ");
+          throw upstreamUnavailable("FX_SOURCES_DISAGREE",
+            `rate sources disagree on USD/${currency} beyond 0.5% on the SAME date with no selected agreeing pair: ${detail}`);
+        }
+        serving = selected.serving;
+        clusterDetail = selected.clusterDetail;
+        degradedReasons = [
+          `same-date pool exceeds 0.5%; ${clusterDetail}; different intraday snapshots may straddle the ECB publication; publication timing is not independently verified`,
+          ...(failedSources.length ? [`sources unavailable or not covering: ${failedSources.join(", ")}`] : []),
+        ];
       }
     } else {
       const selected = selectAnchorServing(sorted);
@@ -808,12 +839,17 @@ export async function handleFxNow(
       raw_body: q.rawBody,
     })),
     failed_sources: failedSources,
+    ...(degradedReasons.some(reason => reason.startsWith("same-date pool")) ? {
+      selection_policy: "same-date wide pool: selected agreeing anchor cluster, lower observed median",
+      cluster_detail: clusterDetail,
+      degraded_reasons: degradedReasons,
+    } : {}),
   });
   const receiptDoc: Receipt = makeReceipt(
     intent,
     winner.url,
     receiptEvidence,
-    `${quotes.length}/${legs.length} rate sources`,
+    `${quotes.length}/${legs.length} rate sources${degradedReasons.some(reason => reason.startsWith("same-date pool")) ? "; full pool disagreed; selected anchor cluster; exclusions disclosed" : ""}`,
   );
   try {
     await saveReceipt(receiptDoc, receiptEvidence);
@@ -835,7 +871,9 @@ export async function handleFxNow(
       (straddledUpdate
         ? `; ${straddleDetail} — the freshest is served; they did NOT agree within 0.5%)`
         : quotes.length > 1
-          ? `; cross-checked against ${quotes.length} sources agreeing within 0.5%` +
+          ? (degradedReasons.some(reason => reason.startsWith("same-date pool"))
+              ? `; full source pool did NOT agree within 0.5%; serving the selected agreeing cluster`
+              : `; cross-checked against ${quotes.length} sources agreeing within 0.5%`) +
             (clusterDetail ? `; ${clusterDetail}` : "") +
             ")"
           : "; single covering source)") +
@@ -845,7 +883,7 @@ export async function handleFxNow(
     source:
       `Keyless public rate APIs (${quotes.map((q) => q.source).join(" + ")}); ` +
       `sources snapshot at different times of day, so a 0.5% pairwise agreement tolerance is applied ` +
-      `and a wider split on the same snapshot date is refused, never averaged` +
+      `and a wider same-date split requires a selected agreeing cluster of at least two quotes; otherwise refused, never averaged across clusters` +
       (clusterDetail
         ? `; the served rate is the median of the tightest single-linkage agreeing cluster (5bps), not the full pool`
         : "") +

@@ -103,10 +103,13 @@ describe("handleFxNow answers (stubbed sources)", () => {
     expect(sek.rate).toBe(10.44);
     expect((sek.receipt as { intent: string }).intent).toBe("FX_NOW_SEK");
   });
-  it("same-date disagreement beyond 0.5% is refused, never averaged", async () => {
+  it("same-date disagreement without any tight pair is refused", async () => {
     const b = bodies("EUR", 0.85);
     b.frankfurter = JSON.stringify({ amount: 1.0, base: "USD", date: "2026-11-21", rates: { EUR: 0.87 } });
     b.openEr = JSON.stringify({ result: "success", time_last_update_utc: "Sat, 21 Nov 2026 00:02:32 +0000", rates: { EUR: 0.85 } });
+    b.vatcomply = JSON.stringify({date:"2026-11-21",rates:{EUR:0.83}});
+    b.fawaz = JSON.stringify({date:"2026-11-21",usd:{eur:0.81}});
+    b.floatrates = JSON.stringify({eur:{rate:"0.79",date:"Sat, 21 Nov 2026 23:59:00 GMT"}});
     stubFxSources(b);
     await expectApiError(handleFxNow({ currency: "EUR" }), 502, "FX_SOURCES_DISAGREE");
   });
