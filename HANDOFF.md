@@ -12,7 +12,7 @@ The viewer and adapter are separate lineages. Neither is merged to main or deplo
 
 ## Real-run evidence
 
-A1 and A2 remain immutable HOLD packets. A2 has usable price and total supply, exact implied FDV, withheld TVL, and unknown FDV/TVL. TVL's shaped value does not exactly equal its signed provider value. The diagnostic change preserves that failed equality separately and never makes the raw candidate usable for arithmetic. A1+A2 reserved/reported 60,000 micro testUSDC, with no settlement assertion, no on-chain transaction, no escalation or reuse. Private paid-response files must not be published.
+A1 and A2 remain immutable HOLD packets. A2 has usable price and total supply, exact implied FDV, withheld TVL, and unknown FDV/TVL. TVL's shaped value does not exactly equal its signed provider value. The diagnostic change preserves that failed equality separately and never makes the raw candidate usable for arithmetic. As observed in the two immutable run packets at run time, A1+A2 reserved/reported 60,000 micro testUSDC, with no settlement assertion (not a current ledger balance claim), no on-chain transaction, no escalation or reuse. Private paid-response files must not be published.
 
 ## Proposed next steps, not execution approval
 
@@ -67,6 +67,6 @@ Read-only checks only. This note is a proposal, not a paid-run instruction.
 
 ## Afternoon continuation, 17:32 EET
 
-Integration merge f1409d2c7a898d43834e808a33c2fb05248057ad is unpushed and in independent review. Exact approved adapter + viewer parents, no conflicts or functional edits. Desk 617/617; frontend 9942/9943, one existing dashboard YAML snippet parity failure reproduced on exact approved UI parent (30/31). Typechecks/build pass. A2 offline/public replay remain false/HOLD as expected.
+Integration merge f1409d2c7a898d43834e808a33c2fb05248057ad is unpushed and in independent review. Exact approved adapter + viewer parents, no conflicts or functional edits. Desk 617/617; frontend 9941 passed + 1 skipped + 1 inherited dashboard YAML snippet parity failure (9943 total) reproduced on exact approved UI parent (30/31). Typechecks/build pass. A2 offline/public replay remain false/HOLD as expected.
 
 Live authoritative leaderboard at epoch 44 has no TVL ranking. Contract proposal is docs/research-ranked-provider-contract.md. Do not invent ordering from catalog history. Retain auto-route + honest HOLD until rank exists. No new paid run or deploy.
