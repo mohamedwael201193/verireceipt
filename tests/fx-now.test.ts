@@ -23,7 +23,7 @@ function bodies(ccy: string, rate: number, date = "2026-11-21") {
   const lower = ccy.toLowerCase();
   return {
     frankfurter: JSON.stringify({ amount: 1.0, base: "USD", date, rates: { [ccy]: rate } }),
-    openEr: JSON.stringify({ result: "success", time_last_update_utc: "Sat, 22 Nov 2026 00:02:32 +0000", rates: { [ccy]: rate } }),
+    openEr: JSON.stringify({ result: "success", base_code: "USD", time_last_update_utc: "Sat, 22 Nov 2026 00:02:32 +0000", rates: { [ccy]: rate } }),
     fawaz: JSON.stringify({ date, usd: { [lower]: rate } }),
     vatcomply: JSON.stringify({ date, base: "USD", rates: { [ccy]: rate } }),
     floatrates: JSON.stringify({ [lower]: { code: ccy, rate: String(rate), date: "Sat, 21 Nov 2026 23:59:00 GMT", inverseRate: "1" } }),
@@ -106,8 +106,8 @@ describe("handleFxNow answers (stubbed sources)", () => {
   it("same-date disagreement without any tight pair is refused", async () => {
     const b = bodies("EUR", 0.85);
     b.frankfurter = JSON.stringify({ amount: 1.0, base: "USD", date: "2026-11-21", rates: { EUR: 0.87 } });
-    b.openEr = JSON.stringify({ result: "success", time_last_update_utc: "Sat, 21 Nov 2026 00:02:32 +0000", rates: { EUR: 0.85 } });
-    b.vatcomply = JSON.stringify({date:"2026-11-21",rates:{EUR:0.83}});
+    b.openEr = JSON.stringify({ result: "success", base_code: "USD", time_last_update_utc: "Sat, 21 Nov 2026 00:02:32 +0000", rates: { EUR: 0.85 } });
+    b.vatcomply = JSON.stringify({base:"USD",date:"2026-11-21",rates:{EUR:0.83}});
     b.fawaz = JSON.stringify({date:"2026-11-21",usd:{eur:0.81}});
     b.floatrates = JSON.stringify({eur:{rate:"0.79",date:"Sat, 21 Nov 2026 23:59:00 GMT"}});
     stubFxSources(b);
@@ -147,7 +147,7 @@ describe("handleFxNow answers (stubbed sources)", () => {
     b.frankfurter = JSON.stringify({ amount: 1.0, base: "USD", date: "2026-11-20", rates: { EUR: 0.90992 } });
     b.vatcomply = JSON.stringify({ date: "2026-11-20", base: "USD", rates: { EUR: 0.909918 } });
     b.floatrates = JSON.stringify({ eur: { code: "EUR", rate: "0.910744", date: "Fri, 20 Nov 2026 23:59:00 GMT", inverseRate: "1" } });
-    b.openEr = JSON.stringify({ result: "success", time_last_update_utc: "Sun, 22 Nov 2026 00:02:32 +0000", rates: { EUR: 0.911256 } });
+    b.openEr = JSON.stringify({ result: "success", base_code: "USD", time_last_update_utc: "Sun, 22 Nov 2026 00:02:32 +0000", rates: { EUR: 0.911256 } });
     b.fawaz = JSON.stringify({ date: "2026-11-22", usd: { eur: 0.91158 } });
     stubFxSources(b);
     const result = await handleFxNow({ currency: "EUR" });

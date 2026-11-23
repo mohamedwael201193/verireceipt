@@ -56,7 +56,7 @@ function frankfurterBody(rate: number, date = "2026-11-21"): string {
 }
 function openErBody(rate: number, date = "Sat, 22 Nov 2026 00:02:32 +0000"): string {
   return JSON.stringify({
-    result: "success",
+    result: "success", base_code: "USD",
     time_last_update_utc: date,
     rates: { EUR: rate, EGP: 47.65 },
   });
@@ -423,10 +423,10 @@ describe("handleFx answers (stubbed sources)", () => {
 
   it("sources answering without the pair -> 422 NO_DATA with coverage named (review 35)", async () => {
     stubFxSources({
-      frankfurter: JSON.stringify({ date: "2026-11-21", rates: { GBP: 0.79 } }),
-      openEr: JSON.stringify({ result: "success", time_last_update_utc: "Sat, 22 Nov 2026 00:02:32 +0000", rates: { GBP: 0.79 } }),
+      frankfurter: JSON.stringify({ base: "USD", date: "2026-11-21", rates: { GBP: 0.79 } }),
+      openEr: JSON.stringify({ result: "success", base_code: "USD", time_last_update_utc: "Sat, 22 Nov 2026 00:02:32 +0000", rates: { GBP: 0.79 } }),
       fawaz: JSON.stringify({ date: "2026-11-21", usd: { gbp: 0.79 } }),
-      vatcomply: JSON.stringify({ date: "2026-11-21", rates: { GBP: 0.79 } }),
+      vatcomply: JSON.stringify({ base: "USD", date: "2026-11-21", rates: { GBP: 0.79 } }),
       floatrates: JSON.stringify({ gbp: { code: "GBP", rate: "0.79", date: "Sat, 21 Nov 2026 23:59:00 GMT" } }),
     });
     await expectApiError(handleFx({ from_currency: "USD", to_currency: "EUR" }), 422, "NO_DATA");

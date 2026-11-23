@@ -139,7 +139,8 @@ interface SourceQuote {
 async function quoteFrankfurter(from: string, to: string): Promise<SourceQuote | null> {
   const url = `https://api.frankfurter.dev/v1/latest?base=${from}&symbols=${to}`;
   const rawBody = await fetchText(url, SOURCE_TIMEOUT_MS);
-  const parsed = JSON.parse(rawBody) as { date?: unknown; rates?: Record<string, unknown> };
+  const parsed = JSON.parse(rawBody) as { base?: unknown; date?: unknown; rates?: Record<string, unknown> };
+  if (parsed.base !== from) throw new Error("FX base identity mismatch");
   const rate = parsed.rates?.[to];
   if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
   return { source: "Frankfurter (ECB reference rates)", url, rawBody, rate, rateDate: String(parsed.date ?? "unknown") };
@@ -152,10 +153,12 @@ async function quoteOpenErApi(from: string, to: string): Promise<SourceQuote | n
   const rawBody = await fetchText(url, SOURCE_TIMEOUT_MS);
   const parsed = JSON.parse(rawBody) as {
     result?: unknown;
+    base_code?: unknown;
     time_last_update_utc?: unknown;
     rates?: Record<string, unknown>;
   };
   if (parsed.result !== "success") return null;
+  if (parsed.base_code !== from) throw new Error("FX base identity mismatch");
   const rate = parsed.rates?.[to];
   if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
   return {
@@ -172,7 +175,8 @@ async function quoteOpenErApi(from: string, to: string): Promise<SourceQuote | n
 async function quoteVatcomply(from: string, to: string): Promise<SourceQuote | null> {
   const url = `https://api.vatcomply.com/rates?base=${from}`;
   const rawBody = await fetchText(url, SOURCE_TIMEOUT_MS);
-  const parsed = JSON.parse(rawBody) as { date?: unknown; rates?: Record<string, unknown> };
+  const parsed = JSON.parse(rawBody) as { base?: unknown; date?: unknown; rates?: Record<string, unknown> };
+  if (parsed.base !== from) throw new Error("FX base identity mismatch");
   const rate = parsed.rates?.[to];
   if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
   return { source: "vatcomply", url, rawBody, rate, rateDate: String(parsed.date ?? "unknown") };
@@ -267,10 +271,12 @@ export async function quoteExchangeRateApi(from: string, to: string, key: string
   }
   const parsed = JSON.parse(rawBody) as {
     result?: unknown;
+    base_code?: unknown;
     time_last_update_utc?: unknown;
     rates?: Record<string, unknown>;
   };
   if (parsed.result !== "success") return null;
+  if (parsed.base_code !== from) throw new Error("FX base identity mismatch");
   const rate = parsed.rates?.[to];
   if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
   return {
