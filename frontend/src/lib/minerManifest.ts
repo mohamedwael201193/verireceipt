@@ -1,6 +1,6 @@
-// Canonical declarations from miner.yaml (45 intents). Registration 6177
-// declares exactly these on chain (updateMiner landed 2026-11-23);
-// lib/minerRegistration.ts keeps the on-chain registered truth.
+// Canonical declarations from miner.yaml (49: the 45 registered on chain
+// plus 4 schema-aligned intents pending the next updateMiner for registration
+// 6177; lib/minerRegistration.ts keeps the on-chain registered truth of 45).
 // Six homepage demos are a selected subset, not the full declared contract.
 export const DECLARED_INTENTS = [
   "ONCHAIN_TX_LOOKUP_GENERAL",
@@ -22,6 +22,7 @@ export const DECLARED_INTENTS = [
   "CODE_PATCH_VERIFY_GENERAL",
   "CORPORATE_REGISTRY_LOOKUP_GENERAL",
   "CROSS_CHAIN_STATE_VERIFY_GENERAL",
+  "CRYPTO_PRICE_USD",
   "CVE_LOOKUP_CVSS",
   "EVENT_OUTCOME_RESOLUTION_GENERAL",
   "FINANCIAL_DATA_GENERAL",
@@ -31,6 +32,7 @@ export const DECLARED_INTENTS = [
   "IP_GEOLOCATION_GENERAL",
   "LIQUIDITY_DEPTH_VERIFY_GENERAL",
   "MALWARE_DETECTION_HASH",
+  "MINING_HASHPRICE_VERIFY_GENERAL",
   "NEWS_HEADLINES_GENERAL",
   "NEWS_SEARCH_GENERAL",
   "PAYMENT_METHOD_VERIFY_GENERAL",
@@ -38,6 +40,7 @@ export const DECLARED_INTENTS = [
   "SANCTIONS_SCREENING_MATCH_GENERAL",
   "SLA_COMPLIANCE_GENERAL",
   "SPORTS_SCORE_GENERAL",
+  "STORM_ALERT_GENERAL",
   "STOCK_PRICE_US_EQUITY",
   "THREAT_INTELLIGENCE_INDICATOR",
   "TOKEN_HOLDER_COUNT_GENERAL",
@@ -47,11 +50,13 @@ export const DECLARED_INTENTS = [
   "URL_SCAN_VERDICT",
   "VENDOR_VERIFY_GENERAL",
   "VULNERABILITY_TRIAGE_GENERAL",
+  "WEATHER_CHECK_TEMPERATURE",
   "WEATHER_FORECAST_GENERAL"
 ] as const;
 export const DECLARED_INTENT_COUNT = DECLARED_INTENTS.length;
-export const MINER_YAML_SHA256 = "0xabaee05348e6d4374dd7fbf0c9da6a14794dfc372bffdb37b8958d1107b44d7a";
+export const MINER_YAML_SHA256 = "0x0a3458df32c547ced4e7c4eda4d0f252fd18321d814725ccae599fe3c4390efb";
 
-/** SHA-256 of the repo-root miner.yaml bytes (45 intents). It equals the
- * on-chain yaml_hash of registration 6177 and SEPOLIA_YAML_HASH in
- * lib/minerRegistration.ts (updateMiner landed 2026-11-23). */
+/** SHA-256 of the repo-root miner.yaml bytes (49 intents). It becomes the
+ * on-chain yaml_hash of registration 6177's successor when the 49-intent
+ * updateMiner lands; SEPOLIA_YAML_HASH in lib/minerRegistration.ts stays the
+ * registered truth (45 intents) until then. */

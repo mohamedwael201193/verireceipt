@@ -226,6 +226,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - CODE_PATCH_VERIFY_GENERAL\n' +
     '    - CORPORATE_REGISTRY_LOOKUP_GENERAL\n' +
     '    - CROSS_CHAIN_STATE_VERIFY_GENERAL\n' +
+    '    - CRYPTO_PRICE_USD\n' +
     '    - CVE_LOOKUP_CVSS\n' +
     '    - EVENT_OUTCOME_RESOLUTION_GENERAL\n' +
     '    - FINANCIAL_DATA_GENERAL\n' +
@@ -235,6 +236,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - IP_GEOLOCATION_GENERAL\n' +
     '    - LIQUIDITY_DEPTH_VERIFY_GENERAL\n' +
     '    - MALWARE_DETECTION_HASH\n' +
+    '    - MINING_HASHPRICE_VERIFY_GENERAL\n' +
     '    - NEWS_HEADLINES_GENERAL\n' +
     '    - NEWS_SEARCH_GENERAL\n' +
     '    - PAYMENT_METHOD_VERIFY_GENERAL\n' +
@@ -242,6 +244,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - SANCTIONS_SCREENING_MATCH_GENERAL\n' +
     '    - SLA_COMPLIANCE_GENERAL\n' +
     '    - SPORTS_SCORE_GENERAL\n' +
+    '    - STORM_ALERT_GENERAL\n' +
     '    - STOCK_PRICE_US_EQUITY\n' +
     '    - THREAT_INTELLIGENCE_INDICATOR\n' +
     '    - TOKEN_HOLDER_COUNT_GENERAL\n' +
@@ -251,6 +254,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - URL_SCAN_VERDICT\n' +
     '    - VENDOR_VERIFY_GENERAL\n' +
     '    - VULNERABILITY_TRIAGE_GENERAL\n' +
+    '    - WEATHER_CHECK_TEMPERATURE\n' +
     '    - WEATHER_FORECAST_GENERAL\n' +
     '  signal_mapping:\n' +
     '    confidence_field: confidence\n' +
@@ -1155,6 +1159,82 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          - WEATHER_FORECAST_GENERAL\n' +
     '          description: Forecast window\n' +
     '\n' +
+    '  - path: /v1/crypto-price\n' +
+    '    external_path: /v1/crypto-price\n' +
+    '    method: GET\n' +
+    '    description: Current USD spot price for one crypto symbol from the Coinbase public spot API,\n' +
+    '      with a SHA-256 receipt. One named exchange\'s last spot quote, not an index or VWAP; symbols\n' +
+    '      the source does not list are refused, never guessed.\n' +
+    '    intents:\n' +
+    '    - CRYPTO_PRICE_USD\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: symbol\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - CRYPTO_PRICE_USD\n' +
+    '          description: Asset symbol, e.g. BTC\n' +
+    '\n' +
+    '  - path: /v1/mining-hashprice\n' +
+    '    external_path: /v1/mining-hashprice\n' +
+    '    method: GET\n' +
+    '    description: Bitcoin hashprice at the current tip computed from measured inputs (mempool.space\n' +
+    '      1-week hashrate and per-block fee series, deterministic subsidy, Coinbase spot), with a SHA-256\n' +
+    '      receipt. A spot value from current measured series, never a forecast; a block_height other\n' +
+    '      than the current tip is an honest refusal, not an interpolated answer.\n' +
+    '    intents:\n' +
+    '    - MINING_HASHPRICE_VERIFY_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        optional:\n' +
+    '        - name: block_height\n' +
+    '          type: integer\n' +
+    '          intents:\n' +
+    '          - MINING_HASHPRICE_VERIFY_GENERAL\n' +
+    '          description: Bitcoin block height; only the current tip is served\n' +
+    '\n' +
+    '  - path: /v1/storm-alert\n' +
+    '    external_path: /v1/storm-alert\n' +
+    '    method: GET\n' +
+    '    description: Storm risk for a US point over a forward window from issued NWS alert products only,\n' +
+    '      with a SHA-256 receipt. The score is the worst severity among active issued products expiring\n' +
+    '      inside the window; no forecast model output is scored, and peak gust and precipitation numerics\n' +
+    '      are not carried by issued products. US coverage only.\n' +
+    '    intents:\n' +
+    '    - STORM_ALERT_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: location\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - STORM_ALERT_GENERAL\n' +
+    '          description: Point as latitude,longitude (US coverage)\n' +
+    '        optional:\n' +
+    '        - name: window_hours\n' +
+    '          type: integer\n' +
+    '          intents:\n' +
+    '          - STORM_ALERT_GENERAL\n' +
+    '          description: Assessment window in hours, 1-240, default 24\n' +
+    '\n' +
+    '  - path: /v1/weather-check\n' +
+    '    external_path: /v1/weather-check\n' +
+    '    method: GET\n' +
+    '    description: Measured air temperature for a place from the nearest NOAA aviationweather.gov METAR\n' +
+    '      station, at most 90 minutes old, with a SHA-256 receipt. A measured station observation, not a\n' +
+    '      forecast, reanalysis or city-wide value; the station binding is explicit in the evidence.\n' +
+    '    intents:\n' +
+    '    - WEATHER_CHECK_TEMPERATURE\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: location\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - WEATHER_CHECK_TEMPERATURE\n' +
+    '          description: City or place name, or latitude,longitude\n' +
+    '\n' +
     'intent_mapping:\n' +
     '  ONCHAIN_TX_LOOKUP_GENERAL:\n' +
     '    endpoint: /v1/tx\n' +
@@ -1766,6 +1846,8 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    output:\n' +
     '      url:\n' +
     '        path: url\n' +
+    '      verdict:\n' +
+    '        path: url_check.verdict\n' +
     '      detections:\n' +
     '        path: detections\n' +
     '        unit: "detections"\n' +
@@ -1832,6 +1914,74 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '        path: precipitation_probability_pct\n' +
     '        unit: "percent"\n' +
     '      condition:\n' +
-    '        path: condition\n',
+    '        path: condition\n' +
+    '\n' +
+    '  CRYPTO_PRICE_USD:\n' +
+    '    endpoint: /v1/crypto-price\n' +
+    '    input:\n' +
+    '      symbol:\n' +
+    '        from: symbol\n' +
+    '        how: "The asset symbol as asked (BTC, ETH, SOL), uppercase, without a currency pair suffix."\n' +
+    '    output:\n' +
+    '      price_usd:\n' +
+    '        path: price_usd\n' +
+    '        unit: "US dollars"\n' +
+    '\n' +
+    '  MINING_HASHPRICE_VERIFY_GENERAL:\n' +
+    '    endpoint: /v1/mining-hashprice\n' +
+    '    input:\n' +
+    '      block_height:\n' +
+    '        from: block_height\n' +
+    '        how: "The requested Bitcoin block height. Leave empty when no height is named; only the current tip is served."\n' +
+    '    output:\n' +
+    '      hashprice_sats_per_ph_day:\n' +
+    '        path: hashprice_sats_per_ph_day\n' +
+    '        unit: "sats per PH/s per day"\n' +
+    '      block_height:\n' +
+    '        path: block_height\n' +
+    '        unit: "block height"\n' +
+    '      hashrate_eh_s:\n' +
+    '        path: hashrate_eh_s\n' +
+    '        unit: "EH/s"\n' +
+    '      hashprice_usd_per_ph_day:\n' +
+    '        path: hashprice_usd_per_ph_day\n' +
+    '        unit: "USD per PH/s per day"\n' +
+    '\n' +
+    '  STORM_ALERT_GENERAL:\n' +
+    '    endpoint: /v1/storm-alert\n' +
+    '    input:\n' +
+    '      location:\n' +
+    '        from: location\n' +
+    '        how: "The place as latitude,longitude. US coverage only (NWS alert products)."\n' +
+    '      window_hours:\n' +
+    '        from: window_hours\n' +
+    '        how: "The assessment window in hours when named (next 24 hours, this weekend); otherwise leave empty for the 24-hour default."\n' +
+    '    output:\n' +
+    '      location:\n' +
+    '        path: location\n' +
+    '      risk_score:\n' +
+    '        path: risk_score\n' +
+    '        unit: "fraction (0-1)"\n' +
+    '      risk_level:\n' +
+    '        path: risk_level\n' +
+    '      peak_gust_kmh:\n' +
+    '        path: peak_gust_kmh\n' +
+    '        unit: "km/h"\n' +
+    '      precipitation_mm:\n' +
+    '        path: precipitation_mm\n' +
+    '        unit: "mm"\n' +
+    '      window:\n' +
+    '        path: window\n' +
+    '\n' +
+    '  WEATHER_CHECK_TEMPERATURE:\n' +
+    '    endpoint: /v1/weather-check\n' +
+    '    input:\n' +
+    '      location:\n' +
+    '        from: location\n' +
+    '        how: "The city or place name as asked, or latitude,longitude when given as coordinates."\n' +
+    '    output:\n' +
+    '      temperature_c:\n' +
+    '        path: temperature_c\n' +
+    '        unit: "degrees Celsius"\n',
   cast: REGISTRATION_CAST_SNIPPET,
 };

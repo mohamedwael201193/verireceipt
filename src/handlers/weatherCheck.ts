@@ -4,7 +4,7 @@
 // station, with a SHA-256 receipt over the exact upstream body.
 //
 // Intent contract (read 2026-11-22): request location (string); scored
-// temp_c in [-90, 60].
+// temperature_c in [-90, 60].
 //
 // SOURCE: aviationweather.gov (NOAA) METAR station observations,
 // keyless, the same measured pipeline /v1/weather uses, probed live

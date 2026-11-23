@@ -75,11 +75,13 @@ export async function handleUrlSafe(query: Record<string, string | undefined>): 
     ? `Malicious: ${raw} is flagged by ${detections} of ${states.length} blocklists checked: ${matches.map((m) => `${m.feed} ("${m.raw}")`).join("; ")}. The URL itself was not fetched or analysed.`
     : `Safe (blocklist sense): ${raw} has zero flags across ${states.length} blocklists checked (${feedMeta.map((f) => f.feed).join(", ")}) as of ${asOf}. ` +
       `This is a blocklist screening, not a guarantee: blocklists are not safelists, and the URL itself was not fetched or analysed.`;
-  // The contract's `verdict` field is named safety_verdict here: the
-  // shared envelope reserves `verdict` for the verification status.
+  // The contract's `verdict` field nests under url_check: the shared
+  // envelope reserves the top-level `verdict` for the verification status.
+  // miner.yaml maps the schema field at path url_check.verdict (the yaml
+  // standard's output path is a dot path into the answer).
   return envelope(INTENT, {
     url: raw,
-    safety_verdict: verdict,
+    url_check: { verdict },
     detections,
     summary,
     matches: matches.map((m) => ({ feed: m.feed, matched_entry: m.raw })),

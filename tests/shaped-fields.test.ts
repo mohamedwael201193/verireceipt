@@ -59,9 +59,18 @@ describe("OUTPUT_MAPPING mirrors miner.yaml", () => {
   it("has exactly the yaml's intents, fields, paths and units", () => {
     expect(OUTPUT_MAPPING).toEqual(yamlOutputs());
   });
-  it("every mapped path is a plain top-level key", () => {
-    for (const m of Object.values(OUTPUT_MAPPING))
-      for (const [f, o] of Object.entries(m)) expect(o.path).toBe(f);
+  it("every mapped path is a plain top-level key (one pinned exception)", () => {
+    // Exception: URL_SAFE_GENERAL.verdict maps at url_check.verdict. The
+    // envelope reserves the top-level `verdict` for the verification status,
+    // and the yaml standard's output path is a dot path into the answer
+    // (anjoman.ai/docs/miners/yaml-config, intent_mapping output path).
+    const ALLOWED_NESTED: Record<string, string> = { "URL_SAFE_GENERAL.verdict": "url_check.verdict" };
+    for (const [intent, m] of Object.entries(OUTPUT_MAPPING))
+      for (const [f, o] of Object.entries(m)) {
+        const exception = ALLOWED_NESTED[`${intent}.${f}`];
+        if (exception) expect(o.path).toBe(exception);
+        else expect(o.path).toBe(f);
+      }
   });
 });
 
