@@ -22,7 +22,10 @@ import { buildServer } from "../src/server";
 
 // Unit/injection fixtures only. No live sources, evaluator calls or stored production data.
 let negativeDns = false;
-const holderBody = JSON.stringify({ holders_count: "123", symbol: "USDC" });
+// The fixture carries the indexer's own contract identity: b05bb71 made
+// the handler reject responses whose address/type do not match the
+// requested ERC-20 contract, and this body's shape must satisfy that.
+const holderBody = JSON.stringify({ address_hash: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", type: "ERC-20", holders_count: "123", symbol: "USDC" });
 function fetchFixture(input: unknown): Promise<Response> {
   const url = String(input), date = new Date().toISOString().slice(0, 10);
   let body: unknown;
