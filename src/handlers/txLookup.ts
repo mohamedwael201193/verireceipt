@@ -591,6 +591,95 @@ export function weiToEth(weiHex: string): number {
   return Number(`${whole.toString()}.${fracStr}`);
 }
 
+/** Exact decimal string for `v / 10^scaleExp` — no float anywhere. */
+export function scaledDecimalString(v: bigint, scaleExp: number): string {
+  if (v < 0n) throw new RangeError("scaledDecimalString: negative value");
+  const scale = 10n ** BigInt(scaleExp);
+  const whole = v / scale;
+  const frac = v % scale;
+  if (frac === 0n) return whole.toString();
+  const fracStr = frac.toString().padStart(scaleExp, "0").replace(/0+$/, "");
+  return `${whole}.${fracStr}`;
+}
+
+const HEX_32BYTE_RE = /^0x[0-9a-fA-F]{64}$/;
+
+function hexQtyToBigInt(v: unknown): bigint | null {
+  return typeof v === "string" && HEX_QTY_RE.test(v) ? BigInt(v) : null;
+}
+
+/**
+ * Winning-leg enrichment (2026-11-23): fee, gas, block hash, method
+ * selector and the exact wei value are read from the SAME canonical
+ * {tx, receipt} evidence the receipt already hashes (buildTxEvidence) —
+ * never from an extra upstream call. They are not quorum-voted fields:
+ * the quorum decides the winning leg, and a judge recomputes every one
+ * of them from the served evidence bytes. A malformed optional field is
+ * omitted (null), never invented and never a verdict change. Gas price
+ * is the receipt's effectiveGasPrice, falling back to the legacy
+ * tx.gasPrice on pre-London receipts.
+ */
+interface TxEnrichment {
+  /** Exact wei value of the tx, decimal string. */
+  valueWei: string | null;
+  /** Exact whole-native-unit value, decimal string ("0.000000000000031337"). */
+  valueEthExact: string | null;
+  gasUsed: number | null;
+  /** Exact gas price in wei, decimal string. */
+  gasPriceWei: string | null;
+  /** Exact gas price in gwei, decimal string. */
+  gasPriceGweiExact: string | null;
+  /** Exact fee in wei, decimal string (gasUsed x gasPrice). */
+  feeWei: string | null;
+  /** Exact fee in whole native units, decimal string. */
+  feeEthExact: string | null;
+  receiptStatus: "success" | "reverted" | null;
+  blockHash: string | null;
+  /** First 4 bytes of tx input (0x + 8 lowercase hex), else null. */
+  methodSelector: string | null;
+}
+
+function extractTxEnrichment(txResult: unknown, receiptResult: unknown): TxEnrichment {
+  const tx = isRecord(txResult) ? txResult : null;
+  const rc = isRecord(receiptResult) ? receiptResult : null;
+  const valueWei = tx !== null ? hexQtyToBigInt(tx.value) : null;
+  const gasUsed = rc !== null ? hexQtyToBigInt(rc.gasUsed) : null;
+  const gasPrice =
+    rc !== null
+      ? (hexQtyToBigInt(rc.effectiveGasPrice) ?? (tx !== null ? hexQtyToBigInt(tx.gasPrice) : null))
+      : null;
+  const feeWei = gasUsed !== null && gasPrice !== null ? gasUsed * gasPrice : null;
+  let receiptStatus: "success" | "reverted" | null = null;
+  if (rc !== null) {
+    if (typeof rc.status === "string" && HEX_QTY_RE.test(rc.status)) {
+      receiptStatus = BigInt(rc.status) === 1n ? "success" : "reverted";
+    } else if (typeof rc.root === "string") {
+      receiptStatus = "success"; // pre-Byzantium shape: root present means confirmed
+    }
+  }
+  const blockHash =
+    rc !== null && typeof rc.blockHash === "string" && HEX_32BYTE_RE.test(rc.blockHash)
+      ? rc.blockHash
+      : null;
+  const input = tx !== null && typeof tx.input === "string" ? tx.input : null;
+  const methodSelector =
+    input !== null && /^0x[0-9a-fA-F]{8,}$/.test(input)
+      ? `0x${input.slice(2, 10).toLowerCase()}`
+      : null;
+  return {
+    valueWei: valueWei !== null ? valueWei.toString() : null,
+    valueEthExact: valueWei !== null ? scaledDecimalString(valueWei, 18) : null,
+    gasUsed: gasUsed !== null ? Number(gasUsed) : null,
+    gasPriceWei: gasPrice !== null ? gasPrice.toString() : null,
+    gasPriceGweiExact: gasPrice !== null ? scaledDecimalString(gasPrice, 9) : null,
+    feeWei: feeWei !== null ? feeWei.toString() : null,
+    feeEthExact: feeWei !== null ? scaledDecimalString(feeWei, 18) : null,
+    receiptStatus,
+    blockHash,
+    methodSelector,
+  };
+}
+
 /** An outcome is "empty" when the leg returned neither a tx nor a receipt. */
 function isEmptyOutcome(o: RpcOutcome): boolean {
   return o.tx === null && o.receipt === null;
@@ -882,6 +971,26 @@ export async function handleTx(
 
   const tx = value.tx;
   const receipt = value.receipt;
+  const enrichment = extractTxEnrichment(value.txResult, value.receiptResult);
+  // Detail sentences built only from evidence-backed fields, each clause
+  // omitted (never invented) when its data is absent.
+  const transferSentence = (verb: "carried" | "carries"): string => {
+    const fromAddr = tx?.from ?? receipt?.from ?? null;
+    const toAddr = tx?.to ?? receipt?.to ?? null;
+    if (fromAddr === null || enrichment.valueEthExact === null) return "";
+    const toPart = toAddr !== null ? ` to ${toAddr}` : "";
+    return ` It was sent from ${fromAddr}${toPart} and ${verb} ${enrichment.valueEthExact} ETH.`;
+  };
+  const feeSentence = (): string => {
+    if (
+      enrichment.feeEthExact === null ||
+      enrichment.gasUsed === null ||
+      enrichment.gasPriceGweiExact === null
+    ) {
+      return "";
+    }
+    return ` The fee was ${enrichment.feeEthExact} ETH (${enrichment.gasUsed} gas at ${enrichment.gasPriceGweiExact} gwei).`;
+  };
 
   let status: "confirmed" | "reverted" | "pending" | "not_found";
   let verdict: string;
@@ -895,18 +1004,26 @@ export async function handleTx(
       status = "confirmed";
       verdict = "verified";
       confidence = 1.0;
-      answer = `Transaction ${txHash} on ${chain} is confirmed in block ${blockNumber}.`;
+      answer =
+        `Transaction ${txHash} on ${chain} is confirmed in block ${blockNumber}.` +
+        transferSentence("carried") +
+        feeSentence();
     } else {
       status = "reverted";
       verdict = "reverted";
       confidence = 1.0;
-      answer = `Transaction ${txHash} on ${chain} was reverted in block ${blockNumber}.`;
+      answer =
+        `Transaction ${txHash} on ${chain} was reverted in block ${blockNumber}.` +
+        transferSentence("carried") +
+        feeSentence();
     }
   } else if (tx !== null) {
     status = "pending";
     verdict = "pending";
     confidence = 0.9;
-    answer = `Transaction ${txHash} on ${chain} is pending and has not yet been included in a block.`;
+    answer =
+      `Transaction ${txHash} on ${chain} is pending and has not yet been included in a block.` +
+      transferSentence("carries");
   } else {
     status = "not_found";
     verdict = "not_found";
@@ -940,12 +1057,27 @@ export async function handleTx(
     block_number: blockNumber,
     value_eth: valueEth,
   };
+  // Winning-leg enrichment fields, all exact decimal strings where money
+  // (no float anywhere); each present only when the evidence carries it.
+  if (enrichment.valueWei !== null) fields.value_wei = enrichment.valueWei;
+  if (enrichment.methodSelector !== null) fields.method_selector = enrichment.methodSelector;
+  if (receipt !== null) {
+    if (enrichment.receiptStatus !== null) fields.receipt_status = enrichment.receiptStatus;
+    if (enrichment.gasUsed !== null) fields.gas_used = enrichment.gasUsed;
+    if (enrichment.gasPriceWei !== null) fields.gas_price_wei = enrichment.gasPriceWei;
+    if (enrichment.feeWei !== null) fields.fee_wei = enrichment.feeWei;
+    if (enrichment.blockHash !== null) fields.block_hash = enrichment.blockHash;
+  }
   // OP-stack L1 data fee: include it (converted to whole native units) when
   // the receipt carries it. The canonical {tx, receipt} evidence hashed
   // below carries the receipt result verbatim, including the original
   // l1Fee hex.
   if (receipt !== null && OP_STACK_CHAINS.has(chain) && receipt.l1Fee !== undefined) {
     fields.l1_fee_eth = weiToEth(receipt.l1Fee);
+    const l1FeeWei = hexQtyToBigInt(receipt.l1Fee);
+    if (l1FeeWei !== null && status !== "pending") {
+      answer += ` The L1 data fee was ${scaledDecimalString(l1FeeWei, 18)} ETH.`;
+    }
   }
 
   // R2 (F1): the receipt hashes the canonical {tx, receipt} evidence

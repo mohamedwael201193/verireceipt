@@ -2120,3 +2120,128 @@ describe("handleTx live A2: reference tx returns block 46147", () => {
     60000,
   );
 });
+
+describe("handleTx winning-leg enrichment (stubbed, no network)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("confirmed: exact fee/gas/block-hash/value fields and full-decimal prose from receipt evidence", async () => {
+    installStub(() => ({
+      tx: stubTx({
+        value: "0x7a69", // 31337 wei
+        gasPrice: "0xb2d05e00", // 3 gwei (legacy field; effectiveGasPrice wins below)
+        input: "0xa9059cbb0000000000000000000000000000000000000000000000000000000000000001",
+      }),
+      receipt: stubReceipt({
+        gasUsed: "0x5208", // 21000
+        effectiveGasPrice: "0xb2d05e00", // 3 gwei
+        blockHash: "0x" + "ab".repeat(32),
+      }),
+    }));
+    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
+    expect(out.status).toBe("confirmed");
+    expect(out.receipt_status).toBe("success");
+    // The scored contract field keeps its documented display precision;
+    // the exact wei string carries the full value.
+    expect(out.value_eth).toBe(3.1337e-14);
+    expect(out.value_wei).toBe("31337");
+    expect(out.gas_used).toBe(21000);
+    expect(out.gas_price_wei).toBe("3000000000");
+    expect(out.fee_wei).toBe("63000000000000"); // 21000 * 3 gwei
+    expect(out.block_hash).toBe("0x" + "ab".repeat(32));
+    expect(out.method_selector).toBe("0xa9059cbb");
+    const ans = String(out.answer);
+    expect(ans).toContain("is confirmed in block 26454409");
+    expect(ans).toContain(`sent from ${STUB_FROM} to ${STUB_TO}`);
+    expect(ans).toContain("carried 0.000000000000031337 ETH"); // exact, never 3.1337e-14
+    expect(ans).toContain("fee was 0.000063 ETH (21000 gas at 3 gwei)");
+    expect(ans).not.toContain("e-14");
+  });
+
+  it("legacy receipt without effectiveGasPrice: fee derives from tx.gasPrice", async () => {
+    installStub(() => ({
+      tx: stubTx({ gasPrice: "0xba43b7400" }), // 50 gwei
+      receipt: stubReceipt({ gasUsed: "0x5208" }),
+    }));
+    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
+    expect(out.gas_price_wei).toBe("50000000000");
+    expect(out.fee_wei).toBe("1050000000000000"); // 21000 * 50 gwei
+    expect(String(out.answer)).toContain("fee was 0.00105 ETH (21000 gas at 50 gwei)");
+  });
+
+  it("reverted: receipt_status reverted, prose keeps the transfer and fee detail", async () => {
+    installStub(() => ({
+      tx: stubTx({ hash: REVERTED_TX, blockNumber: "0x193a98b" }),
+      receipt: stubReceipt({
+        status: "0x0",
+        blockNumber: "0x193a98b",
+        transactionHash: REVERTED_TX,
+        gasUsed: "0x5208",
+        effectiveGasPrice: "0xb2d05e00",
+      }),
+    }));
+    const out = await handleTx({ tx_hash: REVERTED_TX, chain: "ethereum" });
+    expect(out.status).toBe("reverted");
+    expect(out.receipt_status).toBe("reverted");
+    const ans = String(out.answer);
+    expect(ans).toContain("was reverted in block 26454411");
+    expect(ans).toContain("carried 1 ETH");
+    expect(ans).toContain("fee was 0.000063 ETH");
+  });
+
+  it("pending: value and method from the tx, no receipt-only fields, present-tense prose", async () => {
+    installStub(() => ({
+      tx: stubTx({
+        blockNumber: "0x193a989",
+        input: "0xa9059cbb0000000000000000000000000000000000000000000000000000000000000001",
+      }),
+      receipt: null,
+    }));
+    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
+    expect(out.status).toBe("pending");
+    expect(out.value_wei).toBe("1000000000000000000");
+    expect(out.method_selector).toBe("0xa9059cbb");
+    expect(out).not.toHaveProperty("receipt_status");
+    expect(out).not.toHaveProperty("gas_used");
+    expect(out).not.toHaveProperty("fee_wei");
+    expect(String(out.answer)).toContain("carries 1 ETH");
+  });
+
+  it("not_found: no enrichment fields", async () => {
+    installStub(() => NULL_LEG);
+    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
+    expect(out.status).toBe("not_found");
+    expect(out).not.toHaveProperty("value_wei");
+    expect(out).not.toHaveProperty("receipt_status");
+  });
+
+  it("malformed optional fields are omitted, never a verdict change", async () => {
+    installStub(() => ({
+      tx: stubTx({ input: "0xzz" }),
+      receipt: stubReceipt({ gasUsed: "not-hex", effectiveGasPrice: "0xzz", blockHash: "0xshort" }),
+    }));
+    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
+    expect(out.status).toBe("confirmed");
+    expect(out).not.toHaveProperty("gas_used");
+    expect(out).not.toHaveProperty("fee_wei");
+    expect(out).not.toHaveProperty("gas_price_wei");
+    expect(out).not.toHaveProperty("block_hash");
+    expect(out).not.toHaveProperty("method_selector");
+    expect(String(out.answer)).not.toContain("fee was");
+  });
+
+  it("OP-stack l1Fee: prose names the L1 data fee with an exact decimal", async () => {
+    installStub(() => ({
+      tx: stubTx(),
+      receipt: stubReceipt({
+        l1Fee: "0x7a69", // 31337 wei
+        gasUsed: "0x5208",
+        effectiveGasPrice: "0xb2d05e00",
+      }),
+    }));
+    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "base" });
+    expect(out.l1_fee_eth).toBe(3.1337e-14);
+    expect(String(out.answer)).toContain("The L1 data fee was 0.000000000000031337 ETH.");
+  });
+});
