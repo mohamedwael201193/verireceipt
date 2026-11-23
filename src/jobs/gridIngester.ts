@@ -1804,34 +1804,6 @@ function cptWallParts(utcMs: number): { y: number; mo: number; d: number; h: num
   return { y: v("year"), mo: v("month"), d: v("day"), h: v("hour") % 24, min: v("minute"), s: v("second") };
 }
 
-/**
- * A whole-hour wall start in America/Chicago -> UTC epoch ms, or null
- * when the wall time does not exist (the spring-forward gap, e.g.
- * 02:00 on 2026-03-08). Iterates the offset to convergence, then
- * round-trip verifies (the same defence as nyWallToUtcMs): an
- * ambiguous fall-back wall resolves to the SECOND occurrence (CST),
- * which this function alone cannot distinguish from the first.
- */
-export function ercotWallHourToUtcMs(y: number, mo: number, d: number, h: number): number | null {
-  if (!Number.isInteger(y) || !Number.isInteger(mo) || !Number.isInteger(d) || !Number.isInteger(h)) return null;
-  if (mo < 1 || mo > 12 || d < 1 || d > daysInMonth(y, mo) || h < 0 || h > 23) return null;
-  const target = Date.UTC(y, mo - 1, d, h);
-  if (y >= 0 && y < 100) {
-    // Date.UTC maps years 0-99 to 1900-1999; reject rather than repair
-    // (the ERCOT pages never label such dates).
-    return null;
-  }
-  let t = target;
-  for (let i = 0; i < 4; i++) {
-    const parts = cptWallParts(t);
-    const localAsUtc = Date.UTC(parts.y, parts.mo - 1, parts.d, parts.h, parts.min, parts.s);
-    t = target - (localAsUtc - t);
-  }
-  const back = cptWallParts(t);
-  if (back.y !== y || back.mo !== mo || back.d !== d || back.h !== h) return null;
-  return t;
-}
-
 /** Minimal cell extraction for the cdr html price tables (no DOM). */
 function parseErcotTable(html: string): { header: string[]; rows: string[][] } | null {
   const table = /<table[\s\S]*?<\/table>/i.exec(html);
@@ -1860,6 +1832,10 @@ function parseErcotTable(html: string): { header: string[]; rows: string[][] } |
  * Measured shapes (2026-11-23): ordinary days carry HE 1-24; the
  * 2026-03-08 spring-forward page skips HE 3 (23 rows, genuine miss);
  * the 2026-11-01 fall-back page is not published at the dated URL.
+ * Latent: on a published fall-back page the repeated wall hour would
+ * appear as two HE 2 rows; both UTC hours (CDT and CST occurrences)
+ * map to HE 2 and the FIRST matching row wins, so the second row is
+ * unservable from this page shape (pinned by a hypothetical-page test).
  * A missing table/header/column or a non-numeric cell throws (fail
  * closed); a well-formed page with no row for the hour returns null.
  */

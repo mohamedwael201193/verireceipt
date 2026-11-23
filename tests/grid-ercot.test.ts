@@ -45,7 +45,12 @@ const ROW_1122_HE24 = "11/22/2026,24,26.40,26.32,26.62,26.13,26.15,26.47,27.56,2
 const ROW_0308_HE2 = "03/08/2026,2,35.78,35.34,36.24,35.45,36.12,35.00,39.18,34.88,35.30,35.34,35.20,35.48,35.52,35.75,47.84";
 const ROW_0308_HE4 = "03/08/2026,4,33.63,33.03,34.20,33.24,33.46,32.54,37.97,32.48,32.86,33.08,32.98,33.29,33.38,33.40,48.41";
 
+// Real rows from the 2026-07-15 page (CDT, UTC-5 — summer mapping pin).
+const ROW_0715_HE1 = "07/15/2026,1,30.06,29.55,30.28,30.34,30.53,28.02,33.19,29.98,30.39,29.52,30.12,30.38,30.38,25.50,36.91";
+const ROW_0715_HE24 = "07/15/2026,24,28.81,28.71,28.82,29.15,28.31,27.46,29.97,28.86,29.17,28.69,28.97,29.17,29.16,25.58,31.12";
+
 const PAGE_20261122 = table([ROW_1122_HE1, ROW_1122_HE24]);
+const PAGE_20260715 = table([ROW_0715_HE1, ROW_0715_HE24]);
 const PAGE_20260308 = table([ROW_0308_HE2, ROW_0308_HE4]);
 
 function stubPage(body: string) {
@@ -85,6 +90,37 @@ describe("fetchErcotDamSpp (CPT/HE mapping against the real page shape)", () => 
     stubPage(PAGE_20260308);
     const got = await fetchErcotDamSpp("HB_BUSAVG", "2026-03-08T08:00:00.000Z");
     expect(got?.lmp).toBe(33.63);
+  });
+
+  it("CDT summer mapping: UTC 05:00 = wall 00:00 CDT = HE 1 -> 30.06", async () => {
+    const calls = stubPage(PAGE_20260715);
+    const got = await fetchErcotDamSpp("HB_BUSAVG", "2026-07-15T05:00:00.000Z");
+    expect(got).toEqual({ lmp: 30.06, upstreamUrl: ERCOT_CDR_URL + "20260715_dam_spp" });
+    expect(calls).toEqual([ERCOT_CDR_URL + "20260715_dam_spp"]);
+  });
+
+  it("CDT summer mapping, no date wrap: UTC 2026-07-16T04:00 = wall 23:00 CDT 07/15 = HE 24 -> 28.81", async () => {
+    const calls = stubPage(PAGE_20260715);
+    const got = await fetchErcotDamSpp("HB_BUSAVG", "2026-07-16T04:00:00.000Z");
+    expect(got).toEqual({ lmp: 28.81, upstreamUrl: ERCOT_CDR_URL + "20260715_dam_spp" });
+    expect(calls).toEqual([ERCOT_CDR_URL + "20260715_dam_spp"]);
+  });
+
+  it("fall-back duplicate HE 2 (hypothetical 25-row page): both UTC hours serve the FIRST matching row", async () => {
+    // Reviewer control: the repeated wall hour 01:00 on a fall-back
+    // page would appear as two HE 2 rows; the fetch maps BOTH UTC
+    // hours (CDT and CST occurrences) to HE 2 and the first matching
+    // row wins, so the second row is unservable from this page shape.
+    stubPage(table([
+      "11/01/2026,1,10.00,10.00,10.00,10.00,10.00,10.00,10.00,10.00,10.00,10.00,10.00,10.00,10.00,10.00,10.00",
+      "11/01/2026,2,11.11,11.11,11.11,11.11,11.11,11.11,11.11,11.11,11.11,11.11,11.11,11.11,11.11,11.11,11.11",
+      "11/01/2026,2,22.22,22.22,22.22,22.22,22.22,22.22,22.22,22.22,22.22,22.22,22.22,22.22,22.22,22.22,22.22",
+      "11/01/2026,3,12.00,12.00,12.00,12.00,12.00,12.00,12.00,12.00,12.00,12.00,12.00,12.00,12.00,12.00,12.00",
+    ]));
+    const cdt = await fetchErcotDamSpp("HB_BUSAVG", "2026-11-01T06:00:00.000Z"); // wall 01:00 CDT
+    const cst = await fetchErcotDamSpp("HB_BUSAVG", "2026-11-01T07:00:00.000Z"); // wall 01:00 CST
+    expect(cdt?.lmp).toBe(11.11);
+    expect(cst?.lmp).toBe(11.11);
   });
 
   it("a well-formed page with no row for the hour is a genuine miss (null)", async () => {
