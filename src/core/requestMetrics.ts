@@ -12,6 +12,7 @@ const ROUTE_INTENTS: Record<string, string> = {
   "/v1/academic-search": "ACADEMIC_SEARCH_GENERAL",
   "/v1/code-patch": "CODE_PATCH_VERIFY_GENERAL",
   "/v1/stock-price": "STOCK_PRICE_US_EQUITY",
+  "/v1/sanctions-screen": "SANCTIONS_SCREENING_MATCH_GENERAL",
 };
 // Only known parameter NAMES are emitted, including rejected aliases. Never values
 // or unknown names: callers can put a credential into an arbitrary query key.

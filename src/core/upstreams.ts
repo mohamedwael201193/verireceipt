@@ -88,6 +88,8 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "api.crossref.org": "crossref",
   "api.github.com": "github",
   "query1.finance.yahoo.com": "yahoo-finance",
+  "sanctionslistservice.ofac.treas.gov": "ofac",
+  "scsanctions.un.org": "un-sanctions",
 };
 
 /** Hostname suffixes shared by every CHAIN_RPCS host family. */
@@ -203,6 +205,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "academic-search": "crossref",
   "code-patch": "github",
   "stock-price": "yahoo-finance",
+  "sanctions-screen": "ofac",
 };
 
 /**
