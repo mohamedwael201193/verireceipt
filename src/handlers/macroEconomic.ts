@@ -46,15 +46,20 @@ const CATALOG_TTL_MS = 60 * 60 * 1000;
 const SUPPORTED_INDICATOR = "unemployment rate";
 
 /** Normalized spellings of the ONE contract-enum indicator. Matching
- * lowercases, collapses whitespace and strips parenthetical asides, so
- * "Unemployment", "unemployment rate (%)" and "jobless rate" all mean
- * the contract's "unemployment rate". Anything outside this set stays
- * 422 UNSUPPORTED_INDICATOR — the registered surface is unchanged.
- * A served normalization is always disclosed. */
+ * lowercases, collapses whitespace and removes only unit asides such
+ * as "(%)" — other parentheticals stay in the text, so a phrase that
+ * merely CONTAINS an aside cannot smuggle a different statistic past
+ * the alias check. Anything outside the alias set stays 422
+ * UNSUPPORTED_INDICATOR; the registered surface is unchanged. A served
+ * normalization is always disclosed. */
 const INDICATOR_ALIASES = new Set([
   "unemployment rate",
   "unemployment",
   "jobless rate",
+  "unemployment % of total labor force",
+  "unemployment rate % of total labor force",
+  "unemployment total",
+  "unemployment total of total labor force",
 ]);
 
 /** Normalize an indicator input; returns the canonical enum value when
@@ -62,8 +67,7 @@ const INDICATOR_ALIASES = new Set([
 export function normalizeIndicator(input: string): string | null {
   const stripped = input
     .toLowerCase()
-    .replace(/\([^)]*\)/g, " ")
-    .replace(/[%]+/g, " ")
+    .replace(/\(\s*(%|percent|percentage)\s*\)/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   return INDICATOR_ALIASES.has(stripped) ? SUPPORTED_INDICATOR : null;
