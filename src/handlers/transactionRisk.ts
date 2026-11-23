@@ -18,7 +18,10 @@
 // heuristic flag whose rubric weight is published in the receipt; a
 // LOW grade is "no listed signal fired", never "this tx is safe".
 //
-// NARROWING (disclosed in every answer and receipt): ethereum mainnet
+// Hash lookup is ethereum mainnet; free-text mode is an unverified
+// local scenario assessment and performs no chain or sanctions lookup.
+//
+// NARROWING (disclosed in every hash answer and receipt): ethereum mainnet
 // only in this slice; a hash that does not resolve there is
 // TX_NOT_FOUND, not a cross-chain guess.
 //
@@ -116,10 +119,48 @@ export function riskLevel(score: number): string {
   return score >= 0.75 ? "CRITICAL" : score >= 0.5 ? "HIGH" : score >= 0.25 ? "MEDIUM" : "LOW";
 }
 
+
+/** A rubric assessment of supplied assertions, not an observed transaction or sanctions check. */
+export async function scenarioRisk(description: string): Promise<Record<string, unknown>> {
+  const signals: {signal: string; weight: number; evidence: string}[] = [];
+  // Only complete declarative clauses are recognized. Negated, conditional and
+  // prospective clauses are not positive signals; unsupported prose stays unassessed.
+  const clauses = description.split(/(?:[;!\n]+|\.(?=\s|$))/).map(x => x.trim()).filter(Boolean);
+  const asserted = clauses.filter(x => !/\b(?:not|no|never|without|if|unless|would|could|may|might|will|should|maybe|possibly|whether)\b|\?/i.test(x));
+  const add = (signal: string, weight: number, match: string | undefined) => {if (match) signals.push({signal, weight, evidence: 'User-supplied assertion only: ' + match});};
+  add('TX_REVERTED', .3, asserted.find(x => /^(?:the )?(?:tx|transaction|execution) (?:has |was )?(?:reverted|failed)$/i.test(x) || /^receipt status (?:is |was )?0x0$/i.test(x)));
+  add('CONTRACT_CREATION', .1, asserted.find(x => /^(?:the )?(?:tx|transaction) (?:deploys|creates) (?:a |an |the )?(?:new )?(?:smart )?contract$/i.test(x) || /^contract (?:creation|deployment)$/i.test(x)));
+  add('ZERO_VALUE_NO_LOGS', .1, asserted.find(x => /^(?:the )?(?:tx|transaction) (?:transfers|transferred) 0 (?:ETH|wei) (?:with|and) (?:zero|0) logs$/i.test(x)));
+  const large = asserted.find(x => {
+    const m = /^(?:(?:the )?(?:tx|transaction) (?:transfers|transferred) |value (?:is |was )?)([0-9]{1,12}(?:\.[0-9]{1,18})?) ETH$/i.exec(x);
+    return !!m && Number(m[1]) >= 100;
+  });
+  add('LARGE_VALUE', .1, large);
+  const score = Math.round(Math.min(.4, signals.reduce((n,s) => n+s.weight,0)) * 1e6) / 1e6;
+  const level = riskLevel(score);
+  const now = new Date().toISOString();
+  const notice = 'Scenario rubric only, based on supplied assertions; no RPC lookup, sanctions screening or independent verification. Unsupported details are not assessed. LOW means no recognized rubric signal, never safe.';
+  const summary = `Scenario risk ${level} (rubric score ${score}): ${signals.length ? signals.map(s => s.signal).join(', ') : 'no recognized rubric signal'}. ${notice}`;
+  const evidence = JSON.stringify({mode:'scenario', description, rubric:RUBRIC, notice, signals, risk_score:score, assessed_at:now});
+  const receipt = makeReceipt(INTENT, 'local:transaction-risk-disclosed-rubric', evidence, 'No external source; user-supplied scenario assertions only');
+  receipt.fetched_at = now;
+  try {await saveReceipt(receipt,evidence);}
+  catch {throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
+  return envelope(INTENT,{risk_level:level,risk_score:score,signals:signals.map(s=>s.signal+': '+s.evidence),summary,assessment_mode:'scenario',sanctions_screened:false},receipt,
+    {answer:summary,verdict:'unverified',confidence:0,source:'Supplied description + disclosed local rubric; no external evidence'});
+}
+
 export async function handleTransactionRisk(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
-  const txHash = query.transaction?.trim().toLowerCase();
-  if (!txHash) throw badRequest("MISSING_PARAM", "transaction is required as an ethereum mainnet tx hash (0x + 64 hex)");
-  if (!/^0x[0-9a-f]{64}$/.test(txHash)) throw badRequest("INVALID_TX_HASH", "transaction must be a tx hash: 0x followed by 64 lowercase hex characters; this slice covers ethereum mainnet only");
+  const input = query.transaction?.trim();
+  if (!input) throw badRequest("MISSING_PARAM", "transaction is required as a hash or description");
+  if (input.length > 2000 || /[\x00-\x1f]/.test(input)) throw badRequest("INVALID_TRANSACTION", "transaction must be at most 2000 printable characters");
+  const normalized = input.toLowerCase();
+  const txHash = /^(?:0x)?[0-9a-f]{64}$/.test(normalized) ? '0x' + normalized.replace(/^0x/, '') : null;
+  if (!txHash) {
+    // Never reinterpret malformed hash-shaped input as a narrative assessment.
+    if (/^(?:0x)?[a-f0-9]+$/i.test(input) || /^0x\S+$/i.test(input)) throw badRequest("INVALID_TX_HASH", "hash lookup requires exactly 64 hex characters, with an optional 0x prefix");
+    return scenarioRisk(input);
+  }
   const fetchedAt = new Date().toISOString();
   const rpcs = CHAIN_RPCS.ethereum;
   let sdn: { addresses: string[]; body: string };
