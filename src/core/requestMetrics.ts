@@ -11,6 +11,7 @@ const ROUTE_INTENTS: Record<string, string> = {
   "/v1/vulnerability-triage": "VULNERABILITY_TRIAGE_GENERAL",
   "/v1/academic-search": "ACADEMIC_SEARCH_GENERAL",
   "/v1/code-patch": "CODE_PATCH_VERIFY_GENERAL",
+  "/v1/stock-price": "STOCK_PRICE_US_EQUITY",
 };
 // Only known parameter NAMES are emitted, including rejected aliases. Never values
 // or unknown names: callers can put a credential into an arbitrary query key.
@@ -18,7 +19,7 @@ const KNOWN_QUERY_KEYS = [
   "address", "amount", "base", "block", "chain", "country", "cve", "domain",
   "entity", "form_type", "host", "indicator", "interval_start", "node_or_zone",
   "pair", "period", "protocol", "query", "question", "quote", "record_type",
-  "token", "tx_hash", "validator_index", "year",
+  "ticker", "token", "tx_hash", "validator_index", "year",
 ] as const;
 // Fixed internal categories only. A regex alone could admit a secret-looking code.
 const DIAGNOSTIC_ERROR_CODES = new Set([

@@ -87,6 +87,7 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "explorer.optimism.io": "blockscout",
   "api.crossref.org": "crossref",
   "api.github.com": "github",
+  "query1.finance.yahoo.com": "yahoo-finance",
 };
 
 /** Hostname suffixes shared by every CHAIN_RPCS host family. */
@@ -201,6 +202,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "weather-history": "ncei-noaa",
   "academic-search": "crossref",
   "code-patch": "github",
+  "stock-price": "yahoo-finance",
 };
 
 /**
