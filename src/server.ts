@@ -25,6 +25,7 @@ import { handleUrlScan } from "./handlers/urlScan";
 import { handleWeatherForecast } from "./handlers/weatherForecast";
 import { handleVendorVerify } from "./handlers/vendorVerify";
 import { handlePaymentMethod } from "./handlers/paymentMethod";
+import { handleUrlSafe } from "./handlers/urlSafe";
 import { handleBalance } from "./handlers/walletBalance";
 import { handleTokenSupply } from "./handlers/tokenSupply";
 import { fxLogLine, handleFx, handleFxNow } from "./handlers/currencyConvert";
@@ -337,6 +338,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/weather-forecast", async (request) => trackIntent("weather-forecast", () => handleWeatherForecast(asQuery(request.query))));
   app.get("/v1/vendor-verify", async (request) => trackIntent("vendor-verify", () => handleVendorVerify(asQuery(request.query))));
   app.get("/v1/payment-method", async (request) => trackIntent("payment-method", () => handlePaymentMethod(asQuery(request.query))));
+  app.get("/v1/url-safe", async (request) => trackIntent("url-safe", () => handleUrlSafe(asQuery(request.query))));
   app.get("/v1/threat-indicator", async (request) => trackIntent("threat-indicator", () => handleThreatIndicator(asQuery(request.query))));
   app.get("/v1/balance", async (request) =>
     trackIntent("balance", () => handleBalance(asQuery(request.query))),
