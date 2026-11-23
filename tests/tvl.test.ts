@@ -1055,6 +1055,42 @@ describe('handleTvl chain-scoped queries ("X on Y")', () => {
     }
   });
 
+  it('whole-query resolution wins: "sushi on base" is the protocol sushi-on-base (reviewer pin)', async () => {
+    // Reviewer pin for b90784fc: with a protocol literally named
+    // "Sushi On Base" AND a chain "Base" both in the lists, the exact
+    // whole-query protocol match must win and the chain-scoped path
+    // must never fire (it only runs when the whole query resolves to
+    // nothing).
+    const protocols = [
+      ...PROTOCOLS_FIXTURE,
+      { slug: 'sushi', name: 'Sushi', symbol: 'SUSHI', tvl: 987654321 },
+      { slug: 'sushi-on-base', name: 'Sushi On Base', symbol: 'SUSHI', tvl: 123456789 },
+    ];
+    const chains = [
+      ...CHAINS_FIXTURE,
+      { name: 'Base', gecko_id: 'base', tokenSymbol: 'ETH', tvl: 5000000000 },
+    ];
+    // Resolver level: the whole query resolves as the protocol...
+    expect(resolveTvlTarget('sushi on base', protocols, chains)).toMatchObject({
+      kind: 'protocol',
+      slug: 'sushi-on-base',
+    });
+    // ...and the handler serves it unscoped.
+    __seedTvlCachesForTests(protocols, chains);
+    const base = fixtureFetch();
+    const fetchImpl = (async (url: string | URL | Request): Promise<Response> => {
+      const u = String(url);
+      if (u === 'https://api.llama.fi/tvl/sushi-on-base') {
+        return new Response('123456789', { status: 200 });
+      }
+      return base(url);
+    }) as typeof fetch;
+    const out = await handleTvl({ protocol: 'sushi on base' }, { fetchImpl });
+    expect(out.protocol_or_chain).toBe('sushi-on-base');
+    expect(out.scoped_chain).toBeUndefined();
+    expect(out.tvl_usd).toBe(123456789);
+  });
+
   it('unresolvable chain side falls through to the ordinary 422', async () => {
     try {
       await handleTvl({ protocol: 'aave v3 on zzzznotreal' }, { fetchImpl: fixtureFetch() });
