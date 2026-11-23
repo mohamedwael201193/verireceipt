@@ -18,10 +18,31 @@ function stub(body: string | "ERR" = corpus, status = 200): void {
   });
 }
 describe("ROUTE_ETA_GENERAL", () => {
-  it("validates both endpoints as lat,lon", async () => {
+  it("validates both endpoints; place names go through the geocoder, unknown names refuse honestly", async () => {
     await expect(handleRouteEta({})).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
     await expect(handleRouteEta({ origin: "27.3,-97.2" })).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
-    await expect(handleRouteEta({ origin: "27.3,-97.2", destination: "Austin" })).rejects.toMatchObject({ status: 400, code: "BAD_LOCATION" });
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const u = String(url);
+      if (u.startsWith("https://geocoding-api.open-meteo.com/")) return new Response('{"results":[]}', { status: 200 });
+      throw new Error(`unexpected fetch ${u}`);
+    });
+    await expect(handleRouteEta({ origin: "27.3,-97.2", destination: "Zzznotaplace" })).rejects.toMatchObject({ status: 422, code: "PLACE_NOT_FOUND" });
+    await expect(handleRouteEta({ origin: "91,0", destination: "27.3,-97.2" })).rejects.toMatchObject({ status: 400, code: "BAD_LOCATION" });
+  });
+
+  it("R1: place-name endpoints resolve with named disclosure in the answer", async () => {
+    const geoAustin = JSON.stringify({ results: [{ name: "Austin", latitude: 30.2672, longitude: -97.7431, country: "United States", admin1: "Texas", country_code: "US" }] });
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const u = String(url);
+      if (u.startsWith("https://geocoding-api.open-meteo.com/")) return new Response(geoAustin, { status: 200 });
+      if (u.startsWith("https://router.project-osrm.org/")) return new Response(corpus, { status: 200 });
+      throw new Error(`unexpected fetch ${u}`);
+    });
+    const result = await handleRouteEta({ origin: "Austin, Texas", destination: "Austin, Texas" });
+    expect(result.duration).toBe(5282);
+    const ans = String(result.answer);
+    expect(ans).toContain("Austin, Texas, United States (30.2672, -97.7431)");
+    expect(ans).toContain("static car-profile estimate");
   });
   it("parses the real route: duration, distance, snapped waypoints", () => {
     const r = parseOsrm(corpus);
