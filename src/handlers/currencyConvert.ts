@@ -26,7 +26,7 @@
 //   5. floatrates (www.floatrates.com) — daily fix snapshots with a
 //      per-currency date label, fiat codes.
 // — plus one KEYED leg, ExchangeRate-API v6 (env EXCHANGE_RATE_API_KEY,
-//   owner-directed testnet source 2026-11-23, to be registered with the owner's own email), restricted to the EGP
+//   configured through the environment), restricted to the EGP
 //   panel and the NO_DATA coverage fallback. See quoteExchangeRateApi.
 // The three fix-anchored sources and the two recomputed ones snapshot
 // at different times; the served rate is the median of whichever subset
@@ -198,7 +198,7 @@ export function rateDayKey(rateDate: string): number {
  * stale or recomputed outlier can never move the middle value. Coverage
  * doctrine is unchanged: er-api and fawaz still carry the long tail of
  * non-ECB codes the three fix sources do not have. A KEYED sixth leg
- * (ExchangeRate-API v6, owner-directed testnet source, 2026-11-23)
+ * (ExchangeRate-API v6, environment-configured testnet source, 2026-11-23)
  * exists outside this list and joins only in two narrow roles: the EGP
  * panel, and the NO_DATA coverage fallback. Major-pair medians and the
  * fix-dated outvote are untouched by it (see quoteExchangeRateApi). */
@@ -210,7 +210,7 @@ const SOURCES: Array<{ name: string; quote: (from: string, to: string) => Promis
   { name: "floatrates", quote: quoteFloatrates },
 ];
 
-/** ExchangeRate-API v6 (the KEYED sixth leg, 2026-11-23, owner-directed
+/** ExchangeRate-API v6 (the KEYED sixth leg, 2026-11-23, environment-configured
  * testnet source): GET /v6/<key>/latest/FROM, the same response shape as
  * its keyless mirror open.er-api. The key exists ONLY in the fetch path
  * (their sole auth mechanism is the URL path segment); the recorded
