@@ -512,7 +512,7 @@ export async function handleFx(
     failed_sources: failedSources,
     ...(clusterDetail.startsWith("largest complete-span") ? { independent_window_selection: clusterDetail, median_inputs: serving.map(q => ({source:q.source, rate:q.rate})) } : {}),
     ...(degradedReasons.some(reason => reason.startsWith("same-date pool")) ? {
-      selection_policy: clusterDetail.startsWith("largest complete-span") ? "same-date independent-origin complete-span window median, even midpoint" : "same-date wide pool: selected agreeing anchor cluster, lower observed median",
+      selection_policy: clusterDetail.startsWith("largest complete-span") ? (serving.length === 2 ? "same-date independent-origin complete-span window median, even midpoint" : "same-date independent-origin complete-span window median, odd observed middle") : "same-date wide pool: selected agreeing anchor cluster, lower observed median",
       cluster_detail: clusterDetail,
       degraded_reasons: degradedReasons,
     } : {}),
@@ -543,7 +543,7 @@ export async function handleFx(
   return envelope(INTENT, fields, receiptDoc, {
     answer:
       `${amount} ${from} = ${converted} ${to} at a rate of ${rate} ${to} per ${from}` +
-      ` (${serving.map(q => q.source).join(" + ")}${serving.length > 1 && serving[0].rate !== serving[1].rate ? "; median midpoint, not a single-source quote" : ""}, rates dated ${winner.rateDate}` +
+      ` (${clusterDetail.startsWith("largest complete-span") ? serving.map(q => q.source).join(" + ") : winner.source}${clusterDetail.startsWith("largest complete-span") && serving.length > 1 && serving[0].rate !== serving[1].rate ? "; median midpoint, not a single-source quote" : ""}, rates dated ${winner.rateDate}` +
       (straddledUpdate
         ? `; ${straddleDetail} — the freshest is served; they did NOT agree within 0.5%)`
         : quotes.length > 1
@@ -888,7 +888,7 @@ export async function handleFxNow(
     failed_sources: failedSources,
     ...(clusterDetail.startsWith("largest complete-span") ? { independent_window_selection: clusterDetail, median_inputs: serving.map(q => ({source:q.source, rate:q.rate})) } : {}),
     ...(degradedReasons.some(reason => reason.startsWith("same-date pool")) ? {
-      selection_policy: clusterDetail.startsWith("largest complete-span") ? "same-date independent-origin complete-span window median, even midpoint" : "same-date wide pool: selected agreeing anchor cluster, lower observed median",
+      selection_policy: clusterDetail.startsWith("largest complete-span") ? (serving.length === 2 ? "same-date independent-origin complete-span window median, even midpoint" : "same-date independent-origin complete-span window median, odd observed middle") : "same-date wide pool: selected agreeing anchor cluster, lower observed median",
       cluster_detail: clusterDetail,
       degraded_reasons: degradedReasons,
     } : {}),
@@ -915,7 +915,7 @@ export async function handleFxNow(
   return envelope(intent, fields, receiptDoc, {
     answer:
       `1 USD buys ${rate} ${currency}` +
-      ` (${serving.map(q => q.source).join(" + ")}${serving.length > 1 && serving[0].rate !== serving[1].rate ? "; median midpoint, not a single-source quote" : ""}, rates dated ${winner.rateDate}` +
+      ` (${clusterDetail.startsWith("largest complete-span") ? serving.map(q => q.source).join(" + ") : winner.source}${clusterDetail.startsWith("largest complete-span") && serving.length > 1 && serving[0].rate !== serving[1].rate ? "; median midpoint, not a single-source quote" : ""}, rates dated ${winner.rateDate}` +
       (straddledUpdate
         ? `; ${straddleDetail} — the freshest is served; they did NOT agree within 0.5%)`
         : quotes.length > 1
