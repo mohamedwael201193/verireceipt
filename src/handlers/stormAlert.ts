@@ -1,42 +1,11 @@
-// STORM_ALERT_GENERAL — GET /v1/storm-alert?location=<lat,lon>&window_hours=<1-240>
-//
-// Zero-LLM. Storm/weather-disruption risk for a place from currently
-// ISSUED US National Weather Service alert products, with a SHA-256
-// receipt over the exact upstream response bodies.
-//
-// Intent contract (https://devnode.telegraphprotocol.com/engine/v1/intents/STORM_ALERT_GENERAL,
-// read 2026-11-22): request location (string) + window_hours (integer
-// 1..240, default 24); response risk_score (0..1, scored) + risk_level
-// (LOW/MODERATE/HIGH/SEVERE); off-chain location, peak_gust_kmh,
-// precipitation_mm, window.
-//
-// SOURCE: NWS api.weather.gov, keyless (User-Agent identification per
-// NWS policy), probed live 2026-11-23. Authoritative US issuer, single
-// source, honestly named.
-//
-// SCOPE, stated in every answer:
-// - Risk derives ONLY from currently issued alert products (the
-//   /alerts/active feed), each named with its event, severity, and
-//   issue/expiry times. No forecast model output is scored.
-// - US coverage only: the /points lookup 404s outside the NWS grid,
-//   which is an honest 422 OUTSIDE_NWS_COVERAGE, never a silent LOW.
-// - location may be "lat,lon" decimal degrees or a place name (S1,
-//   audit 2026-11-23: the contract reads "The place"). Place names are
-//   geocoded with the same Open-Meteo geocoder and fail-closed rules as
-//   the forecast slice (named resolution, provider-ranked first result disclosed), and the
-//   resolved place and its coordinates are named in every answer.
-// - peak_gust_kmh and precipitation_mm are null: issued alert products
-//   do not carry those numerics and they are never invented.
-//
-// RISK MAPPING (deterministic, disclosed in evidence): among alerts
-// active now whose expiry falls inside the assessment window, the worst
-// severity sets the score — Extreme 1.0, Severe 0.75, Moderate 0.5,
-// Minor/Unknown 0.25, none 0.0. Levels: >=0.875 SEVERE, >=0.625 HIGH,
-// >=0.375 MODERATE, else LOW.
+// STORM_ALERT_GENERAL: aligned hourly model forecast plus available NWS alert evidence.
+// Forecast heuristic is disclosed, not an official warning or a contract risk formula.
+// NWS expiry-inside-window scoring policy is retained from the prior implementation.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { parseRankedLocation } from "./routeGeocoder";
 import { envelope, makeReceipt, sha256Hex } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+import { forecastWindow,stormForecastUrl,readStormForecast,parseStormForecast,STORM_HEURISTIC } from "./stormForecast";
 
 const SOURCE_TIMEOUT_MS = 6000;
 const UA = "VeriReceipt/2.0 storm-alert observer (+https://verireceipt.vercel.app)";
@@ -96,11 +65,11 @@ export function parseLocation(raw: string | undefined): { lat: number; lon: numb
   return { lat, lon };
 }
 
-async function fetchText(url: string): Promise<{ status: number; body: string }> {
+async function fetchText(url: string, outerSignal?: AbortSignal): Promise<{ status: number; body: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/geo+json" } });
+    const res = await fetch(url, { signal: outerSignal ? AbortSignal.any([controller.signal,outerSignal]) : controller.signal, headers: { "User-Agent": UA, Accept: "application/geo+json" } });
     return { status: res.status, body: await res.text() };
   } finally {
     clearTimeout(timer);
@@ -141,61 +110,53 @@ export async function handleStormAlert(query: Record<string, string | undefined>
     if (!Number.isInteger(w) || w < 1 || w > 240) throw badRequest("BAD_WINDOW", "window_hours must be an integer in [1, 240]");
     windowHours = w;
   }
+  const requestedAt = Date.now();
+  const forecastInterval=forecastWindow(requestedAt,windowHours);
+  const forecastUrl=stormForecastUrl(lat,lon,forecastInterval.start,forecastInterval.end);
   const pointsUrl = `https://api.weather.gov/points/${lat},${lon}`;
   const alertsUrl = `https://api.weather.gov/alerts/active?point=${lat},${lon}`;
-  const fetchedAt = new Date().toISOString();
-  let points: { status: number; body: string };
-  let alertsRes: { status: number; body: string };
-  try {
-    points = await fetchText(pointsUrl);
-    if (points.status === 404) {
-      throw unprocessable("OUTSIDE_NWS_COVERAGE", `${lat},${lon} is outside the NWS grid (US and territories); this intent covers issued NWS alert products only`);
-    }
-    if (!points.status || points.status >= 400) throw new Error(`points HTTP ${points.status}`);
-    alertsRes = await fetchText(alertsUrl);
-    if (alertsRes.status >= 400) throw new Error(`alerts HTTP ${alertsRes.status}`);
-  } catch (e) {
-    if (e && typeof e === "object" && "status" in e) throw e; // ApiError from the 404 above
-    throw upstreamUnavailable("NWS_UNREACHABLE", "the NWS api.weather.gov feed could not be reached");
+  const nwsController=new AbortController();
+  const readNws=async()=>{
+    const points=await fetchText(pointsUrl,nwsController.signal);
+    if(nwsController.signal.aborted)throw new Error("NWS deadline");
+    if(points.status===404)return {available:false as const,reason:"outside NWS grid",points,alerts:null};
+    if(points.status>=400)throw new Error("NWS coverage unavailable");
+    const alerts=await fetchText(alertsUrl,nwsController.signal);if(alerts.status>=400)throw new Error("NWS alerts unavailable");
+    return {available:true as const,reason:"available",points,alerts};
+  };
+  let nwsTimer: ReturnType<typeof setTimeout>;
+  const nwsRead=Promise.race([readNws(),new Promise<never>((_,reject)=>{nwsTimer=setTimeout(()=>{nwsController.abort();reject(new Error("NWS optional deadline"));},4100);})]).finally(()=>clearTimeout(nwsTimer!));
+  const [forecastResult,nwsResult]=await Promise.allSettled([readStormForecast(forecastUrl),nwsRead]);
+  const capture=forecastResult.status==="fulfilled"?forecastResult.value:null;
+  let forecast=null;
+  if(capture){try {forecast=parseStormForecast(capture.raw,forecastInterval.start,forecastInterval.end);}catch { /* invalid forecast may not replace available NWS evidence */ }}
+  const nowIso=new Date(requestedAt).toISOString();
+  let alerts:IssuedAlert[]=[],nwsState=nwsResult.status==='fulfilled'?nwsResult.value.reason:'unavailable';
+  if(nwsResult.status==='fulfilled'&&nwsResult.value.available){
+    try{alerts=parseAlerts(nwsResult.value.alerts.body);}catch{nwsState='malformed alert response';}
   }
-  const alerts = parseAlerts(alertsRes.body);
-  const nowIso = new Date().toISOString();
-  const { score, level, counted, excluded } = assessAlerts(alerts, nowIso, windowHours);
-  const asOf = new Date().toISOString();
-  const evidence = JSON.stringify({ location: `${lat},${lon}`, resolved_place: geocoder ? placeLabel : "not geocoded (coordinates given directly)",
-    geocoder: geocoder ? { url: geocoder.url, selection: geocoder.selection, raw_body: geocoder.body, sha256: sha256Hex(Buffer.from(geocoder.body, "utf8")) } : "not used",
-    window_hours: windowHours, as_of: asOf,
-    alerts: alerts.map((a) => ({ ...a, counted: counted.includes(a) })),
-    risk_mapping: "worst severity among active alerts expiring inside the window: Extreme 1.0, Severe 0.75, Moderate 0.5, Minor/Unknown 0.25, none 0; levels >=0.875 SEVERE, >=0.625 HIGH, >=0.375 MODERATE, else LOW",
-    source_policy: "NWS api.weather.gov issued alert products only; no forecast output scored; US coverage only",
-    raw_bodies: { points: points.body, alerts: alertsRes.body }, fetched_at: fetchedAt });
-  const receipt = makeReceipt(INTENT, alertsUrl, evidence, "NWS single authoritative source; issued products only, US only");
-  receipt.fetched_at = fetchedAt;
-  try {
-    await saveReceipt(receipt, evidence);
-  } catch {
-    throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
-  }
-  const fmt = (a: IssuedAlert) => `${a.event} (${a.severity}), issued ${a.sent}, expires ${a.expires}`;
-  const answerCore = counted.length === 0
-    ? `Storm risk LOW (score 0) for ${placeLabel} over the next ${windowHours}h: no issued NWS alert products are active at this point expiring inside the window` +
-      (excluded.length ? ` (${excluded.length} issued product(s) not counted toward this window: ${excluded.map((a) => `${a.event}, onset ${a.onset}, expires ${a.expires}`).join("; ")})` : "") +
-      ". Issued US NWS alert products only; no forecast model output is scored."
-    : `Storm risk ${level} (score ${score}) for ${placeLabel} over the next ${windowHours}h from ${counted.length} issued NWS alert product(s): ` +
-      counted.map(fmt).join("; ") +
-      (excluded.length ? `. Not counted toward this window: ${excluded.map((a) => `${a.event}, onset ${a.onset}, expires ${a.expires}`).join("; ")}` : "") +
-      ". Score is the worst severity among these issued products (Extreme 1.0 / Severe 0.75 / Moderate 0.5 / Minor 0.25); no forecast model output is scored. Peak gust and precipitation numerics are not carried by issued alert products.";
-  const answer = answerCore + (geocoder ? ` Location selection: ${geocoder.selection}. Geocoding: Open-Meteo / GeoNames (CC BY 4.0).` : "");
-  return envelope(INTENT, {
-    location: `${lat},${lon}`,
-    risk_score: score,
-    risk_level: level,
-    window_hours: windowHours,
-    window: `${nowIso}/${new Date(new Date(nowIso).getTime() + windowHours * 3600_000).toISOString()}`,
-    peak_gust_kmh: null,
-    precipitation_mm: null,
-    alerts: counted.map((a) => ({ event: a.event, severity: a.severity, area: a.area, sent: a.sent, expires: a.expires })),
-    alerts_beyond_window: excluded.map((a) => ({ event: a.event, severity: a.severity, expires: a.expires })),
-  }, receipt, { answer, verdict: "verified", confidence: 0.9,
-    source: `${alertsUrl} (+ ${pointsUrl} coverage check); NWS issued alert products only, US coverage only; fetched ${fetchedAt}` });
+  if(!forecast&&nwsState!=="available")throw upstreamUnavailable("STORM_FORECAST_UNAVAILABLE","no valid forecast or available NWS alert evidence; no guessed LOW");
+  const assessed=assessAlerts(alerts,nowIso,windowHours);
+  const {counted,excluded}=assessed;
+  const score=Math.max(forecast?.score??0,nwsState==='available'?assessed.score:0),level=riskLevel(score);
+  const window=forecast?`${new Date(forecastInterval.start).toISOString()}/${new Date(forecastInterval.end).toISOString()}`:`${nowIso}/${new Date(requestedAt+windowHours*3600000).toISOString()}`;
+  const fetchedAt=capture?.fetchedAt??new Date().toISOString();
+  const evidence=JSON.stringify({location:`${lat},${lon}`,resolved_place:geocoder?placeLabel:'coordinates given directly',
+    geocoder:geocoder?{url:geocoder.url,selection:geocoder.selection,raw_body:geocoder.body,sha256:sha256Hex(Buffer.from(geocoder.body))}:null,
+    window_hours:windowHours,window,requested_at:nowIso,forecast,forecast_url:forecastUrl,
+    forecast_acquired_at:capture?.fetchedAt??null,forecast_sha256:capture?sha256Hex(Buffer.from(capture.raw)):null,forecast_source_url:capture?.url??null,forecast_cache_policy:"0.01-degree quantized cache key, actual source URL and model grid retained; cache may reuse nearby request body up to 10 minutes",
+    risk_mapping:STORM_HEURISTIC,nws_state:nwsState,nws_assessment:assessed,
+    nws_window_policy:'unchanged: active now, expiry inside request-now plus window_hours; NWS products outside this policy are disclosed, not scored',
+    raw_bodies:{forecast:capture?.raw??null,points:nwsResult.status==='fulfilled'?nwsResult.value.points.body:null,alerts:nwsResult.status==='fulfilled'?nwsResult.value.alerts?.body??null:null},
+    source_policy:'Open-Meteo forecast model and optional NWS issued products; no official warning outside available NWS evidence',
+    attribution:'Weather data by Open-Meteo, CC BY 4.0; hourly values aggregated and transformed by VeriReceipt heuristic',
+    terms:{url:'https://open-meteo.com/en/terms',free_endpoint_commercial_use:false,scope:'evaluation/prototyping only; data licence does not grant unrestricted commercial API access'},fetched_at:fetchedAt});
+  const receipt=makeReceipt(INTENT,forecast?capture!.url:alertsUrl,evidence,'aligned complete forecast hours, exact raw model bytes, disclosed heuristic and NWS availability');receipt.fetched_at=fetchedAt;
+  try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
+  const nwsText=nwsState==='available'?`NWS available: ${counted.length} scored issued products (${counted.map(a=>a.event+' ('+a.severity+'), expires '+a.expires).join('; ')||'none'}); ${excluded.length} products excluded under the unchanged expiry-inside-window policy.`:`NWS ${nwsState}; forecast-only result, this does not confirm absence of official warnings.`;
+  const answerForecast=forecast?`Storm/weather-disruption risk ${level} (score ${score}) for ${placeLabel}. Forecast assessed aligned complete-hour window ${window}, starting at the next whole UTC hour (up to 59m59s after request), not partial current-hour weather. Peak gust ${forecast.peakGust} km/h, total precipitation ${forecast.precipitation} mm, maximum rolling-24h precipitation ${forecast.max24hPrecipitation} mm. ${STORM_HEURISTIC} ${nwsText} Weather data by Open-Meteo (CC BY 4.0), model grid ${forecast.grid.latitude},${forecast.grid.longitude}; not an official warning. Forecast acquired ${fetchedAt}. Nearby requests may reuse the same 0.01-degree cache cell for up to 10 minutes; actual source URL and grid retained.`:`Storm risk ${level} (score ${score}) for ${placeLabel}, window ${window}. Forecast unavailable or invalid; NWS-only result with peak gust and precipitation unknown, not zero. ${nwsText}`;
+  const answer=answerForecast+(geocoder?` Location selection: ${geocoder.selection}. Geocoding: Open-Meteo / GeoNames (CC BY 4.0).`:'');
+  return envelope(INTENT,{location:`${lat},${lon}`,risk_score:score,risk_level:level,window_hours:windowHours,window,
+    peak_gust_kmh:forecast?.peakGust??null,precipitation_mm:forecast?.precipitation??null,max_rolling_24h_precipitation_mm:forecast?.max24hPrecipitation??null,forecast_status:forecast?"available":"unavailable",
+    nws_status:nwsState,alerts:counted,alerts_beyond_window:excluded},receipt,{answer,verdict:'verified',confidence:nwsState==='available'?.9:.7,source:forecast?`${capture?.url}; Open-Meteo CC BY 4.0 model forecast, acquired ${fetchedAt}; NWS ${nwsState}`:`${alertsUrl}; NWS-only, forecast unavailable`});
 }
