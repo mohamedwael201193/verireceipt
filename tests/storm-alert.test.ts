@@ -68,6 +68,8 @@ describe("STORM_ALERT_GENERAL", () => {
     const result = await handleStormAlert({ location: "27.345,-97.225", window_hours: "24" });
     expect(result.risk_score).toBe(0.75);
     expect(result.risk_level).toBe("HIGH");
+    // schema off-chain field `window`: the assessed interval, ISO 8601
+    expect(result.window).toBe(`${FROZEN.toISOString()}/${new Date(FROZEN.getTime() + 24 * 3600_000).toISOString()}`);
     expect(result.peak_gust_kmh).toBeNull();
     expect(result.precipitation_mm).toBeNull();
     const ans = String(result.answer);

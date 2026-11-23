@@ -72,7 +72,7 @@ export async function handleWeatherCheck(query: Record<string, string | undefine
     `Measured temperature ${obs.temperatureC} C at ${obs.station} (${obs.name}, ${obs.latitude}, ${obs.longitude}), observed ${obs.observedAt}. ` +
     `This is a measured METAR station observation (raw: ${obs.rawObservation}), at most 90 minutes old — an airport station's reading, not a city-wide value, and never a forecast.`;
   return envelope(INTENT, {
-    temp_c: obs.temperatureC,
+    temperature_c: obs.temperatureC,
     location: station,
     station_name: obs.name,
     latitude: obs.latitude,

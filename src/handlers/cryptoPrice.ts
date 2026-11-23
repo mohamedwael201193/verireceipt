@@ -65,7 +65,7 @@ export async function handleCryptoPrice(query: Record<string, string | undefined
     `${symbol}/USD spot ${price} on Coinbase, fetched ${fetchedAt}. ` +
     `This is one named exchange's public spot quote, not an index or VWAP; symbols the source does not list are refused.`;
   return envelope(INTENT, {
-    symbol, price, quote_currency: "USD",
+    symbol, price_usd: price, quote_currency: "USD",
   }, receipt, { answer, verdict: "verified", confidence: 0.85,
     source: `${url}; Coinbase public spot single source; fetched ${fetchedAt}` });
 }

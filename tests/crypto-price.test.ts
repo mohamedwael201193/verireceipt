@@ -28,7 +28,7 @@ describe("CRYPTO_PRICE_USD", () => {
     stub();
     const result = await handleCryptoPrice({ symbol: "eth" });
     expect(result.symbol).toBe("ETH");
-    expect(result.price).toBe(1710.305);
+    expect(result.price_usd).toBe(1710.305);
     const ans = String(result.answer);
     expect(ans).toContain("Coinbase");
     expect(ans).toContain("not an index or VWAP");
@@ -54,7 +54,7 @@ describe("CRYPTO_PRICE_USD", () => {
     stub();
     const res = await app.inject({ method: "GET", url: "/v1/crypto-price?symbol=ETH" });
     expect(res.statusCode).toBe(200);
-    expect(res.json().price).toBe(1710.305);
+    expect(res.json().price_usd).toBe(1710.305);
     await app.close();
   });
 });
