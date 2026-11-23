@@ -1082,7 +1082,7 @@ async function fetchEpochBalanceDelta(
   const finalizedSlotRaw =
     (head?.data as Record<string, unknown> | undefined)?.header as Record<string, unknown> | undefined;
   const slotStr = (finalizedSlotRaw?.message as Record<string, unknown> | undefined)?.slot;
-  if (head?.execution_optimistic === true || typeof slotStr !== "string" || !/^\d+$/.test(slotStr)) {
+  if (head?.execution_optimistic !== false || head?.finalized !== true || typeof slotStr !== "string" || !/^\d+$/.test(slotStr)) {
     return undefined;
   }
   const slotNew = Number(slotStr);
@@ -1108,14 +1108,14 @@ async function fetchEpochBalanceDelta(
       }
       const body = await res.text();
       const parsed = JSON.parse(body) as Record<string, unknown>;
-      if (parsed.execution_optimistic === true || parsed.finalized !== true) return undefined;
+      if (parsed.execution_optimistic !== false || parsed.finalized !== true) return undefined;
       const rows = parsed.data;
       if (!Array.isArray(rows) || rows.length !== 1) return undefined;
       const row = rows[0] as Record<string, unknown>;
       if (row.index !== String(index) || typeof row.balance !== "string" || !/^\d+$/.test(row.balance)) {
         return undefined;
       }
-      return { url, body, balance: row.balance };
+      return { url, body, balance: exactUint64(row.balance, "performance balance") };
     } catch {
       return undefined;
     }

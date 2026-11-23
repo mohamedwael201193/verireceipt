@@ -262,3 +262,24 @@ describe("handleValidator epoch balance-delta performance section", () => {
     expect(chainsafeProbes).toEqual([]);
   });
 });
+
+describe('performance enrichment strict finality and quantity controls',()=>{
+ it.each(['header-finalized-missing','header-finalized-false','header-optimistic-missing','sample-optimistic-missing','sample-balance-uint64-overflow'])('negative mutation %s omits enrichment but preserves verified answer',async(mode)=>{
+  const base=makeStubFetch({oldBalances:[BALANCE_OLD,BALANCE_OLD]});
+  const fetchImpl=(async(url:string|URL|Request,init?:RequestInit)=>{
+   const response=await base(url,init);const text=await response.text();const j=JSON.parse(text),u=String(url);
+   if(u.includes('/headers/finalized')){
+    if(mode==='header-finalized-missing')delete j.finalized;
+    if(mode==='header-finalized-false')j.finalized=false;
+    if(mode==='header-optimistic-missing')delete j.execution_optimistic;
+   }
+   if(u.includes('/validator_balances')){
+    if(mode==='sample-optimistic-missing')delete j.execution_optimistic;
+    if(mode==='sample-balance-uint64-overflow')j.data[0].balance='18446744073709551616';
+   }
+   return new Response(JSON.stringify(j));
+  }) as typeof fetch;
+  const out=await handleValidator({validator_index:INDEX},{fetchImpl});
+  expect(out.verdict).toBe('verified');expect(out.recent_epoch_balance_delta).toBeUndefined();expect(out.performance_receipt).toBeUndefined();
+ });
+});
