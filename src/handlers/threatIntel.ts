@@ -63,7 +63,7 @@ const FEEDS: Feed[] = [
   { name: "OpenPhish community feed", url: "https://openphish.com/feed.txt", kind: "url", floor: 50 },
 ];
 
-interface FeedState {
+export interface FeedState {
   feed: Feed;
   sha256: string;
   fetchedAt: string;
@@ -116,7 +116,10 @@ function parseEntries(feed: Feed, raw: string): string[] {
   return out;
 }
 
-async function loadFeeds(): Promise<FeedState[]> {
+// Exported for the URL_SCAN_VERDICT handler, which screens against the
+// same seven feeds and shares this cache. Additive export only; the
+// loading, floor and fail-closed behaviour is unchanged.
+export async function loadFeeds(): Promise<FeedState[]> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.states;
   const settled = await Promise.allSettled(FEEDS.map((f) => fetchText(f.url)));
   const states: FeedState[] = [];

@@ -21,6 +21,7 @@ import { handleFinancialData } from "./handlers/financialData";
 import { handleCrossChainState } from "./handlers/crossChainState";
 import { handleReserveAttestation } from "./handlers/reserveAttestation";
 import { handleThreatIndicator } from "./handlers/threatIntel";
+import { handleUrlScan } from "./handlers/urlScan";
 import { handleBalance } from "./handlers/walletBalance";
 import { handleTokenSupply } from "./handlers/tokenSupply";
 import { fxLogLine, handleFx, handleFxNow } from "./handlers/currencyConvert";
@@ -329,6 +330,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/financial-data", async (request) => trackIntent("financial-data", () => handleFinancialData(asQuery(request.query))));
   app.get("/v1/cross-chain-state", async (request) => trackIntent("cross-chain-state", () => handleCrossChainState(asQuery(request.query))));
   app.get("/v1/reserve-attestation", async (request) => trackIntent("reserve-attestation", () => handleReserveAttestation(asQuery(request.query))));
+  app.get("/v1/url-scan", async (request) => trackIntent("url-scan", () => handleUrlScan(asQuery(request.query))));
   app.get("/v1/threat-indicator", async (request) => trackIntent("threat-indicator", () => handleThreatIndicator(asQuery(request.query))));
   app.get("/v1/balance", async (request) =>
     trackIntent("balance", () => handleBalance(asQuery(request.query))),
