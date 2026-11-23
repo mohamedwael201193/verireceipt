@@ -207,6 +207,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "gas-price": "evm-rpc",
   "transaction-risk": "evm-rpc",
   "financial-data": "sec-edgar",
+  "cross-chain-state": "evm-rpc",
   balance: "evm-rpc",
   "token-supply": "evm-rpc",
   macro: "worldbank",
