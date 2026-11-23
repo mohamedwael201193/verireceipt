@@ -23,6 +23,7 @@ import { handleReserveAttestation } from "./handlers/reserveAttestation";
 import { handleThreatIndicator } from "./handlers/threatIntel";
 import { handleUrlScan } from "./handlers/urlScan";
 import { handleWeatherForecast } from "./handlers/weatherForecast";
+import { handleVendorVerify } from "./handlers/vendorVerify";
 import { handleBalance } from "./handlers/walletBalance";
 import { handleTokenSupply } from "./handlers/tokenSupply";
 import { fxLogLine, handleFx, handleFxNow } from "./handlers/currencyConvert";
@@ -333,6 +334,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/reserve-attestation", async (request) => trackIntent("reserve-attestation", () => handleReserveAttestation(asQuery(request.query))));
   app.get("/v1/url-scan", async (request) => trackIntent("url-scan", () => handleUrlScan(asQuery(request.query))));
   app.get("/v1/weather-forecast", async (request) => trackIntent("weather-forecast", () => handleWeatherForecast(asQuery(request.query))));
+  app.get("/v1/vendor-verify", async (request) => trackIntent("vendor-verify", () => handleVendorVerify(asQuery(request.query))));
   app.get("/v1/threat-indicator", async (request) => trackIntent("threat-indicator", () => handleThreatIndicator(asQuery(request.query))));
   app.get("/v1/balance", async (request) =>
     trackIntent("balance", () => handleBalance(asQuery(request.query))),

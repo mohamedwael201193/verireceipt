@@ -1,0 +1,22 @@
+{
+  "isValid" : true,
+  "requestDate" : "2026-11-23T03:02:32.450Z",
+  "userError" : "VALID",
+  "name" : "AMAZON EUROPE CORE S.A R.L.",
+  "address" : "38, AVENUE JOHN F. KENNEDY\nL-1855  LUXEMBOURG",
+  "requestIdentifier" : "",
+  "originalVatNumber" : "26375245",
+  "vatNumber" : "26375245",
+  "viesApproximate" : {
+    "name" : "---",
+    "street" : "---",
+    "postalCode" : "---",
+    "city" : "---",
+    "companyType" : "---",
+    "matchName" : 3,
+    "matchStreet" : 3,
+    "matchPostalCode" : 3,
+    "matchCity" : 3,
+    "matchCompanyType" : 3
+  }
+}
