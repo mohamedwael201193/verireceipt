@@ -160,6 +160,7 @@ export async function handleStormAlert(query: Record<string, string | undefined>
     risk_score: score,
     risk_level: level,
     window_hours: windowHours,
+    window: `${nowIso}/${new Date(new Date(nowIso).getTime() + windowHours * 3600_000).toISOString()}`,
     peak_gust_kmh: null,
     precipitation_mm: null,
     alerts: counted.map((a) => ({ event: a.event, severity: a.severity, area: a.area, sent: a.sent, expires: a.expires })),

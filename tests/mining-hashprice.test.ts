@@ -34,6 +34,7 @@ describe("MINING_HASHPRICE_VERIFY_GENERAL", () => {
   it("validates block_height and refuses historical heights honestly", async () => {
     stub();
     await expect(handleMiningHashprice({ block_height: "-1" })).rejects.toMatchObject({ status: 400, code: "BAD_HEIGHT" });
+    await expect(handleMiningHashprice({ block_height: "100000001" })).rejects.toMatchObject({ status: 400, code: "BAD_HEIGHT" });
     await expect(handleMiningHashprice({ block_height: "900000" }))
       .rejects.toMatchObject({ status: 422, code: "HISTORICAL_NOT_SERVED" });
     const ok = await handleMiningHashprice({ block_height: "977127" });

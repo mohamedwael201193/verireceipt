@@ -28,7 +28,7 @@ describe("WEATHER_CHECK_TEMPERATURE", () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date("2026-11-23T00:00:00Z"));
     stub();
     const result = await handleWeatherCheck({ location: "heca" });
-    expect(result.temp_c).toBe(16);
+    expect(result.temperature_c).toBe(16);
     expect(result.station_name).toBe("Cairo Intl, QH, EG");
     const ans = String(result.answer);
     expect(ans).toContain("measured METAR");

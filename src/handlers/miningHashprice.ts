@@ -87,7 +87,7 @@ export async function handleMiningHashprice(query: Record<string, string | undef
   let requestedHeight: number | null = null;
   if (query.block_height !== undefined && query.block_height.trim() !== "") {
     const h = Number(query.block_height);
-    if (!Number.isInteger(h) || h < 0) throw badRequest("BAD_HEIGHT", "block_height must be a non-negative integer");
+    if (!Number.isInteger(h) || h < 0 || h > 100000000) throw badRequest("BAD_HEIGHT", "block_height must be an integer in [0, 100000000]");
     requestedHeight = h;
   }
   const fetchedAt = new Date().toISOString();
