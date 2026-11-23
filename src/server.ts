@@ -36,6 +36,7 @@ import { handleNewsSearch } from "./handlers/newsSearch";
 import { handleRouteEta } from "./handlers/routeEta";
 import { handleApiHealth } from "./handlers/apiHealth";
 import { handleServerUptime } from "./handlers/serverUptime";
+import { handleMiningHashprice } from "./handlers/miningHashprice";
 import { handleEmailSecurity } from "./handlers/emailSecurity";
 import { exactQuery } from "./core/exactQuery";
 import { diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
@@ -256,6 +257,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/route-eta", async (request) => trackIntent("route-eta", () => handleRouteEta(asQuery(request.query))));
   app.get("/v1/api-health", async (request) => trackIntent("api-health", () => handleApiHealth(asQuery(request.query))));
   app.get("/v1/server-uptime", async (request) => trackIntent("server-uptime", () => handleServerUptime(asQuery(request.query))));
+  app.get("/v1/mining-hashprice", async (request) => trackIntent("mining-hashprice", () => handleMiningHashprice(asQuery(request.query))));
   app.get("/v1/email-security", async (request) => trackIntent("email-security", () => handleEmailSecurity(exactQuery(request.raw.url ?? "", ["domain", "record_type"])), "dns.google"));
   app.get("/v1/filings", async (request) =>
     trackIntent("filings", () => {
