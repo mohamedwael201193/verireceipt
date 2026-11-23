@@ -249,6 +249,28 @@ export function settleWithStragglerGrace<T>(
   });
 }
 
+/**
+ * One structured, injection-safe log line per /v1/fx request
+ * (2026-11-23, epoch-41 postmortem): a scoring pass must be
+ * reconstructable from Render logs. Only the currency codes and the
+ * amount are echoed, each whitelisted - anything else (including
+ * newline-bearing or oversized caller input) logs as "-". No caller
+ * identity is logged (no PII). `ms` is the route-level wall time.
+ */
+export function fxLogLine(
+  query: Record<string, string | undefined>,
+  outcome: { ok: true } | { ok: false; status: number; code: string },
+  startedMs: number,
+  endedMs: number,
+): string {
+  const code = (v: string | undefined): string =>
+    v !== undefined && /^[A-Za-z]{2,8}$/.test(v) ? v.toUpperCase() : "-";
+  const amount = (v: string | undefined): string =>
+    v !== undefined && /^[0-9]{1,15}(\.[0-9]{1,8})?$/.test(v) ? v : "-";
+  const result = outcome.ok ? "ok" : `error ${outcome.status} ${outcome.code}`;
+  return `verireceipt: fx_request at=${new Date(startedMs).toISOString()} from=${code(query.from_currency)} to=${code(query.to_currency)} amount=${amount(query.amount)} result=${result} ms=${Math.max(0, endedMs - startedMs)}`;
+}
+
 export async function handleFx(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {

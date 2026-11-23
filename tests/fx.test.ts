@@ -19,7 +19,7 @@ afterAll(() => {
 import { ApiError } from "../src/core/errors";
 import { sha256Hex } from "../src/core/receipt";
 import { getReceiptEvidence } from "../src/core/storage";
-import { AGREEMENT_TOLERANCE, INTENT, handleFx, settleWithStragglerGrace } from "../src/handlers/currencyConvert";
+import { AGREEMENT_TOLERANCE, INTENT, fxLogLine, handleFx, settleWithStragglerGrace } from "../src/handlers/currencyConvert";
 
 describe("settleWithStragglerGrace coverage accounting", () => {
   it("pending results are dense, explicit undefined slots and late completions cannot mutate the snapshot", async () => {
@@ -119,6 +119,63 @@ async function expectApiError(p: Promise<unknown>, status: number, code: string)
   }
   throw new Error("expected ApiError " + status + " " + code);
 }
+
+describe("fxLogLine (unit, no network)", () => {
+  const T0 = Date.parse("2026-11-23T01:16:59.000Z");
+  it("ok line: codes uppercased, amount echoed, wall time in ms", () => {
+    const line = fxLogLine(
+      { from_currency: "usd", to_currency: "eur", amount: "100" },
+      { ok: true },
+      T0,
+      T0 + 1234,
+    );
+    expect(line).toBe(
+      "verireceipt: fx_request at=2026-11-23T01:16:59.000Z from=USD to=EUR amount=100 result=ok ms=1234",
+    );
+  });
+
+  it("error line carries the ApiError status and code", () => {
+    const line = fxLogLine(
+      { from_currency: "USD", to_currency: "EUR" },
+      { ok: false, status: 502, code: "FX_SOURCES_DISAGREE" },
+      T0,
+      T0 + 42,
+    );
+    expect(line).toContain("result=error 502 FX_SOURCES_DISAGREE");
+    expect(line).toContain("amount=-");
+    expect(line).toContain("ms=42");
+  });
+
+  it("caller input is whitelisted: long, malformed or newline-bearing values log as -", () => {
+    const line = fxLogLine(
+      {
+        from_currency: "USD\nforged: admin",
+        to_currency: "EUROPEANCENTRALBANK",
+        amount: "1; drop table--",
+      },
+      { ok: true },
+      T0,
+      T0,
+    );
+    expect(line).toContain("from=-");
+    expect(line).toContain("to=-");
+    expect(line).toContain("amount=-");
+    expect(line).not.toContain("\n");
+    expect(line).not.toContain("forged");
+    expect(line).not.toContain("drop");
+  });
+
+  it("no caller identity fields are present even if supplied", () => {
+    const line = fxLogLine(
+      { from_currency: "USD", to_currency: "EUR", amount: "5", ip: "203.0.113.7", authorization: "Bearer x" },
+      { ok: true },
+      T0,
+      T0 + 1,
+    );
+    expect(line).not.toContain("203.0.113.7");
+    expect(line).not.toContain("Bearer");
+  });
+});
 
 describe("handleFx validation (stubbed, no network use)", () => {
   it("missing from/to -> 400 MISSING_PARAM", async () => {
