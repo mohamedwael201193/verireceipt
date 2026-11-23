@@ -163,8 +163,9 @@ endpoints:
           type: string
           intents:
           - REGULATORY_FILING_MONITOR_GENERAL
-          description: 'An inclusive filing-date period: last N months, a calendar year, an explicit calendar
-            Q1/Q2/Q3/Q4 with year, a valid quarter ending YYYY-MM-DD (March 31, June 30, September 30 or December
+          description: 'An inclusive filing-date period: last N months, a calendar year, year to date
+            (YTD, January 1 of the current calendar year through today), an explicit calendar
+            Q1/Q2/Q3/Q4 with year (e.g. "Q3 2026"), a valid quarter ending YYYY-MM-DD (March 31, June 30, September 30 or December
             31), YYYY-MM-DD..YYYY-MM-DD, or a supported year/date range using to or through. Bare Q1-Q4 without
             calendar qualification and company fiscal-year or fiscal-quarter requests are rejected.'
         optional:
@@ -1206,6 +1207,9 @@ intent_mapping:
       gas_price_gwei:
         path: gas_price_gwei
         unit: gwei
+      transfer_fee_usd:
+        path: transfer_fee_usd
+        unit: USD
       as_of:
         path: as_of
   WALLET_BALANCE_CHECK_GENERAL:

@@ -92,7 +92,7 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, Outpu
   },
   GAS_PRICE_GENERAL: {
     endpoint: "/v1/gas-price", inputs: ["chain"],
-    outputs: { chain: null, gas_price_gwei: "gwei", as_of: null },
+    outputs: { chain: null, gas_price_gwei: "gwei", transfer_fee_usd: "USD", as_of: null },
   },
   WALLET_BALANCE_CHECK_GENERAL: {
     endpoint: "/v1/balance", inputs: ["address", "chain", "token"],

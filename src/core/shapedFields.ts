@@ -63,6 +63,7 @@ export const OUTPUT_MAPPING: Record<string, Record<string, OutputMapping>> = {
   GAS_PRICE_GENERAL: {
     chain: { path: "chain" },
     gas_price_gwei: { path: "gas_price_gwei", unit: "gwei" },
+    transfer_fee_usd: { path: "transfer_fee_usd", unit: "USD" },
     as_of: { path: "as_of" },
   },
   WALLET_BALANCE_CHECK_GENERAL: {
@@ -328,6 +329,7 @@ export const FIELD_FORMAT: Record<string, Record<string, FieldFormat>> = {
   GAS_PRICE_GENERAL: {
     chain: { type: "string" },
     gas_price_gwei: { type: "number" },
+    transfer_fee_usd: { type: "number" },
     as_of: { type: "string" },
   },
   WALLET_BALANCE_CHECK_GENERAL: {
