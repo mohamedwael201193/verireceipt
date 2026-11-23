@@ -232,7 +232,12 @@ export async function handleVulnTriage(query: Record<string, string | undefined>
     unavailable_sources: outcomes.flatMap((r, i) => r?.status !== "fulfilled" ? [i === 0 ? nvd : mitre] : []) });
   const receipt = makeReceipt(TRIAGE_INTENT, winner.url, evidence, `${candidates.length}/2 published CVSS v3.1 assessments; source agreement, not independent scoring`);
   receipt.fetched_at = winner.fetchedAt ?? asOf;
-  await saveReceipt(receipt, evidence);
+  try {
+    await saveReceipt(receipt, evidence);
+  } catch {
+    // A published assessment is not a receipted answer until its evidence is stored.
+    throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
+  }
   const assessmentText = candidates.map((c) => `${c.assessment.assessor}: ${c.assessment.score}`).join("; ");
   return envelope(TRIAGE_INTENT, { cve_id: id, cvss_base_score: chosen.score, severity: cvssSeverity(chosen.score),
     cvss_version: chosen.version, vector: chosen.vector, description: winner.description, published: winner.published,

@@ -52,6 +52,16 @@ describe("VULNERABILITY_TRIAGE_GENERAL", () => {
     sources(JSON.stringify(v30), null);
     await expect(handleVulnTriage({ cve_id: "CVE-2021-44228" })).rejects.toMatchObject({ status: 422, code: "NO_CVSS_V3_1" });
   });
+  it("serves the NVD value at 0.9 when published v3.1 assessments agree within tolerance", async () => {
+    vi.stubEnv("CVE_NVD_ENABLED", "true");
+    const edited = JSON.parse(mitre);
+    edited.containers.adp[1].metrics[0].cvssV3_1.baseScore = 9.8; // within the 0.3 refusal band of NVD's 10.0
+    sources(nvd, JSON.stringify(edited));
+    const result = await handleVulnTriage({ cve_id: "CVE-2021-44228" });
+    expect(result.cvss_base_score).toBe(10); // NVD primary wins within the agreement band
+    expect(result.confidence).toBe(0.9);     // near-agreement is not exact agreement
+    expect(String(result.answer)).toContain("nvd@nist.gov");
+  });
   it("refuses to average disagreeing published v3.1 assessments", async () => {
     vi.stubEnv("CVE_NVD_ENABLED", "true");
     const edited = JSON.parse(mitre);
