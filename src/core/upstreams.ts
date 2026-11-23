@@ -92,6 +92,7 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "scsanctions.un.org": "un-sanctions",
   "ipwho.is": "ipwhois",
   "ip-api.com": "ip-api",
+  "site.api.espn.com": "espn",
 };
 
 /** Hostname suffixes shared by every CHAIN_RPCS host family. */
@@ -209,6 +210,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "stock-price": "yahoo-finance",
   "sanctions-screen": "ofac",
   "ip-geolocation": "ipwhois",
+  "game-result": "espn",
 };
 
 /**

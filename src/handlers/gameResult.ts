@@ -1,0 +1,173 @@
+// GAME_RESULT_GENERAL — GET /v1/game-result?game=<teams and date>
+//
+// Zero-LLM. Resolves a finished game's result from the ESPN site API,
+// with a SHA-256 receipt over the exact upstream response bodies.
+//
+// Intent contract (https://devnode.telegraphprotocol.com/engine/v1/intents/GAME_RESULT_GENERAL,
+// read 2026-11-22): request game (string — teams or competitors, and
+// date); response winner/home_team/away_team/date (off-chain) and
+// scored home_score/away_score (points, [0, 1000], integers).
+//
+// SOURCE: ESPN site API (site.api.espn.com), keyless and unauthenticated,
+// probed live 2026-11-23 — the only concrete keyless feed that verified;
+// the official league APIs are keyed. Single source, honestly named, 0.9.
+//
+// INPUT SHAPE (fail closed, never guess): the string must carry an ISO
+// date (YYYY-MM-DD) and two competitor names separated by "vs"/"at"/"v".
+// Leagues searched: NFL, NBA, MLB, NHL — named in every answer; other
+// sports are not covered. Only COMPLETED events serve; a scheduled or
+// in-progress game is 422 GAME_NOT_FINAL. Exactly one completed event
+// must match both names (normalized substring or token overlap); zero
+// matches is 422 GAME_NOT_FOUND, several is 422 AMBIGUOUS_GAME with the
+// candidates named. Team-name matching is name matching, not identity
+// resolution — the answer always names the exact teams ESPN carried.
+import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
+import { envelope, makeReceipt } from "../core/receipt";
+import { saveReceipt } from "../core/storage";
+
+const SOURCE_TIMEOUT_MS = 6000;
+const UA = "VeriReceipt/2.0 game-result observer (+https://verireceipt.vercel.app)";
+const LEAGUES = [
+  ["NFL", "football/nfl"],
+  ["NBA", "basketball/nba"],
+  ["MLB", "baseball/mlb"],
+  ["NHL", "hockey/nhl"],
+] as const;
+
+async function fetchText(url: string): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function norm(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+export function teamNameMatches(asked: string, carried: string): boolean {
+  const a = norm(asked);
+  const b = norm(carried);
+  if (!a || !b) return false;
+  if (b.includes(a) || a.includes(b)) return true;
+  const ta = a.split(" ");
+  const tb = new Set(b.split(" "));
+  const inter = ta.filter((t) => tb.has(t)).length;
+  return (2 * inter) / (ta.length + tb.size) >= 0.6;
+}
+
+export function parseGameInput(raw: string): { date: string; dates: string; teamA: string; teamB: string } {
+  const m = /(20\d{2})-(\d{2})-(\d{2})/.exec(raw);
+  if (!m) throw badRequest("DATE_REQUIRED", "game must name the date in YYYY-MM-DD form, e.g. \"Chargers vs Ravens 2026-11-16\"");
+  const date = `${m[1]}-${m[2]}-${m[3]}`;
+  const rest = raw.replace(m[0], " ").trim();
+  const parts = rest.split(/\s+(?:vs\.?|v|at|@)\s+/i).map((p) => p.trim()).filter(Boolean);
+  if (parts.length !== 2 || !norm(parts[0]) || !norm(parts[1])) {
+    throw badRequest("TEAMS_REQUIRED", "game must name two competitors separated by 'vs' or 'at'");
+  }
+  return { date, dates: `${m[1]}${m[2]}${m[3]}`, teamA: parts[0], teamB: parts[1] };
+}
+
+interface Candidate {
+  league: string; name: string; date: string; completed: boolean;
+  home: string; away: string; homeScore: number | null; awayScore: number | null; winner: string;
+}
+
+export function parseScoreboard(raw: string, league: string): Candidate[] {
+  const d = JSON.parse(raw) as { events?: unknown };
+  if (!Array.isArray(d.events)) return [];
+  const out: Candidate[] = [];
+  for (const e of d.events as Record<string, unknown>[]) {
+    const comp = (e.competitions as Record<string, unknown>[] | undefined)?.[0];
+    if (!comp) continue;
+    const status = (comp.status as { type?: { completed?: unknown } } | undefined)?.type;
+    const competitors = (comp.competitors as Record<string, unknown>[] | undefined) ?? [];
+    const home = competitors.find((c) => c.homeAway === "home");
+    const away = competitors.find((c) => c.homeAway === "away");
+    if (!home || !away) continue;
+    const scoreOf = (c: Record<string, unknown>): number | null => {
+      const s = Number(c.score);
+      return Number.isInteger(s) && s >= 0 && s <= 1000 ? s : null;
+    };
+    const homeName = String((home.team as { displayName?: unknown } | undefined)?.displayName ?? "");
+    const awayName = String((away.team as { displayName?: unknown } | undefined)?.displayName ?? "");
+    const hs = scoreOf(home);
+    const as = scoreOf(away);
+    out.push({
+      league, name: String(e.name ?? ""), date: String(e.date ?? "").slice(0, 10),
+      completed: status?.completed === true,
+      home: homeName, away: awayName, homeScore: hs, awayScore: as,
+      winner: home.winner === true ? homeName : away.winner === true ? awayName : "",
+    });
+  }
+  return out;
+}
+
+export const INTENT = "GAME_RESULT_GENERAL";
+
+export async function handleGameResult(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+  const raw = query.game?.trim();
+  if (!raw) throw badRequest("MISSING_PARAM", "game is required (teams and date, e.g. \"Chargers vs Ravens 2026-11-16\")");
+  if (raw.length > 200) throw badRequest("GAME_TOO_LONG", "game must be at most 200 characters");
+  const { date, dates, teamA, teamB } = parseGameInput(raw);
+  const urls = LEAGUES.map(([label, path]) => ({ label, url: `https://site.api.espn.com/apis/site/v2/sports/${path}/scoreboard?dates=${dates}` }));
+  const fetchedAt = new Date().toISOString();
+  const settled = await Promise.allSettled(urls.map((u) => fetchText(u.url)));
+  const bodies = new Map<string, string>();
+  const failed: string[] = [];
+  settled.forEach((r, i) => {
+    if (r.status === "fulfilled") bodies.set(urls[i].label, r.value);
+    else failed.push(urls[i].label);
+  });
+  if (bodies.size === 0) {
+    throw upstreamUnavailable("ESPN_UNREACHABLE", `ESPN scoreboards failed for every covered league (${failed.join(", ")})`);
+  }
+  const candidates: Candidate[] = [];
+  for (const [label, body] of bodies) candidates.push(...parseScoreboard(body, label));
+  const matches = candidates.filter((c) =>
+    (teamNameMatches(teamA, c.home) && teamNameMatches(teamB, c.away)) ||
+    (teamNameMatches(teamA, c.away) && teamNameMatches(teamB, c.home)));
+  if (matches.length === 0) {
+    throw unprocessable("GAME_NOT_FOUND", `no game matching "${teamA}" vs "${teamB}" on ${date} in the covered leagues (${[...bodies.keys()].join(", ")})${failed.length ? `; unavailable: ${failed.join(", ")}` : ""}`);
+  }
+  const final = matches.filter((m) => m.completed);
+  if (final.length === 0) {
+    throw unprocessable("GAME_NOT_FINAL", `the matching game (${matches[0].name}, ${matches[0].league}) is not completed; final scores are never guessed`);
+  }
+  if (final.length > 1) {
+    throw unprocessable("AMBIGUOUS_GAME", `several completed games match: ${final.map((f) => `${f.name} (${f.league})`).join("; ")}; name the teams more precisely`);
+  }
+  const g = final[0];
+  if (g.homeScore === null || g.awayScore === null) {
+    throw unprocessable("NO_USABLE_SCORE", `ESPN carried no usable final scores for ${g.name}`);
+  }
+  const asOf = new Date().toISOString();
+  const evidence = JSON.stringify({ game: raw, parsed: { date, teamA, teamB }, as_of: asOf,
+    matched_event: g, covered_leagues: [...bodies.keys()], unavailable_leagues: failed,
+    source_policy: "ESPN site API, keyless unauthenticated, single source honestly named; only completed events serve",
+    raw_bodies: Object.fromEntries(bodies), fetched_at: fetchedAt });
+  const leagueUrl = urls.find((u) => u.label === g.league)!.url;
+  const receipt = makeReceipt(INTENT, leagueUrl, evidence, "ESPN site API single source; completed events only");
+  receipt.fetched_at = fetchedAt;
+  try {
+    await saveReceipt(receipt, evidence);
+  } catch {
+    throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
+  }
+  const tie = g.homeScore === g.awayScore;
+  return envelope(INTENT, { winner: tie ? "" : g.winner, home_team: g.home, away_team: g.away,
+    home_score: g.homeScore, away_score: g.awayScore, date: g.date || date, league: g.league }, receipt, {
+    answer: `${g.name} (${g.league}), ${g.date || date}: final — ${g.away} ${g.awayScore}, ${g.home} ${g.homeScore}. ` +
+      (tie ? "The game ended tied; there is no winner. " : `${g.winner} won. `) +
+      `Source: ESPN site API (single source). Covered leagues: ${[...bodies.keys()].join(", ")}${failed.length ? `; unavailable: ${failed.join(", ")}` : ""}. ` +
+      "Only completed games serve; this is ESPN's published final, not a live score.",
+    verdict: "verified",
+    confidence: 0.9,
+    source: `${leagueUrl}; ESPN site API single source, honestly named; completed event only; fetched ${fetchedAt}`,
+  });
+}
