@@ -11,22 +11,24 @@
 // keyless, non-commercial terms, probed live 2026-11-23. Single source,
 // honestly named.
 //
-// MEASURED-ONLY DOCTRINE: only the "current" block is served — no
-// hourly forecast is ever requested or quoted. Honesty limit, stated in
-// every answer: Open-Meteo current values are a MODEL BLEND (CAMS-based)
-// at the nearest grid cell on an hourly interval, not a ground-station
-// measurement, and the served coordinates are the grid cell the API
-// snapped to, which the answer names explicitly.
+// Only the current block is returned. It is a CAMS model-derived current
+// estimate, not a measured station observation. Forecast-model data can
+// underlie the current estimate. The grid cell and interval are disclosed.
+// https://open-meteo.com/en/docs/air-quality-api
+// Local validity policy: UTC current interval <=1h, age <=3h, future skew
+// <=5min, grid center <=100km from the explicit coordinates. These bounds
+// reject stale/mismatched evidence; they are not provider accuracy claims.
 //
-// The scored boolean is `acceptable`: US AQI at or below 100 (US EPA
+// The local boolean is `acceptable`: US AQI at or below 100 (US EPA
 // "moderate or better" band). The AQI value itself and the pollutant
 // concentrations are served as numbers with their units named.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+import { readPublicBody } from "../core/publicSource";
 
 const SOURCE_TIMEOUT_MS = 6000;
-const UA = "VeriReceipt/2.0 air-quality observer (+https://verireceipt.vercel.app)";
+
 /** US AQI at or below this is EPA "moderate or better". */
 const ACCEPTABLE_US_AQI = 100;
 
@@ -53,7 +55,7 @@ export interface AirQualityReading {
   grid_longitude: number;
 }
 
-export function parseAirQuality(raw: string): AirQualityReading {
+export function parseAirQuality(raw: string, expected?: { lat: number; lon: number }): AirQualityReading {
   const d = JSON.parse(raw) as Record<string, unknown>;
   const cur = d.current as Record<string, unknown> | undefined;
   const num = (v: unknown): number | null =>
@@ -61,6 +63,27 @@ export function parseAirQuality(raw: string): AirQualityReading {
   const us = num(cur?.us_aqi);
   if (us === null || !cur) {
     throw unprocessable("NO_USABLE_AQI", "the upstream answer carried no current US AQI; never guessed");
+  }
+  const latitude = num(d.latitude), longitude = num(d.longitude);
+  const time = cur.time;
+  const stamp = typeof time === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(time) ? Date.parse(time + "Z") : NaN;
+  const validStamp = Number.isFinite(stamp) && new Date(stamp).toISOString().slice(0,16) === time;
+  const interval = num(cur.interval);
+  const units = d.current_units as Record<string, unknown> | undefined;
+  const pollutants = ["pm2_5", "pm10", "nitrogen_dioxide", "ozone", "carbon_monoxide"];
+  if (us < 0 || latitude === null || Math.abs(latitude) > 90 || longitude === null || Math.abs(longitude) > 180 ||
+      !validStamp || Date.now() - stamp > 3 * 3600_000 || stamp > Date.now() + 300_000 ||
+      d.utc_offset_seconds !== 0 || interval === null || interval <= 0 || interval > 3600 || units?.us_aqi !== "USAQI" ||
+      (cur.european_aqi != null && (num(cur.european_aqi) === null || Number(cur.european_aqi) < 0)) ||
+      pollutants.some(key => cur[key] != null && (num(cur[key]) === null || Number(cur[key]) < 0 || units?.[key] !== "μg/m³"))) {
+    throw unprocessable("INVALID_AQI_OBSERVATION", "invalid, stale, future-dated or wrong-unit current model observation");
+  }
+  if (expected) {
+    const radians = (n: number) => n * Math.PI / 180;
+    const deltaLat = radians(latitude - expected.lat), deltaLon = radians(longitude - expected.lon);
+    const a = Math.sin(deltaLat / 2) ** 2 + Math.cos(radians(expected.lat)) * Math.cos(radians(latitude)) * Math.sin(deltaLon / 2) ** 2;
+    if (6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a))) > 100)
+      throw unprocessable("AQI_GRID_MISMATCH", "returned model grid cell is over 100 km from requested coordinates");
   }
   return {
     us_aqi: us,
@@ -70,10 +93,10 @@ export function parseAirQuality(raw: string): AirQualityReading {
     nitrogen_dioxide: num(cur.nitrogen_dioxide),
     ozone: num(cur.ozone),
     carbon_monoxide: num(cur.carbon_monoxide),
-    time: String(cur.time ?? ""),
-    interval_seconds: num(cur.interval) ?? 0,
-    grid_latitude: num(d.latitude) ?? NaN,
-    grid_longitude: num(d.longitude) ?? NaN,
+    time: time as string,
+    interval_seconds: interval,
+    grid_latitude: latitude,
+    grid_longitude: longitude,
   };
 }
 
@@ -87,23 +110,15 @@ export async function handleAirQuality(query: Record<string, string | undefined>
   const fetchedAt = new Date().toISOString();
   let body: string;
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-    try {
-      const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      body = await res.text();
-    } finally {
-      clearTimeout(timer);
-    }
+    body = (await readPublicBody(url, 64_000, SOURCE_TIMEOUT_MS)).raw;
   } catch {
     throw upstreamUnavailable("OPEN_METEO_UNREACHABLE", "the Open-Meteo air-quality API could not be reached");
   }
-  const r = parseAirQuality(body);
+  const r = parseAirQuality(body, { lat, lon });
   const acceptable = r.us_aqi <= ACCEPTABLE_US_AQI;
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({ lat, lon, as_of: asOf, reading: r, acceptable,
-    source_policy: "Open-Meteo air-quality current block only; model blend at nearest grid cell, never a forecast, never a ground-station claim",
+    source_policy: "Open-Meteo air-quality current block only; model blend at nearest grid cell, model-derived current estimate, not a measured station value, never a ground-station claim",
     raw_bodies: { current: body }, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, url, evidence, "Open-Meteo single source; current block only");
   receipt.fetched_at = fetchedAt;
@@ -116,7 +131,7 @@ export async function handleAirQuality(query: Record<string, string | undefined>
     `Current US AQI ${r.us_aqi} (EPA scale) at grid cell ${r.grid_latitude}, ${r.grid_longitude}` +
     ` (nearest cell to ${lat}, ${lon}), upstream hour ${r.time}Z — ${acceptable ? "acceptable (at or below 100, EPA moderate or better)" : "above 100 (unhealthy for sensitive groups or worse)"}.` +
     ` PM2.5 ${r.pm2_5 ?? "n/a"} µg/m³, PM10 ${r.pm10 ?? "n/a"} µg/m³, NO2 ${r.nitrogen_dioxide ?? "n/a"} µg/m³, O3 ${r.ozone ?? "n/a"} µg/m³.` +
-    ` These are Open-Meteo modelled current conditions (CAMS blend) at the nearest grid cell on an hourly interval, not a ground-station measurement, and never a forecast.`;
+    ` These are Open-Meteo modelled current conditions (CAMS blend) at the returned grid cell, interval ${r.interval_seconds} seconds, not a ground-station measurement. This current estimate may be derived from model output.`;
   return envelope(INTENT, {
     aqi: r.us_aqi,
     aqi_scale: "US EPA",
@@ -131,5 +146,5 @@ export async function handleAirQuality(query: Record<string, string | undefined>
     longitude: r.grid_longitude,
     upstream_hour: r.time,
   }, receipt, { answer, verdict: "verified", confidence: 0.8,
-    source: `${url}; Open-Meteo air-quality current block only, model blend at nearest grid cell, hourly interval, never a forecast; fetched ${fetchedAt}` });
+    source: `${url}; Open-Meteo air-quality current block only, model blend at nearest grid cell, interval ${r.interval_seconds} seconds, model-derived current estimate, not a measured station value; fetched ${fetchedAt}` });
 }
