@@ -13,10 +13,11 @@
 //
 // HONEST SCOPE: this is AIRPORT-LEVEL FAA NAS status — ground delay
 // programs, ground stops, general arrival/departure delays, closures —
-// NEVER flight-level tracking; no keyless flight-status source exists.
+// NEVER flight-level tracking; this slice has no verified flight-origin source.
 // Every answer says so, and the receipt discloses the input narrowing
 // (route_or_flight accepts a 3-letter FAA/IATA airport code or a name
-// from the bundled US airport list, disclosed when resolved).
+// from the bundled US airport list, disclosed when resolved), or a
+// two-endpoint route. A flight number alone does not establish its origin.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -76,24 +77,18 @@ export function parseNasStatus(raw: string, airport: string): { updateTime: stri
 export async function handleTravelDisruption(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const rawInput = query.route_or_flight?.trim();
   if (!rawInput) throw badRequest("MISSING_PARAM", "route_or_flight is required as a 3-letter airport code, e.g. LGA, or a US airport name");
-  let airport = rawInput.toUpperCase();
-  let resolvedFrom: { name: string; label: string } | null = null;
-  if (!/^[A-Z]{3}$/.test(airport)) {
-    // Bundled static US airport list: exact name forms only, ambiguity
-    // refused naming the candidates, never a silent first-hit pick.
-    const matches = resolveAirportName(rawInput);
-    if (matches.length > 1) {
-      throw unprocessable("AMBIGUOUS_AIRPORT",
-        `"${rawInput}" matches ${matches.length} airports in the bundled list: ${matches.map((m) => `${m.code} (${m.label})`).join("; ")}; pass the 3-letter code or a more specific name`);
-    }
-    if (matches.length === 1) {
-      resolvedFrom = { name: rawInput, label: matches[0].label };
-      airport = matches[0].code;
-    } else {
-      throw badRequest("AIRPORT_CODE_REQUIRED",
-        "route_or_flight accepts a 3-letter airport code or a name from the bundled US airport list in this slice: this is FAA airport-level status, not flight tracking, and routes are not covered");
-    }
-  }
+  if (rawInput.length > 200 || /[\x00-\x1f]/.test(rawInput)) throw badRequest('INVALID_ROUTE','route_or_flight must be at most 200 printable characters');
+  const route = /^(.+?)\s+to\s+(.+)$/i.exec(rawInput) ?? /^([a-z]{3})\s*[-/]\s*([a-z]{3})$/i.exec(rawInput);
+  const names = route ? [route[1].trim(),route[2].trim()] : [rawInput];
+  const resolutions = names.map(name => {
+    if (/^[a-z]{3}$/i.test(name)) return {airport:name.toUpperCase(),resolvedFrom:null};
+    const matches=resolveAirportName(name);
+    if(matches.length>1)throw unprocessable('AMBIGUOUS_AIRPORT',`"${name}" matches ${matches.length} airports: ${matches.map(m=>m.code+' ('+m.label+')').join('; ')}; pass the 3-letter code`);
+    if(matches.length!==1)throw badRequest('AIRPORT_CODE_REQUIRED','Use a 3-letter airport code, exact bundled US airport name or a route X to Y / XXX-YYY / XXX/YYY. Flight-number origin requires a real dated flight source and is not inferred.');
+    return {airport:matches[0].code,resolvedFrom:{name,label:matches[0].label}};
+  });
+  const airport = resolutions[0].airport;
+  const resolvedFrom = resolutions[0].resolvedFrom;
   const fetchedAt = new Date().toISOString();
   let body: string;
   try {
@@ -112,16 +107,24 @@ export async function handleTravelDisruption(query: Record<string, string | unde
   if (!body.includes("AIRPORT_STATUS_INFORMATION")) {
     throw unprocessable("NO_USABLE_STATUS", "the FAA answer was not a NAS status document; nothing is guessed");
   }
-  const { updateTime, entries } = parseNasStatus(body, airport);
-  const disrupted = entries.length > 0;
-  const delayMinutes = entries.map((e) => minutesOf(e.avg)).filter((v): v is number => v !== null);
-  const maxDelay = delayMinutes.length ? Math.max(...delayMinutes) : null;
-  const status = disrupted ? entries.map((e) => e.kind).join("; ") : "no active FAA-listed disruption";
-  const reason = entries.map((e) => e.reason).filter(Boolean).join("; ");
+  const airportStatuses=resolutions.map(({airport})=>{
+    const {updateTime,entries}=parseNasStatus(body,airport);
+    const delays=entries.map(e=>minutesOf(e.avg)).filter((v):v is number=>v!==null);
+    return {airport,update_time:updateTime,entries,disrupted:entries.length>0,delay_minutes:delays.length?Math.max(...delays):null};
+  });
+  const updateTime=airportStatuses[0].update_time;
+  const entries=airportStatuses.flatMap(s=>s.entries);
+  const disrupted=airportStatuses.some(s=>s.disrupted);
+  const delayMinutes=airportStatuses.map(s=>s.delay_minutes).filter((v):v is number=>v!==null);
+  // These airport-level averages are not a sum or estimate of route/flight delay.
+  const maxDelay=delayMinutes.length?Math.max(...delayMinutes):null;
+  const status=disrupted?airportStatuses.filter(s=>s.disrupted).map(s=>s.airport+': '+s.entries.map(e=>e.kind).join('; ')).join('; '):'no active FAA-listed disruption';
+  const reason=entries.map(e=>e.reason).filter(Boolean).join('; ');
+  const resolvedRoute=route?resolutions.map(r=>r.airport).join('-'):airport;
   const asOf = new Date().toISOString();
-  const evidence = JSON.stringify({ route_or_flight: airport, as_of: asOf, feed_update_time: updateTime, entries,
+  const evidence = JSON.stringify({ route_or_flight: resolvedRoute, airport_statuses:airportStatuses, route_name_resolutions:resolutions, as_of: asOf, feed_update_time: updateTime, entries,
     name_resolution: resolvedFrom ? { input: resolvedFrom.name, resolved_to: airport, label: resolvedFrom.label, source: "bundled static US airport list (in-repo table, not a live directory)" } : "not used (3-letter code given directly)",
-    input_narrowing: "route_or_flight narrowed to a 3-letter airport code: FAA airport-level NAS status only, never flight-level tracking; the feed ignores its airport parameter so filtering is local",
+    input_narrowing: "route_or_flight resolved to one or two airport codes: FAA airport-level NAS status only, never flight-level tracking; the feed ignores its airport parameter so filtering is local",
     source_policy: "FAA NAS status snapshot (ground delay programs, ground stops, arrival/departure delays, closures); airport-level only",
     raw_bodies: { nas_status: body }, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, NAS_URL, evidence, "FAA NAS status single source; airport-level only, input narrowing disclosed");
@@ -132,7 +135,9 @@ export async function handleTravelDisruption(query: Record<string, string | unde
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
   const namePrefix = resolvedFrom ? `"${resolvedFrom.name}" resolved to ${airport} (${resolvedFrom.label}) via the bundled airport list. ` : "";
-  const answer = disrupted
+  const answer = route
+    ? `${resolvedRoute}: ${airportStatuses.map(s=>s.airport+(s.disrupted?' has '+s.entries.map(e=>e.kind+(e.reason?' ('+e.reason+')':'')).join('; '):' has no active FAA-listed disruption')).join('; ')}. FAA NAS status as of ${updateTime}. Both endpoints checked against one snapshot. Airport-level status only, not flight tracking or route delay; an unlisted condition is not claimed normal.`
+    : disrupted
     ? `${namePrefix}${airport} is DISRUPTED at the airport level: ${status}${reason ? ` (${reason})` : ""}` +
       `${maxDelay !== null ? `, average delay up to ${maxDelay} minutes` : ""}. FAA NAS status as of ${updateTime}. ` +
       `This is airport-level FAA status, not flight-level tracking.`
@@ -140,9 +145,11 @@ export async function handleTravelDisruption(query: Record<string, string | unde
       `This is airport-level FAA status, not flight-level tracking; an unlisted airport or unlisted condition is not claimed normal.`;
   return envelope(INTENT, {
     disrupted,
-    route_or_flight: airport,
+    route_or_flight: resolvedRoute,
+    airport_statuses: airportStatuses,
     status,
     delay_minutes: maxDelay,
+    delay_semantics: "maximum reported airport average, not route or flight delay",
     reason: reason || null,
   }, receipt, { answer, verdict: "verified", confidence: 0.9,
     source: `${NAS_URL}; FAA NAS status snapshot, airport-level only; feed updated ${updateTime}; fetched ${fetchedAt}` });
