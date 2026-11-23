@@ -1128,11 +1128,20 @@ const MAX_PROTOCOL_BODY_BYTES = 2 * 1024 * 1024;
 // Measured 2026-11-22: protocols 9,682,478 B; chains 58,511 B;
 // Ethereum history 123,498 B; bare totals about 18 B. Bound every
 // source before parsing, with headroom and explicit failure on growth.
+// /protocol/{slug} is the outlier: umbrella payloads are far larger —
+// measured live 2026-11-23: /protocol/aave 11,108,531 B,
+// /protocol/sushiswap 2,649,324 B, /protocol/uniswap 2,028,601 B; the
+// fill doctrine anticipates up to ~31 MB (lido). The old 2 MiB default
+// made every oversized fill fail DEFILLAMA_RESPONSE_TOO_LARGE, so a
+// chain-scoped query for a top protocol (aave, sushi) could NEVER
+// answer: permanent CHAIN_SPLIT_UNAVAILABLE, observed live post-deploy.
+const PROTOCOL_BODY_BYTES = 40 * 1024 * 1024;
 function sourceBodyByteLimit(url: string): number {
   if (url === PROTOCOLS_URL) return 16 * 1024 * 1024;
   if (url === CHAINS_URL) return 1024 * 1024;
   if (url.startsWith('https://api.llama.fi/v2/historicalChainTvl/')) return 4 * 1024 * 1024;
   if (url.startsWith('https://api.llama.fi/tvl/')) return 4 * 1024;
+  if (url.startsWith('https://api.llama.fi/protocol/')) return PROTOCOL_BODY_BYTES;
   return MAX_PROTOCOL_BODY_BYTES;
 }
 

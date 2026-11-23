@@ -1055,6 +1055,41 @@ describe('handleTvl chain-scoped queries ("X on Y")', () => {
     }
   });
 
+  it('"binance cex on ethereum" answers once a >2MiB /protocol fill lands (body-cap regression pin)', async () => {
+    // Regression pin for the shipped 2 MiB /protocol/{slug} body cap: real
+    // umbrella payloads exceed it (measured live 2026-11-23: /protocol/aave
+    // 11,108,531 B, /protocol/sushiswap 2,649,324 B), so the fill failed
+    // DEFILLAMA_RESPONSE_TOO_LARGE on every attempt and the chain-scoped
+    // query refused CHAIN_SPLIT_UNAVAILABLE forever. The /protocol/{slug}
+    // cap is now 40 MiB. The payload below is the suite's real observed
+    // binance-cex fixture plus inert padding past the old 2 MiB bound;
+    // every asserted number is the fixture's captured value.
+    const bigPayload = { ...BINANCE_CEX_PROTOCOL_FIXTURE, padding: 'x'.repeat(3 * 1024 * 1024) };
+    const base = fixtureFetch();
+    const fetchImpl = (async (url: string | URL | Request): Promise<Response> => {
+      const u = String(url);
+      if (u === 'https://api.llama.fi/protocol/binance-cex') {
+        return new Response(JSON.stringify(bigPayload), { status: 200 });
+      }
+      return base(url as string);
+    }) as typeof fetch;
+    // First call: no lists chainTvls for binance-cex and no fill yet, so
+    // the split is unknown - the handler kicks the background fill and
+    // fails closed with a retry hint.
+    try {
+      await handleTvl({ protocol: 'binance cex on ethereum' }, { fetchImpl });
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expectApiError(err, 502, 'CHAIN_SPLIT_UNAVAILABLE');
+    }
+    await __awaitTvlProtocolFillForTests('binance-cex');
+    const out = await handleTvl({ protocol: 'binance cex on ethereum' }, { fetchImpl });
+    expect(out.protocol_or_chain).toBe('binance-cex');
+    expect(out.tvl_usd).toBe(109405735889);
+    expect(out.chain_tvl_usd).toBe(1000000000);
+    expect(out.scoped_chain).toBe('Ethereum');
+  });
+
   it('whole-query resolution wins: "sushi on base" is the protocol sushi-on-base (reviewer pin)', async () => {
     // Reviewer pin for b90784fc: with a protocol literally named
     // "Sushi On Base" AND a chain "Base" both in the lists, the exact
@@ -4729,11 +4764,13 @@ describe('catalog parent protocol resolution (epoch-35 Curve Finance regression)
 
 describe('TVL process memory safety', () => {
   beforeEach(() => __seedTvlCachesForTests(PROTOCOLS_FIXTURE, CHAINS_FIXTURE));
+  // 322 x 128 KiB = 42,205,184 B > the 40 MiB /protocol/{slug} cap
+  // (raised from 2 MiB 2026-11-23: real umbrella payloads are 11-31 MB).
   const oversizeStream = (cancelled: () => void) => {
     let chunks = 0;
     return new ReadableStream<Uint8Array>({
       pull(controller) {
-        if (++chunks > 24) controller.close();
+        if (++chunks > 322) controller.close();
         else controller.enqueue(new Uint8Array(128 * 1024).fill(32));
       },
       cancel: cancelled,
@@ -4756,7 +4793,7 @@ describe('TVL process memory safety', () => {
       String(url) === 'https://api.llama.fi/tvl/aave-v3'
         ? new Response('', { status: 503 })
         : new Response(oversizeStream(() => { cancelled = true; }), {
-          headers: { 'Content-Length': String(32 * 1024 * 1024) },
+          headers: { 'Content-Length': String(41 * 1024 * 1024) },
         })) as typeof fetch;
     await expect(handleTvl({ protocol: 'aave-v3' }, { fetchImpl })).rejects.toMatchObject({
       code: 'DEFILLAMA_RESPONSE_TOO_LARGE',
@@ -4805,6 +4842,7 @@ describe('TVL every-source streaming byte bounds', () => {
     ['https://api.llama.fi/v2/chains', 1024 * 1024],
     ['https://api.llama.fi/v2/historicalChainTvl/Ethereum', 4 * 1024 * 1024],
     ['https://api.llama.fi/tvl/lido', 4 * 1024],
+    ['https://api.llama.fi/protocol/lido', 40 * 1024 * 1024],
   ] as const;
 
   for (const [url, limit] of sources) {
