@@ -5,16 +5,16 @@
 //
 // Intent contract (read 2026-11-23): request service (string) and
 // period (string); scored uptime_pct (number). The contract also lists
-// sla_target_pct and compliant as response fields, but no vendor
-// publishes its SLA target in machine-readable form, so BOTH are
+// sla_target_pct and compliant as response fields, but this endpoint
+// has not established a machine-readable SLA target, so BOTH are
 // returned null and the answer says why. Only uptime_pct is scored.
 //
 // SOURCE (keyless, probed live 2026-11-23): the public statuspage.io
-// JSON API that every statuspage-hosted status page exposes
+// JSON API exposed by the verified status pages below
 // (/api/v2/incidents.json). Public read of a status page is its
 // intended use; nothing is scraped around a block. Only services on
 // statuspage.io can be answered, through the alias map below; an
-// unknown service fails closed with a 400 naming the supported set.
+// unknown service returns not_found with null observation fields.
 //
 // DISCLOSED IMPACT-TO-DOWNTIME RULE (fixed, deterministic, restated in
 // every answer): downtime minutes = the union of [started_at,
@@ -32,6 +32,8 @@ import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
+import {readPublicBody} from '../core/publicSource';
+
 const SOURCE_TIMEOUT_MS = 10000;
 const UA = "VeriReceipt/2.0 sla-compliance observer (+https://verireceipt.vercel.app)";
 
@@ -45,6 +47,8 @@ const STATUSPAGES: Record<string, string> = {
   openai: "status.openai.com",
   twilio: "status.twilio.com",
   reddit: "www.redditstatus.com",
+  atlassian: "status.atlassian.com",
+  digitalocean: "status.digitalocean.com",
 };
 
 const MAX_PAGES = 5; // 500 incidents worst case; a full log can be longer, and then we fail closed.
@@ -127,14 +131,26 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
   const service = query.service?.trim().toLowerCase();
   if (!service) throw badRequest("MISSING_PARAM", `service is required: one of ${Object.keys(STATUSPAGES).join(", ")}`);
   if (service.length > 64) throw badRequest("INVALID_SERVICE", "service is over 64 characters");
-  const host = STATUSPAGES[service];
-  if (!host) {
-    throw badRequest(
-      "UNSUPPORTED_SERVICE",
-      `${service} is not a supported statuspage.io alias. Supported: ${Object.keys(STATUSPAGES).join(", ")}. Services without a statuspage.io log cannot be answered keyless, and no substitute is guessed`,
-    );
-  }
   const { days } = parsePeriod(query.period);
+  const alias=service.replace(/[^a-z0-9.]/g,'');
+  const host = STATUSPAGES[alias] ?? Object.values(STATUSPAGES).find(host=>host===service) ?? (/^[a-z0-9][a-z0-9-]{1,60}\.statuspage\.io$/.test(service)?service:null);
+  if (!host) {
+    const at=new Date().toISOString();
+    const evidence=JSON.stringify({service,period_days:days,status:'not_found',source_resolution:'No verified statuspage binding; no guessed hostname or external lookup',checked_at:at});
+    const receipt=makeReceipt(INTENT,'local:verified-statuspage-bindings',evidence,'No provider found; no uptime observation');receipt.fetched_at=at;
+    try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
+    const answer=`${service}: no verified statuspage source found. Uptime, SLA target and compliance are unknown, not zero or fully operational.`;
+    return envelope(INTENT,{service,period:`${days}d`,status:'not_found',uptime_pct:null,sla_target_pct:null,compliant:null,summary:answer},receipt,{answer,verdict:'unverified',confidence:0,source:'Verified statuspage binding list only; no provider observation'});
+  }
+  const summaryUrl=`https://${host}/api/v2/summary.json`;
+  let summaryBody:string, summary:any;
+  try {
+    const got=await readPublicBody(summaryUrl,1000000,2500);summaryBody=got.raw;summary=JSON.parse(got.raw);
+    if(!summary.page || typeof summary.page.id!=='string' || !Array.isArray(summary.components))throw new Error('missing page/components');
+    const declared=new URL(summary.page.url);if(!['https:','http:'].includes(declared.protocol)||declared.hostname!==host||declared.username||declared.password||declared.port)throw new Error('wrong statuspage identity');
+    // Some provider metadata declares http while the actual fetch uses HTTPS.
+    declared.protocol='https:';summary.page.url=declared.toString();
+  }catch {throw upstreamUnavailable('STATUSPAGE_MALFORMED','verified statuspage summary could not be read or had inconsistent identity');}
   const now = Date.now();
   const asOf = new Date(now).toISOString();
   const winStart = now - days * 86400_000;
@@ -172,7 +188,7 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
     .filter((i) => Date.parse(i.started_at) >= winStart || (i.resolved_at && Date.parse(i.resolved_at) > winStart))
     .map((i) => ({ name: i.name, impact: i.impact, started_at: i.started_at, resolved_at: i.resolved_at }));
   const evidence = JSON.stringify({
-    service, host, period_days: days, window_start: new Date(winStart).toISOString(), as_of: asOf,
+    service, host, summary_url:summaryUrl, summary_raw_body:summaryBody, components:summary.components, period_days: days, window_start: new Date(winStart).toISOString(), as_of: asOf,
     downtime_rule: "downtime = union of [started_at, resolved_at-or-now] for statuspage impact major|critical, clipped to the window; minor/none degradations excluded and counted separately",
     counted_incidents: countedList,
     excluded_degradations: excluded.length,
@@ -194,19 +210,22 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
 
   const downtimeMin = Math.round(downtimeMs / 60000);
   const answer =
-    `${service} delivered ${uptimeRounded}% uptime over the last ${days} days as of ${asOf}, under this disclosed rule: ` +
+    `${service} has ${uptimeRounded}% incident-log estimated uptime over the last ${days} days as of ${asOf}, under this disclosed rule: ` +
     `downtime counts only major/critical incidents from its statuspage.io log (${countedList.length} such incident(s), ~${downtimeMin} minutes); ` +
     `${excluded.length} minor/none degradation(s) are excluded from downtime. ` +
-    `sla_target_pct and compliant are NOT provided: no vendor publishes its SLA target in machine-readable form, so a compliance verdict would be invented, not observed.`;
+    `sla_target_pct and compliant are NOT provided: a machine-readable SLA target was not established by this endpoint, so a compliance verdict would be invented, not observed.`;
   return envelope(INTENT, {
     service,
     period: `${days}d`,
     uptime_pct: uptimeRounded,
+    status: "found",
+    components: summary.components.map((c:any)=>({id:c.id,name:c.name,status:c.status,updated_at:c.updated_at})),
+    uptime_semantics: "incident-log estimate, not measured availability or component uptime history",
     sla_target_pct: null,
     compliant: null,
     counted_incidents: countedList.length,
     excluded_degradations: excluded.length,
     downtime_minutes: downtimeMin,
-    summary: `${service} ${uptimeRounded}% uptime over ${days}d per the disclosed major/critical-only rule (${countedList.length} counted incidents); sla_target_pct/compliant not provided (no machine-readable SLA target exists).`,
+    summary: `${service} ${uptimeRounded}% uptime over ${days}d per the disclosed major/critical-only rule (${countedList.length} counted incidents); sla_target_pct/compliant not provided (SLA target not established).`,
   }, receipt, { answer, verdict: "verified", confidence: 0.85, source: upstreamDesc });
 }

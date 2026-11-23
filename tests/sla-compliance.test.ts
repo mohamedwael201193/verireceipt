@@ -30,6 +30,7 @@ function stub(opts: { down?: boolean; malformed?: boolean } = {}): void {
   vi.stubGlobal("fetch", async (url: unknown) => {
     const u = String(url);
     if (u.includes("githubstatus.com")) {
+      if (u.includes("summary.json")) return new Response(readFileSync(join(__dirname,"fixtures/sla-resolution/github-summary.json"),"utf8"));
       if (opts.down) throw new Error("statuspage outage");
       if (opts.malformed) return new Response("not json", { status: 200 });
       if (u.includes("&page=1")) return new Response(PAGE1, { status: 200 });
@@ -53,7 +54,7 @@ describe("SLA_COMPLIANCE_GENERAL", () => {
     expect(result.sla_target_pct).toBeNull();
     expect(result.compliant).toBeNull();
     expect(String(result.answer)).toContain("NOT provided");
-    expect(String(result.answer)).toContain("SLA target in machine-readable form");
+    expect(String(result.answer)).toContain("machine-readable SLA target");
     const receipt = result.receipt as { receipt_id: string; raw_response_sha256: string; intent: string };
     expect(receipt.intent).toBe("SLA_COMPLIANCE_GENERAL");
     const stored = await getReceiptEvidence(receipt.receipt_id);
@@ -76,13 +77,13 @@ describe("SLA_COMPLIANCE_GENERAL", () => {
     expect(result.counted_incidents).toBe(0);
     expect(result.excluded_degradations).toBe(2);
   });
-  it("an unsupported service fails closed with a 400 naming the supported set", async () => {
+  it("an unsupported service returns disclosed not_found with nulls", async () => {
     stub();
     const app = buildServer();
     const res = await app.inject({ method: "GET", url: "/v1/sla-compliance?service=stripe&period=30d" });
-    expect(res.statusCode).toBe(400);
-    expect(res.json().code).toBe("UNSUPPORTED_SERVICE");
-    expect(res.body).toContain("github");
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("not_found");
+    expect(res.json().uptime_pct).toBeNull();
     await app.close();
   });
   it("a malformed period is a 400", async () => {
@@ -118,6 +119,7 @@ describe("SLA_COMPLIANCE_GENERAL", () => {
     });
     vi.stubGlobal("fetch", async (url: unknown) => {
       const u = String(url);
+      if (u.includes("summary.json")) return new Response(readFileSync(join(__dirname,"fixtures/sla-resolution/github-summary.json"),"utf8"));
       if (u.includes("githubstatus.com")) return new Response(recent, { status: 200 });
       throw new Error(`unexpected fetch ${u}`);
     });
