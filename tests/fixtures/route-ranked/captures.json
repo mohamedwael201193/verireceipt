@@ -1,0 +1,30 @@
+[
+  {
+    "name": "springfield",
+    "query": "Springfield",
+    "url": "https://geocoding-api.open-meteo.com/v1/search?name=Springfield&count=10&language=en&format=json",
+    "status": 200,
+    "captured_at": "2026-11-23T22:52:21.152904+00:00"
+  },
+  {
+    "name": "street",
+    "query": "1600 Pennsylvania Avenue NW, Washington DC",
+    "url": "https://photon.komoot.io/api/?q=1600+Pennsylvania+Avenue+NW%2C+Washington+DC&limit=10&lang=en",
+    "status": 200,
+    "captured_at": "2026-11-23T22:52:23.159471+00:00"
+  },
+  {
+    "name": "negative",
+    "query": "Zzznotaplaceverireceipt20261124",
+    "url": "https://photon.komoot.io/api/?q=Zzznotaplaceverireceipt20261124&limit=10&lang=en",
+    "status": 200,
+    "captured_at": "2026-11-23T22:52:25.202629+00:00"
+  },
+  {
+    "name": "street-city-negative",
+    "query": "1600 Pennsylvania Avenue NW, Washington DC",
+    "url": "https://geocoding-api.open-meteo.com/v1/search?name=1600+Pennsylvania+Avenue+NW%2C+Washington+DC&count=10&language=en&format=json",
+    "status": 200,
+    "captured_at": "2026-11-23T22:53:43.977127+00:00"
+  }
+]

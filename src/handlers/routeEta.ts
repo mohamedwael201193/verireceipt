@@ -7,9 +7,9 @@
 // (strings, "Start point"/"End point"); response duration (scored,
 // integer seconds 1..1000000). R1 (audit 2026-11-23): each endpoint may
 // be "lat,lon" or a place name; names go through the same Open-Meteo
-// geocoder and fail-closed rules as the weather slices (named
-// resolution, ambiguity refused) and every answer names the resolved
-// places with their coordinates.
+// city geocoder, selecting its first ranked match, with Photon street fallback
+// only on an empty successful city result. Every answer discloses the selection,
+// returned count and coordinates. This explicitly reverses ambiguity refusal.
 //
 // SOURCE: router.project-osrm.org demo server, keyless, probed live
 // 2026-11-23. Fair use respected: exactly one lightweight request
@@ -24,8 +24,7 @@
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, sha256Hex } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
-import { parseLocation } from "./stormAlert";
-import { resolveGeocode } from "./weatherForecast";
+import {resolveRoutePlace,ROUTE_GEOCODER_ATTRIBUTION} from "./routeGeocoder";
 
 const SOURCE_TIMEOUT_MS = 6000;
 const UA = "VeriReceipt/2.0 route-eta observer (+https://verireceipt.vercel.app)";
@@ -66,32 +65,20 @@ export function parseOsrm(raw: string): OsrmRoute {
 
 export const INTENT = "ROUTE_ETA_GENERAL";
 
-interface ResolvedPoint { lat: number; lon: number; label: string; geocoder: { url: string; body: string } | null }
-
-async function resolveEndpoint(raw: string | undefined, which: "origin" | "destination"): Promise<ResolvedPoint> {
-  if (!raw?.trim()) throw badRequest("MISSING_PARAM", `${which} is required: \"lat,lon\" or a place name`);
-  const trimmed = raw.trim();
-  if (!/^\s*-?\d{1,2}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?\s*$/.test(trimmed)) {
-    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(trimmed)}&count=10&language=en&format=json`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-    let gbody: string;
-    try {
-      const res = await fetch(geoUrl, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      gbody = await res.text();
-    } catch {
-      throw upstreamUnavailable("GEOCODER_UNREACHABLE", "the Open-Meteo geocoder could not be reached; pass \"lat,lon\" to skip geocoding");
-    } finally {
-      clearTimeout(timer);
-    }
-    const hit = resolveGeocode(gbody, trimmed);
-    return { lat: hit.latitude, lon: hit.longitude,
-      label: `${hit.name}${hit.admin1 ? `, ${hit.admin1}` : ""}${hit.country ? `, ${hit.country}` : ""} (${hit.latitude.toFixed(4)}, ${hit.longitude.toFixed(4)})`,
-      geocoder: { url: geoUrl, body: gbody } };
-  }
-  const { lat, lon } = parseLocation(trimmed);
-  return { lat, lon, label: `${lat},${lon}`, geocoder: null };
+interface ResolvedPoint { lat:number;lon:number;label:string;selection:string;geocoders:{url:string;body:string;fetched_at:string}[] }
+async function resolveEndpoint(raw:string|undefined,which:'origin'|'destination'):Promise<ResolvedPoint> {
+ if(!raw?.trim())throw badRequest('MISSING_PARAM',which+' is required: lat,lon or a place/street');
+ const trimmed=raw.trim();
+ // Coordinate-like tokens must not become remote geocoding queries on parse failure.
+ if(/^[+\-\d.\s,eE]+$/.test(trimmed)) {
+  if(!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)\s*,\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(trimmed))throw badRequest('BAD_LOCATION','invalid coordinates; expected latitude,longitude');
+  const [lat,lon]=trimmed.split(',').map(Number);if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180)throw badRequest('BAD_LOCATION','coordinates outside latitude/longitude bounds');
+  return {lat,lon,label:lat+','+lon,selection:'coordinates given directly',geocoders:[]};
+ }
+ if(trimmed.length>250)throw badRequest('BAD_LOCATION','location name too long');
+ const {hit,captures}=await resolveRoutePlace(trimmed);
+ const label=hit.label+' ('+hit.latitude+', '+hit.longitude+')';
+ return {lat:hit.latitude,lon:hit.longitude,label,selection:'chose '+label+' of '+hit.count+' matches returned by '+hit.provider+' (rank 1, provider order; not confirmed unique)',geocoders:captures};
 }
 
 export async function handleRouteEta(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
@@ -118,10 +105,10 @@ export async function handleRouteEta(query: Record<string, string | undefined>):
   const durationS = route.duration_s; // Validated source value, rounded only; never clamped.
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({ origin: `${o.lat},${o.lon}`, destination: `${dst.lat},${dst.lon}`,
-    origin_resolved: o.geocoder ? o.label : "not geocoded (coordinates given directly)",
-    destination_resolved: dst.geocoder ? dst.label : "not geocoded (coordinates given directly)",
-    geocoders: [o.geocoder, dst.geocoder].filter(Boolean).map((g) => ({ url: g!.url, sha256: sha256Hex(Buffer.from(g!.body, "utf8")), raw_body: g!.body })),
-    as_of: asOf, route,
+    origin_resolved:o.label, origin_selection:o.selection,
+    destination_resolved:dst.label,destination_selection:dst.selection,
+    geocoders: [...o.geocoders,...dst.geocoders].map((g) => ({ url: g!.url, sha256: sha256Hex(Buffer.from(g!.body, "utf8")), raw_body: g!.body, fetched_at:g!.fetched_at })),
+    as_of: asOf, route,geocoder_policy:ROUTE_GEOCODER_ATTRIBUTION,geocoder_terms:{photon:'https://photon.komoot.io/',open_meteo:'https://open-meteo.com/en/terms',odbl:'https://opendatacommons.org/licenses/odbl/1-0/',checked_at:'2026-11-24',photon_project_use:'fair use, throttling and no availability guarantee',open_meteo_free_commercial_use:false},
     source_policy: "OSRM demo server static car-profile model estimate; no live traffic; snapped waypoints disclosed; fair use: one lightweight request",
     raw_bodies: { route: body }, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, url, evidence, "OSRM demo server single source; static model estimate, snapped waypoints disclosed");
@@ -136,6 +123,7 @@ export async function handleRouteEta(query: Record<string, string | undefined>):
   const answer =
     `Driving ETA ${mins} min (${durationS}s) over ${km} km from ${o.label} to ${dst.label}. ` +
     `This is the OSRM routing model's static car-profile estimate — no live traffic or closures — from the public demo server. ` +
+    `Origin: ${o.selection}. Destination: ${dst.selection}. ${ROUTE_GEOCODER_ATTRIBUTION} ` +
     `OSRM snapped the origin to ${route.origin_snapped[1]}, ${route.origin_snapped[0]} (${Math.round(route.origin_snap_m)} m away) ` +
     `and the destination to ${route.destination_snapped[1]}, ${route.destination_snapped[0]} (${Math.round(route.destination_snap_m)} m away).`;
   return envelope(INTENT, {

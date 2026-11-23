@@ -1,10 +1,12 @@
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 const scratch = mkdtempSync("/tmp/route-eta-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 afterEach(() => vi.unstubAllGlobals());
+import {resetRouteGeocoderForTests} from "../src/handlers/routeGeocoder";
+beforeEach(()=>resetRouteGeocoderForTests());
 import { handleRouteEta, parseOsrm } from "../src/handlers/routeEta";
 import { buildServer } from "../src/server";
 import { getReceiptEvidence } from "../src/core/storage";
@@ -24,6 +26,7 @@ describe("ROUTE_ETA_GENERAL", () => {
     vi.stubGlobal("fetch", async (url: unknown) => {
       const u = String(url);
       if (u.startsWith("https://geocoding-api.open-meteo.com/")) return new Response('{"results":[]}', { status: 200 });
+      if(u.startsWith("https://photon.komoot.io/"))return new Response('{"features":[]}');
       throw new Error(`unexpected fetch ${u}`);
     });
     await expect(handleRouteEta({ origin: "27.3,-97.2", destination: "Zzznotaplace" })).rejects.toMatchObject({ status: 422, code: "PLACE_NOT_FOUND" });
