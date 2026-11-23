@@ -7,24 +7,12 @@
 // scored home_score (number); response home_team, away_team,
 // home_score, away_score, status, date.
 //
-// SCOPE (named in every answer): NHL and MLB only.
-//   NHL: api-web.nhle.com/v1/score/{date} — keyless official endpoint,
-//   probed live 2026-11-23. MLB: statsapi.mlb.com/api/v1/schedule
-//   (hydrate=linescore) — keyless official endpoint, probed live
-//   2026-11-23; its body carries an MLB copyright banner. The banner
-//   is preserved only inside the receipted raw evidence bytes and is
-//   never copied into answer text.
-//   ESPN stays blocked (HTTP 403) and is NOT used; NBA/NFL/soccer
-//   have no keyless official feed and are NOT answered here.
-//
-// MATCHING: the query is matched against team names (and NHL
-// abbreviations) for games on the requested date (default: today in
-// each league's latest scoreboard, plus yesterday). Exactly one
-// unique match wins; zero matches is a 404-class 400, several is an
-// ambiguous-match 400. No fuzzy first-hit is ever picked silently.
-//
-// FAIL CLOSED: source outage, malformed body or a game without final
-// numbers is an error, never a guessed score.
+// NHL and MLB official today/yesterday scoreboards, plus major football
+// current-season openfootball CC0 snapshot fallback. Football picks most recent
+// final between both complete named teams, else next scheduled fixture.
+// Unknown coverage is a disclosed200 null-score result, never a made-up zero.
+// ESPN remains excluded after403; no alternate route to blocked sources.
+import { footballLookup } from "./footballScores";
 import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -163,10 +151,17 @@ export async function handleSportsScore(query: Record<string, string | undefined
   });
 
   if (matches.length === 0) {
-    throw badRequest(
-      "GAME_NOT_FOUND",
-      `no NHL or MLB game on ${dates[0]} or ${dates[1]} matches "${game.slice(0, 80)}". Scope: NHL and MLB official scoreboards for the dates searched`,
-    );
+    let football: Awaited<ReturnType<typeof footballLookup>>;
+    try { football = await footballLookup(game, today); } catch { throw upstreamUnavailable("FOOTBALL_UNAVAILABLE", "major-football reference unavailable or ambiguous; refusing to guess"); }
+    const m = football.match;
+    const scope = "NHL and MLB official scoreboards for today/yesterday; major football current-season openfootball snapshot (five leagues), not a live score feed; other leagues including NBA are not covered";
+    const evidence = JSON.stringify({ game_query: game, matched: m, scope, upstream_bodies: [...bodies, ...football.bodies], football_urls: football.urls, fetched_at: asOf });
+    const receipt = makeReceipt(INTENT, football.urls[0], evidence, "openfootball football.json CC0 snapshot; exact source bytes; null means no score, never zero");
+    receipt.fetched_at = asOf;
+    try { await saveReceipt(receipt, evidence); } catch { throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable"); }
+    const fields = m ?? { home_team: null, away_team: null, home_score: null, away_score: null, status: "not_found", date: null, league: null };
+    const answer = m ? `${m.league}, ${m.date}: ${m.away_team} ${m.away_score ?? "no score"} at ${m.home_team} ${m.home_score ?? "no score"} (${m.status}). Source: openfootball football.json, CC0, community snapshot. ${scope}.` : `No matching fixture in sources covered: ${scope}. Scores are null, not zero.`;
+    return envelope(INTENT, { ...fields, found: !!m, summary: answer }, receipt, { answer, verdict: m ? "verified" : "not_found", confidence: m ? 0.8 : 0, source: "openfootball football.json, CC0 public-domain current-season snapshots" });
   }
   if (matches.length > 1) {
     const listing = matches.map((m) => `${m.league} ${m.away_team} at ${m.home_team} (${m.date})`).join("; ");

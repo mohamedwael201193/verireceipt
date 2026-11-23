@@ -1,0 +1,5 @@
+# Major football fixture coverage
+
+Openfootball football.json is a CC0 public-domain dataset. Its source README states the schema, data and scripts are public domain without restrictions. Verified 2026-11-23. Five current-season files en.1, es.1, de.1, it.1, fr.1 under2026-27 were fetched successfully; complete unmodified bodies are captured as fixtures. Fixture rows use team1 for home, team2 for away and score.ft for final scores. Current snapshots can lag actual games and are never described as a live scoreboard.
+
+A query must include both complete team names after removing punctuation, diacritics and FC/CF/AFC/SC suffixes. Single-token fuzzy matching is not used for the season-wide dataset, because it can choose the wrong fixture. Latest completed fixture is preferred; without one, the next scheduled fixture has null scores. Unknown sports, including NBA, return a disclosed not-found envelope with null scores, never zero. NHL/MLB matching remains unchanged. All source bytes and URLs stay inside receipt evidence; answer prose names the dataset, not its hosting URL. No TheSportsDB key or blocked ESPN path is used. YAML is unchanged.

@@ -35,6 +35,7 @@ function stub(opts: { nhlDown?: boolean; mlbDown?: boolean; nhlBody?: string } =
       if (opts.mlbDown) throw new Error("mlb outage");
       return new Response(MLB, { status: 200 });
     }
+    if (u.includes("raw.githubusercontent.com")) return new Response(JSON.stringify({matches:[]}));
     throw new Error(`unexpected fetch ${u}`);
   });
 }
@@ -79,12 +80,13 @@ describe("SPORTS_SCORE_GENERAL", () => {
     expect(res.body).toContain("Lightning");
     await app.close();
   });
-  it("a game outside NHL/MLB coverage fails closed, naming the scope", async () => {
+  it("an uncovered game returns disclosed null-score coverage result", async () => {
     stub();
     const app = buildServer();
     const res = await app.inject({ method: "GET", url: "/v1/sports-score?game=Lakers%20vs%20Celtics" });
-    expect(res.statusCode).toBe(400);
-    expect(res.json().code).toBe("GAME_NOT_FOUND");
+    expect(res.statusCode).toBe(200);
+    expect(res.json().home_score).toBeNull();
+    expect(res.json().status).toBe("not_found");
     expect(res.body).toContain("NHL and MLB official scoreboards");
     expect(res.body).not.toContain("ESPN");
     await app.close();
@@ -106,4 +108,11 @@ describe("SPORTS_SCORE_GENERAL", () => {
     expect(res.json().code).toBe("NHL_SCOREBOARD_UNAVAILABLE");
     await app.close();
   });
+});
+
+it("football answer persists exact captured bytes and never exposes hosting links",async()=>{
+ stub(); const base=globalThis.fetch;
+ vi.stubGlobal("fetch",async(u:unknown)=>String(u).includes("raw.githubusercontent.com")?new Response(readFileSync(join(__dirname,"fixtures/sports-football",String(u).split("/").pop()!),"utf8")):base(u as string));
+ const out=await handleSportsScore({game:"Arsenal vs Chelsea"});expect(out.home_score).toBe(2);expect(out.away_score).toBe(1);expect(out.answer).not.toContain("github");
+ const r=out.receipt as {receipt_id:string;raw_response_sha256:string};const stored=await getReceiptEvidence(r.receipt_id);expect(sha256Hex(stored.evidence!)).toBe(r.raw_response_sha256);expect(String(stored.evidence)).toContain("Arsenal FC");
 });
