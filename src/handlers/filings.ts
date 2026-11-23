@@ -981,6 +981,28 @@ export function resolveCikFromTickers(entity: string, tickers: TickersMap): CikM
     if (cik === null) return null;
     return { cik, cik10: padCik(cik), matchKind: 'name' };
   }
+  // F2 — dominance inside the prefix round (exact ticker > exact name >
+  // prefix): a candidate whose title equals the query once its legal
+  // suffix is stripped ("apple" vs "Apple Inc") is a name-level match,
+  // strictly stronger than the bare prefix matches around it ("Apple
+  // Hospitality REIT Inc"). When EXACTLY ONE candidate matches at that
+  // level it is the clearly dominant resolution and resolves; when zero
+  // or several do, the matches are genuinely comparable and the request
+  // still refuses with AMBIGUOUS_ENTITY.
+  const stemMatches: TickerEntry[] = [];
+  for (const e of candidates.values()) {
+    const title = normalizeCompanyName(e.title as string);
+    const tokens = title.split(' ');
+    // Strip at most ONE trailing legal suffix: "apple inc" -> "apple",
+    // but "acme holdings inc" -> "acme holdings" (never "acme"), so a
+    // Holdings/Industries pair around one stem stays genuinely comparable.
+    if (tokens.length > 1 && COMPANY_SUFFIX_TOKENS.has(tokens[tokens.length - 1])) tokens.pop();
+    if (tokens.join(' ') === normQuery) stemMatches.push(e);
+  }
+  if (stemMatches.length === 1) {
+    const cik = tickerEntryCik(stemMatches[0]);
+    if (cik !== null) return { cik, cik10: padCik(cik), matchKind: 'name' };
+  }
   throw unprocessable(
     'AMBIGUOUS_ENTITY',
     `Entity "${entity}" matches ${candidates.size} companies; use a ticker, CIK, or fuller company name`,
