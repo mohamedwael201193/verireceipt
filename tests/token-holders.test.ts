@@ -230,6 +230,10 @@ it("deduplicated Gecko requests each persist the original body with provider as_
  let count=0;setTokenHoldersFetchForTests(async()=>{count++;return raw;});
  const results=await Promise.all(Array.from({length:4},()=>handleTokenHolders({token:"USDC",chain:"base"})));
  expect(count).toBe(1);
+ const firstFetched=(results[0].receipt as {fetched_at:string}).fetched_at;
+ await vi.advanceTimersByTimeAsync(1000);
+ const cached=await handleTokenHolders({token:"USDC",chain:"base"});
+ expect((cached.receipt as {fetched_at:string}).fetched_at).toBe(firstFetched);
  const ids=new Set<string>();
  for(const r of results){
   expect(r.as_of).toBe(updated);
@@ -237,4 +241,12 @@ it("deduplicated Gecko requests each persist the original body with provider as_
   expect((await getReceiptEvidence(id)).evidence!.toString()).toBe(raw);
  }
  expect(ids.size).toBe(4);
+});
+
+
+it("bounds a hung source by the reduced HTTP budget instead of waiting beyond 8s", async()=>{
+ vi.useFakeTimers();vi.setSystemTime(new Date("2026-11-23T13:00:00Z"));
+ setTokenHoldersFetchForTests(async()=>new Promise<string>(()=>{}));
+ const checked=expect(handleTokenHolders({token:"USDC",chain:"base"})).rejects.toMatchObject({status:502,code:"INDEXER_UNREACHABLE"});
+ await vi.advanceTimersByTimeAsync(4001);await checked;
 });

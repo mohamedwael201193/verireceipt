@@ -17,13 +17,13 @@
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
-import { cachedHolderBody, holderBodyFetchedAt, resetHolderCacheForTests } from "./holderSourceCache";
+import { cachedHolderBody, resetHolderCacheForTests } from "./holderSourceCache";
 import { normalizeChain } from "./txLookup";
 import { ADDRESS_RE, TOKEN_CONTRACTS, isNativeSymbol, labeledTokenContract, tokenContractFor } from "./tokenContracts";
 
 export const INTENT = "TOKEN_HOLDER_COUNT_GENERAL";
 
-const HTTP_TIMEOUT_MS = 12000;
+const HTTP_TIMEOUT_MS = 4000;
 /** Scored range upper bound from the intent contract. */
 const MAX_HOLDERS = 10_000_000_000;
 
@@ -49,11 +49,11 @@ export function setTokenHoldersFetchForTests(impl: FetchText | null): void {
   resetHolderCacheForTests();
 }
 
-async function fetchText(url: string): Promise<string> {
-  if (fetchImpl) return fetchImpl(url);
+async function fetchText(url: string, timeoutMs = HTTP_TIMEOUT_MS): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    if (fetchImpl) return await Promise.race([fetchImpl(url), new Promise<never>((_r, reject) => controller.signal.addEventListener("abort", () => reject(new Error("holder HTTP budget exceeded")), { once: true }))]);
     const res = await fetch(url, {
       signal: controller.signal,
       headers: { accept: "application/json" },
@@ -129,6 +129,8 @@ function parseGecko(rawBody: string, network: string, contract: string): Indexer
 export async function handleTokenHolders(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
+  const startedAt = Date.now();
+  const deadlineAt = startedAt + 7_500;
   let tokenRaw = query.token?.trim();
   let chainRaw = query.chain?.trim();
   // Tolerate the builder packing the chain into the token ("USDC on
@@ -191,11 +193,13 @@ export async function handleTokenHolders(
     : `${indexer}/api/v2/tokens/${contract}`;
   const sourceName = network ? "GeckoTerminal" : "Blockscout";
   let info: IndexerTokenInfo;
+  let bodyFetchedAt: string;
   try {
-    const body = network
-      ? await cachedHolderBody(url, () => fetchText(url), (raw) => { parseGecko(raw, network, contract); })
-      : await fetchText(url);
-    info = network ? parseGecko(body, network, contract) : parseIndexerResponse(body, url, contract);
+    const observation = network
+      ? await cachedHolderBody(url, (remaining) => fetchText(url, remaining), (raw) => { parseGecko(raw, network, contract); }, deadlineAt)
+      : { body: await fetchText(url, Math.min(4_000, deadlineAt - Date.now())), fetchedAt: new Date().toISOString() };
+    bodyFetchedAt = observation.fetchedAt;
+    info = network ? parseGecko(observation.body, network, contract) : parseIndexerResponse(observation.body, url, contract);
   } catch (err) {
     throw upstreamUnavailable(
       "INDEXER_UNREACHABLE",
@@ -224,14 +228,21 @@ export async function handleTokenHolders(
   };
 
   const receiptDoc: Receipt = makeReceipt(INTENT, url, info.rawBody, `1/1 indexer of record (${sourceName})`);
-  if (network) receiptDoc.fetched_at = holderBodyFetchedAt(url) ?? receiptDoc.fetched_at;
+  receiptDoc.fetched_at = bodyFetchedAt;
+  if (Date.now() >= deadlineAt) throw upstreamUnavailable("HOLDER_DEADLINE", "holder lookup exceeded its 7.5s observation budget; no answer served");
   try {
-    await saveReceipt(receiptDoc, info.rawBody);
+    let persistTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([saveReceipt(receiptDoc, info.rawBody), new Promise<never>((_resolve, reject) => {
+        persistTimer = setTimeout(() => reject(new Error("holder persistence deadline exceeded")), Math.max(1, startedAt + 8_000 - Date.now()));
+      })]);
+    } finally { if (persistTimer) clearTimeout(persistTimer); }
   } catch {
     // A source observation is not a receipted answer until its evidence is stored.
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
 
+  if (Date.now() >= startedAt + 8_000) throw upstreamUnavailable("HOLDER_DEADLINE", "holder lookup exceeded its 8s total budget; no answer served");
   return envelope(INTENT, fields, receiptDoc, {
     answer: `${symbol} (${contract}) on ${chain} has ${info.holdersCount} distinct holder addresses (${sourceName} indexer, as of ${asOf}).`,
     verdict: "verified",
