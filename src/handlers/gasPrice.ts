@@ -28,10 +28,12 @@
 // Sanity bound (intent contract range): a leg above 100000 gwei is
 // absurd on every supported chain and is dropped as malformed, so the
 // served answer is always inside the contract range by construction.
-// G3: on mainnet chains an agreeing pair at exactly 0 gwei (raw wei
-// hex, pre-rounding) is implausible and fails closed with 502
-// IMPLAUSIBLE_ZERO instead of serving a verified zero; sepolia and
-// base-sepolia serve 0 honestly (true state, inside the contract range).
+// G3: a served value of exactly 0 gwei fails closed with 502
+// IMPLAUSIBLE_ZERO on every chain — an agreeing raw 0x0, or a dust
+// value that rounds to 0 at the served 6dp precision, is a degenerate
+// fee answer even where it is the true eth_gasPrice state (testnets
+// with no fee market). A partial-zero split still serves the non-zero
+// agreement.
 import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, sha256Hex, type Receipt } from "../core/receipt";
 import { CHAIN_RPCS } from "../config/chains";
@@ -42,7 +44,6 @@ import { normalizeChain } from "./txLookup";
 export const INTENT = "GAS_PRICE_GENERAL";
 
 /** Mainnet chains where an agreeing 0 gwei is implausible (G3). */
-const MAINNET_CHAINS = new Set(["ethereum", "base", "arbitrum", "optimism", "polygon", "avalanche"]);
 
 /** txLookup's chains plus avalanche (G2): every CHAIN_RPCS key with a
  * verified keyless gas quorum. txLookup's own SUPPORTED_CHAINS list is
@@ -233,24 +234,22 @@ export async function handleGasPrice(
     );
   }
 
-  // G3: on a MAINNET chain an agreeing pair at exactly 0 gwei is an
-  // implausible fee level — fail closed rather than serve a verified 0.
-  // The comparison is on the raw wei hex, before the 6dp gwei rounding.
-  // Sepolia and base-sepolia are excluded: 0x0 is a true state there
-  // (live 2026-11-23: every sepolia leg serves 0x0) and the contract
-  // range admits 0, so testnets answer honestly. A partial-zero split
-  // still fails closed via the quorum rules above or serves the
-  // non-zero agreement.
-  if (MAINNET_CHAINS.has(chain) && pair.weiHex === "0x0") {
+  // G3: a served value of exactly 0 gwei fails closed on EVERY chain —
+  // either an agreeing pair at raw 0x0, or a dust value that rounds to
+  // 0 at the served 6dp precision (live 2026-11-23: sepolia legs agree
+  // on 19 wei, which serves as "0 gwei"). A zero fee level is a
+  // degenerate answer even where that is the true eth_gasPrice state
+  // (testnets with no fee market). A partial-zero split still fails
+  // closed via the quorum rules above or serves the non-zero agreement.
+  const winner = round.successes.find((leg) => leg.weiHex === pair!.weiHex)!;
+  const gasPriceGwei = Math.round((Number(winner.wei) / 1e9) * 1e6) / 1e6;
+  if (gasPriceGwei === 0) {
     throw upstreamUnavailable(
       "IMPLAUSIBLE_ZERO",
-      `implausible eth_gasPrice 0 gwei on ${chain}: ${pair.count} of ${total} sources agreed on exactly zero; refusing to serve an implausible fee level`,
+      `implausible eth_gasPrice 0 gwei on ${chain}: ${pair.count} of ${total} sources agreed on ${winner.weiHex === "0x0" ? "exactly zero" : `${winner.wei} wei, which rounds to 0 gwei`}; refusing to serve an implausible fee level`,
     );
   }
-
-  const winner = round.successes.find((leg) => leg.weiHex === pair!.weiHex)!;
   const votes = `${pair.count}/${total} sources agreed`;
-  const gasPriceGwei = Math.round((Number(winner.wei) / 1e9) * 1e6) / 1e6;
   const asOf = new Date().toISOString();
 
   // G4: transfer_fee_usd, computed only — live gas price x 21,000 gas

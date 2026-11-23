@@ -288,14 +288,19 @@ describe("handleGasPrice quorum (stubbed fetch)", () => {
   });
 });
 
-describe("G3: implausible zero fails closed on mainnet only (stubbed fetch)", () => {
-  it("an all-zero testnet quorum answers 0 honestly (0x0 is a true sepolia state)", async () => {
+describe("G3: implausible zero fails closed on every chain (stubbed fetch)", () => {
+  it("an all-zero testnet quorum fails closed too (a zero fee level is degenerate even where 0x0 is the true state)", async () => {
     stubGasFetch("sepolia", Object.fromEntries(
       CHAIN_RPCS["sepolia"].map((url: string) => [url, { kind: "ok", value: "0x0" } as StubOutcome]),
     ));
-    const res = (await handleGasPrice({ chain: "sepolia" })) as Record<string, unknown>;
-    expect(res.gas_price_gwei).toBe(0);
-    expect(res.verdict).toBe("verified");
+    await expectApiError(handleGasPrice({ chain: "sepolia" }), 502, "IMPLAUSIBLE_ZERO");
+  });
+
+  it("a dust agreement that rounds to 0 gwei fails closed too (live sepolia shape: 19 wei)", async () => {
+    stubGasFetch("sepolia", Object.fromEntries(
+      CHAIN_RPCS["sepolia"].map((url: string) => [url, { kind: "ok", value: "0x13" } as StubOutcome]),
+    ));
+    await expectApiError(handleGasPrice({ chain: "sepolia" }), 502, "IMPLAUSIBLE_ZERO");
   });
 
   it("a non-zero agreement still serves", async () => {
