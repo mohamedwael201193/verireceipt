@@ -104,3 +104,6 @@ describe("URL_SAFE_GENERAL", () => {
     await app.close();
   });
 });
+it.each(['http://0xb9dc6504/','http://[::ffff:185.220.101.4]/'])('ambiguous/mapped URL host cannot receive Safe verdict: %s',async url=>{
+ await expect(handleUrlSafe({url})).rejects.toMatchObject({status:400});
+});

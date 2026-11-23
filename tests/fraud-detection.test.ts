@@ -39,3 +39,10 @@ it('degraded feeds and incomplete OFAC fail closed',async()=>{
 it('storage failure cannot return screening answer',async()=>{
  vi.mocked(saveReceipt).mockRejectedValueOnce(new Error('storage'));await expect(handleFraudDetection({subject:'Unknown subject'})).rejects.toMatchObject({code:'RECEIPT_PERSIST_FAILED'});
 });
+it('URL IPv4 host retains the captured IP-feed hit',async()=>{
+ feeds();const out=await handleFraudDetection({subject:'http://185.220.101.4/path'});
+ expect(out.verdict).toBe('SUSPICIOUS');expect(String(out.answer)).toContain('stamparm ipsum');
+});
+it.each(['http://0xb9dc6504/','http://[::ffff:185.220.101.4]/'])('ambiguous or mapped URL never becomes inconclusive clearance: %s',async subject=>{
+ feeds();await expect(handleFraudDetection({subject})).rejects.toMatchObject({status:400});
+});

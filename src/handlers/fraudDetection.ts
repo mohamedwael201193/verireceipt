@@ -3,7 +3,7 @@ import {badRequest,upstreamUnavailable} from '../core/errors';
 import {envelope,makeReceipt} from '../core/receipt';
 import {saveReceipt} from '../core/storage';
 import {extractSdnCryptoAddresses,RUBRIC} from './transactionRisk';
-import {loadFeeds,matchIndicator} from './threatIntel';
+import {loadFeeds,matchIndicator,canonicalScreeningHost} from './threatIntel';
 const SDN='https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV';
 export async function handleFraudDetection(query:Record<string,string|undefined>):Promise<Record<string,unknown>> {
  const subject=query.subject?.trim();
@@ -32,7 +32,7 @@ export async function handleFraudDetection(query:Record<string,string|undefined>
   finally{clearTimeout(timer);}
  } else if(isIP(subject)===4 || /^https?:\/\//i.test(subject) || /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(subject)) {
   if(/^https?:\/\//i.test(subject)) {
-   try {const u=new URL(subject);if(u.username||u.password)throw new Error();}
+   try {canonicalScreeningHost(subject);const u=new URL(subject);if(u.username||u.password)throw new Error();}
    catch {throw badRequest('INVALID_SUBJECT','subject URL must be valid and have no credentials');}
   }
   const states=await loadFeeds();const matched=matchIndicator(subject,states);

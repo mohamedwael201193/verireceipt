@@ -23,7 +23,7 @@ import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { probeUrlHeaders } from './urlProbe';
-import { loadFeeds, matchIndicator, type IndicatorMatch } from "./threatIntel";
+import { loadFeeds, matchIndicator, canonicalScreeningHost, type IndicatorMatch } from "./threatIntel";
 
 export const INTENT = "URL_SCAN_VERDICT";
 
@@ -40,7 +40,7 @@ export async function handleUrlScan(query: Record<string, string | undefined>): 
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw badRequest("INVALID_URL", "only http:// and https:// URLs can be screened");
   }
-  const host = parsed.hostname.toLowerCase();
+  const host = canonicalScreeningHost(raw);
   if (!host) throw badRequest("INVALID_URL", "url has no host");
 
   const states = await loadFeeds();

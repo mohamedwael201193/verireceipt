@@ -111,3 +111,26 @@ it('handler never lists TEST-NET-3 in supplemental feeds or Tor context',async()
  for(const row of out.context_feeds as any[]){expect(row.matched_entry).toBeNull();if(row.status==='answered')expect(row.listed).toBe(false);else expect(row.listed).toBeNull();expect(out.context_listed_by).not.toContain(row.name)}
  expect(out.listed_by).not.toContain('Tor exit list');expect(out.listed_by).not.toContain('CINS Army');
 });
+
+describe('URL IP-literal screening',()=>{
+ it('URL host replays the same actual captured CIDR and individual-IP entries',async()=>{
+  stub();
+  const {loadFeeds}=await import('../src/handlers/threatIntel');
+  const states=await loadFeeds();
+  for(const ip of ['1.10.16.9','185.220.101.4']) {
+   const bare=matchIndicator(ip,states);
+   const url=matchIndicator('http://'+ip+':8080/path?x=1',states);
+   expect(url.type).toBe("url");
+   expect(url.matches).toEqual(bare.matches);
+   expect(url.matches.length).toBeGreaterThan(0);
+  }
+ });
+ it('full URL matches are preserved alongside an IP host match',()=>{
+  const url='http://1.10.16.9/path';
+  const states:any[]=[{feed:{name:'URL control',kind:'url'},lines:[url]},{feed:{name:'CIDR control',kind:'cidr'},lines:['1.10.16.0/20']}];
+  expect(matchIndicator(url,states).matches.map(m=>m.feed)).toEqual(['URL control','CIDR control']);
+ });
+ it.each(['http://16846985/','http://0x010a1009/','http://01.012.020.011/','http://1.10.4105/','http://%31.10.16.9/','http://1.10.16.9./','http://[::ffff:1.10.16.9]/','http://[::ffff:10a:1009]/','http://[2001:db8::1]/','http://user@1.10.16.9/'])('refuses ambiguous/unsupported literal before a clean result: %s',url=>{
+  expect(()=>matchIndicator(url,[])).toThrowError(expect.objectContaining({status:400}));
+ });
+});

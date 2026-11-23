@@ -21,7 +21,7 @@
 import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
-import { loadFeeds, matchIndicator, type IndicatorMatch } from "./threatIntel";
+import { loadFeeds, matchIndicator, canonicalScreeningHost, type IndicatorMatch } from "./threatIntel";
 
 export const INTENT = "URL_SAFE_GENERAL";
 
@@ -38,7 +38,7 @@ export async function handleUrlSafe(query: Record<string, string | undefined>): 
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw badRequest("INVALID_URL", "only http:// and https:// URLs can be checked");
   }
-  const host = parsed.hostname.toLowerCase();
+  const host = canonicalScreeningHost(raw);
   if (!host) throw badRequest("INVALID_URL", "url has no host");
 
   const states = await loadFeeds();

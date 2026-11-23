@@ -36,6 +36,7 @@
 // FAIL CLOSED: every feed must download and clear its truncation floor,
 // else 502 — a "clean" answer against a partial view is a wrong answer.
 // Lists are cached in memory for CACHE_TTL_MS; freshness is named.
+import { isIP } from "node:net";
 import { threatContext } from "./threatContext";
 import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
@@ -176,44 +177,58 @@ function cidrContains(cidr: string, ip: number): boolean {
 
 export interface IndicatorMatch { feed: string; kind: Feed["kind"]; raw: string }
 
+/** Reject numeric-host spellings that URL parsing silently rewrites before screening. */
+export function canonicalScreeningHost(indicator: string): string {
+  let parsed: URL;
+  try { parsed = new URL(indicator); }
+  catch { throw badRequest("INVALID_INDICATOR", "URL indicator must be a valid absolute HTTP(S) URL"); }
+  if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password || /[\\\x00-\x20]/.test(indicator))
+    throw badRequest("INVALID_INDICATOR", "URL indicator requires HTTP(S), no credentials, whitespace, controls or backslashes");
+  const authority = /^https?:\/\/([^/?#]+)/i.exec(indicator)?.[1];
+  const rawHost = authority?.startsWith('[') ? authority.slice(0, authority.indexOf(']') + 1) : authority?.split(':')[0];
+  const host = parsed.hostname.toLowerCase();
+  if (!rawHost || !host) throw badRequest("INVALID_INDICATOR", "URL indicator has no unambiguous host");
+  if (host.startsWith('['))
+    throw badRequest("UNSUPPORTED_IP_VERSION", "IPv6 URL hosts, including IPv4-mapped forms, are unsupported by the IPv4 feeds; no clean verdict is issued");
+  if (isIP(host) === 4 && (rawHost !== host || !rawHost.split('.').every(p => /^(?:0|[1-9][0-9]{0,2})$/.test(p))))
+    throw badRequest("AMBIGUOUS_IP_HOST", "IP URL hosts must use canonical dotted-decimal IPv4; numeric, octal, hexadecimal and escaped variants are refused");
+  return host;
+}
+
 /** Match an indicator against the loaded feeds. Exported for tests. */
 export function matchIndicator(indicator: string, states: FeedState[]): { type: "ip" | "domain" | "url"; matches: IndicatorMatch[] } {
   const matches: IndicatorMatch[] = [];
-  const asIp = ipToInt(indicator);
   const isUrl = /^https?:\/\//i.test(indicator);
-  let host = indicator.toLowerCase();
-  if (isUrl) {
-    try { host = new URL(indicator).hostname.toLowerCase(); } catch { host = ""; }
-  }
-  const type: "ip" | "domain" | "url" = asIp !== null ? "ip" : isUrl ? "url" : "domain";
+  const host = isUrl ? canonicalScreeningHost(indicator) : indicator.toLowerCase();
+  const asIp = ipToInt(host);
+  const type: "ip" | "domain" | "url" = isUrl ? "url" : asIp !== null ? "ip" : "domain";
   for (const s of states) {
-    if (type === "ip" && asIp !== null) {
+    if (asIp !== null) {
       if (s.feed.kind === "cidr") {
         const hit = s.lines.find((c) => cidrContains(c, asIp));
         if (hit) matches.push({ feed: s.feed.name, kind: "cidr", raw: hit });
       } else if (s.feed.kind === "ip") {
-        const hit = s.lines.find((l) => l === indicator);
+        const hit = s.lines.find((l) => l === host);
         if (hit) matches.push({ feed: s.feed.name, kind: "ip", raw: hit });
       }
-    } else {
-      if (s.feed.kind === "url" && isUrl) {
-        const hit = s.lines.find((u) => u === indicator);
-        if (hit) matches.push({ feed: s.feed.name, kind: "url", raw: hit });
-      } else if (s.feed.kind === "domain") {
-        // Exact host or any parent domain listed.
-        const labels = host.split(".");
-        for (let i = 0; i < labels.length - 1; i++) {
-          const parent = labels.slice(i).join(".");
-          if (s.lines.includes(parent)) { matches.push({ feed: s.feed.name, kind: "domain", raw: parent }); break; }
-        }
-      } else if (s.feed.kind === "wildcard-domain") {
-        // "*.d" matches d and its subdomains; bare "d" matches d exactly.
-        if (s.lines.includes(host)) { matches.push({ feed: s.feed.name, kind: "wildcard-domain", raw: host }); continue; }
-        const labels = host.split(".");
-        for (let i = 0; i < labels.length - 1; i++) {
-          const parent = labels.slice(i).join(".");
-          if (s.lines.includes(`*.${parent}`)) { matches.push({ feed: s.feed.name, kind: "wildcard-domain", raw: `*.${parent}` }); break; }
-        }
+    }
+    if (s.feed.kind === "url" && isUrl) {
+      const hit = s.lines.find((u) => u === indicator);
+      if (hit) matches.push({ feed: s.feed.name, kind: "url", raw: hit });
+    } else if (s.feed.kind === "domain") {
+      // Exact host or any parent domain listed.
+      const labels = host.split(".");
+      for (let i = 0; i < labels.length - 1; i++) {
+        const parent = labels.slice(i).join(".");
+        if (s.lines.includes(parent)) { matches.push({ feed: s.feed.name, kind: "domain", raw: parent }); break; }
+      }
+    } else if (s.feed.kind === "wildcard-domain") {
+      // "*.d" matches d and its subdomains; bare "d" matches d exactly.
+      if (s.lines.includes(host)) { matches.push({ feed: s.feed.name, kind: "wildcard-domain", raw: host }); continue; }
+      const labels = host.split(".");
+      for (let i = 0; i < labels.length - 1; i++) {
+        const parent = labels.slice(i).join(".");
+        if (s.lines.includes(`*.${parent}`)) { matches.push({ feed: s.feed.name, kind: "wildcard-domain", raw: `*.${parent}` }); break; }
       }
     }
   }
@@ -225,6 +240,7 @@ export async function handleThreatIndicator(query: Record<string, string | undef
   if (!indicator) throw badRequest("MISSING_PARAM", "indicator is required: an IPv4 address, a domain, or a URL");
   if (indicator.length > 2048) throw badRequest("INVALID_INDICATOR", "indicator is over 2048 characters");
   if (/\s/.test(indicator)) throw badRequest("INVALID_INDICATOR", "indicator must be a single IPv4 address, domain or URL, no whitespace");
+  if (/^https?:\/\//i.test(indicator)) canonicalScreeningHost(indicator);
   const states = await loadFeeds();
   const fetchedAt = new Date().toISOString();
   const { type, matches } = matchIndicator(indicator, states);

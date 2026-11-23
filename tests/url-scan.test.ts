@@ -135,3 +135,6 @@ it('listed targets are not contacted and clean feed results retain probe failure
  const out=await handleUrlScan({url:'https://example.com/'});expect(out.safe).toBe(true);expect((out.live_probe as any).stop).toBe('probe-unavailable');
  const stored=await getReceiptEvidence((out.receipt as any).receipt_id);expect(JSON.parse(String(stored.evidence)).live_probe.stop).toBe('probe-unavailable');
 });
+it.each(['http://0xb9dc6504/','http://[::ffff:185.220.101.4]/'])('ambiguous/mapped URL host cannot receive safe verdict: %s',async url=>{
+ await expect(handleUrlScan({url})).rejects.toMatchObject({status:400});
+});
