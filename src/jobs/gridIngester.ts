@@ -1741,7 +1741,13 @@ export async function fetchMisoDaLmp(
     if (col < 0 || col >= cells.length) {
       throw new Error("MISO DA ExPost CSV missing " + heCol + " column for " + node);
     }
-    const lmp = Number(cells[col]);
+    // Fail closed on a blank cell: Number("")/Number("  ") is 0, so a
+    // partial file would otherwise serve and cache a $0.00 price.
+    const cell = (cells[col] ?? "").trim();
+    if (cell === "") {
+      throw new Error("MISO DA ExPost CSV blank LMP cell for " + node + " " + heCol);
+    }
+    const lmp = Number(cell);
     if (!Number.isFinite(lmp)) {
       throw new Error("MISO DA ExPost CSV non-numeric LMP for " + node + " " + heCol);
     }

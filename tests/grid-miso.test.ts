@@ -104,6 +104,20 @@ describe("fetchMisoDaLmp (EST/HE mapping against the real file shape)", () => {
     );
   });
 
+  it("fails closed on a blank LMP cell (two commas) — never serves $0.00", async () => {
+    stubCsv(CSV_20261123.replace(",13.92,", ",,"));
+    await expect(fetchMisoDaLmp("ILLINOIS.HUB", "2026-11-23T05:00:00.000Z")).rejects.toThrow(
+      /blank LMP cell/,
+    );
+  });
+
+  it("fails closed on a whitespace-only LMP cell — never serves $0.00", async () => {
+    stubCsv(CSV_20261123.replace(",13.92,", ", ,"));
+    await expect(fetchMisoDaLmp("ILLINOIS.HUB", "2026-11-23T05:00:00.000Z")).rejects.toThrow(
+      /blank LMP cell/,
+    );
+  });
+
   it("fails closed when the Node/Type header is absent", async () => {
     stubCsv("Day Ahead Market ExPost LMPs\n11/23/2026\n\nno header here");
     await expect(fetchMisoDaLmp("ILLINOIS.HUB", "2026-11-23T05:00:00.000Z")).rejects.toThrow(
