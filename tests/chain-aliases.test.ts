@@ -27,7 +27,6 @@ describe("shared exact chain aliases", () => {
     ["avax", "avalanche"],
     ["Avalanche C-Chain", "avalanche"],
     ["c-chain", "avalanche"],
-  ,
   ])("%s selects exactly %s", (input, expected) => {
     expect(normalizeChain(input)).toBe(expected);
   });

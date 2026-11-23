@@ -53,7 +53,7 @@ function gasResponse(weiHex: string): string {
 }
 
 interface StubOutcome {
-  kind: "ok" | "http" | "throw" | "badjson" | "rpcerror";
+  kind: "ok" | "http" | "throw" | "badjson" | "rpcerror" | "spot";
   /** For kind "ok": the eth_gasPrice result hex. For "badjson"/"rpcerror": raw text. */
   value?: string;
 }
@@ -63,6 +63,10 @@ interface StubOutcome {
  * or to an array of outcomes consumed one per call (re-poll rounds).
  * Returns the number of fetch calls made.
  */
+// G4: what the Coinbase gas-token spot leg serves. "ok" serves a fixed
+// 3000 USD; "http" a 503; "throw" a network error; "badjson" unparseable.
+let spotOutcome: StubOutcome = { kind: "spot", value: "3000" };
+
 function stubGasFetch(chain: string, table: Record<string, StubOutcome | StubOutcome[]>): () => number {
   const queues = new Map<string, StubOutcome[]>();
   for (const [url, entry] of Object.entries(table)) {
@@ -71,6 +75,17 @@ function stubGasFetch(chain: string, table: Record<string, StubOutcome | StubOut
   let calls = 0;
   const fetchStub = async (url: unknown) => {
     calls++;
+    if (String(url).includes("api.coinbase.com")) {
+      const o = spotOutcome;
+      if (o.kind === "throw") throw new Error("socket hangup");
+      if (o.kind === "http") return { ok: false, status: 503, text: async () => "unavailable" } as Response;
+      if (o.kind === "badjson") return { ok: true, status: 200, text: async () => "not json" } as Response;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ data: { base: "ETH", currency: "USD", amount: o.value ?? "3000" } }),
+      } as Response;
+    }
     const queue = queues.get(String(url));
     const outcome = queue && queue.length > 0 ? (queue.length > 1 ? queue.shift()! : queue[0]) : undefined;
     if (!outcome) throw new Error(`unexpected fetch to ${String(url)}`);
@@ -98,6 +113,7 @@ function stubGasFetch(chain: string, table: Record<string, StubOutcome | StubOut
 }
 
 afterEach(() => {
+  spotOutcome = { kind: "spot", value: "3000" };
   vi.unstubAllGlobals();
 });
 
@@ -362,4 +378,58 @@ describe("handleGasPrice LIVE (real public RPCs, no stub)", () => {
     },
     LIVE_TIMEOUT_MS,
   );
+});
+
+describe("G4 transfer_fee_usd (stubbed fetch)", () => {
+  it("serves transfer_fee_usd computed from the live spot, formula disclosed", async () => {
+    stubGasFetch("ethereum", {
+      [ETH[0]]: { kind: "ok", value: "0x3b9aca00" }, // 1 gwei
+      [ETH[1]]: { kind: "ok", value: "0x3b9aca00" },
+      [ETH[2]]: { kind: "ok", value: "0x3b9aca00" },
+    });
+    spotOutcome = { kind: "spot", value: "3000" };
+    const res = await handleGasPrice({ chain: "ethereum" });
+    // 1 gwei * 21000 gas * $3000 / 1e9 = $0.063
+    expect(res.transfer_fee_usd).toBe(0.063);
+    expect(String(res.answer)).toContain("$0.063");
+    expect(String(res.answer)).toContain("1 gwei x 21000 gas x ETH $3000 (Coinbase spot) / 1e9");
+    const rc = res.receipt as { gas_token_spot?: { source: string; token_usd: number; formula: string } };
+    expect(rc.gas_token_spot?.token_usd).toBe(3000);
+    expect(rc.gas_token_spot?.formula).toContain("transfer_fee_usd = 1 gwei x 21000 gas");
+    expect(rc.gas_token_spot?.source).toContain("Coinbase");
+  });
+
+  it("refuses the whole answer when the spot is unreachable", async () => {
+    stubGasFetch("ethereum", {
+      [ETH[0]]: { kind: "ok", value: "0x3b9aca00" },
+      [ETH[1]]: { kind: "ok", value: "0x3b9aca00" },
+      [ETH[2]]: { kind: "ok", value: "0x3b9aca00" },
+    });
+    spotOutcome = { kind: "throw" };
+    await expectApiError(handleGasPrice({ chain: "ethereum" }), 502, "SPOT_UNAVAILABLE");
+  });
+
+  it("refuses when the spot serves an HTTP error", async () => {
+    stubGasFetch("ethereum", {
+      [ETH[0]]: { kind: "ok", value: "0x3b9aca00" },
+      [ETH[1]]: { kind: "ok", value: "0x3b9aca00" },
+      [ETH[2]]: { kind: "ok", value: "0x3b9aca00" },
+    });
+    spotOutcome = { kind: "http" };
+    await expectApiError(handleGasPrice({ chain: "ethereum" }), 502, "SPOT_UNAVAILABLE");
+  });
+
+  it("uses the AVAX spot on avalanche", async () => {
+    const AVAX = CHAIN_RPCS["avalanche"];
+    stubGasFetch("avalanche", {
+      [AVAX[0]]: { kind: "ok", value: "0x5d21dba00" }, // 25 gwei
+      [AVAX[1]]: { kind: "ok", value: "0x5d21dba00" },
+      [AVAX[2]]: { kind: "ok", value: "0x5d21dba00" },
+    });
+    spotOutcome = { kind: "spot", value: "40" };
+    const res = await handleGasPrice({ chain: "avalanche" });
+    // 25 gwei * 21000 * $40 / 1e9 = $0.021
+    expect(res.transfer_fee_usd).toBe(0.021);
+    expect(String(res.answer)).toContain("AVAX $40");
+  });
 });

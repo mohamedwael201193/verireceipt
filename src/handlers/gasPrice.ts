@@ -10,9 +10,10 @@
 // Intent contract (https://devnode.telegraphprotocol.com/engine/v1/intents/GAS_PRICE_GENERAL,
 // read 2026-11-22): input `chain` (string, required); scored output
 // `gas_price_gwei` (number, unit gwei, 6 decimals, range 0..100000);
-// `transfer_fee_usd` is an optional off_chain estimate that needs a
-// price feed and is NOT served (omitting an optional field is honest;
-// inventing one is not).
+// `transfer_fee_usd` is an optional off_chain estimate; G4 serves it
+// as a computed value only (live gwei x 21,000 gas x live Coinbase
+// gas-token spot, formula disclosed in the answer and receipt) and
+// refuses the answer outright when the spot is unavailable.
 //
 // Live behaviour measured 2026-11-22 before this handler was written:
 // all three ethereum legs (blastapi, drpc, mevblocker) returned the
@@ -32,7 +33,7 @@
 // IMPLAUSIBLE_ZERO instead of serving a verified zero; sepolia and
 // base-sepolia serve 0 honestly (true state, inside the contract range).
 import { badRequest, upstreamUnavailable } from "../core/errors";
-import { envelope, makeReceipt, type Receipt } from "../core/receipt";
+import { envelope, makeReceipt, sha256Hex, type Receipt } from "../core/receipt";
 import { CHAIN_RPCS } from "../config/chains";
 import { saveReceipt } from "../core/storage";
 import { HEX_QTY_RE, rpcCall } from "../core/evmRpc";
@@ -40,12 +41,12 @@ import { normalizeChain } from "./txLookup";
 
 export const INTENT = "GAS_PRICE_GENERAL";
 
-/** txLookup's chains plus avalanche (G2): every CHAIN_RPCS key with a
- * verified keyless gas quorum. txLookup's own SUPPORTED_CHAINS list is
- * unchanged (tx verification on avalanche is out of G2 scope). */
 /** Mainnet chains where an agreeing 0 gwei is implausible (G3). */
 const MAINNET_CHAINS = new Set(["ethereum", "base", "arbitrum", "optimism", "polygon", "avalanche"]);
 
+/** txLookup's chains plus avalanche (G2): every CHAIN_RPCS key with a
+ * verified keyless gas quorum. txLookup's own SUPPORTED_CHAINS list is
+ * unchanged (tx verification on avalanche is out of G2 scope). */
 const SUPPORTED_CHAINS = [
   "ethereum",
   "base",
@@ -63,6 +64,62 @@ const MAX_GAS_WEI = BigInt(MAX_GAS_GWEI) * 1_000_000_000n;
 
 /** Delay before the single re-poll of a split round (txLookup uses 800 ms). */
 const REPOLL_DELAY_MS = 800;
+
+/** Gas-token symbol per chain (L2s price gas in ETH). */
+const GAS_TOKEN: Record<string, string> = {
+  ethereum: "ETH",
+  base: "ETH",
+  arbitrum: "ETH",
+  optimism: "ETH",
+  polygon: "POL",
+  avalanche: "AVAX",
+  sepolia: "ETH",
+  "base-sepolia": "ETH",
+};
+
+/** USD cost of a plain 21,000-gas transfer at the given gwei level and
+ * gas-token USD spot. Computed value only — never a heuristic. */
+export function transferFeeUsd(gwei: number, tokenUsd: number): number {
+  return (gwei * 21000 * tokenUsd) / 1e9;
+}
+
+/** Live gas-token USD spot from Coinbase (keyless, same spot source the
+ * financial-data slice uses). Any failure REFUSES the whole answer
+ * (502): transfer_fee_usd is a computed value and an unavailable input
+ * is never estimated around. The response body is receipted. */
+async function fetchGasTokenUsd(
+  symbol: string,
+  receiptBodies: string[],
+): Promise<number> {
+  const url = `https://api.coinbase.com/v2/prices/${symbol}-USD/spot`;
+  let res: Response;
+  let rawText = "";
+  try {
+    res = await fetch(url, { headers: { accept: "application/json" } });
+    rawText = await res.text();
+  } catch {
+    throw upstreamUnavailable(
+      "SPOT_UNAVAILABLE",
+      `gas-token USD spot unavailable (Coinbase ${symbol}-USD unreachable); transfer_fee_usd cannot be computed, refusing`,
+    );
+  }
+  receiptBodies.push(rawText);
+  if (!res.ok) {
+    throw upstreamUnavailable(
+      "SPOT_UNAVAILABLE",
+      `gas-token USD spot unavailable (Coinbase ${symbol}-USD HTTP ${res.status}); transfer_fee_usd cannot be computed, refusing`,
+    );
+  }
+  const body = JSON.parse(rawText) as { data?: { amount?: string } };
+  const amount = Number(body?.data?.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw upstreamUnavailable(
+      "SPOT_UNAVAILABLE",
+      `gas-token USD spot malformed (Coinbase ${symbol}-USD); transfer_fee_usd cannot be computed, refusing`,
+    );
+  }
+  return amount;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -188,13 +245,29 @@ export async function handleGasPrice(
   const gasPriceGwei = Math.round((Number(winner.wei) / 1e9) * 1e6) / 1e6;
   const asOf = new Date().toISOString();
 
+  // G4: transfer_fee_usd, computed only — live gas price x 21,000 gas
+  // x live gas-token USD spot (Coinbase). The formula is disclosed in
+  // the answer and the receipt; an unavailable spot refuses the answer.
+  const tokenSymbol = GAS_TOKEN[chain] ?? "ETH";
+  const spotBodies: string[] = [];
+  const tokenUsd = await fetchGasTokenUsd(tokenSymbol, spotBodies);
+  const usdFee = Math.round(transferFeeUsd(gasPriceGwei, tokenUsd) * 1e6) / 1e6;
+  const formula = `${gasPriceGwei} gwei x 21000 gas x ${tokenSymbol} $${Math.round(tokenUsd * 100) / 100} (Coinbase spot) / 1e9`;
+
   const fields: Record<string, unknown> = {
     chain,
     gas_price_gwei: gasPriceGwei,
+    transfer_fee_usd: usdFee,
     as_of: asOf,
   };
 
   const receiptDoc: Receipt = makeReceipt(INTENT, winner.rpcUrl, winner.rawText, votes);
+  receiptDoc.gas_token_spot = {
+    source: `Coinbase ${tokenSymbol}-USD spot`,
+    token_usd: tokenUsd,
+    formula: `transfer_fee_usd = ${formula}`,
+    sha256: sha256Hex(spotBodies[0]),
+  };
   try {
     await saveReceipt(receiptDoc, winner.rawText);
   } catch {
@@ -206,8 +279,8 @@ export async function handleGasPrice(
 
   return envelope(INTENT, fields, receiptDoc, {
     answer: defaulted
-      ? `Current gas price on ethereum: ${gasPriceGwei} gwei (no chain given; defaulted to ethereum. ${votes}).`
-      : `Current gas price on ${chain}: ${gasPriceGwei} gwei (${votes}).`,
+      ? `Current gas price on ethereum: ${gasPriceGwei} gwei (no chain given; defaulted to ethereum. ${votes}). 21,000-gas transfer ≈ $${usdFee} = ${formula}. Not a quote for a future transaction; the price moves block to block.`
+      : `Current gas price on ${chain}: ${gasPriceGwei} gwei (${votes}). 21,000-gas transfer ≈ $${usdFee} = ${formula}. Not a quote for a future transaction; the price moves block to block.`,
     verdict: "verified",
     confidence: pair.count === total ? 1.0 : 0.9,
     source: `EVM RPC quorum (${chain}, 2-of-${total})`,
