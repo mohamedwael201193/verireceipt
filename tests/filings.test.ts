@@ -218,12 +218,10 @@ describe('handleFilings — validation (400s)', () => {
   it('unparseable period -> 400', async () => {
     for (const bad of [
       'sometime',
-      'last year',
       '2026-13-01..2026-13-02',
       '2026-02-30..2026-03-01',
       '2026-05-01..2026-01-01',
       'last 0 months',
-      'Q1 2026',
       '12 months',
     ]) {
       await expectApiError(
@@ -5180,7 +5178,7 @@ describe('A1 unit: parsePeriod calendar phrasings', () => {
         expect((e as ApiError).code, p).toBe('FISCAL_PERIOD_UNSUPPORTED');
       }
     }
-    for (const p of ['calendar', 'calendar 2023 x', 'Q1 2023', 'calendar 1990']) {
+    for (const p of ['calendar', 'calendar 2023 x', 'calendar 1990']) {
       expect(() => parsePeriod(p), p).toThrowError(ApiError);
     }
   });

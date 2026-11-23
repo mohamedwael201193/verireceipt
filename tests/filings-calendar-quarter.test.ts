@@ -147,3 +147,33 @@ describe('calendar quarter-ending periods, original isolated grammar coverage', 
     expect(parsePeriod(text)).toEqual({ start, end, label: text });
   });
 });
+
+describe('F1: calendar quarters, YTD and filler-tolerant relatives (frozen 2026-11-22T07:00Z)', () => {
+  it.each([
+    ['Q3 2026', '2026-07-01', '2026-09-30', 'Q3 2026 (calendar quarter 2026-07-01..2026-09-30)'],
+    ['q1 of 2025', '2025-01-01', '2025-03-31', 'q1 of 2025 (calendar quarter 2025-01-01..2025-03-31)'],
+    ['third quarter of 2026', '2026-07-01', '2026-09-30', 'third quarter of 2026 (calendar quarter 2026-07-01..2026-09-30)'],
+    ['the 4th quarter of 2020', '2020-10-01', '2020-12-31', 'the 4th quarter of 2020 (calendar quarter 2020-10-01..2020-12-31)'],
+    ['in the second quarter 2021', '2021-04-01', '2021-06-30', 'in the second quarter 2021 (calendar quarter 2021-04-01..2021-06-30)'],
+    ['last quarter', '2026-07-01', '2026-09-30', 'last quarter (calendar quarter 2026-07-01..2026-09-30)'],
+    ['year to date', '2026-01-01', '2026-11-22', 'year to date (2026-01-01..2026-11-22)'],
+    ['YTD', '2026-01-01', '2026-11-22', 'YTD (2026-01-01..2026-11-22)'],
+    ['the past 12 months', '2025-11-22', '2026-11-22', 'the past 12 months'],
+    ['past year', '2025-11-22', '2026-11-22', 'past year'],
+    ['the last year', '2025-11-22', '2026-11-22', 'the last year'],
+    ['the last 6 months', '2026-05-22', '2026-11-22', 'the last 6 months'],
+  ])('maps %s to exact inclusive filing-date boundaries', (text, start, end, label) => {
+    expect(parsePeriod(text)).toEqual({ start, end, label });
+  });
+
+  it.each([
+    'Q5 2026', 'Q0 2026', 'Q3 1990', 'third quarter', 'the next quarter',
+    'past decade', 'year to dates',
+  ])('still refuses %s honestly', (text) => {
+    expectPeriodError(text, 'INVALID_PERIOD');
+  });
+
+  it('keeps the fiscal-period refusal ahead of the new quarter forms', () => {
+    expectPeriodError('fiscal Q3 2026', 'FISCAL_PERIOD_UNSUPPORTED');
+  });
+});
