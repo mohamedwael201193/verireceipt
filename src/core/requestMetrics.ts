@@ -15,12 +15,13 @@ const ROUTE_INTENTS: Record<string, string> = {
   "/v1/sanctions-screen": "SANCTIONS_SCREENING_MATCH_GENERAL",
   "/v1/ip-geolocation": "IP_GEOLOCATION_GENERAL",
   "/v1/game-result": "GAME_RESULT_GENERAL",
+  "/v1/corporate-registry": "CORPORATE_REGISTRY_LOOKUP_GENERAL",
 };
 // Only known parameter NAMES are emitted, including rejected aliases. Never values
 // or unknown names: callers can put a credential into an arbitrary query key.
 const KNOWN_QUERY_KEYS = [
   "address", "amount", "base", "block", "chain", "country", "cve", "domain",
-  "entity", "form_type", "game", "host", "indicator", "ip", "interval_start", "node_or_zone",
+  "company", "entity", "form_type", "game", "jurisdiction", "host", "indicator", "ip", "interval_start", "node_or_zone",
   "pair", "period", "protocol", "query", "question", "quote", "record_type",
   "ticker", "token", "tx_hash", "validator_index", "year",
 ] as const;

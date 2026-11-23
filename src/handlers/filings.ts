@@ -155,7 +155,7 @@ interface TickerEntry {
   title: string;
 }
 
-type TickersMap = Record<string, TickerEntry>;
+export type TickersMap = Record<string, TickerEntry>;
 
 // ---------------------------------------------------------------------------
 // Period parsing
