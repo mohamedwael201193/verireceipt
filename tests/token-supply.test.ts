@@ -4,7 +4,7 @@
 // RPCs. Hermetic DB via a unique scratch SQLITE_PATH per run.
 
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync } from "fs";
+import { readFileSync, mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join, resolve } from "path";
 
 const SCRATCH_PARENT = resolve(process.cwd(), "..", "tmp");
@@ -60,6 +60,7 @@ interface Behavior {
 function stubSupplyFetch(table: Record<string, Behavior>, seenContracts?: string[]): void {
   const fetchStub = async (url: unknown, init?: { body?: unknown }) => {
     const u = String(url);
+    if(u.includes("api.coingecko.com")) return new Response(readFileSync(join(__dirname,"fixtures/token-aggregate/usdc.json"),"utf8"));
     const behavior = table[u];
     if (!behavior) throw new Error(`unexpected fetch to ${u}`);
     const body = JSON.parse(String(init?.body ?? "{}")) as { method: string; params: unknown[] };
@@ -120,11 +121,32 @@ describe("handleTokenSupply validation (no network use)", () => {
 });
 
 describe("display-label input validation", () => {
+  it('chainless provider failure or stale asset refuses instead of substituting chain supply',async()=>{
+    const fixture=JSON.parse(readFileSync(join(__dirname,'fixtures/token-aggregate/usdc.json'),'utf8'));
+    const clock=vi.spyOn(Date,'now').mockReturnValue(Date.parse(fixture.last_updated));
+    try {
+      for(const mode of ['failure','stale']) {
+        stubSupplyFetch(Object.fromEntries(ETH.map(url=>[url,supplyBehavior(41000000123456n,6,'USDC')])));
+        const rpcFetch=globalThis.fetch;
+        vi.stubGlobal('fetch',async(url:unknown,init?:RequestInit)=>{
+          if(String(url).includes('api.coingecko.com')) {
+            if(mode==='failure')throw new Error('provider unavailable');
+            return new Response(JSON.stringify({...fixture,last_updated:'2000-01-01T00:00:00Z'}));
+          }
+          return rpcFetch(url as any,init);
+        });
+        await expect(handleTokenSupply({token:'USDC'})).rejects.toMatchObject({code:'ASSET_SUPPLY_UNAVAILABLE',status:502});
+      }
+    }finally{clock.mockRestore();}
+  });
   it("a chainless listed symbol resolves to its canonical home chain, disclosed", async () => {
+    const clock=vi.spyOn(Date,"now").mockReturnValue(Date.parse(JSON.parse(readFileSync(join(__dirname,"fixtures/token-aggregate/usdc.json"),"utf8")).last_updated));
+    try {
     stubSupplyFetch(Object.fromEntries(ETH.map((url) => [url, supplyBehavior(41000000123456n, 6, "USDC")])));
     const out = await handleTokenSupply({ token: "USDC" });
     expect(out.chain).toBe("ethereum");
-    expect(out.total_supply).toBe(41000000.123456);
+    expect(out.per_chain_total_supply).toBe(41000000.123456);
+    expect(out.total_supply).toBe(JSON.parse(readFileSync(join(__dirname,"fixtures/token-aggregate/usdc.json"),"utf8")).market_data.total_supply);
     expect(String(out.answer)).toContain("No chain was given");
     expect(String(out.answer)).toContain("canonical home chain ethereum");
     const receipt = out.receipt as { receipt_id: string };
@@ -132,6 +154,12 @@ describe("display-label input validation", () => {
     const parsed = JSON.parse(evidence.evidence!) as { chain_resolution: { resolved_chain: string } | string };
     expect(typeof parsed.chain_resolution).toBe("object");
     expect((parsed.chain_resolution as { resolved_chain: string }).resolved_chain).toBe("ethereum");
+    const full=JSON.parse(evidence.evidence!);
+    expect(full.asset_total.raw_body).toBe(readFileSync(join(__dirname,"fixtures/token-aggregate/usdc.json"),"utf8"));
+    expect(sha256Hex(evidence.evidence!)).toBe((out.receipt as any).raw_response_sha256);
+    expect(String(out.answer)).toContain("provider-reported asset total");
+    expect(String(out.answer)).toContain("Per-chain figure follows separately");
+    } finally {clock.mockRestore();}
   });
 
   it("a single-chain listed symbol resolves to its only chain (ARB on arbitrum)", async () => {
