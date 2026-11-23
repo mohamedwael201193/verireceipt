@@ -294,6 +294,21 @@ describe("G3: implausible zero fails closed on mainnet only (stubbed fetch)", ()
   });
 });
 
+describe("G2: avalanche quorum (stubbed fetch)", () => {
+  const AVAX = CHAIN_RPCS.avalanche; // 3 legs, verified live 2026-11-23
+  it("serves avalanche from its own keyless quorum", async () => {
+    stubGasFetch("avalanche", {
+      [AVAX[0]]: { kind: "ok", value: "0x1bf08eb96" },
+      [AVAX[1]]: { kind: "ok", value: "0x1bf08eb96" },
+      [AVAX[2]]: { kind: "throw" },
+    });
+    const res = (await handleGasPrice({ chain: "avax" })) as Record<string, unknown>;
+    expect(res.chain).toBe("avalanche");
+    expect(res.gas_price_gwei).toBe(7.5);
+    expect(res.verdict).toBe("verified");
+  });
+});
+
 describe("handleGasPrice LIVE (real public RPCs, no stub)", () => {
   it("answers the published Arbitrum One name from real RPC quorum", async () => {
     const out = await handleGasPrice({ chain: "Arbitrum One" });

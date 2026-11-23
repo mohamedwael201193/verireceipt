@@ -127,6 +127,11 @@ const CHAIN_ALIASES: Record<string, string> = {
   matic: "polygon",
   sepolia: "sepolia",
   "base-sepolia": "base-sepolia",
+  avalanche: "avalanche",
+  avax: "avalanche",
+  "avalanche c-chain": "avalanche",
+  "avalanche c chain": "avalanche",
+  "c-chain": "avalanche",
 };
 
 /** Normalise a raw chain value to its canonical name: trim, lowercase,
