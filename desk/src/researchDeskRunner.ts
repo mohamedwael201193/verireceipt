@@ -42,7 +42,7 @@ export async function runResearchDesk(spec:ThesisSpec,claims:Claim[],adapter:Res
   };
   for(const f of spec.facts){
     const cached=cache.find(o=>o.request_hash===factHash(f)&&!observationFailures(f,{...o,fact_id:f.id},now().toISOString()).length);
-    if(cached){const validated=await adapter.revalidate(structuredClone(cached),structuredClone(f),now().toISOString());if(validated&&!observationFailures(f,validated,now().toISOString()).length){observations.push({...validated,reuse:'fresh-receipt-reuse'});continue;}}
+    if(cached){const validated=structuredClone(await adapter.revalidate(structuredClone(cached),structuredClone(f),now().toISOString()));if(validated&&!observationFailures(f,validated,now().toISOString()).length){observations.push({...validated,reuse:'fresh-receipt-reuse'});continue;}}
     let a=await buy(f,false);
     if(!a)continue;
     const valid=(x:Acquisition)=>x.failure===null&&x.observation!==null&&!observationFailures(f,x.observation,now().toISOString()).length;
