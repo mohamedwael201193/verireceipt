@@ -25,14 +25,15 @@ const ROUTE_INTENTS: Record<string, string> = {
   "/v1/server-uptime": "SERVER_UPTIME_MONITOR_GENERAL",
   "/v1/mining-hashprice": "MINING_HASHPRICE_VERIFY_GENERAL",
   "/v1/crypto-price": "CRYPTO_PRICE_USD",
+  "/v1/crypto-transfer": "CRYPTO_TRANSFER_VERIFY_GENERAL",
 };
 // Only known parameter NAMES are emitted, including rejected aliases. Never values
 // or unknown names: callers can put a credential into an arbitrary query key.
 const KNOWN_QUERY_KEYS = [
   "address", "amount", "base", "block", "block_height", "chain", "country", "cve", "domain",
-  "company", "entity", "form_type", "game", "jurisdiction", "destination", "host", "indicator", "lat", "location", "lon", "window_hours", "ip", "interval_start", "node_or_zone",
+  "company", "entity", "form_type", "from", "game", "jurisdiction", "destination", "host", "indicator", "lat", "location", "lon", "window_hours", "ip", "interval_start", "node_or_zone",
   "origin", "pair", "period", "symbol", "protocol", "query", "question", "quote", "record_type",
-  "ticker", "token", "topic", "url", "tx_hash", "validator_index", "year",
+  "ticker", "to", "token", "topic", "url", "tx_hash", "validator_index", "year",
 ] as const;
 // Fixed internal categories only. A regex alone could admit a secret-looking code.
 const DIAGNOSTIC_ERROR_CODES = new Set([
