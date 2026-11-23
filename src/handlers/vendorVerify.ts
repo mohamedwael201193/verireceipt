@@ -81,25 +81,32 @@ export async function handleVendorVerify(query: Record<string, string | undefine
   let body = "";
   const attempts: { status?: number; body: string; error?: string }[] = [];
   for (let attempt = 0; attempt < 3; attempt++) {
+    body = "";
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
     let retry = false;
+    let transportError: string | undefined;
+    let status: number | undefined;
     try {
       const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
+      status = res.status;
       body = await res.text();
-      attempts.push({ status: res.status, body });
-      if (!res.ok) {
-        if ((res.status >= 500 || res.status === 429) && attempt < 2) retry = true;
-        else throw new Error(`HTTP ${res.status}`);
-      } else {
-        try { retry = RETRY_ERRORS.has((JSON.parse(body) as ViesReply).userError ?? "") && attempt < 2; }
-        catch { retry = false; }
-      }
     } catch (e) {
-      attempts.push({ body, error: e instanceof Error ? e.message : "network failure" });
-      if (attempt < 2) retry = true;
-      else throw upstreamUnavailable("VIES_UNREACHABLE", "VIES unavailable after three bounded attempts");
+      transportError = e instanceof Error ? e.message : "network failure";
     } finally { clearTimeout(timer); }
+    attempts.push({ status, body, ...(transportError ? { error: transportError } : {}) });
+    if (transportError) {
+      if (attempt === 2) throw upstreamUnavailable("VIES_UNREACHABLE", "VIES unavailable after three bounded attempts");
+      retry = true;
+    } else if (status === 429 || (status !== undefined && status >= 500)) {
+      if (attempt === 2) throw upstreamUnavailable("VIES_UNREACHABLE", "VIES HTTP service failure after three bounded attempts");
+      retry = true;
+    } else if (status === undefined || status < 200 || status >= 300) {
+      throw upstreamUnavailable("VIES_UNREACHABLE", `VIES returned non-retryable HTTP ${status ?? "unknown"}`);
+    } else {
+      try { retry = RETRY_ERRORS.has((JSON.parse(body) as ViesReply).userError ?? "") && attempt < 2; }
+      catch { retry = false; }
+    }
     if (!retry) break;
     await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
   }

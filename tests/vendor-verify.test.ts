@@ -128,3 +128,29 @@ describe("VIES number-only extraction and bounded retry", () => {
   expect((await handleVendorVerify({vat_number:"LU26375245"})).valid).toBe(true);expect(n).toBe(2);
  });
 });
+
+
+describe("VIES retry classification and cross-parameter ambiguity", () => {
+ for (const status of [400,404]) {
+  it(`fails immediately on HTTP ${status}`, async()=>{
+   const requested=stub({status});
+   await expect(handleVendorVerify({vat_number:"LU26375245"})).rejects.toMatchObject({status:502});
+   expect(requested.length).toBe(1);
+  });
+ }
+ for (const status of [429,503]) {
+  it(`retries HTTP ${status} and records each attempt once`, async()=>{
+   let calls=0;
+   vi.stubGlobal("fetch",async()=>++calls===1?new Response("temporary",{status}):new Response(LU_VALID));
+   const r=await handleVendorVerify({vat_number:"LU26375245"});expect(calls).toBe(2);
+   const ev=await getReceiptEvidence((r.receipt as {receipt_id:string}).receipt_id);
+   const attempts=JSON.parse(ev.evidence!.toString()).upstream.attempts;
+   expect(attempts).toHaveLength(2);expect(attempts.map((a:{status:number})=>a.status)).toEqual([status,200]);
+  });
+ }
+ it("refuses different VAT numbers across question and context before fetching",async()=>{
+  const requested=stub();
+  await expect(handleVendorVerify({question:"LU26375245",context:"DE000000000"})).rejects.toMatchObject({status:400,code:"AMBIGUOUS_VAT"});
+  expect(requested).toHaveLength(0);
+ });
+});
