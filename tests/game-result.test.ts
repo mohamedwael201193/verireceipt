@@ -118,4 +118,11 @@ describe("GAME_RESULT_GENERAL", () => {
     expect(String(out.date_semantics)).toContain('UTC');
   });
 
+  it('negative mutation: both winner flags true refuses even when home has the higher score',async()=>{
+    const edited=JSON.parse(nfl);
+    for(const c of edited.events[0].competitions[0].competitors){c.winner=true;c.score=c.homeAway==='home'?'30':'20';}
+    stub({nfl:JSON.stringify(edited)});
+    await expect(handleGameResult({game:'Chargers vs Ravens 2026-11-16'})).rejects.toMatchObject({code:'INCONSISTENT_FINAL_RESULT'});
+  });
+
 });

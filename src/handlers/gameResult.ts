@@ -107,7 +107,7 @@ export function parseScoreboard(raw: string, league: string): Candidate[] {
       league, name: String(e.name ?? ""), date: String(e.date ?? "").slice(0, 10),
       completed: status?.completed === true,
       home: homeName, away: awayName, homeScore: hs, awayScore: as,
-      winner: home.winner === true ? homeName : away.winner === true ? awayName : "",
+      winner: home.winner === true && away.winner !== true ? homeName : away.winner === true && home.winner !== true ? awayName : "",
     });
   }
   return out;
