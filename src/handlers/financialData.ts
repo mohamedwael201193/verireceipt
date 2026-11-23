@@ -166,7 +166,13 @@ export async function handleFinancialData(query: Record<string, string | undefin
   } catch (err) {
     throw upstreamUnavailable("SEC_UNAVAILABLE", `SEC company_tickers fetch failed: ${err instanceof Error ? err.message : "unknown"}`);
   }
-  const entries = Object.values(JSON.parse(tickersBody) as Record<string, SecEntry>);
+  let entries: SecEntry[];
+  try {
+    const parsed = JSON.parse(tickersBody);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid SEC index");
+    entries = Object.values(parsed);
+    if (!entries.length || entries.some((e) => !e || typeof e !== "object")) throw new Error("invalid SEC rows");
+  } catch { throw upstreamUnavailable("SEC_MALFORMED", "SEC company ticker response was malformed; no asset guessed"); }
   let row = resolveSec(entries, asset);
   let searchBody: string | null = null;
   const searchUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(asset)}&quotesCount=10&newsCount=0`;
@@ -200,8 +206,13 @@ export async function handleFinancialData(query: Record<string, string | undefin
   } catch (err) {
     throw upstreamUnavailable("SOURCE_UNREACHABLE", `an equity source could not be reached: ${err instanceof Error ? err.message : "unknown"}`);
   }
-  const shares = latestShares(sharesBody);
-  const meta = (JSON.parse(chartBody) as { chart?: { result?: { meta?: Record<string, unknown> }[] | null } }).chart?.result?.[0]?.meta;
+  let shares: ReturnType<typeof latestShares>;
+  let meta: Record<string, unknown> | undefined;
+  try { JSON.parse(sharesBody); } catch { throw upstreamUnavailable("SEC_MALFORMED", "SEC shares response was malformed JSON"); }
+  shares = latestShares(sharesBody);
+  try {
+    meta = (JSON.parse(chartBody) as { chart?: { result?: { meta?: Record<string, unknown> }[] | null } }).chart?.result?.[0]?.meta;
+  } catch { throw upstreamUnavailable("YAHOO_MALFORMED", "Yahoo chart response was malformed JSON"); }
   if (!meta) throw unprocessable("TICKER_NOT_FOUND", `Yahoo carried no chart for ${ticker}`);
   if (String(meta.symbol ?? "").toUpperCase() !== ticker || meta.instrumentType !== "EQUITY" || meta.currency !== "USD") {
     throw unprocessable("UNSUPPORTED_ASSET", `${ticker} is not a USD US equity on the price source; refusing a mismatched figure`);

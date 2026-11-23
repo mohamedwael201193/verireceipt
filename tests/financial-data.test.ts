@@ -168,3 +168,30 @@ describe("Yahoo equity discovery remains SEC-bound", () => {
     await expect(handleFinancialData({ asset: "Unknown" })).rejects.toMatchObject({ code: "UNSUPPORTED_ASSET" });
   });
 });
+
+
+describe("financial fail-closed boundaries", () => {
+  for (const [label, key, value] of [
+    ["future update", "last_updated_at", 9999999999],
+    ["cap above contract range", "usd_market_cap", 1000000000000001],
+    ["negative volume", "usd_24h_vol", -1],
+    ["zero cap", "usd_market_cap", 0],
+  ] as const) {
+    it(`rejects ${label}`, async () => {
+      const d = JSON.parse(crypto);
+      d.ethereum[key] = value;
+      vi.stubGlobal("fetch", async () => new Response(JSON.stringify(d)));
+      await expect(handleFinancialData({ asset: "ETH" })).rejects.toMatchObject({ status: 502, code: "BAD_MARKET_DATA" });
+    });
+  }
+  for (const source of ["company_tickers", "companyconcept", "finance/chart"]) {
+    it(`malformed ${source} is a disclosed 502`, async () => {
+      vi.stubGlobal("fetch", async (input: unknown) => {
+        const u = String(input);
+        if (u.includes(source)) return new Response("not-json");
+        return new Response(u.includes("company_tickers") ? tickers : u.includes("companyconcept") ? shares : chart);
+      });
+      await expect(handleFinancialData({ asset: "AAPL" })).rejects.toMatchObject({ status: 502 });
+    });
+  }
+});
