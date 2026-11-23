@@ -280,3 +280,33 @@ describe("news valid-search gate", () => {
     });
   }
 });
+
+
+describe("news bounded source diagnostics", () => {
+ it("opens the GDELT breaker after timeout and skips the next request", async () => {
+  const { fetchIndex, resetNewsCircuitForTests } = await import("../src/handlers/newsSources");
+  resetNewsCircuitForTests(); const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const f = vi.fn(async () => { throw Object.assign(new Error("private-token-and-url"), { name: "AbortError" }); });
+  vi.stubGlobal("fetch", f);
+  try {
+   expect((await fetchIndex("https://api.gdeltproject.org/api/v2/doc/doc?query=test")).failure_reason).toBe("timeout");
+   expect((await fetchIndex("https://api.gdeltproject.org/api/v2/doc/doc?query=other")).failure_reason).toBe("circuit_open");
+   expect(f).toHaveBeenCalledTimes(1); expect(JSON.stringify(spy.mock.calls)).not.toContain("private-token");
+  } finally { resetNewsCircuitForTests(); spy.mockRestore(); }
+ });
+});
+it("search answer leads with three dated publisher-attributed captured headlines",async()=>{
+ stub();const out=await handleNewsSearch({query:"openai"});
+ const items=parseHn(hn).slice(0,3);
+ const lead=items.map(i=>`"${i.title}" (${i.published.slice(0,10)}, ${i.outlet??i.index}).`).join(" ")+" ";
+ expect(items).toHaveLength(3);expect(String(out.answer).startsWith(lead)).toBe(true);
+});
+it("GDELT timeout breaker expires at five minutes and recovered source is retried",async()=>{
+ const {fetchIndex,resetNewsCircuitForTests}=await import("../src/handlers/newsSources");resetNewsCircuitForTests();
+ const now=Date.now();const clock=vi.spyOn(Date,"now").mockReturnValue(now);const warn=vi.spyOn(console,"warn").mockImplementation(()=>{});
+ const f=vi.fn().mockRejectedValueOnce(Object.assign(new Error("timeout"),{name:"AbortError"})).mockImplementation(async()=>new Response(gdelt));vi.stubGlobal("fetch",f);
+ try{await fetchIndex("https://api.gdeltproject.org/api/v2/doc/doc?query=test");
+ clock.mockReturnValue(now+299999);expect((await fetchIndex("https://api.gdeltproject.org/api/v2/doc/doc?query=test")).failure_reason).toBe("circuit_open");expect(f).toHaveBeenCalledTimes(1);
+ clock.mockReturnValue(now+300000);const recovered=await fetchIndex("https://api.gdeltproject.org/api/v2/doc/doc?query=test");expect(f).toHaveBeenCalledTimes(2);expect(recovered.body).toBe(gdelt);
+ }finally{clock.mockRestore();warn.mockRestore();resetNewsCircuitForTests()}
+});

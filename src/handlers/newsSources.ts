@@ -24,7 +24,9 @@
 //     its current feed only.
 import { upstreamUnavailable } from "../core/errors";
 
-const SOURCE_TIMEOUT_MS = 6000;
+const SOURCE_TIMEOUT_MS = 2500;
+let gdeltBlockedUntil = 0;
+export function resetNewsCircuitForTests(): void { gdeltBlockedUntil = 0; }
 const UA = "VeriReceipt/2.0 news observer (+https://verireceipt.vercel.app)";
 
 export const HN_INDEX = "Hacker News story index (Algolia API)";
@@ -47,7 +49,7 @@ export async function fetchText(url: string): Promise<string> {
   const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
   try {
     const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "*/*" } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok || res.redirected) throw Object.assign(new Error("source response unavailable"), { safeReason: res.redirected ? "redirect" : "http_error", safeStatus: res.status });
     return await res.text();
   } finally {
     clearTimeout(timer);
@@ -220,13 +222,20 @@ export function inWindow(item: NewsItem, cutoffIso: string): boolean {
   return item.published !== "" && item.published >= cutoffIso;
 }
 
-export interface FetchResult { ok: boolean; body: string }
+export interface FetchResult { ok: boolean; body: string; failure_reason?: string }
 
 export async function fetchIndex(url: string): Promise<FetchResult> {
+  const host = new URL(url).hostname;
+  const gdelt = host === "api.gdeltproject.org";
+  if (gdelt && Date.now() < gdeltBlockedUntil) return { ok: false, body: "", failure_reason: "circuit_open" };
   try {
     return { ok: true, body: await fetchText(url) };
-  } catch {
-    return { ok: false, body: "" };
+  } catch (error) {
+    const e = error as { name?: string; safeReason?: string; safeStatus?: number };
+    const reason = e.name === "AbortError" || e.name === "TimeoutError" ? "timeout" : e.safeReason ?? "transport_error";
+    if (gdelt && reason === "timeout") gdeltBlockedUntil = Date.now() + 5 * 60000;
+    console.warn(JSON.stringify({ event: "news_source_failure", source: host, reason, ...(e.safeStatus ? { status: e.safeStatus } : {}) }));
+    return { ok: false, body: "", failure_reason: reason };
   }
 }
 

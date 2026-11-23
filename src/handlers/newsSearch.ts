@@ -131,7 +131,9 @@ export async function handleNewsSearch(query: Record<string, string | undefined>
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
   const fmt = (i: NewsItem) => `"${i.title}"${i.points !== null ? ` (${i.points} pts, ${i.published.slice(0, 10)})` : ` (${i.published.slice(0, 10)})`}`;
-  const answer = `${brief} ` +
+  const top = groups.flatMap(g => g.items).slice(0, 3);
+  const lead = top.length ? top.map(i => `"${i.title}" (${i.published.slice(0, 10)}, ${i.outlet ?? i.index}).`).join(" ") + " " : "No matching headlines found in the named sources. ";
+  const answer = lead + `${brief} ` +
     (hn.length ? `HN top: ${hn.slice(0, 3).map(fmt).join("; ")}. ` : "") +
     (gnews.length ? `Google News: ${gnews.slice(0, 3).map(fmt).join("; ")}. ` : "") +
     (gdelt.length ? `GDELT: ${gdelt.slice(0, 3).map(fmt).join("; ")}. ` : "") +
