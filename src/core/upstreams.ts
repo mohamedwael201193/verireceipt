@@ -193,6 +193,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "token-holders": "blockscout",
   price: "chainlink-evm-rpc",
   liquidity: "dexscreener",
+  yield: "aave-v3-evm-rpc",
   weather: "aviationweather-noaa",
   "weather-history": "ncei-noaa",
 };

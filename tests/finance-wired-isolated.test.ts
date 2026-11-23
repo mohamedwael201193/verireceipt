@@ -72,16 +72,36 @@ it('keyed failover legs appear only with a non-blank key, order stays Chainlink,
     expect(keyed.liquiditySourceNames).toEqual(['DEX Screener named pool reserve liquidity']);
 });
 
-it('yield stays unconfigured and fails closed with no provider call', async () => {
+it('yield is wired to the Aave on-chain rate; unbound queries fail closed without network', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
     try {
         const h = createWiredFinanceHandlers({} as NodeJS.ProcessEnv);
-        await expect(h.yield({ project: 'aave', symbol: 'USDC', chain: 'ethereum' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });
+        expect(h.yieldSourceNames).toEqual(['Aave v3 on-chain reserve liquidity rate']);
+        await expect(h.yield({ project: 'compound', symbol: 'USDC', chain: 'ethereum' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });
+        await expect(h.yield({ project: 'aave-v3', symbol: 'WBTC', chain: 'ethereum' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });
         expect(fetchSpy).not.toHaveBeenCalled();
         expect(saveReceipt).not.toHaveBeenCalled();
     }
     finally {
+        vi.unstubAllGlobals();
+    }
+});
+
+it('route /v1/yield is wired and fails closed for unbound queries', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const app = buildServer();
+    try {
+        const r = await app.inject({ method: 'GET', url: '/v1/yield?project=compound&symbol=USDC&chain=ethereum' });
+        expect(r.statusCode).toBe(502);
+        expect(r.json().code).toBe('APPROVED_SOURCES_UNAVAILABLE');
+        const missing = await app.inject({ method: 'GET', url: '/v1/yield?project=aave-v3&symbol=USDC' });
+        expect(missing.statusCode).toBe(400);
+        expect(fetchSpy).not.toHaveBeenCalled();
+    }
+    finally {
+        await app.close();
         vi.unstubAllGlobals();
     }
 });

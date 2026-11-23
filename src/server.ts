@@ -303,6 +303,9 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/liquidity", async (request) =>
     trackIntent("liquidity", () => wiredFinance.liquidity(asQuery(request.query))),
   );
+  app.get("/v1/yield", async (request) =>
+    trackIntent("yield", () => wiredFinance.yield(asQuery(request.query))),
+  );
   // Wired measured-weather observations (expansion): NOAA station
   // observations only, exact reviewed station spellings, no forecast or
   // reanalysis substitution.

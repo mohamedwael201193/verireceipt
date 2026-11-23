@@ -34,6 +34,7 @@ import { createPinnedFeedReader, type PinnedRpcLeg } from './pinnedFeedReader';
 import { coinpaprikaPriceSource, dexScreenerLiquiditySource, type PoolBinding, type TickerBinding } from './marketSourceAdapters';
 import { coinGeckoPriceSource, coinMarketCapPriceSource, type CmcTickerBinding, type GeckoTickerBinding } from './keyedMarketSources';
 import { MAINNET_RPCS } from '../config/chains';
+import { aaveYieldSource, type AaveReserveBinding } from './aaveYieldSource';
 
 /** Presence-only pointer to the owner's trusted-channel message quoted in
  * the header. Authenticity is established out-of-band; a passing
@@ -51,6 +52,9 @@ export const COINPAPRIKA_APPROVAL = termsRiskApproval('https://docs.coinpaprika.
 export const COINGECKO_APPROVAL = termsRiskApproval('https://www.coingecko.com/en/api_terms', '2026-11-23');
 export const COINMARKETCAP_APPROVAL = termsRiskApproval('https://coinmarketcap.com/api/terms/v1/', '2026-11-23');
 export const DEXSCREENER_APPROVAL = termsRiskApproval('https://docs.dexscreener.com/api/api-terms-and-conditions', '2026-11-23');
+/** On-chain public state carries no provider terms; the record keeps the
+ * shared approval-gate shape and the same owner-risk pointer as above. */
+export const AAVE_V3_APPROVAL = termsRiskApproval('https://aave.com/docs/aave-v3/smart-contracts/view-contracts', '2026-11-23');
 
 /** Reviewed Chainlink USD feed bindings (Ethereum mainnet, chainId 1).
  * maxAgeMs is each feed's own published heartbeat. */
@@ -75,6 +79,16 @@ export const DEXSCREENER_POOLS: readonly PoolBinding[] = [
     { pool: 'USDC/WETH 0.05%', chain: 'ethereum', address: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640', dexScreenerChain: 'ethereum', dexId: 'uniswap' },
 ];
 
+/** Reviewed Aave v3 Ethereum reserve bindings. dataProvider and
+ * underlying addresses verified 2026-11-23 against the official
+ * aave-address-book module AaveV3Ethereum.json. */
+export const AAVE_V3_RESERVES: readonly AaveReserveBinding[] = [
+    { project: 'aave-v3', symbol: 'USDC', chain: 'ethereum', chainId: '1', underlying: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', dataProvider: '0x0a16f2FCC0D44FaE41cc54e079281D84A363bECD', registryUrl: 'https://assets.aave.com/address-book/releases/latest/modules/AaveV3Ethereum.json' },
+    { project: 'aave-v3', symbol: 'WETH', chain: 'ethereum', chainId: '1', underlying: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', dataProvider: '0x0a16f2FCC0D44FaE41cc54e079281D84A363bECD', registryUrl: 'https://assets.aave.com/address-book/releases/latest/modules/AaveV3Ethereum.json' },
+    { project: 'aave-v3', symbol: 'USDT', chain: 'ethereum', chainId: '1', underlying: '0xdAC17F958D2ee523a2206206994597C13D831ec7', dataProvider: '0x0a16f2FCC0D44FaE41cc54e079281D84A363bECD', registryUrl: 'https://assets.aave.com/address-book/releases/latest/modules/AaveV3Ethereum.json' },
+    { project: 'aave-v3', symbol: 'DAI', chain: 'ethereum', chainId: '1', underlying: '0x6B175474E89094C44Da98b954EedeAC495271d0F', dataProvider: '0x0a16f2FCC0D44FaE41cc54e079281D84A363bECD', registryUrl: 'https://assets.aave.com/address-book/releases/latest/modules/AaveV3Ethereum.json' },
+];
+
 /** All three MAINNET_RPCS legs are keyless public endpoints, so the
  * evidence URL equals the RPC URL and no credential can leak into a
  * receipt. A future keyed RPC leg MUST get a separate credential-free
@@ -89,6 +103,7 @@ export interface WiredFinanceHandlers {
     yield: (q: Record<string, string | undefined>) => Promise<Record<string, unknown>>;
     priceSourceNames: readonly string[];
     liquiditySourceNames: readonly string[];
+    yieldSourceNames: readonly string[];
 }
 
 /** Composed primary/fallback finance handlers.
@@ -97,7 +112,8 @@ export interface WiredFinanceHandlers {
  * ONLY when their API keys are present in the environment (blank or
  * whitespace-only keys are ignored, matching 22e2a402). No key means the
  * leg is silently absent; the answer shape is unchanged.
- * Yield stays unconfigured (fail closed) until a source is selected. */
+ * Yield: on-chain Aave v3 reserve liquidity rate over the same pinned
+ * legs; incentives and rewards excluded, disclosed in the answer. */
 export function createWiredFinanceHandlers(env: NodeJS.ProcessEnv = process.env): WiredFinanceHandlers {
     const price: ObservationSource<PriceQuery, PriceValue>[] = [
         chainlinkPriceSource(CHAINLINK_USD_FEEDS, createPinnedFeedReader(ethereumPinnedLegs()), CHAINLINK_APPROVAL),
@@ -112,7 +128,9 @@ export function createWiredFinanceHandlers(env: NodeJS.ProcessEnv = process.env)
     const liquidity: ObservationSource<PoolQuery, PoolValue>[] = [
         dexScreenerLiquiditySource(DEXSCREENER_POOLS, DEXSCREENER_APPROVAL),
     ];
-    const yieldSources: ObservationSource<YieldQuery, YieldValue>[] = [];
+    const yieldSources: ObservationSource<YieldQuery, YieldValue>[] = [
+        aaveYieldSource(AAVE_V3_RESERVES, ethereumPinnedLegs(), AAVE_V3_APPROVAL),
+    ];
     const lists: FinanceSourceLists = { price, liquidity, yield: yieldSources };
     const handlers = createFinanceObservationHandlers(lists);
     return {
@@ -121,5 +139,6 @@ export function createWiredFinanceHandlers(env: NodeJS.ProcessEnv = process.env)
         yield: handlers.yield,
         priceSourceNames: price.map(s => s.name),
         liquiditySourceNames: liquidity.map(s => s.name),
+        yieldSourceNames: yieldSources.map(s => s.name),
     };
 }
