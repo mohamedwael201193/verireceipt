@@ -2,7 +2,7 @@
 
 Design only, not implemented. The authoritative leaderboard endpoint now resolves the ranking question: filtered TVL at epoch 44 returns an empty intents object. Do not synthesize a ranking from older catalog rows. Keep auto-route with honest HOLD and no escalation until a usable current ranking exists.
 
-Official MCP source labels this endpoint the latest-epoch ranking, and describes an unranked intent as model-selected routing. Sources: https://github.com/telegraphprotocol/Telegraph-MCP and https://devnode.telegraphprotocol.com/leaderboard/miners?intent=TVL_LOOKUP_GENERAL&limit=1000 . Read-only snapshot checked 2026-11-23 17:31 Africa/Cairo. This is a bounded live observation, not a permanent claim that TVL will stay unranked.
+Official MCP source labels this endpoint the latest-epoch ranking, and describes an unranked intent as model-selected routing. Sources: the official Telegraph MCP source repository and https://devnode.telegraphprotocol.com/leaderboard/miners?intent=TVL_LOOKUP_GENERAL&limit=1000 . Read-only snapshot checked 2026-11-23 17:31 Africa/Cairo. This is a bounded live observation, not a permanent claim that TVL will stay unranked.
 
 # TVL ranked-provider contract proposal
 
