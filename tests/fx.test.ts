@@ -308,6 +308,25 @@ describe("handleFx answers (stubbed sources)", () => {
     vi.unstubAllGlobals();
   });
 
+  it("all-singleton pool (incl. a fix republication) -> no cluster anchors, pool median serves", async () => {
+    // Reviewer pin (727496d follow-up): the >=2-member gate must hold -
+    // a lone fix republication among mutually distant quotes is not a
+    // cluster, so the full-pool median serves, never the fix value.
+    stubFxSources({
+      frankfurter: frankfurterBody(0.90992, "2026-11-20"),
+      openEr: openErBody(0.911134, "Mon, 23 Nov 2026 00:02:32 +0000"),
+      fawaz: fawazBody(0.9124, "2026-11-23"),
+      vatcomply: "ERR",
+      floatrates: "ERR",
+    });
+    const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
+    expect(result.verdict).toBe("verified");
+    // Median of {0.90992, 0.911134, 0.9124}, all >5bps apart.
+    expect(result.rate).toBe(0.911134);
+    expect(String(result.answer)).not.toContain("anchored on the tightest agreeing cluster");
+    vi.unstubAllGlobals();
+  });
+
   it("no fix republication in the pool -> the largest tight cluster anchors, as before", async () => {
     // frankfurter + vatcomply down: the rule must reduce to the previous
     // largest-cluster behaviour, never refuse and never invent a fix.

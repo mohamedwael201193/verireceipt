@@ -442,6 +442,9 @@ export async function handleFx(
       // the previous largest-cluster rule. Both sides sit within the
       // scorer's 50bps tolerance of the truth median in every measured
       // shape, so this is an alignment choice, never a score trick.
+      // Exact source-name strings as set by the source adapters above;
+      // a renamed adapter must update this set or the preference silently
+      // stops applying.
       const FIX_REPUBLISHERS = new Set(["Frankfurter (ECB reference rates)", "vatcomply"]);
       const fixCount = (g: typeof sorted): number =>
         g.filter((q) => FIX_REPUBLISHERS.has(q.source)).length;
