@@ -86,18 +86,26 @@ describe("ROUTE_ETA_GENERAL", () => {
   });
 });
 
-describe("route-eta duration clamp (reviewer follow-up)", () => {
-  const withDuration = (d: number) => {
-    const body = JSON.parse(corpus);
-    body.routes[0].duration = d;
-    return JSON.stringify(body);
-  };
-  it("a 0s duration is clamped up to 1 and 20,000,000s down to 1,000,000 (contract range)", async () => {
-    stub(withDuration(0));
-    const lo = await handleRouteEta({ origin: "27.345,-97.225", destination: "27.8006,-97.3961" });
-    expect(lo.duration).toBe(1);
-    stub(withDuration(20000000));
-    const hi = await handleRouteEta({ origin: "27.345,-97.225", destination: "27.8006,-97.3961" });
-    expect(hi.duration).toBe(1000000);
-  });
+
+describe('route-eta source validation',()=>{
+ it.each([0,-1,20000000,null,'',false,'100'])('invalid duration %j refuses instead of clamping/coercing',async(duration)=>{
+  const j=JSON.parse(corpus);j.routes[0].duration=duration;stub(JSON.stringify(j));
+  await expect(handleRouteEta({origin:'27.345,-97.225',destination:'27.8006,-97.3961'})).rejects.toMatchObject({code:'NO_USABLE_ROUTE'});
+ });
+ it.each([null,'',false,-1])('invalid route distance %j refuses',distance=>{
+  const j=JSON.parse(corpus);j.routes[0].distance=distance;expect(()=>parseOsrm(JSON.stringify(j))).toThrow();
+ });
+ it.each([null,[],[181,0],[0,91],['0',0],[null,0]])('invalid snapped location %j refuses',location=>{
+  const j=JSON.parse(corpus);j.waypoints[0].location=location;expect(()=>parseOsrm(JSON.stringify(j))).toThrow();
+ });
+ it.each([null,'',-1])('invalid snap distance %j refuses',distance=>{
+  const j=JSON.parse(corpus);j.waypoints[0].distance=distance;expect(()=>parseOsrm(JSON.stringify(j))).toThrow();
+ });
+ it('named endpoint receipts retain geocoder raw bodies as well as hashes',async()=>{
+  const geo=JSON.stringify({results:[{name:'Austin',latitude:30.2672,longitude:-97.7431,country:'United States',admin1:'Texas',country_code:'US'}]});
+  vi.stubGlobal('fetch',async(url:unknown)=>new Response(String(url).includes('geocoding-api')?geo:corpus));
+  const out=await handleRouteEta({origin:'Austin, Texas',destination:'Austin, Texas'});
+  const stored=await getReceiptEvidence((out.receipt as any).receipt_id);const evidence=JSON.parse(String(stored.evidence));
+  expect(evidence.geocoders).toHaveLength(2);expect(evidence.geocoders[0].raw_body).toBe(geo);expect(evidence.geocoders[0].sha256).toBe(sha256Hex(geo));
+ });
 });

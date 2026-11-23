@@ -43,19 +43,24 @@ export function parseOsrm(raw: string): OsrmRoute {
   }
   const r = (d.routes as Record<string, unknown>[])[0];
   const wps = (d.waypoints ?? []) as Record<string, unknown>[];
-  const duration = Number(r.duration);
-  const distance = Number(r.distance);
-  if (!Number.isFinite(duration) || duration < 0 || !Number.isFinite(distance)) {
+  const duration = r.duration;
+  const distance = r.distance;
+  if (typeof duration !== "number" || !Number.isFinite(duration) || duration < 1 || duration > 1000000 || typeof distance !== "number" || !Number.isFinite(distance) || distance < 0) {
     throw unprocessable("NO_USABLE_ROUTE", "the OSRM answer carried no usable duration; never guessed");
   }
   const loc = (i: number): [number, number] => {
     const l = wps[i]?.location as unknown;
-    return Array.isArray(l) && l.length === 2 ? [Number(l[0]), Number(l[1])] : [NaN, NaN];
+    if (!Array.isArray(l) || l.length !== 2 || typeof l[0] !== 'number' || typeof l[1] !== 'number' || !Number.isFinite(l[0]) || !Number.isFinite(l[1]) || Math.abs(l[0]) > 180 || Math.abs(l[1]) > 90)
+      throw unprocessable('NO_USABLE_ROUTE', 'missing or invalid source-snapped waypoint');
+    return [l[0], l[1]];
   };
+  const snaps = [wps[0]?.distance, wps[1]?.distance];
+  if (snaps.some(n => typeof n !== 'number' || !Number.isFinite(n) || n < 0))
+    throw unprocessable('NO_USABLE_ROUTE', 'missing or invalid source snapping distance');
   return {
     duration_s: Math.round(duration), distance_m: distance,
     origin_snapped: loc(0), destination_snapped: loc(1),
-    origin_snap_m: Number(wps[0]?.distance ?? NaN), destination_snap_m: Number(wps[1]?.distance ?? NaN),
+    origin_snap_m: snaps[0] as number, destination_snap_m: snaps[1] as number,
   };
 }
 
@@ -110,12 +115,12 @@ export async function handleRouteEta(query: Record<string, string | undefined>):
     throw upstreamUnavailable("OSRM_UNREACHABLE", "the OSRM demo server could not be reached");
   }
   const route = parseOsrm(body);
-  const durationS = Math.min(Math.max(route.duration_s, 1), 1000000); // contract range
+  const durationS = route.duration_s; // Validated source value, rounded only; never clamped.
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({ origin: `${o.lat},${o.lon}`, destination: `${dst.lat},${dst.lon}`,
     origin_resolved: o.geocoder ? o.label : "not geocoded (coordinates given directly)",
     destination_resolved: dst.geocoder ? dst.label : "not geocoded (coordinates given directly)",
-    geocoders: [o.geocoder, dst.geocoder].filter(Boolean).map((g) => ({ url: g!.url, sha256: sha256Hex(Buffer.from(g!.body, "utf8")) })),
+    geocoders: [o.geocoder, dst.geocoder].filter(Boolean).map((g) => ({ url: g!.url, sha256: sha256Hex(Buffer.from(g!.body, "utf8")), raw_body: g!.body })),
     as_of: asOf, route,
     source_policy: "OSRM demo server static car-profile model estimate; no live traffic; snapped waypoints disclosed; fair use: one lightweight request",
     raw_bodies: { route: body }, fetched_at: fetchedAt });
