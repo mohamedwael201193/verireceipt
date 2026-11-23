@@ -45,7 +45,10 @@ export async function guardPublicHttpUrl(raw: string | undefined, param: string)
   if (u.username || u.password) throw badRequest("BAD_URL", "credentials in URLs are never followed");
   const port = u.port ? Number(u.port) : u.protocol === "https:" ? 443 : 80;
   if (port !== 80 && port !== 443) throw unprocessable("PORT_NOT_CHECKED", "only ports 80 and 443 are checked; internal-service probing is out of scope");
-  const hostname = u.hostname.toLowerCase();
+  // Trailing-dot FQDNs (example.com.) are the same host; normalize so
+  // the private-name checks and the rate-limit key cannot be bypassed
+  // by adding a dot.
+  const hostname = u.hostname.toLowerCase().replace(/\.+$/, "");
   if (!hostname || hostname.endsWith(".internal") || hostname.endsWith(".local") || hostname.endsWith(".localhost") || hostname === "localhost") {
     throw unprocessable("PRIVATE_HOST", "local and internal names are never checked");
   }

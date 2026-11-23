@@ -7,7 +7,7 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 afterEach(() => { vi.unstubAllGlobals(); __setLookupForTests(null); });
 import { handleApiHealth } from "../src/handlers/apiHealth";
 import { handleServerUptime } from "../src/handlers/serverUptime";
-import { guardPublicHttpUrl, __setLookupForTests } from "../src/handlers/ssrfGuard";
+import { guardPublicHttpUrl, __setLookupForTests, __clearRateLimitsForTests } from "../src/handlers/ssrfGuard";
 import { buildServer } from "../src/server";
 import { getReceiptEvidence } from "../src/core/storage";
 import { sha256Hex } from "../src/core/receipt";
@@ -112,5 +112,26 @@ describe("routes", () => {
     expect(app.hasRoute({ method: "GET", url: "/v1/api-health" })).toBe(true);
     expect(app.hasRoute({ method: "GET", url: "/v1/server-uptime" })).toBe(true);
     await app.close();
+  });
+});
+
+describe("SSRF follow-ups (reviewer)", () => {
+  it("measureGet fetches with redirect: manual; a mutant following redirects fails this pin", async () => {
+    const calls: RequestInit[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return new Response("ok", { status: 200 });
+    });
+    const { measureGet } = await import("../src/handlers/ssrfGuard");
+    const r = await measureGet("https://example.com", 1000, "test-agent");
+    expect(r.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].redirect).toBe("manual");
+  });
+  it("a trailing-dot hostname shares the rate-limit key with its plain form", async () => {
+    __clearRateLimitsForTests();
+    fakeDns({ "example.com": ["93.184.216.34"] });
+    await guardPublicHttpUrl("example.com", "url");
+    await expect(guardPublicHttpUrl("example.com.", "url")).rejects.toMatchObject({ status: 422, code: "RATE_LIMITED" });
   });
 });
