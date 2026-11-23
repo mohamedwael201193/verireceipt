@@ -4,7 +4,7 @@
 // (CHAIN_RPCS[chain]; N is the chain's configured RPC count, so the label
 // is "2-of-3" on 3-RPC chains and "2-of-2" on 2-RPC chains) and returns
 // exact tx_hash, status, from, to, block_number, value_eth plus a SHA-256
-// receipt over the canonical {tx, receipt} evidence object (R2): the
+// receipt over canonical {tx, receipt, optional confirmation_context} evidence: the
 // parsed results of BOTH upstream calls on the winning leg —
 // eth_getTransactionByHash AND eth_getTransactionReceipt — combined with
 // stableStringify, so the served evidence re-derives every answer field
@@ -82,6 +82,7 @@
 //   status-less — different state roots must not agree.
 // - F3: a "… on <chain>" suffix that conflicts with an explicit `chain`
 //   param is a 400 CHAIN_MISMATCH, never silently discarded.
+import { confirmationContext, transactionFlags } from "./txContext";
 import { ApiError, badRequest } from "../core/errors";
 import { envelope, makeReceipt, stableStringify, type Receipt } from "../core/receipt";
 import { CHAIN_RPCS } from "../config/chains";
@@ -1058,7 +1059,13 @@ export async function handleTx(
   const from = tx?.from ?? receipt?.from ?? null;
   const to = tx?.to ?? receipt?.to ?? null;
 
+  const flags = transactionFlags(value.txResult);
+  const confirmations = blockNumber === null ? { confirmations: null, confirmation_evidence: [], confirmation_scope: "pending or not found; no inclusion confirmations" } : await confirmationContext(rpcs, blockNumber);
   const fields: Record<string, unknown> = {
+    ...flags,
+    confirmations: confirmations.confirmations,
+    confirmation_scope: confirmations.confirmation_scope,
+    status_statement: answer.split(".")[0] + ".",
     tx_hash: txHash,
     status,
     from,
@@ -1096,7 +1103,8 @@ export async function handleTx(
   // bytes matches. The old receipt-only hash could never cover
   // value_eth (the receipt has no `value` field) and left pending vs
   // not_found indistinguishable from evidence alone.
-  const evidence = buildTxEvidence(value.txResult, value.receiptResult);
+  const coreEvidence = buildTxEvidence(value.txResult, value.receiptResult);
+  const evidence = confirmations.confirmations === null ? coreEvidence : stableStringify({ ...JSON.parse(coreEvidence), confirmation_context: confirmations });
   const receiptDoc: Receipt = makeReceipt(INTENT, value.rpcUrl, evidence, votes);
   try {
     await saveReceipt(receiptDoc, evidence);

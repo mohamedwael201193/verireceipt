@@ -1,3 +1,4 @@
+import { getReceiptEvidence } from "../src/core/storage";
 // Tests for src/handlers/txLookup.ts (ONCHAIN_TX_LOOKUP_GENERAL).
 //
 // Unit tests use local fixtures only. Live tests hit the REAL public archive
@@ -488,9 +489,12 @@ describe("handleTx stubbed quorum (fetch stubbed, no network)", () => {
     const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
     expect(out.status).toBe("confirmed");
     expect(out.block_number).toBe(26454409);
+    expect(out.confirmations).toBeNull();
+    const evidence = await getReceiptEvidence(String((out.receipt as Record<string, unknown>).receipt_id));
+    expect(String(evidence.evidence)).toBe(stableStringify({tx: CONFIRMED_LEG.tx, receipt: CONFIRMED_LEG.receipt}));
     // No request anywhere mentions eth_blockNumber, and every batch
     // carries exactly the one eth_getTransactionByHash call.
-    expect(JSON.stringify(requests)).not.toContain("eth_blockNumber");
+    expect(requests.filter(r => !Array.isArray(r.body) && (r.body as Record<string, unknown>)?.method === "eth_blockNumber")).toHaveLength(CHAIN_RPCS.ethereum.length);
     const batches = requests.map((r) => r.body).filter((b) => Array.isArray(b));
     expect(batches.length).toBeGreaterThan(0);
     for (const batch of batches as Array<Array<Record<string, unknown>>>) {
@@ -606,7 +610,7 @@ describe("handleTx live receipt recomputation (M2)", () => {
     "receipt hash recomputes by re-POSTing BOTH eth_getTransactionByHash and eth_getTransactionReceipt to the winning leg (NOT a GET)",
     async () => {
       // M2 (R2, JUDGE.md §4): the receipt digest is
-      // sha256(stableStringify({tx, receipt})) over the PARSED `result`
+      // sha256(stableStringify({tx, receipt, optional confirmation_context})) over the PARSED `result`
       // of BOTH upstream calls on the winning leg
       // (src/handlers/txLookup.ts buildTxEvidence) — NOT sha256 of the
       // raw receipt-call text. The recomputation below uses FRESH
@@ -647,9 +651,24 @@ describe("handleTx live receipt recomputation (M2)", () => {
       expect(txResult?.hash).toBe(CONFIRMED_TX);
       expect(rcResult).not.toBeNull();
       expect(rcResult?.transactionHash).toBe(CONFIRMED_TX);
-      expect(sha256Hex(stableStringify({ tx: txResult, receipt: rcResult }))).toBe(
-        rc.raw_response_sha256,
-      );
+      const stored = await getReceiptEvidence(String(rc.receipt_id));
+      expect(stored.evidence).toBeDefined();
+      const observed = JSON.parse(String(stored.evidence));
+      const context = observed.confirmation_context;
+      if (context) {
+        const votes = context.confirmation_evidence as {height:number;raw:string;url:string}[];
+        expect(votes.length).toBeGreaterThanOrEqual(2);
+        const heights = votes.map(v => { const j = JSON.parse(v.raw); expect(j.error).toBeUndefined(); expect(j.jsonrpc).toBe("2.0"); expect(j.id).toBe(1); expect(Number(BigInt(j.result))).toBe(v.height); return v.height; });
+        const agreed = heights.find(h => heights.filter(x => x === h).length >= 2);
+        expect(agreed).toBeDefined();
+        expect(context.confirmations).toBe(agreed! - Number(BigInt(String(rcResult!.blockNumber))));
+        expect(out.confirmations).toBe(context.confirmations);
+      } else expect(out.confirmations).toBeNull();
+      // Fresh calls independently verify the immutable tx/receipt. Historical
+      // moving-head observations must come from preserved raw responses, not
+      // a later head read that would no longer reproduce the acquisition time.
+      const recomputed = context ? { tx: txResult, receipt: rcResult, confirmation_context: context } : { tx: txResult, receipt: rcResult };
+      expect(sha256Hex(stableStringify(recomputed))).toBe(rc.raw_response_sha256);
     },
     60000,
   );
@@ -709,9 +728,24 @@ describe("handleTx live receipt recomputation (M2)", () => {
       expect(weiToEth(txResult?.value as string)).toBe(out.value_eth);
       expect(rcResult).not.toBeNull();
       expect(rcResult?.transactionHash).toBe(NONZERO_TX);
-      expect(sha256Hex(stableStringify({ tx: txResult, receipt: rcResult }))).toBe(
-        rc.raw_response_sha256,
-      );
+      const stored = await getReceiptEvidence(String(rc.receipt_id));
+      expect(stored.evidence).toBeDefined();
+      const observed = JSON.parse(String(stored.evidence));
+      const context = observed.confirmation_context;
+      if (context) {
+        const votes = context.confirmation_evidence as {height:number;raw:string;url:string}[];
+        expect(votes.length).toBeGreaterThanOrEqual(2);
+        const heights = votes.map(v => { const j = JSON.parse(v.raw); expect(j.error).toBeUndefined(); expect(j.jsonrpc).toBe("2.0"); expect(j.id).toBe(1); expect(Number(BigInt(j.result))).toBe(v.height); return v.height; });
+        const agreed = heights.find(h => heights.filter(x => x === h).length >= 2);
+        expect(agreed).toBeDefined();
+        expect(context.confirmations).toBe(agreed! - Number(BigInt(String(rcResult!.blockNumber))));
+        expect(out.confirmations).toBe(context.confirmations);
+      } else expect(out.confirmations).toBeNull();
+      // Fresh calls independently verify the immutable tx/receipt. Historical
+      // moving-head observations must come from preserved raw responses, not
+      // a later head read that would no longer reproduce the acquisition time.
+      const recomputed = context ? { tx: txResult, receipt: rcResult, confirmation_context: context } : { tx: txResult, receipt: rcResult };
+      expect(sha256Hex(stableStringify(recomputed))).toBe(rc.raw_response_sha256);
     },
     60000,
   );
