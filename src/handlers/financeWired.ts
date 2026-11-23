@@ -27,6 +27,7 @@
 //   CoinPaprika / CoinGecko / CoinMarketCap asset ids are the providers'
 //   own canonical ids (btc-bitcoin/eth-ethereum, bitcoin/ethereum, 1/1027).
 
+import { handleCexDepth } from './cexDepth';
 import type { ObservationSource, SourceApproval } from '../core/observedSources';
 import { createFinanceObservationHandlers, type FinanceSourceLists, type PriceQuery, type PriceValue, type PoolQuery, type PoolValue, type YieldQuery, type YieldValue } from './financeObservations';
 import { chainlinkPriceSource, type FeedBinding } from './chainlinkSource';
@@ -135,7 +136,7 @@ export function createWiredFinanceHandlers(env: NodeJS.ProcessEnv = process.env)
     const handlers = createFinanceObservationHandlers(lists);
     return {
         price: handlers.price,
-        liquidity: handlers.liquidity,
+        liquidity: q => ['gemini','bitstamp'].includes(q.chain?.toLowerCase() ?? '') ? handleCexDepth(q) : handlers.liquidity(q),
         yield: handlers.yield,
         priceSourceNames: price.map(s => s.name),
         liquiditySourceNames: liquidity.map(s => s.name),
