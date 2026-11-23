@@ -5,7 +5,7 @@
 // the handler through handleRouteWithRpcs with injectable RPC URLs.
 import { countReceipts, storedReceiptRow, storedReceiptEvidence } from "./helpers/storeView";
 import { getReceiptEvidence } from "../src/core/storage";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createServer } from "http";
 import { mkdtempSync, readFileSync } from "fs";
 import { tmpdir } from "os";
@@ -758,8 +758,18 @@ describe("generic ERC-20 pair resolution (2026-11-22)", () => {
     expect(uniHopOut).toBe(186_892_531n);
     expect(sushiHopOut).toBe(4_976_362n);
     const calls: Array<{ to: string; data: string; blockRef: unknown }> = [];
+    // This pinned-historical-block test freezes wall time just after the
+    // block's implied timestamp: a fixed historical number paired with a
+    // wall-clock-now timestamp is refused as a stale/forged pin (round-8
+    // number-vs-timestamp consistency), and its implied timestamp is
+    // refused as stale (max age 1800s) once real time has advanced. The
+    // pinned-block assertions (calldata, blockRef, venue choice) are
+    // time-independent; only the freshness window needs freezing.
+    const frozenNowSec = impliedBlockTimestamp(pinned.block_number) + 60;
+    vi.useFakeTimers({ now: frozenNowSec * 1000 });
     const mk = () => startStubRpc({
       blockNumber: pinned.block_number, blockHash: pinned.blockRef.blockHash,
+      blockTimestampSec: frozenNowSec,
       failCalls: false, failUni: true, failSushi: true,
       v3AmountOut: directOut, v2AmountOut: 0n,
       uniHopAmountOut: uniHopOut, sushiHopAmountOut: sushiHopOut, capturedCalls: calls,
@@ -777,7 +787,7 @@ describe("generic ERC-20 pair resolution (2026-11-22)", () => {
       const evidence = JSON.parse(stored.evidence!.toString("utf8"));
       expect(evidence.direct_hop_safety).toMatchObject({ policy: "non-degrading direct-only baseline", combined_winner_base_units: sushiHopOut.toString(), direct_winner_base_units: directOut.toString() });
       expect(evidence.direct_hop_safety.rejected_hop_quotes).toHaveLength(2);
-    } finally { await a.close(); await b.close(); }
+    } finally { vi.useRealTimers(); await a.close(); await b.close(); }
   });
 
   it("a hop quote that beats every direct quote wins and is named as the route", async () => {
