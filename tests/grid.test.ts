@@ -4440,9 +4440,14 @@ describe("handleGridPrice natural-name aliases", () => {
     expect(res.lmp_usd_per_mwh).toBe(33.7);
   });
 
+  // Edited by the MISO packet (2026-11-23): "MISO" removed from the
+  // no-feed list — MISO now has a feed (docs.misoenergy.org DA ExPost
+  // CSV) and bare "MISO" is answered for the Illinois hub with
+  // disclosure (tests/grid-miso.test.ts). ERCOT, PJM and plain "Texas"
+  // (the ERCOT region, not the MISO "texas hub" alias) still refuse.
   it("operators with no feed stay an honest 422 (ERCOT, PJM, Texas)", async () => {
     const interval = pastIso(8);
-    for (const name of ["ERCOT", "PJM", "Texas", "MISO"]) {
+    for (const name of ["ERCOT", "PJM", "Texas"]) {
       await expectApiError(
         handleGridPrice({ node_or_zone: name, interval_start: interval }),
         422,

@@ -56,6 +56,11 @@ export interface GridZoneInfo {
 }
 
 export const ELERING_URL = "https://dashboard.elering.ee/api/nps/price";
+
+export const MISO_REPORTS_URL = "https://docs.misoenergy.org/marketreports/";
+export const MISO_SOURCE = "MISO day-ahead ExPost LMP (public market reports)";
+/** Fixed EST offset (MISO labels intervals in EST year-round). */
+export const MISO_EST_OFFSET_MS = -5 * 3600_000;
 export const NYISO_BASE_URL = "https://mis.nyiso.com/public/csv/realtime/";
 export const CAISO_OASIS_URL = "https://oasis.caiso.com/oasisapi/SingleZip";
 export const FX_EUR_USD_URL = "https://open.er-api.com/v6/latest/EUR";
@@ -94,6 +99,17 @@ export const SUPPORTED_ZONES: Record<string, GridZoneInfo> = {
   "TH_NP15_GEN-APND": { market: "CAISO", source: CAISO_SOURCE, url: CAISO_OASIS_URL, windowMin: 60 },
   "TH_SP15_GEN-APND": { market: "CAISO", source: CAISO_SOURCE, url: CAISO_OASIS_URL, windowMin: 60 },
   "TH_ZP26_GEN-APND": { market: "CAISO", source: CAISO_SOURCE, url: CAISO_OASIS_URL, windowMin: 60 },
+  // MISO day-ahead ExPost LMPs (hourly). The real-time 5-min ExPost
+  // feed carries CP nodes only — no hubs — so hub coverage is
+  // day-ahead only (measured 2026-11-23 against the live feeds).
+  "ARKANSAS.HUB": { market: "MISO", source: MISO_SOURCE, url: MISO_REPORTS_URL, windowMin: 60 },
+  "ILLINOIS.HUB": { market: "MISO", source: MISO_SOURCE, url: MISO_REPORTS_URL, windowMin: 60 },
+  "INDIANA.HUB": { market: "MISO", source: MISO_SOURCE, url: MISO_REPORTS_URL, windowMin: 60 },
+  "LOUISIANA.HUB": { market: "MISO", source: MISO_SOURCE, url: MISO_REPORTS_URL, windowMin: 60 },
+  "MICHIGAN.HUB": { market: "MISO", source: MISO_SOURCE, url: MISO_REPORTS_URL, windowMin: 60 },
+  "MINN.HUB": { market: "MISO", source: MISO_SOURCE, url: MISO_REPORTS_URL, windowMin: 60 },
+  "MS.HUB": { market: "MISO", source: MISO_SOURCE, url: MISO_REPORTS_URL, windowMin: 60 },
+  "TEXAS.HUB": { market: "MISO", source: MISO_SOURCE, url: MISO_REPORTS_URL, windowMin: 60 },
 };
 
 /**
@@ -369,6 +385,7 @@ export const GRID_UPSTREAM_ORIGINS: ReadonlySet<string> = new Set([
   "dashboard.elering.ee",
   "mis.nyiso.com",
   "oasis.caiso.com",
+  "docs.misoenergy.org",
   "open.er-api.com",
 ]);
 
@@ -1684,6 +1701,56 @@ export async function fetchCaisoDamLmp(
   });
   caisoLiveInflight.set(key, work);
   return work;
+}
+
+/**
+ * On-demand MISO day-ahead ExPost LMP for one hub and one finished
+ * UTC hour, from the operator's public dated market-report CSV
+ * ({yyyymmdd}_da_expost_lmp.csv). The file labels hours by
+ * hour-ENDING in EST (fixed UTC-5 year-round): UTC interval
+ * [t, t+1h) is EST [t-5h, t-4h), hour-ending (estHour+1) of the EST
+ * delivery date. Fail-closed: any fetch, parse, missing-row or
+ * missing-value problem throws; the handler turns that into the
+ * same refusal family as a cache miss — never a guess.
+ */
+export async function fetchMisoDaLmp(
+  node: string,
+  intervalStartIso: string,
+): Promise<{ lmp: number; upstreamUrl: string } | null> {
+  const startMs = Date.parse(intervalStartIso);
+  if (Number.isNaN(startMs)) return null;
+  const est = new Date(startMs + MISO_EST_OFFSET_MS);
+  const y = est.getUTCFullYear();
+  const mm = String(est.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(est.getUTCDate()).padStart(2, "0");
+  const hourEnding = est.getUTCHours() + 1; // 1..24
+  const upstreamUrl = MISO_REPORTS_URL + String(y) + mm + dd + "_da_expost_lmp.csv";
+  const text = await fetchText(upstreamUrl);
+  const lines = text.split("\n");
+  let header: string[] | null = null;
+  const heCol = "HE " + hourEnding;
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\r$/, "");
+    const cells = line.split(",");
+    if (!header) {
+      if (cells[0] === "Node" && cells[1] === "Type") header = cells;
+      continue;
+    }
+    if (cells[0] !== node || cells[2] !== "LMP") continue;
+    const col = header.indexOf(heCol);
+    if (col < 0 || col >= cells.length) {
+      throw new Error("MISO DA ExPost CSV missing " + heCol + " column for " + node);
+    }
+    const lmp = Number(cells[col]);
+    if (!Number.isFinite(lmp)) {
+      throw new Error("MISO DA ExPost CSV non-numeric LMP for " + node + " " + heCol);
+    }
+    return { lmp, upstreamUrl };
+  }
+  if (!header) {
+    throw new Error("MISO DA ExPost CSV missing Node/Type header: " + upstreamUrl);
+  }
+  return null; // node absent from the file: no price exists to serve
 }
 
 

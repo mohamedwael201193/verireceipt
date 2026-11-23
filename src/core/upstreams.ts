@@ -30,6 +30,7 @@
 //   caiso-oasis      oasis.caiso.com
 //   nyiso            mis.nyiso.com
 //   elering          dashboard.elering.ee
+//   miso-marketreports docs.misoenergy.org
 //   fx-er-api        open.er-api.com (EUR→USD, ingester only)
 //   beacon-api       both beacon hosts (lodestar-mainnet.chainsafe.io,
 //                    ethereum-beacon-api.publicnode.com)
@@ -77,6 +78,7 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "oasis.caiso.com": "caiso-oasis",
   "mis.nyiso.com": "nyiso",
   "dashboard.elering.ee": "elering",
+  "docs.misoenergy.org": "miso-marketreports",
   "open.er-api.com": "fx-er-api",
   "lodestar-mainnet.chainsafe.io": "beacon-api",
   "ethereum-beacon-api.publicnode.com": "beacon-api",
@@ -270,6 +272,9 @@ export function primaryUpstreamForGridZone(zone: string | undefined): string {
     ) {
       return "nyiso";
     }
+    // MISO classic hubs (ARKANSAS.HUB .. TEXAS.HUB) are served from the
+    // docs.misoenergy.org marketreports DA ExPost CSV.
+    if (z.endsWith(".HUB")) return "miso-marketreports";
     return "caiso-oasis";
   } catch {
     return "caiso-oasis";

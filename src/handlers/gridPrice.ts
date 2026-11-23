@@ -56,6 +56,7 @@ import {
 import {
   SUPPORTED_ZONES,
   fetchCaisoDamLmp,
+  fetchMisoDaLmp,
   fetchNyisoRtLbmp,
   gridFallbackUrl,
   isSettledGridInterval,
@@ -155,6 +156,21 @@ const CAISO_HUB_ALIASES: Record<string, string> = (() => {
 })();
 
 /**
+ * Spellings that name MISO rather than one hub (A12), matched like
+ * CAISO_SYSTEM_REQUESTS. Answered for the Illinois hub, the
+ * conventional MISO reference hub; the choice is disclosed in
+ * node_or_zone, market and the answer prose.
+ */
+const MISO_SYSTEM_REQUESTS: Record<string, true> = {
+  miso: true,
+  "miso system": true,
+  "midcontinent iso": true,
+};
+export const MISO_SYSTEM_NODE = "ILLINOIS.HUB";
+export const MISO_SYSTEM_MARKET =
+  "MISO day-ahead ExPost LMP (Illinois hub ILLINOIS.HUB; request named no MISO hub)";
+
+/**
  * Natural-name aliases (A11): the name a person uses for a place —
  * the Elering countries and the NYISO load zones by their common
  * names — matched on the whitespace-normalised, lower-cased
@@ -163,8 +179,8 @@ const CAISO_HUB_ALIASES: Record<string, string> = (() => {
  * that zone (node_or_zone, market, answer prose), the same disclosure
  * standard as a CAISO hub short name. Bare "nyiso" is answered for
  * the N.Y.C. load zone, mirroring bare "caiso" -> the NP15 hub.
- * Places run by operators we have no feed for (ERCOT, PJM, MISO,
- * SPP, ...) are NOT here: they stay an honest 422 UNSUPPORTED_ZONE.
+ * Places run by operators we have no feed for (ERCOT, PJM, SPP,
+ * ...) are NOT here: they stay an honest 422 UNSUPPORTED_ZONE.
  */
 const GRID_NATURAL_ZONE_ALIASES: Record<string, string> = {
   estonia: "EE",
@@ -182,6 +198,17 @@ const GRID_NATURAL_ZONE_ALIASES: Record<string, string> = {
   millwood: "MILLWD",
   dunwoodie: "DUNWOD",
   "mohawk valley": "MHK VL",
+  // MISO trading hubs by their common names (A12).
+  "arkansas hub": "ARKANSAS.HUB",
+  "illinois hub": "ILLINOIS.HUB",
+  "indiana hub": "INDIANA.HUB",
+  "louisiana hub": "LOUISIANA.HUB",
+  "michigan hub": "MICHIGAN.HUB",
+  "minnesota hub": "MINN.HUB",
+  "minn hub": "MINN.HUB",
+  "mississippi hub": "MS.HUB",
+  "ms hub": "MS.HUB",
+  "texas hub": "TEXAS.HUB",
 };
 
 /** Canonical supported zone for a natural place name, or undefined. */
@@ -228,6 +255,7 @@ const QUESTION_ZONE_CANDIDATES: ReadonlyArray<{ re: RegExp; spelling: string; ex
   for (const spelling of [
     ...Object.keys(CAISO_HUB_ALIASES),
     ...Object.keys(CAISO_SYSTEM_REQUESTS).filter((k) => k.length > 0),
+    ...Object.keys(MISO_SYSTEM_REQUESTS),
     // A11: natural place names are safe case-insensitive candidates
     // (proper nouns and multi-word names, no english-word collisions).
     ...Object.keys(GRID_NATURAL_ZONE_ALIASES),
@@ -246,6 +274,9 @@ function resolveZoneSpelling(spelling: string): string | undefined {
   const req = spelling.trim().replace(/\s+/g, " ");
   if (Object.hasOwn(CAISO_SYSTEM_REQUESTS, req.toLowerCase())) {
     return CAISO_SYSTEM_NODE;
+  }
+  if (Object.hasOwn(MISO_SYSTEM_REQUESTS, req.toLowerCase())) {
+    return MISO_SYSTEM_NODE;
   }
   const hub = resolveCaisoHubAlias(req);
   if (hub) return hub;
@@ -522,10 +553,12 @@ export async function handleGridPrice(
   const requestedZone = nodeOrZone.trim().replace(/\s+/g, " ");
   const systemKey = requestedZone.toLowerCase();
   const isCaisoSystem = Object.hasOwn(CAISO_SYSTEM_REQUESTS, systemKey);
-  const hubAlias = isCaisoSystem ? undefined : resolveCaisoHubAlias(requestedZone);
+  const isMisoSystem =
+    !isCaisoSystem && Object.hasOwn(MISO_SYSTEM_REQUESTS, systemKey);
+  const hubAlias = isCaisoSystem || isMisoSystem ? undefined : resolveCaisoHubAlias(requestedZone);
   // A11: a natural place name resolves to its supported zone after the
   // CAISO system/hub spellings and before the exact-key lookup.
-  const naturalAlias = isCaisoSystem || hubAlias !== undefined
+  const naturalAlias = isCaisoSystem || isMisoSystem || hubAlias !== undefined
     ? undefined
     : resolveNaturalZoneAlias(requestedZone);
   // Fold ASCII only: Unicode lookalikes, unknown prefixes and near matches
@@ -536,7 +569,9 @@ export async function handleGridPrice(
   // hub short name, else the exact supported-map key.
   let normalizedZone = isCaisoSystem
     ? CAISO_SYSTEM_NODE
-    : hubAlias ?? naturalAlias ?? zoneKey;
+    : isMisoSystem
+      ? MISO_SYSTEM_NODE
+      : hubAlias ?? naturalAlias ?? zoneKey;
   // An explicit source qualifier may name only an existing identifier in
   // that same source. Strip it once, never recursively or across markets.
   const qualified = /^(NYISO|ELERING) (.+)$/.exec(zoneKey);
@@ -652,6 +687,29 @@ export async function handleGridPrice(
       nowMs = Date.now();
     }
   }
+  // A12: a MISO hub hour is fetched on demand from the dated
+  // day-ahead ExPost CSV — the same cache-before-serving rule as the
+  // CAISO path above; a fetch/parse failure falls through to 502.
+  if (!row && zone.market === "MISO") {
+    let fetched: { lmp: number; upstreamUrl: string } | null = null;
+    try {
+      fetched = await fetchMisoDaLmp(normalizedZone, intervalStart);
+    } catch {
+      fetched = null;
+    }
+    if (fetched) {
+      const ingestedAt = new Date().toISOString();
+      await saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "MISO", ingestedAt, fetched.upstreamUrl);
+      row = {
+        lmp_usd_per_mwh: fetched.lmp,
+        market: "MISO",
+        ingested_at: ingestedAt,
+        upstream_url: fetched.upstreamUrl,
+      };
+      fetchedLive = true;
+      nowMs = Date.now();
+    }
+  }
   if (!row) {
     throw upstreamUnavailable(
       "GRID_CACHE_MISS",
@@ -704,6 +762,32 @@ export async function handleGridPrice(
     } else if (!corruptRow && !stale && needsRefresh) {
       // Valid post-provisional row, revalidation failed: keep it,
       // but do not label it verified / 1.0 (r3 / J2 minor 2).
+      await markGridRevalidateAttempt(normalizedZone, intervalStart, new Date().toISOString());
+      unconfirmed = true;
+    }
+  }
+  // MISO live path: the dated ExPost CSV is re-fetchable on demand,
+  // so a stale, corrupt or revalidation-due row is refreshed like the
+  // CAISO path (same cache-before-serving rule).
+  if (zone.market === "MISO" && (stale || corruptRow || needsRefresh)) {
+    let fetched: { lmp: number; upstreamUrl: string } | null = null;
+    try {
+      fetched = await fetchMisoDaLmp(normalizedZone, intervalStart);
+    } catch {
+      fetched = null;
+    }
+    if (fetched) {
+      const ingestedAt = new Date().toISOString();
+      await saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "MISO", ingestedAt, fetched.upstreamUrl);
+      row = {
+        lmp_usd_per_mwh: fetched.lmp,
+        market: "MISO",
+        ingested_at: ingestedAt,
+        upstream_url: fetched.upstreamUrl,
+      };
+      fetchedLive = true;
+      stale = false;
+    } else if (!corruptRow && !stale && needsRefresh) {
       await markGridRevalidateAttempt(normalizedZone, intervalStart, new Date().toISOString());
       unconfirmed = true;
     }
@@ -839,7 +923,11 @@ export async function handleGridPrice(
   const upstreamUrl = row.upstream_url || gridFallbackUrl(normalizedZone, intervalStart);
   // GRID-NP15: a CAISO system request discloses the node it was
   // answered for in the market field (hashed) as well as the prose.
-  const servedMarket = isCaisoSystem ? CAISO_SYSTEM_MARKET : row.market;
+  const servedMarket = isCaisoSystem
+    ? CAISO_SYSTEM_MARKET
+    : isMisoSystem
+      ? MISO_SYSTEM_MARKET
+      : row.market;
   const rawBody = JSON.stringify({
     node_or_zone: normalizedZone,
     interval_start: intervalStart,
@@ -851,6 +939,8 @@ export async function handleGridPrice(
     quorumVotes = "1/1 live CAISO OASIS PRC_LMP DAM fetch (on-demand, cached before serving)";
   } else if (fetchedLive && zone.market === "NYISO") {
     quorumVotes = "1/1 live NYISO MIS realtime LBMP fetch (on-demand, cached before serving)";
+  } else if (fetchedLive && zone.market === "MISO") {
+    quorumVotes = "1/1 live MISO day-ahead ExPost LMP fetch (on-demand, cached before serving)";
   } else if (unconfirmed && gridMarketKind(zone.market) === "ELERING") {
     quorumVotes = "1/1 cache row from official Elering/Nord Pool feed; " + ELERING_NO_HISTORICAL_REFETCH;
   } else if (unconfirmed) {
@@ -860,6 +950,9 @@ export async function handleGridPrice(
   }
   if (isCaisoSystem) {
     quorumVotes += "; CAISO request with no node named, answered for the NP15 trading hub " + CAISO_SYSTEM_NODE;
+  }
+  if (isMisoSystem) {
+    quorumVotes += "; MISO request with no hub named, answered for the Illinois hub " + MISO_SYSTEM_NODE;
   }
   const receipt = makeReceipt(
     "GRID_POWER_PRICE_GENERAL",
@@ -889,7 +982,15 @@ export async function handleGridPrice(
       " USD per MWh for the interval starting " +
       intervalStart +
       ". The request named no CAISO pricing node, so it was answered for NP15; ask for TH_SP15_GEN-APND or TH_ZP26_GEN-APND for the other CAISO hubs."
-    : "The LMP at " +
+    : isMisoSystem
+      ? "The MISO day-ahead ExPost LMP at the Illinois hub (" +
+        MISO_SYSTEM_NODE +
+        ") was $" +
+        plainDecimal(row.lmp_usd_per_mwh) +
+        " USD per MWh for the interval starting " +
+        intervalStart +
+        ". The request named no MISO hub, so it was answered for the Illinois hub; ask for MICHIGAN.HUB, INDIANA.HUB, MINN.HUB, ARKANSAS.HUB, LOUISIANA.HUB, MS.HUB or TEXAS.HUB for the other MISO hubs."
+      : "The LMP at " +
       normalizedZone +
       " was $" +
       plainDecimal(row.lmp_usd_per_mwh) +
