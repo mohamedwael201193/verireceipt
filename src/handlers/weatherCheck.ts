@@ -12,9 +12,16 @@
 // named station, at most 90 minutes old, never a forecast or model
 // value (parseMetar enforces all three).
 //
-// INPUT (ruling overturned 2026-11-23 via the audit; the contract reads
-// "City or place name, or latitude,longitude"): location may be an
-// explicit ICAO station code, "lat,lon" coordinates, or a place name.
+// INPUT: the intent contract reads "City or place name, or
+// latitude,longitude". location may therefore be an explicit ICAO
+// station code, "lat,lon" coordinates, or a place name.
+// W1b: a purely alphabetic 4-letter token is tried as an ICAO station
+// first and falls through to the geocoder when no such station reports.
+// An EXACTLY-uppercase token is station-first with fall-through only;
+// a Titlecase/lowercase token matching BOTH a reporting station and a
+// geocoder place (Lima vs LIMA/Turin) refuses as ambiguous naming both
+// sides, unless the geocoder hit sits within about 5 km of the station;
+// "icao:XXXX" forces the station reading.
 // Place names are geocoded with the same Open-Meteo geocoder and the
 // same fail-closed rules as /v1/weather-forecast (named resolution,
 // ambiguity refused, never a silent first hit); the nearest reporting
@@ -79,15 +86,41 @@ export function nearestMetarStations(body: string, lat: number, lon: number, lim
 export async function handleWeatherCheck(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const rawLocation = query.location?.trim();
   if (!rawLocation) throw badRequest("MISSING_PARAM", "location is required: an ICAO station code, \"lat,lon\", or a place name");
+  const locationText: string = rawLocation;
   let station = "";
   let candidates: { icaoId: string; distanceKm: number }[] = [];
   let resolved: { place: string; lat: number; lon: number; distanceKm: number; geocoder: { url: string; bodySha256: string } | null } | null = null;
+  // W1b(b): every stationinfo bbox body fetched on a resolution path is
+  // receipted by hash alongside the observation body.
+  const stationInfoReceipts: { url: string; sha256: string }[] = [];
   const coordMatch = LATLON_RE.exec(rawLocation);
-  if (/^[A-Za-z][A-Za-z0-9]{3}$/.test(rawLocation) && !coordMatch) {
-    station = rawLocation.toUpperCase();
-  } else {
-    // Coordinates directly, or a place name through the geocoder (same
-    // fail-closed rules as the forecast slice: ambiguity refuses).
+  // A 4-character alphanumeric token reads as an explicit ICAO station.
+  // W1b(a): a purely ALPHABETIC 4-letter token is tried as a station
+  // first and, when no such station reports, falls through to the
+  // geocoder as a place name — "Rome", "Oslo" and "Lima" are places,
+  // not stations. A station that EXISTS but serves an unusable
+  // observation never falls through; that is an honest refusal.
+  // W1c: an "icao:XXXX" prefix is the clearly-station form — it forces
+  // the station path and skips the place-conflict check, because the
+  // caller has already said which side they mean.
+  const icaoPrefix = /^icao:([A-Za-z][A-Za-z0-9]{3})$/i.exec(rawLocation);
+  const icaoForm = !!icaoPrefix || (/^[A-Za-z][A-Za-z0-9]{3}$/.test(rawLocation) && !coordMatch);
+  const icaoFallthrough = !icaoPrefix && icaoForm && /^[A-Za-z]{4}$/.test(rawLocation);
+  if (icaoForm) station = (icaoPrefix ? icaoPrefix[1] : rawLocation).toUpperCase();
+  // Case rule: an EXACTLY-uppercase 4-letter token reads station-first
+  // and falls through to a place name only when no station reports — no
+  // dual-match check (KJFK, HECA serve their stations). A Titlecase or
+  // lowercase token that matches both sides refuses as ambiguous.
+  const exactUpper = /^[A-Z]{4}$/.test(rawLocation) && !icaoPrefix;
+  let fellThroughFrom: string | null = null;
+
+  interface Resolution {
+    candidates: { icaoId: string; distanceKm: number }[];
+    resolved: { place: string; lat: number; lon: number; distanceKm: number; geocoder: { url: string; bodySha256: string } | null };
+  }
+  // Coordinates directly, or a place name through the geocoder (same
+  // fail-closed rules as the forecast slice: ambiguity refuses).
+  async function resolveByPlaceOrCoords(): Promise<Resolution> {
     let lat: number, lon: number, place: string;
     let geocoder: { url: string; bodySha256: string } | null = null;
     if (coordMatch) {
@@ -95,9 +128,9 @@ export async function handleWeatherCheck(query: Record<string, string | undefine
       if (lat < -90 || lat > 90 || lon < -180 || lon > 180) throw badRequest("BAD_LOCATION", "latitude must be in [-90, 90], longitude in [-180, 180]");
       place = `${lat.toFixed(4)}, ${lon.toFixed(4)} (coordinates given directly, not geocoded)`;
     } else {
-      const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(rawLocation)}&count=10&language=en&format=json`;
+      const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationText)}&count=10&language=en&format=json`;
       const geoBody = await fetchText(geoUrl);
-      const hit = resolveGeocode(geoBody, rawLocation);
+      const hit = resolveGeocode(geoBody, locationText);
       lat = hit.latitude; lon = hit.longitude;
       place = `${hit.name}${hit.admin1 ? `, ${hit.admin1}` : ""}${hit.country ? `, ${hit.country}` : ""} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
       geocoder = { url: geoUrl, bodySha256: sha256Hex(Buffer.from(geoBody, "utf8")) };
@@ -108,6 +141,7 @@ export async function handleWeatherCheck(query: Record<string, string | undefine
     for (const half of [0.75, 2, 4]) {
       const boxUrl = `https://aviationweather.gov/api/data/stationinfo?bbox=${(lat - half).toFixed(3)},${(lon - half).toFixed(3)},${(lat + half).toFixed(3)},${(lon + half).toFixed(3)}&format=json`;
       const boxBody = await fetchText(boxUrl);
+      stationInfoReceipts.push({ url: boxUrl, sha256: sha256Hex(Buffer.from(boxBody, "utf8")) });
       try {
         found = nearestMetarStations(boxBody, lat, lon);
         break;
@@ -117,45 +151,113 @@ export async function handleWeatherCheck(query: Record<string, string | undefine
       }
     }
     if (found === null) throw unprocessable("STATION_NOT_FOUND", `no METAR-reporting station found within about 4 degrees of ${place}; no temperature is guessed`);
-    candidates = found;
-    resolved = { place, lat, lon, distanceKm: found[0].distanceKm, geocoder };
+    return { candidates: found, resolved: { place, lat, lon, distanceKm: found[0].distanceKm, geocoder } };
+  }
+
+  if (!icaoForm) {
+    const r = await resolveByPlaceOrCoords();
+    candidates = r.candidates;
+    resolved = r.resolved;
   }
 
   // Fetch the observation. An explicit ICAO station is queried once, as
   // before. A resolved place tries the nearest METAR-flagged stations in
   // distance order (a directory entry can list METAR yet not report —
   // live: EGRB near London) and serves the first fresh parseable one.
-  const tried: string[] = [];
-  let obs: ReturnType<typeof parseMetar> | undefined;
-  let body = "";
-  let lastError: { code?: string } | null = null;
-  const attemptOrder = candidates.length > 0 ? candidates.map((c) => c.icaoId) : [station];
-  let winner: string | null = null;
-  for (const id of attemptOrder) {
-    tried.push(id);
-    const metarUrl = `https://aviationweather.gov/api/data/metar?ids=${id}&format=json`;
-    let text: string;
-    try {
-      text = await fetchText(metarUrl);
-    } catch (e) {
-      lastError = e as { code?: string };
-      continue;
+  // W1b(c): a parse failure keeps the parser's own reason string.
+  interface Attempt {
+    winner: string | null;
+    obs: ReturnType<typeof parseMetar> | undefined;
+    body: string;
+    tried: string[];
+    lastError: { code?: string; reason?: string } | null;
+  }
+  async function attempt(ids: string[]): Promise<Attempt> {
+    const tried: string[] = [];
+    let obs: ReturnType<typeof parseMetar> | undefined;
+    let body = "";
+    let lastError: { code?: string; reason?: string } | null = null;
+    let winner: string | null = null;
+    for (const id of ids) {
+      tried.push(id);
+      const metarUrl = `https://aviationweather.gov/api/data/metar?ids=${id}&format=json`;
+      let text: string;
+      try {
+        text = await fetchText(metarUrl);
+      } catch (e) {
+        lastError = e as { code?: string };
+        continue;
+      }
+      if (text.trim() === "" || text.trim() === "[]") {
+        lastError = { code: "STATION_NOT_FOUND" };
+        continue;
+      }
+      try {
+        obs = parseMetar(text, id);
+        body = text;
+        winner = id;
+        lastError = null;
+        break;
+      } catch (e) {
+        lastError = { code: "NO_USABLE_OBSERVATION", reason: e instanceof Error ? e.message : String(e) };
+        continue;
+      }
     }
-    if (text.trim() === "" || text.trim() === "[]") {
-      lastError = { code: "STATION_NOT_FOUND" };
-      continue;
-    }
+    return { winner, obs, body, tried, lastError };
+  }
+
+  let run = await attempt(candidates.length > 0 ? candidates.map((c) => c.icaoId) : [station]);
+  if (run.winner !== null && icaoFallthrough && !exactUpper) {
+    // Dual-match check (Titlecase/lowercase tokens only): the token
+    // matched a reporting ICAO station. If a geocoder place also
+    // matches (Lima, Peru vs station LIMA in Turin), serving either
+    // side silently risks the wrong place — refuse and name both, with
+    // the unambiguous forms the caller can use instead. Exception: a
+    // geocoder hit within about 5 km of the station is the same place,
+    // so the station serves.
+    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locationText)}&count=10&language=en&format=json`;
+    const geoBody = await fetchText(geoUrl);
+    let placeLabel: string | null = null;
+    let placeHit: { latitude: number; longitude: number } | null = null;
+    let placeAmbiguous = false;
     try {
-      obs = parseMetar(text, id);
-      body = text;
-      winner = id;
-      lastError = null;
-      break;
+      const hit = resolveGeocode(geoBody, locationText);
+      placeHit = hit;
+      placeLabel = `${hit.name}${hit.admin1 ? `, ${hit.admin1}` : ""}${hit.country ? `, ${hit.country}` : ""} (${hit.latitude}, ${hit.longitude})`;
     } catch (e) {
-      lastError = { code: "NO_USABLE_OBSERVATION" };
-      continue;
+      const code = (e as { code?: string }).code;
+      if (code === "PLACE_NOT_FOUND") {
+        placeLabel = null; // No place by that name: the station reading is unambiguous.
+      } else if (code === "AMBIGUOUS_LOCATION") {
+        placeAmbiguous = true;
+      } else {
+        throw e;
+      }
+    }
+    if (placeLabel !== null && placeHit && haversineKm(run.obs!.latitude, run.obs!.longitude, placeHit.latitude, placeHit.longitude) <= 5) {
+      placeLabel = null; // The geocoder hit is the station's own place.
+    }
+    if (placeLabel !== null) {
+      throw unprocessable("AMBIGUOUS_LOCATION",
+        `"${locationText}" matches both a reporting ICAO station (${run.obs!.station} — ${run.obs!.name}, ${run.obs!.latitude}, ${run.obs!.longitude}) and the place ${placeLabel}; no temperature is guessed. For the station pass "icao:${station}"; for the place pass "place, country"`);
+    }
+    if (placeAmbiguous) {
+      throw unprocessable("AMBIGUOUS_LOCATION",
+        `"${locationText}" matches both a reporting ICAO station (${run.obs!.station} — ${run.obs!.name}) and several places by that name; no temperature is guessed. For the station pass "icao:${station}"; for a place pass "place, country"`);
     }
   }
+  if (run.winner === null && icaoFallthrough && run.lastError && run.lastError.code === "STATION_NOT_FOUND") {
+    // No station by that code reports: read the token as a place name.
+    fellThroughFrom = station;
+    const r = await resolveByPlaceOrCoords();
+    candidates = r.candidates;
+    resolved = r.resolved;
+    run = await attempt(candidates.map((c) => c.icaoId));
+  }
+
+  const { winner, tried, lastError } = run;
+  let obs = run.obs;
+  let body = run.body;
   if (winner === null) {
     if (lastError && lastError.code === "UPSTREAM_UNREACHABLE") {
       throw upstreamUnavailable("METAR_UNREACHABLE", "the aviationweather.gov METAR feed could not be reached");
@@ -167,7 +269,7 @@ export async function handleWeatherCheck(query: Record<string, string | undefine
     if (lastError && lastError.code === "STATION_NOT_FOUND") {
       throw unprocessable("STATION_NOT_FOUND", `no METAR for ${station}; the station may not exist or may not report — no temperature is guessed`);
     }
-    throw unprocessable("NO_USABLE_OBSERVATION", `${station}: unusable observation`);
+    throw unprocessable("NO_USABLE_OBSERVATION", `${station}: unusable observation (${lastError?.reason ?? "unknown reason"})`);
   }
   station = winner;
   const observation = obs!;
@@ -178,7 +280,9 @@ export async function handleWeatherCheck(query: Record<string, string | undefine
   const evidence = JSON.stringify({ station, as_of: asOf, observation,
     resolved: resolved ? { place: resolved.place, latitude: resolved.lat, longitude: resolved.lon,
       station_distance_km: resolved.distanceKm,
-      geocoder: resolved.geocoder ? { url: resolved.geocoder.url, sha256: resolved.geocoder.bodySha256 } : "not used (coordinates given directly)" } : "not used (explicit ICAO station)",
+      geocoder: resolved.geocoder ? { url: resolved.geocoder.url, sha256: resolved.geocoder.bodySha256 } : "not used (coordinates given directly)",
+      station_directory: stationInfoReceipts.length > 0 ? stationInfoReceipts : "not fetched" } : "not used (explicit ICAO station)",
+    icao_fallthrough: fellThroughFrom ? `no reporting station ${fellThroughFrom}; the token was then read as a place name` : "not used",
     source_policy: "NOAA aviationweather.gov measured METAR only; max age 90 minutes; station identity verified against the raw observation; never a forecast or model value",
     raw_bodies: { metar: body }, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, url, evidence, "NOAA measured METAR, station-verified, 90-minute freshness");
@@ -189,7 +293,7 @@ export async function handleWeatherCheck(query: Record<string, string | undefine
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
   const prefix = resolved
-    ? `For ${resolved.place}, the nearest reporting station is ${observation.station} (${observation.name}), ${resolved.distanceKm} km away. `
+    ? `${fellThroughFrom ? `No reporting station ${fellThroughFrom} — reading it as a place name. ` : ""}For ${resolved.place}, the nearest reporting station is ${observation.station} (${observation.name}), ${resolved.distanceKm} km away. `
     : "";
   const answer =
     prefix +
