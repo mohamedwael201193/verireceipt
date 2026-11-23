@@ -104,3 +104,10 @@ describe("THREAT_INTELLIGENCE_INDICATOR", () => {
     await app.close();
   });
 });
+it('handler never lists TEST-NET-3 in supplemental feeds or Tor context',async()=>{
+ stub();const base=globalThis.fetch;
+ vi.stubGlobal('fetch',async(u:unknown)=>{const s=String(u);const name=s.includes('torproject')?'tor':s.includes('feodo')?'feodo':s.includes('cinsscore')?'cins':null;return name?new Response(readFileSync(join(__dirname,`fixtures/threat-context/${name}.txt`),'utf8')):base(u as string)});
+ const out=await handleThreatIndicator({indicator:'203.0.113.1'});expect(out.malicious).toBe(false);expect(out.tor_exit).toBe(false);expect(out.context_listed_by).toEqual([]);
+ for(const row of out.context_feeds as any[]){expect(row.matched_entry).toBeNull();if(row.status==='answered')expect(row.listed).toBe(false);else expect(row.listed).toBeNull();expect(out.context_listed_by).not.toContain(row.name)}
+ expect(out.listed_by).not.toContain('Tor exit list');expect(out.listed_by).not.toContain('CINS Army');
+});

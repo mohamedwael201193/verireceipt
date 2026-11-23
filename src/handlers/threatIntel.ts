@@ -36,6 +36,7 @@
 // FAIL CLOSED: every feed must download and clear its truncation floor,
 // else 502 — a "clean" answer against a partial view is a wrong answer.
 // Lists are cached in memory for CACHE_TTL_MS; freshness is named.
+import { threatContext } from "./threatContext";
 import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -228,10 +229,12 @@ export async function handleThreatIndicator(query: Record<string, string | undef
   const fetchedAt = new Date().toISOString();
   const { type, matches } = matchIndicator(indicator, states);
   const malicious = matches.length > 0;
+  const context = await threatContext(indicator);
+  const listedBy = [...new Set([...matches.map(m => m.feed), ...((context.context_listed_by as string[]) ?? [])])];
   const asOf = new Date().toISOString();
   const feedMeta = states.map((s) => ({ feed: s.feed.name, url: s.feed.url, entries: s.lines.length, sha256: s.sha256, published: s.published }));
   const evidence = JSON.stringify({
-    indicator, type, malicious, as_of: asOf,
+    indicator, type, malicious, as_of: asOf, context,
     matches: matches.map((m) => ({ feed: m.feed, matched_entry: m.raw })),
     feeds: feedMeta,
     honesty: "a blocklist match means at least one feed lists the indicator; absence means only that NONE of these feeds list it as of their fetch times — blocklists are not safelists, and a delisted indicator is not a cleared one",
@@ -245,12 +248,14 @@ export async function handleThreatIndicator(query: Record<string, string | undef
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
   const checkedDesc = `${states.length} feeds (${feedMeta.map((f) => `${f.feed}: ${f.entries} entries`).join(", ")})`;
-  const answer = malicious
+  const coreAnswer = malicious
     ? `${indicator} IS reported as malicious: listed by ${matches.map((m) => `${m.feed} ("${m.raw}")`).join("; ")}. ` +
       `Checked against ${checkedDesc}.`
     : `${indicator} is NOT listed in any of the ${states.length} blocklists checked (${checkedDesc}) as of ${asOf}. ` +
       `That is NOT a clearance: blocklists are not safelists, and these feeds cover only what they have seen.`;
+  const answer = coreAnswer + ` Supplemental listed_by: ${listedBy.join(", ") || "none"}. ${context.tor_context ?? ""} ${context.context_scope}.`;
   return envelope(INTENT, {
+    ...context, listed_by: listedBy, indicator_type: type,
     malicious,
     indicator,
     type,
