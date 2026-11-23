@@ -28,6 +28,7 @@ import { diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, req
 import { handleMacro } from "./handlers/macroEconomic";
 import { handleTokenHolders } from "./handlers/tokenHolders";
 import { createWiredFinanceHandlers } from "./handlers/financeWired";
+import { createWiredWeatherHandlers } from "./handlers/weatherWired";
 import { ApiError, badRequest, errorBody } from "./core/errors";
 import { getDb } from "./core/db";
 import {
@@ -301,6 +302,16 @@ export function buildServer(): FastifyInstance {
   );
   app.get("/v1/liquidity", async (request) =>
     trackIntent("liquidity", () => wiredFinance.liquidity(asQuery(request.query))),
+  );
+  // Wired measured-weather observations (expansion): NOAA station
+  // observations only, exact reviewed station spellings, no forecast or
+  // reanalysis substitution.
+  const wiredWeather = createWiredWeatherHandlers();
+  app.get("/v1/weather", async (request) =>
+    trackIntent("weather", () => wiredWeather.current(asQuery(request.query))),
+  );
+  app.get("/v1/weather-history", async (request) =>
+    trackIntent("weather-history", () => wiredWeather.past(asQuery(request.query))),
   );
 
   // G10: serve stored receipts + their exact raw evidence bytes
