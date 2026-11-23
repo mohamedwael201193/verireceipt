@@ -268,7 +268,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/ip-geolocation", async (request) => trackIntent("ip-geolocation", () => handleIpGeolocation(asQuery(request.query))));
   app.get("/v1/game-result", async (request) => trackIntent("game-result", () => handleGameResult(asQuery(request.query))));
   app.get("/v1/corporate-registry", async (request) => trackIntent("corporate-registry", () => handleCorporateRegistry(asQuery(request.query))));
-  app.get("/v1/air-quality", async (request) => trackIntent("air-quality", () => handleAirQuality(asQuery(request.query))));
+  app.get("/v1/air-quality", async (request) => trackIntent("air-quality", () => handleAirQuality(exactQuery(request.raw.url ?? "", ["lat", "lon"]))));
   app.get("/v1/storm-alert", async (request) => trackIntent("storm-alert", () => handleStormAlert(asQuery(request.query))));
   app.get("/v1/news-headlines", async (request) => trackIntent("news-headlines", () => handleNewsHeadlines(asQuery(request.query))));
   app.get("/v1/news-search", async (request) => trackIntent("news-search", () => handleNewsSearch(asQuery(request.query))));

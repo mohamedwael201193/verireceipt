@@ -1,10 +1,11 @@
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 const scratch = mkdtempSync("/tmp/air-quality-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => { vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-11-23T00:30:00Z")); });
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 import { handleAirQuality, parseAirQuality } from "../src/handlers/airQuality";
 import { buildServer } from "../src/server";
 import { getReceiptEvidence } from "../src/core/storage";
@@ -36,7 +37,7 @@ describe("AIR_QUALITY_INDEX_GENERAL", () => {
     const ans = String(result.answer);
     expect(ans).toContain("modelled current conditions");
     expect(ans).toContain("not a ground-station measurement");
-    expect(ans).toContain("never a forecast");
+    expect(ans).toContain("CAMS forecast-model output");
     expect(result.confidence).toBe(0.8);
     const receipt = result.receipt as { receipt_id: string; raw_response_sha256: string; intent: string };
     expect(receipt.intent).toBe("AIR_QUALITY_INDEX_GENERAL");
@@ -69,6 +70,46 @@ describe("AIR_QUALITY_INDEX_GENERAL", () => {
     stub("ERR");
     await expect(handleAirQuality({ lat: "30", lon: "31" }))
       .rejects.toMatchObject({ status: 502, code: "OPEN_METEO_UNREACHABLE" });
+  });
+  it.each([
+    ["negative AQI", (d: any) => { d.current.us_aqi = -1; }],
+    ["stale timestamp", (d: any) => { d.current.time = "2026-11-22T00:00"; }],
+    ["future timestamp", (d: any) => { d.current.time = "2026-11-24T00:00"; }],
+    ["invalid calendar", (d: any) => { d.current.time = "2026-02-30T00:00"; }],
+    ["missing time", (d: any) => { delete d.current.time; }],
+    ["wrong units", (d: any) => { d.current_units.us_aqi = "EAQI"; }],
+    ["wrong pollutant units", (d: any) => { d.current_units.pm2_5 = "mg/m³"; }],
+    ["negative pollutant", (d: any) => { d.current.pm10 = -1; }],
+    ["invalid interval", (d: any) => { d.current.interval = 0; }],
+    ["non-UTC", (d: any) => { d.utc_offset_seconds = 3600; }],
+    ["missing grid", (d: any) => { delete d.latitude; }],
+  ])("refuses %s rather than assigning a good-air verdict", (_label, mutate) => {
+    const d = JSON.parse(cairo); mutate(d);
+    expect(() => parseAirQuality(JSON.stringify(d), {lat:30.0444,lon:31.2357})).toThrow();
+  });
+  it("refuses a valid-looking but wrong-location grid", () => {
+    const d = JSON.parse(cairo); d.latitude = 50; d.longitude = 10;
+    expect(() => parseAirQuality(JSON.stringify(d), {lat:30.0444,lon:31.2357})).toThrow();
+  });
+  it("accepts the exact freshness bound and fails beyond it", () => {
+    vi.mocked(Date.now).mockReturnValue(Date.parse("2026-11-23T03:00:00Z"));
+    expect(parseAirQuality(cairo).us_aqi).toBe(75);
+    vi.mocked(Date.now).mockReturnValue(Date.parse("2026-11-23T03:00:00.001Z"));
+    expect(() => parseAirQuality(cairo)).toThrow();
+  });
+  it("allows genuinely high AQI above 500, not an arbitrary capped range", () => {
+    const d=JSON.parse(cairo); d.current.us_aqi=600;
+    expect(parseAirQuality(JSON.stringify(d)).us_aqi).toBe(600);
+  });
+  it("refuses oversized upstream evidence", async () => {
+    stub(" ".repeat(64_001));
+    await expect(handleAirQuality({lat:"30",lon:"31"})).rejects.toMatchObject({status:502});
+  });
+  it("rejects duplicate and unknown query keys before source calls", async () => {
+    const fetch=vi.fn(); vi.stubGlobal("fetch",fetch); const app=buildServer();
+    try { for (const query of ["lat=30&lon=31&lat=50","lat=30&lon=31&extra=1"]) {
+      const res=await app.inject({method:"GET",url:"/v1/air-quality?"+query}); expect(res.statusCode).toBe(400);
+    } expect(fetch).not.toHaveBeenCalled(); } finally { await app.close(); }
   });
   it("GET /v1/air-quality is wired", async () => {
     const app = buildServer();
