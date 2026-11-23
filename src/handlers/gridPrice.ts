@@ -356,7 +356,11 @@ export async function handleGridPrice(
     );
   }
 
-  const intervalStart = start.toISOString();
+  let intervalStart = start.toISOString();
+  // Set when the requested interval had not finished and the latest
+  // finished interval is served instead (see the ruling below).
+  let requestedIntervalStart: string | undefined;
+  let substitutionNote: string | undefined;
   // `let`, not `const`: an on-demand fetch below takes real time, and a
   // row ingested by that fetch must not look "from the future" against
   // a timestamp captured before the fetch started (round-2 J2 M1's
@@ -366,21 +370,34 @@ export async function handleGridPrice(
   // above already ran against the call-start time.
   let nowMs = Date.now();
   const windowMin = zone.windowMin ?? 60;
-  const intervalEndMs = startMs + windowMin * 60_000;
+  const windowMs = windowMin * 60_000;
+  const intervalEndMs = startMs + windowMs;
   if (intervalEndMs > nowMs) {
-    const retryAfterSec = Math.max(1, Math.ceil((intervalEndMs - nowMs) / 1000));
-    throw unprocessable(
-      "FUTURE_INTERVAL",
-      "settlement interval starting " + intervalStart + " has not finished yet",
-      retryAfterSec,
-    );
+    // Delegated ruling (owner, 2026-11-23 02:17 EET, "do the right
+    // thing"): an interval that has not finished yet is served as the
+    // LATEST FINISHED interval, honestly labelled — the answer names the
+    // interval actually served, states the requested one was still in
+    // progress, and never presents the served interval as the asked one
+    // — instead of refusing with 422 FUTURE_INTERVAL. The receipt still
+    // covers exactly the interval served. When no cached/fetchable row
+    // exists for that finished interval the request still fails closed
+    // (GRID_CACHE_MISS), never a guess.
+    requestedIntervalStart = intervalStart;
+    const servedStartMs = Math.floor(nowMs / windowMs) * windowMs - windowMs;
+    intervalStart = new Date(servedStartMs).toISOString();
+    substitutionNote =
+      "The requested interval starting " +
+      requestedIntervalStart +
+      " was still in progress; this answer serves the latest finished interval starting " +
+      intervalStart +
+      " instead.";
   }
 
   // Window alignment: the interval must start on a settlement boundary.
-  // Checked after the future-interval check so an unfinished interval still
-  // reports FUTURE_INTERVAL (with retry_after_sec) rather than alignment.
-  const windowMs = windowMin * 60_000;
-  if (startMs % windowMs !== 0) {
+  // A substituted in-progress interval is never alignment-checked: the
+  // served latest-finished interval is aligned by construction, and the
+  // request was well-formed enough to name a real window.
+  if (substitutionNote === undefined && startMs % windowMs !== 0) {
     const containingStartMs = Math.floor(startMs / windowMs) * windowMs;
     throw unprocessable(
       "OFF_BOUNDARY_INTERVAL",
@@ -681,11 +698,12 @@ export async function handleGridPrice(
       intervalStart +
       ".";
   // The mapped answer must retain uncertainty even without sibling metadata.
-  const answer = unconfirmed
-    ? "Unverified cached price: " +
-      (gridMarketKind(zone.market) === "ELERING" ? ELERING_NO_HISTORICAL_REFETCH : FAILED_REVALIDATION) +
-      ". " + measuredAnswer
-    : measuredAnswer;
+  const answer =
+    (unconfirmed
+      ? "Unverified cached price: " +
+        (gridMarketKind(zone.market) === "ELERING" ? ELERING_NO_HISTORICAL_REFETCH : FAILED_REVALIDATION) +
+        ". " + measuredAnswer
+      : measuredAnswer) + (substitutionNote ? " " + substitutionNote : "");
   return envelope(
     "GRID_POWER_PRICE_GENERAL",
     {
@@ -694,6 +712,12 @@ export async function handleGridPrice(
       market: servedMarket,
       interval_start: intervalStart,
       currency,
+      ...(substitutionNote
+        ? {
+            requested_interval_start: requestedIntervalStart,
+            interval_substitution: "latest_finished",
+          }
+        : {}),
     },
     receipt,
     unconfirmed
