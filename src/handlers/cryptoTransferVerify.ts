@@ -8,13 +8,13 @@
 // read 2026-11-22): registered bootstrap intent with no response format
 // yet; the family shape is tx_hash + chain in, verified bool out.
 //
-// QUORUM (copied from txLookup's reviewed doctrine, not refactored):
+// QUORUM:
 // the chain's configured public RPCs are polled SEQUENTIALLY, one POST
 // at a time with a 12s budget each (concurrent fan-out self-times-out);
 // an answer needs at least two legs whose answer-relevant receipt
-// projection (effective status, from, to, logs) is identical, else an
-// honest 502. Endpoint-dependent envelope fields (l1Fee, pre-Byzantium
-// root-vs-status) are excluded from the projection on purpose.
+// projection (receipt identity/status/logs and transaction identity/value) is identical, else an
+// honest 502. Mined receipts with explicit status 0x0/0x1 only.
+// Endpoint-dependent envelope fields such as l1Fee are excluded.
 //
 // MATCHING: only what the receipt carries is verified. Expectations not
 // provided are not checked; every checked field is named in the answer.
@@ -36,7 +36,9 @@ const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 export const INTENT = "CRYPTO_TRANSFER_VERIFY_GENERAL";
 export const SUPPORTED = Object.keys(CHAIN_RPCS);
 
-interface RpcLog { address: string; topics: string[]; data: string }
+const WORD_RE = /^0x[0-9a-f]{64}$/;
+const INDEXED_ADDRESS_RE = /^0x0{24}[0-9a-f]{40}$/;
+const QUANTITY_RE = /^0x(?:0|[1-9a-f][0-9a-f]{0,63})$/;
 interface ReceiptProjection { status: number; from: string; to: string | null; logs: { address: string; topics: string[]; data: string }[] }
 
 /** Effective status: 1/0 from `status`, 1 when only pre-Byzantium `root` is present (copied from txLookup's receipt doctrine). */
@@ -69,14 +71,12 @@ export function findMatchingTransfer(
   if (want.token) {
     const token = want.token.toLowerCase();
     for (const l of projection.logs) {
-      if (l.address !== token || l.topics[0] !== TRANSFER_TOPIC || l.topics.length < 3) continue;
+      if (l.address !== token || l.topics[0] !== TRANSFER_TOPIC) continue;
+      if (l.topics.length !== 3 || !INDEXED_ADDRESS_RE.test(l.topics[1]) || !INDEXED_ADDRESS_RE.test(l.topics[2]) || !WORD_RE.test(l.data)) {
+        throw unprocessable("MALFORMED_LOG", "requested token Transfer log is not canonical ERC-20 encoding; ERC-721-shaped logs are not fungible transfers");
+      }
       const from = `0x${l.topics[1].slice(26)}`;
       const to = `0x${l.topics[2].slice(26)}`;
-      // A Transfer-topic log with empty or malformed data ("0x") must
-      // fail typed, never as a generic 500.
-      if (!/^0x[0-9a-f]+$/.test(l.data)) {
-        throw unprocessable("MALFORMED_LOG", "a Transfer-topic log from the requested token carried no parseable amount; never guessed");
-      }
       const amount = BigInt(l.data).toString(10);
       if (want.from && from !== want.from.toLowerCase()) continue;
       if (want.to && to !== want.to.toLowerCase()) continue;
@@ -96,7 +96,7 @@ export function findMatchingTransfer(
   return { kind: "native", from, to, amount_base_units: amount };
 }
 
-async function rpcCall(url: string, method: string, params: unknown[]): Promise<unknown> {
+async function rpcCall(url: string, method: string, params: unknown[]): Promise<{ result: unknown; raw: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
   try {
@@ -106,12 +106,29 @@ async function rpcCall(url: string, method: string, params: unknown[]): Promise<
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const d = JSON.parse(await res.text()) as { result?: unknown; error?: unknown };
+    const raw = await res.text();
+    const d = JSON.parse(raw) as { result?: unknown; error?: unknown };
     if (d.error) throw new Error("rpc error");
-    return d.result ?? null;
+    return { result: d.result ?? null, raw };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Both RPC methods must identify the requested transaction at the same mined block. */
+function projectIdentity(receipt: Record<string, unknown>, tx: Record<string, unknown>, hash: string): Record<string, unknown> {
+  const eq = (a: unknown, b: unknown) => typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase();
+  if (!eq(receipt.transactionHash, hash) || !eq(tx.hash, hash) ||
+      !TX_HASH_RE.test(String(receipt.blockHash)) || !eq(receipt.blockHash, tx.blockHash) ||
+      !QUANTITY_RE.test(String(receipt.blockNumber)) || !eq(receipt.blockNumber, tx.blockNumber) ||
+      !ADDR_RE.test(String(receipt.from)) || !eq(receipt.from, tx.from) ||
+      !(receipt.to === null && tx.to === null || ADDR_RE.test(String(receipt.to)) && eq(receipt.to, tx.to)) ||
+      !QUANTITY_RE.test(String(tx.value)) || (receipt.status !== "0x0" && receipt.status !== "0x1")) {
+    throw new Error("RPC transaction/receipt identity, mined status, or uint256 value invalid");
+  }
+  return { transaction_hash: hash.toLowerCase(), block_hash: String(receipt.blockHash).toLowerCase(),
+    block_number: receipt.blockNumber, from: String(tx.from).toLowerCase(),
+    to: tx.to === null ? null : String(tx.to).toLowerCase(), value: tx.value };
 }
 
 export async function handleCryptoTransferVerify(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
@@ -136,14 +153,18 @@ export async function handleCryptoTransferVerify(query: Record<string, string | 
     want.amount = amount;
   }
   // Sequential legs, one POST at a time (txLookup A2 doctrine).
-  const legs: { url: string; projection: string; receiptResult: unknown; txResult: unknown }[] = [];
+  const legs: { url: string; projection: string; receiptResult: unknown; txResult: unknown; rawBodies: string[] }[] = [];
   let errored = 0;
   for (const url of rpcs) {
     try {
-      const receiptResult = await rpcCall(url, "eth_getTransactionReceipt", [txHash]);
-      if (!receiptResult || typeof receiptResult !== "object") { legs.push({ url, projection: "null", receiptResult: null, txResult: null }); continue; }
-      const txResult = await rpcCall(url, "eth_getTransactionByHash", [txHash]);
-      legs.push({ url, projection: stableStringify(projectReceipt(receiptResult as Record<string, unknown>)), receiptResult, txResult });
+      const receiptReply = await rpcCall(url, "eth_getTransactionReceipt", [txHash]);
+      const receiptResult = receiptReply.result;
+      if (!receiptResult || typeof receiptResult !== "object") { legs.push({ url, projection: "null", receiptResult: null, txResult: null, rawBodies: [receiptReply.raw] }); continue; }
+      const txReply = await rpcCall(url, "eth_getTransactionByHash", [txHash]);
+      const txResult = txReply.result;
+      if (!txResult || typeof txResult !== "object") throw new Error("missing transaction");
+      const identity = projectIdentity(receiptResult as Record<string, unknown>, txResult as Record<string, unknown>, txHash);
+      legs.push({ url, projection: stableStringify({ identity, receipt: projectReceipt(receiptResult as Record<string, unknown>) }), receiptResult, txResult, rawBodies: [receiptReply.raw, txReply.raw] });
     } catch {
       errored++;
     }
@@ -175,11 +196,12 @@ export async function handleCryptoTransferVerify(query: Record<string, string | 
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({ tx_hash: txHash, chain, expectations: want, as_of: asOf,
     quorum: { chain_rpcs: rpcs.length, answered: legs.length, errored, agreeing: winner.length },
-    projection: JSON.parse(stableStringify(projection)), tx_result: txResult,
+    projection: JSON.parse(winner[0].projection), tx_result: txResult,
+    agreeing_legs: winner.map(l => ({ url: l.url, raw_bodies: l.rawBodies })),
     matched_transfer: match,
-    source_policy: "2-of-N identical answer-relevant receipt projections over the chain's configured public RPCs, sequential legs; only receipt-carried facts verified; amounts in base units",
+    source_policy: "2-of-N identical transaction identity/value and receipt projections over the chain's configured public RPCs, sequential legs; transaction identity/value and receipt facts verified; amounts in base units",
     fetched_at: fetchedAt });
-  const receipt = makeReceipt(INTENT, winner[0].url, evidence, "2-of-N public-RPC receipt quorum; receipt-carried facts only");
+  const receipt = makeReceipt(INTENT, winner[0].url, evidence, "2-of-N public-RPC transaction and receipt quorum");
   receipt.fetched_at = fetchedAt;
   try {
     await saveReceipt(receipt, evidence);

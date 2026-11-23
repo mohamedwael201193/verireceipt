@@ -105,3 +105,70 @@ describe("crypto-transfer malformed log data (reviewer nit)", () => {
       .toThrowError(expect.objectContaining({ status: 422, code: "MALFORMED_LOG" }));
   });
 });
+
+function stubLegs(change: (tx: any, receipt: any, leg: number) => void): void {
+  let leg = -1;
+  let current: any;
+  vi.stubGlobal('fetch', async (_url: unknown, init?: {body?: string}) => {
+    const method = JSON.parse(String(init?.body)).method;
+    if (method === 'eth_getTransactionReceipt') {
+      leg++;
+      current = {tx: structuredClone(txResult), receipt: structuredClone(receiptResult)};
+      change(current.tx, current.receipt, leg);
+      return new Response(JSON.stringify({jsonrpc:'2.0',id:1,result:current.receipt}));
+    }
+    return new Response(JSON.stringify({jsonrpc:'2.0',id:1,result:current.tx}));
+  });
+}
+describe('transaction identity/value quorum and canonical ERC-20 encoding', () => {
+  it('native amount from one leg cannot borrow a receipt quorum of three', async () => {
+    stubLegs((tx, _r, leg) => {tx.value = leg === 0 ? '0x1' : '0x2';});
+    const result = await handleCryptoTransferVerify({...base,amount:'1'});
+    expect(result.verified).toBe(false);
+    expect(result.legs_agreeing).toBe(2);
+    stubLegs((tx, _r, leg) => {tx.value = leg === 0 ? '0x1' : '0x2';});
+    const agreed = await handleCryptoTransferVerify({...base,amount:'2'});
+    expect(agreed.verified).toBe(true);
+    expect(agreed.matched_transfer).toMatchObject({amount_base_units:'2'});
+    const receipt = agreed.receipt as {receipt_id:string};
+    const stored = await getReceiptEvidence(receipt.receipt_id);
+    const evidence = JSON.parse(stored.evidence!);
+    expect(evidence.agreeing_legs).toHaveLength(2);
+    for (const leg of evidence.agreeing_legs) {
+      expect(JSON.parse(leg.raw_bodies[1]).result.value).toBe('0x2');
+      expect(JSON.parse(leg.raw_bodies[0]).result.transactionHash).toBe(TX_HASH);
+    }
+  });
+  it('all-distinct native values fail quorum', async () => {
+    stubLegs((tx,_r,leg) => {tx.value = '0x'+(leg+1);});
+    await expect(handleCryptoTransferVerify(base)).rejects.toMatchObject({code:'QUORUM_NOT_REACHED'});
+  });
+  it.each(['hash','blockHash','blockNumber','from','to','value','status'])('invalid transaction/receipt %s cannot supply an agreeing leg', async key => {
+    stubLegs((tx,r) => {
+      if(key==='status')r.status='0x2';
+      else tx[key]=key==='value'?'0x01':key==='blockNumber'?'0x1':'0x'+'f'.repeat(key==='hash'||key==='blockHash'?64:40);
+    });
+    await expect(handleCryptoTransferVerify({...base,token:USDC})).rejects.toMatchObject({code:'QUORUM_NOT_REACHED'});
+  });
+  it('different but internally consistent block identities do not form a quorum',async()=>{
+    stubLegs((tx,r,leg)=>{tx.blockHash=r.blockHash='0x'+String(leg+1).repeat(64);});
+    await expect(handleCryptoTransferVerify({...base,token:USDC})).rejects.toMatchObject({code:'QUORUM_NOT_REACHED'});
+  });
+  it.each(['short-from','short-to','high-padding','four-topics','short-data','oversized-data'])('refuses malformed or NFT-shaped transfer logs: %s',kind=>{
+    const p=projectReceipt(receiptResult);
+    const log=p.logs.find(l=>l.address===USDC.toLowerCase() && l.topics[0]==='0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef')!;
+    p.logs=[structuredClone(log)];
+    if(kind==='short-from')p.logs[0].topics[1]='0xab';
+    if(kind==='short-to')p.logs[0].topics[2]='0xcd';
+    if(kind==='high-padding')p.logs[0].topics[1]='0x'+'f'.repeat(64);
+    if(kind==='four-topics')p.logs[0].topics.push('0x'+'0'.repeat(64));
+    if(kind==='short-data')p.logs[0].data='0x1';
+    if(kind==='oversized-data')p.logs[0].data='0x'+'0'.repeat(128);
+    expect(()=>findMatchingTransfer(p,p.to,'0x0',{token:USDC})).toThrowError(expect.objectContaining({code:'MALFORMED_LOG'}));
+  });
+  it('a validly encoded ERC-721 four-topic event is refused with empty data',()=>{
+    const p=projectReceipt(receiptResult);const log=p.logs.find(l=>l.topics.length===3)!;
+    p.logs=[{...log,address:USDC.toLowerCase(),topics:[...log.topics,'0x'+'0'.repeat(63)+'1'],data:'0x'}];
+    expect(()=>findMatchingTransfer(p,p.to,'0x0',{token:USDC})).toThrowError(expect.objectContaining({code:'MALFORMED_LOG'}));
+  });
+});
