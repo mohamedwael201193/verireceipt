@@ -86,6 +86,7 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "eth.blockscout.com": "blockscout",
   "explorer.optimism.io": "blockscout",
   "api.crossref.org": "crossref",
+  "api.github.com": "github",
 };
 
 /** Hostname suffixes shared by every CHAIN_RPCS host family. */
@@ -199,6 +200,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   weather: "aviationweather-noaa",
   "weather-history": "ncei-noaa",
   "academic-search": "crossref",
+  "code-patch": "github",
 };
 
 /**
