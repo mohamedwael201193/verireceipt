@@ -57,3 +57,16 @@ describe("generic aggregator identity from actual quotes", () => {
   expect(observed.amount_out).toBe(p.destAmount); expect(observed.body).toBe(raw);
  });
 });
+
+it("rejects mutated source amount and output beyond the explicit whole-token scale bound", () => {
+ const raw = readFileSync(join(__dirname, "fixtures/route-aggregator/velora-usdc-weth.json"), "utf8");
+ const p = JSON.parse(raw).priceRoute;
+ const identity = { sellToken: p.srcToken, buyToken: p.destToken, amountIn: BigInt(p.srcAmount), sellDecimals: p.srcDecimals, buyDecimals: p.destDecimals };
+ const changedInput = JSON.parse(raw); changedInput.priceRoute.srcAmount = (identity.amountIn + 1n).toString();
+ expect(() => parseVelora(JSON.stringify(changedInput), p.blockNumber, identity)).toThrow();
+ const changedOutput = JSON.parse(raw); changedOutput.priceRoute.destAmount = (10n ** BigInt(identity.buyDecimals + 10)).toString();
+ expect(() => parseVelora(JSON.stringify(changedOutput), p.blockNumber, identity)).toThrow();
+ const low = { source: "Velora", url: "recorded", body: raw, fetched_at: "recorded", amount_out: "1", excluded: undefined as string | undefined };
+ expect(aggregatorSummary(BigInt(p.destAmount), low).median).toBe(BigInt(p.destAmount));
+ expect(low.excluded).toContain("agreement band");
+});

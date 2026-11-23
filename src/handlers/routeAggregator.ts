@@ -23,7 +23,9 @@ export function parseVelora(body: string, pin: number, identity: RouteIdentity =
     throw new Error("aggregator block outside pinned block..pinned block+2 freshness window");
   }
   const amount = BigInt(p.destAmount);
-  if (amount <= 0n || amount >= 2n ** 256n) throw new Error("invalid positive uint256-scale amount");
+  // One input token: refuse ten billion whole output tokens as a safety cap, not a price guarantee.
+  // Decimal-aware cap keeps 6/18-decimal quotes comparable; the independent 5% agreement gate still applies.
+  if (amount <= 0n || amount >= 10n ** BigInt(identity.buyDecimals + 10)) throw new Error("output exceeds positive ten-billion-token safety scale");
   return { amount, block: p.blockNumber };
 }
 export async function observeVelora(pin: number, parent?: AbortSignal, identity: RouteIdentity = DEFAULT_IDENTITY): Promise<AggregatorObservation> {
