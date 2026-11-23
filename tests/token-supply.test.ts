@@ -177,6 +177,31 @@ describe("display-label input validation", () => {
   });
 });
 
+describe("T2 expanded registry", () => {
+  it("lists the 21 newly verified ethereum symbols", () => {
+    const added = ["STETH","WSTETH","RETH","AAVE","CRV","LDO","COMP","SNX","GRT","ENS","APE","SAND","MANA","FRAX","BAT","ZRX","BNB","CRO","USDP","PYUSD","ONDO"];
+    for (const sym of added) expect(TOKEN_CONTRACTS.ethereum[sym], sym).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    expect(TOKEN_CONTRACTS.ethereum.MKR).toBeUndefined(); // bytes32 symbol: honestly excluded
+  });
+
+  it("answers a newly listed 6-decimal symbol (PYUSD) through the quorum", async () => {
+    stubSupplyFetch(Object.fromEntries(ETH.map((url) => [url, supplyBehavior(500000123456n, 6, "PYUSD")])));
+    const out = await handleTokenSupply({ token: "PYUSD on ethereum" });
+    expect(out.total_supply).toBe(500000.123456);
+    expect(out.token_symbol).toBe("PYUSD");
+  });
+
+  it("a newly listed symbol keeps its on-chain symbol case in the evidence (stETH)", async () => {
+    stubSupplyFetch(Object.fromEntries(ETH.map((url) => [url, supplyBehavior(9000000n * 10n ** 18n, 18, "stETH")])));
+    const out = await handleTokenSupply({ token: "STETH on ethereum" });
+    expect(out.total_supply).toBe(9000000);
+    const receipt = out.receipt as { receipt_id: string };
+    const evidence = await getReceiptEvidence(receipt.receipt_id);
+    const parsed = JSON.parse(evidence.evidence!) as { token_symbol_onchain: string };
+    expect(parsed.token_symbol_onchain).toBe("stETH");
+  });
+});
+
 describe("handleTokenSupply quorum (stubbed fetch)", () => {
   it.each([
     { token: `USDC (${USDC_ETH}) on Ethereum` },
