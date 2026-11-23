@@ -80,3 +80,6 @@ describe('immediate acquisition validation',()=>{
   expect(buys).toBe(kind==='duplicate-nonce'?2:1);expect(appends).toBe(kind==='duplicate-nonce'?1:0);
  });
 });
+
+
+it('raw numeric diagnostics cannot clear HOLD or feed calculations',()=>{const f=fixture();const o=f.observations[0];const primary={...o.source!,value:'1.501'};const diagnostic={fact_id:'price',label:'raw-value observation' as const,status:'REJECTED_SHAPED_MISMATCH' as const,request_hash:o.request_hash,provider_value:'1.501',shaped_value:'1.5',unit:o.unit,signal_hash:o.signal_hash,receipt_hash:o.receipt_hash,source:primary,failed_check:{name:'engine value equals provider answer' as const,ok:false as const,detail:'UNIT mismatch'},usable_for_calculations:false as const};f.expenses[0].useful=false;const p=buildPacket(f.spec,[f.observations[1]],f.expenses,f.claims,at,[diagnostic]);expect(p.outcome).toBe('HOLD');expect(p.calculations.implied_fdv).toBeUndefined();expect(p.claim_results.valuation_test).toBe('UNKNOWN');expect(p.rejected_raw_observations?.[0].failed_check.ok).toBe(false);expect(replayPacket(p).ok).toBe(false);});

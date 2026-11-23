@@ -69,7 +69,25 @@ export function liveResearchAdapter(options:LiveOptions):ResearchAdapter {
    if(!p.nonce||reserved===0n)throw new Error('purchase refused before signing; no adapter retry');
    const expense:Acquisition['expense']={fact_id:fact.id,attempt:0,nonce:p.nonce,reserved_uusdc:reserved.toString(),reported_charge_uusdc:p.paid_uusdc,settled_uusdc:null,status:p.paid_uusdc===null?'reserved-uncertain':'receipted-unsettled',receipt_hash:p.receipt_hash,useful:false};
    const no=(failure:string):Acquisition=>({expense,observation:null,failure});
-   if(!result.evidenceOk||!p.receipt_hash||!result.signal_hash||!rawCapture)return no(result.reasons.join('; ')||'node/receipt verification failed');
+   if(!result.evidenceOk||!p.receipt_hash||!result.signal_hash||!rawCapture){
+    const rejected=no(result.reasons.join('; ')||'node/receipt verification failed');
+    // Preserve a hash-bound raw numeric candidate only when the SOLE node
+    // failure is shaped equality. It stays diagnostic, never a usable fact.
+    const failures=result.node_checks.filter(c=>!c.ok);
+    if(p.receipt_hash&&result.signal_hash&&rawCapture&&failures.length===1&&failures[0].name==='engine value equals provider answer'&&result.miner_chain!=='failed'){
+      try{
+        const rawValue=result.provider_response?.[fact.field];
+        if(typeof rawValue!=='number'&&typeof rawValue!=='string')throw new Error('raw value not numeric');
+        const provider_value=String(rawValue);decimal(provider_value);
+        const shaped=JSON.parse(rawCapture.bodyText)?.result?.[fact.field];
+        if(typeof shaped!=='number'||!Number.isFinite(shaped))throw new Error('shaped numeric field missing');
+        const shaped_value=String(shaped);decimal(shaped_value);
+        const primary=await verifyResearchPrimary(fact,provider_value,{f,now,secUserAgent:options.secUserAgent});
+        if(primary.ok&&primary.source)rejected.raw_diagnostic={fact_id:fact.id,label:'raw-value observation',status:'REJECTED_SHAPED_MISMATCH',request_hash:factHash(fact),provider_value,shaped_value,unit:fact.unit,signal_hash:result.signal_hash,receipt_hash:p.receipt_hash,source:primary.source,failed_check:{name:'engine value equals provider answer',ok:false,detail:failures[0].detail},usable_for_calculations:false};
+      }catch{/* original failure and full expense are retained unchanged */}
+    }
+    return rejected;
+   }
    let value:string;try{if(typeof result.value!=='number'||!Number.isFinite(result.value))throw new Error('numeric field unavailable');value=String(result.value);decimal(value);}catch{return no('numeric value unavailable or not plain decimal');}
    const primary=await verifyResearchPrimary(fact,value,{f,now,secUserAgent:options.secUserAgent});
    if(!primary.ok||!primary.source||!primary.as_of)return no(primary.reasons.join('; '));

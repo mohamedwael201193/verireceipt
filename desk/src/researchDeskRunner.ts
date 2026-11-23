@@ -1,7 +1,7 @@
 // Orchestration only: adapters own purchases and source validation. No signer
 // or key import here. Persist the frozen spec before invoking any paid adapter.
-import {buildPacket,expenseSummary,factHash,hash,observationFailures,validateSpec,type ThesisSpec,type FactSpec,type Observation,type Expense,type Claim,type ResearchPacket} from './researchDesk.js';
-export interface Acquisition { observation:Observation|null; expense:Expense; failure:string|null }
+import {buildPacket,expenseSummary,factHash,hash,observationFailures,validateSpec,type ThesisSpec,type FactSpec,type Observation,type Expense,type Claim,type ResearchPacket,type RawValueDiagnostic} from './researchDesk.js';
+export interface Acquisition { observation:Observation|null; expense:Expense; failure:string|null; raw_diagnostic?:RawValueDiagnostic }
 export interface ResearchAdapter {
   /** False when no independently ranked distinct-provider route is available. */
   allowEscalation?:boolean;
@@ -24,7 +24,7 @@ export async function runResearchDesk(spec:ThesisSpec,claims:Claim[],adapter:Res
   buildPacket(spec,[],[],claims,spec.frozen_at);
   await store.freeze(structuredClone(spec),spec_hash);
   if(hash(spec)!==spec_hash)throw new Error('frozen spec changed');
-  const observations:Observation[]=[],expenses:Expense[]=[];
+  const observations:Observation[]=[],expenses:Expense[]=[],diagnostics:RawValueDiagnostic[]=[];
   let escalated=false;
   const remaining=()=>BigInt(spec.budget_uusdc)-expenses.reduce((n,e)=>n+BigInt(e.settled_uusdc??e.reserved_uusdc),0n);
   const buy=async(f:FactSpec,escalation:boolean)=>{
@@ -52,9 +52,10 @@ export async function runResearchDesk(spec:ThesisSpec,claims:Claim[],adapter:Res
       escalated=true;const second=await buy(f,true);if(second)a=second;
     }
     if(a.observation)observations.push(a.observation);
+    if(a.raw_diagnostic)diagnostics.push(structuredClone(a.raw_diagnostic));
   }
   if(hash(spec)!==spec_hash)throw new Error('frozen spec changed during acquisition');
-  const packet=buildPacket(spec,observations,expenses,claims,now().toISOString());
+  const packet=buildPacket(spec,observations,expenses,claims,now().toISOString(),diagnostics);
   if(packet.spec_hash!==spec_hash)throw new Error('packet spec hash differs from pre-purchase commitment');
   await store.finish(structuredClone(packet));return packet;
 }

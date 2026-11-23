@@ -147,3 +147,21 @@ allowance. The TVL failure therefore stays HOLD. A future fresh run is a new
 packet and does not rewrite the historical result. The documentation describing
 raw signal coverage and shaped convenience values is at
 https://docs.telegraphprotocol.com/docs/using/engine-ask.md .
+
+### Raw-value diagnostics do not waive shaped failures
+
+A future packet may carry `rejected_raw_observations` separately from usable
+`observations`. This records a hash-bound provider numeric candidate only
+when the sole node-verification failure is exact shaped/provider equality
+and the independent primary parser matches the raw candidate. The diagnostic
+has the literal label `raw-value observation`, the shaped numeric value, its
+FAILED equality check, receipt/signal binding, source bytes and an immutable
+`usable_for_calculations: false` flag. The expense remains wasted. The packet
+adds a HOLD reason and never feeds this candidate into its value map.
+
+This is diagnostic evidence, not a clean observation. It cannot make an
+incomplete note READY, clear a failed replay or retroactively change the A1
+or A2 packets. It explains whether source evidence supports a provider's raw
+number while the node's convenience shape differs. A clean next run still
+requires a shaped value that reproduces exactly under a documented rule, or
+an explicitly reviewed new policy with a different evidence contract.

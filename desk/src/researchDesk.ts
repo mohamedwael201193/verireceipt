@@ -101,9 +101,17 @@ export interface Expense {
   useful: boolean;
 }
 export interface Claim { id:string; fact_refs:string[]; assumption_refs:string[]; calculation_ref?:string; predicate?:{left:string;op:'<'|'<='|'>'|'>='|'==';right:string} }
+export interface RawValueDiagnostic {
+  fact_id:string; label:'raw-value observation'; status:'REJECTED_SHAPED_MISMATCH';
+  request_hash:string; provider_value:string; shaped_value:string; unit:string;
+  signal_hash:string; receipt_hash:string; source:SourceEvidence;
+  failed_check:{name:'engine value equals provider answer';ok:false;detail:string};
+  usable_for_calculations:false;
+}
 export interface ResearchPacket {
   version: typeof VERSION; spec:ThesisSpec; spec_hash:string; completed_at:string;
   observations:Observation[]; expenses:Expense[]; claims:Claim[];
+  rejected_raw_observations?:RawValueDiagnostic[];
   calculations:Record<string,{numerator:string;denominator:string;unit:string}>;
   claim_results:Record<string,'SUPPORTED'|'NOT_SUPPORTED'|'UNKNOWN'>;
   outcome:'READY'|'HOLD'; reasons:string[];
@@ -150,7 +158,7 @@ export function expenseSummary(expenses:Expense[]){
   }
   return {reserved_uusdc:reserved.toString(),reported_charge_uusdc:reported.toString(),settled_uusdc:settled.toString(),worst_case_uusdc:exposure.toString(),wasted_uusdc:wasted.toString(),uncertain_uusdc:uncertain.toString(),useful_outcome_cost_uusdc:exposure.toString()};
 }
-export function buildPacket(spec:ThesisSpec,observations:Observation[],expenses:Expense[],claims:Claim[],completed_at:string):ResearchPacket {
+export function buildPacket(spec:ThesisSpec,observations:Observation[],expenses:Expense[],claims:Claim[],completed_at:string,rejected_raw_observations:RawValueDiagnostic[]=[]):ResearchPacket {
   validateSpec(spec);invariant(timestamp(completed_at)&&Date.parse(completed_at)>=Date.parse(spec.frozen_at),'invalid completion time');
   const reasons:string[]=[];const values=new Map<string,Rational>();
   const ids=new Set(spec.facts.map(f=>f.id));
@@ -168,6 +176,17 @@ export function buildPacket(spec:ThesisSpec,observations:Observation[],expenses:
   for(const f of spec.facts){const paid=expenses.filter(e=>e.fact_id===f.id);invariant(paid.length<=2,'too many purchase attempts');invariant(paid.filter(e=>e.attempt===0).length<=1,'duplicate first purchase');if(paid.some(e=>e.attempt===1))invariant(paid.some(e=>e.attempt===0&&e.status!=='reserved-uncertain'&&!e.useful),'escalation needs known failed first attempt');}
   for(const o of observations){if(o.reuse==='fresh-purchase')invariant(expenses.some(e=>e.fact_id===o.fact_id&&e.receipt_hash===o.receipt_hash),'fresh purchase lacks expense');}
   if(BigInt(accounting.worst_case_uusdc)>BigInt(spec.budget_uusdc))reasons.push('note budget exceeded');
+  for(const d of rejected_raw_observations){
+    const fact=spec.facts.find(f=>f.id===d.fact_id);
+    invariant(fact&&d.label==='raw-value observation'&&d.status==='REJECTED_SHAPED_MISMATCH'&&d.usable_for_calculations===false,'invalid raw diagnostic');
+    invariant(d.request_hash===factHash(fact)&&d.unit===fact.unit&&digest(d.signal_hash)&&digest(d.receipt_hash),'raw diagnostic identity mismatch');
+    invariant(d.failed_check.name==='engine value equals provider answer'&&d.failed_check.ok===false,'raw diagnostic must preserve failed shaped check');
+    const raw=decimal(d.provider_value),shaped=decimal(d.shaped_value);
+    invariant(raw.n*shaped.d!==shaped.n*raw.d,'raw diagnostic needs actual numeric mismatch');
+    invariant(d.source.scope_hash===factHash(fact)&&d.source.value===d.provider_value&&createHash('sha256').update(d.source.raw_text).digest('hex')===d.source.content_sha256,'raw diagnostic source mismatch');
+    invariant(expenses.some(e=>e.fact_id===d.fact_id&&e.receipt_hash===d.receipt_hash&&!e.useful),'raw diagnostic needs wasted purchase evidence');
+    reasons.push(`${d.fact_id}: raw-value observation rejected because shaped check FAILED; diagnostic only`);
+  }
   const claim_results:ResearchPacket['claim_results']={};
   for(const c of claims){
     if(!c.predicate){claim_results[c.id]=c.fact_refs.every(id=>values.has(id))&&c.assumption_refs.every(id=>values.has(id))&&(!c.calculation_ref||values.has(c.calculation_ref))?'SUPPORTED':'UNKNOWN';continue;}
@@ -185,10 +204,10 @@ export function buildPacket(spec:ThesisSpec,observations:Observation[],expenses:
   const completed_reproducible_notes=reasons.length?0 as const:1 as const;
   const per_fact_worst_case_uusdc=Object.fromEntries(spec.facts.map(f=>[f.id,expenseSummary(expenses.filter(e=>e.fact_id===f.id)).worst_case_uusdc]));
   const metrics={completed_reproducible_notes,cost_per_useful_note_uusdc:completed_reproducible_notes?accounting.worst_case_uusdc:null,per_fact_worst_case_uusdc,reused_acquisition_cost_uusdc:observations.filter(o=>o.reuse==='fresh-receipt-reuse').reduce((n,o)=>n+BigInt(o.acquisition_cost_uusdc),0n).toString()};
-  const body={version:VERSION as typeof VERSION,spec,spec_hash:hash(spec),completed_at,observations,expenses,claims,calculations,claim_results,outcome:reasons.length?'HOLD' as const:'READY' as const,reasons,accounting,metrics};
+  const body={version:VERSION as typeof VERSION,spec,spec_hash:hash(spec),completed_at,observations,expenses,claims,calculations,claim_results,outcome:reasons.length?'HOLD' as const:'READY' as const,reasons,accounting,metrics,...(rejected_raw_observations.length?{rejected_raw_observations}: {})};
   return {...body,packet_hash:hash(body)};
 }
 export function replayPacket(packet:ResearchPacket, expectedSpecHash?:string):{ok:boolean;reasons:string[]} {
   if(expectedSpecHash!==undefined&&packet.spec_hash!==expectedSpecHash)return {ok:false,reasons:['frozen spec hash mismatch']};
-  try{const rebuilt=buildPacket(packet.spec,packet.observations,packet.expenses,packet.claims,packet.completed_at);return {ok:hash(rebuilt)===hash(packet)&&rebuilt.outcome==='READY',reasons:hash(rebuilt)===hash(packet)?rebuilt.reasons:['packet contents/hash mismatch']};}catch(e){return {ok:false,reasons:[e instanceof Error?e.message:String(e)]};}
+  try{const rebuilt=buildPacket(packet.spec,packet.observations,packet.expenses,packet.claims,packet.completed_at,packet.rejected_raw_observations??[]);return {ok:hash(rebuilt)===hash(packet)&&rebuilt.outcome==='READY',reasons:hash(rebuilt)===hash(packet)?rebuilt.reasons:['packet contents/hash mismatch']};}catch(e){return {ok:false,reasons:[e instanceof Error?e.message:String(e)]};}
 }
