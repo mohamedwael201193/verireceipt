@@ -54,7 +54,7 @@ export interface YahooQuote {
   marketTime: string; exchange: string;
 }
 
-export function parseYahooChart(raw: string, wantSymbol: string): YahooQuote {
+export function parseYahooChart(raw: string, wantSymbol: string, nowMs=Date.now()): YahooQuote {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -66,6 +66,7 @@ export function parseYahooChart(raw: string, wantSymbol: string): YahooQuote {
   if (chart.result === null || chart.error) {
     throw unprocessable("TICKER_NOT_FOUND", `no Yahoo chart for ${wantSymbol}; the symbol may not exist or may be delisted`);
   }
+  if(!Array.isArray(chart.result)||chart.result.length!==1)throw upstreamUnavailable('YAHOO_BAD_BODY','Yahoo chart must contain exactly one matching instrument');
   const meta = (chart.result as { meta?: unknown }[])[0]?.meta as Record<string, unknown> | undefined;
   if (!meta) throw upstreamUnavailable("YAHOO_BAD_BODY", "Yahoo result has no meta");
   if (typeof meta.symbol !== "string" || meta.symbol.toUpperCase() !== wantSymbol.toUpperCase()) {
@@ -79,8 +80,8 @@ export function parseYahooChart(raw: string, wantSymbol: string): YahooQuote {
     throw unprocessable("NO_USABLE_PRICE", `Yahoo carried no usable regular-market price for ${wantSymbol} (market may be closed with no last price)`);
   }
   const mt = meta.regularMarketTime;
-  if (typeof mt !== "number" || !Number.isFinite(mt)) {
-    throw upstreamUnavailable("YAHOO_BAD_BODY", "Yahoo meta has no regularMarketTime");
+  if (typeof mt !== "number" || !Number.isSafeInteger(mt) || mt<=0 || !Number.isFinite(new Date(mt*1000).getTime()) || mt*1000>nowMs+60000) {
+    throw upstreamUnavailable("YAHOO_BAD_BODY", "Yahoo meta has no valid non-future regularMarketTime");
   }
   return { symbol: meta.symbol, price, currency: "USD", instrumentType: "EQUITY",
     marketTime: new Date(mt * 1000).toISOString(),

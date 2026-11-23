@@ -91,3 +91,21 @@ describe("STOCK_PRICE_US_EQUITY", () => {
     await app.close();
   });
 });
+
+describe('stock source time and result identity boundaries',()=>{
+ it('accepted real AAPL capture retains exact source time and source price',()=>{
+  const body=aapl,meta=JSON.parse(body).chart.result[0].meta;
+  const quote=parseYahooChart(body,'AAPL');expect(quote.price).toBe(meta.regularMarketPrice);expect(quote.marketTime).toBe(new Date(meta.regularMarketTime*1000).toISOString());
+ });
+ it.each([0,-1,null,'1795467601',Infinity,1e30,1795467601.5])('invalid source time %j never becomes a current quote',regularMarketTime=>{
+  const j=JSON.parse(aapl);j.chart.result[0].meta.regularMarketTime=regularMarketTime;expect(()=>parseYahooChart(JSON.stringify(j),'AAPL')).toThrowError(expect.objectContaining({code:'YAHOO_BAD_BODY'}));
+ });
+ it('future source quote time refuses while a prior-session time is preserved, not refreshed',()=>{
+  const j=JSON.parse(aapl),now=Date.parse('2026-11-24T00:00:00Z');j.chart.result[0].meta.regularMarketTime=now/1000+61;
+  expect(()=>parseYahooChart(JSON.stringify(j),'AAPL',now)).toThrowError(expect.objectContaining({code:'YAHOO_BAD_BODY'}));
+  const q=parseYahooChart(aapl,'AAPL',now);expect(q.marketTime).toBe(new Date(JSON.parse(aapl).chart.result[0].meta.regularMarketTime*1000).toISOString());
+ });
+ it.each([[],{},[{meta:{}} ,{meta:{}}]])('malformed/multiple instrument result refuses %j',result=>{
+  const j=JSON.parse(aapl);j.chart.result=result;expect(()=>parseYahooChart(JSON.stringify(j),'AAPL')).toThrowError(expect.objectContaining({code:'YAHOO_BAD_BODY'}));
+ });
+});
