@@ -214,14 +214,14 @@ export async function handleTokenHolders(
   // A symbol request must match the indexer's own symbol for the
   // contract — a mismatch means the verified map drifted, and answering
   // would attribute another token's count to the asked symbol.
-  if (requestedSymbol && info.symbol && info.symbol.toUpperCase() !== requestedSymbol) {
+  if (requestedSymbol && (info.symbol === null || info.symbol.toUpperCase() !== requestedSymbol)) {
     throw unprocessable(
       "TOKEN_SYMBOL_MISMATCH",
       `indexer reports symbol ${info.symbol} for ${contract} on ${chain}, not ${requestedSymbol}; refusing to attribute the count`,
     );
   }
   const symbol = requestedSymbol ?? info.symbol ?? "unknown";
-  const asOf = info.sourceUpdated ?? new Date().toISOString();
+  const asOf = info.sourceUpdated ?? bodyFetchedAt;
 
   const fields: Record<string, unknown> = {
     token: contract,
