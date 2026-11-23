@@ -927,6 +927,45 @@ describe('handleTvl with fixture transport', () => {
     expect(b.source).toBe('DeFiLlama API (https://api.llama.fi/v2/chains)');
   });
 
+  it('an expired fresh-chains entry is never served: TTL expiry + failed refresh falls back degraded', async () => {
+    // Reviewer follow-up pin on 5098a46: after the 5-minute TTL the cached
+    // catalog value is stale; when the refresh then fails, the answer must
+    // come from the history point with its own date (named degraded),
+    // never from the expired entry.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date());
+      let chainsFetches = 0;
+      let failChains = false;
+      const base = fixtureFetch();
+      const fetchImpl = (async (url: string | URL | Request): Promise<Response> => {
+        const u = String(url);
+        if (u === 'https://api.llama.fi/v2/chains') {
+          chainsFetches++;
+          if (failChains) return new Response('unavailable', { status: 503 });
+        }
+        return base(url as string);
+      }) as typeof fetch;
+      const first = await handleTvl({ protocol: 'ethereum' }, { fetchImpl });
+      expect(first.tvl_usd).toBe(35974180659);
+      expect(first.source).toBe('DeFiLlama API (https://api.llama.fi/v2/chains)');
+      expect(chainsFetches).toBe(1);
+      vi.setSystemTime(Date.now() + 6 * 60 * 1000);
+      failChains = true;
+      const second = await handleTvl({ protocol: 'ethereum' }, { fetchImpl });
+      expect(chainsFetches).toBe(2);
+      expect(second.tvl_usd).toBe(35974180659);
+      // The history point's own date, not the expired fresh fetch time.
+      expect(second.as_of).toBe(LATEST_ISO);
+      expect(String(second.answer)).toContain('(degraded:');
+      expect(second.source).toBe(
+        'DeFiLlama API (https://api.llama.fi/v2/historicalChainTvl/Ethereum), latest history point (degraded: no usable live chains value)',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('chain entry without a catalog tvl falls back to the history point, named as degraded', async () => {
     // Tezos carries no `tvl` in the /v2/chains fixture, so the fresh read
     // has no usable value: the answer comes from the history point
