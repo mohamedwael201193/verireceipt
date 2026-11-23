@@ -513,3 +513,186 @@ export async function handleFx(
       (degradedReasons.length ? `; degraded: ${degradedReasons.join("; ")}` : ""),
   });
 }
+
+// FX_NOW_{EUR,CAD,SEK} — GET /v1/fx-now?currency=EUR
+//
+// Intent contract (https://devnode.telegraphprotocol.com/engine/v1/intents/FX_NOW_EUR,
+// read 2026-11-22; FX_NOW_CAD and FX_NOW_SEK are the same contract with
+// their own question key): request currency (string, e.g. EUR); scored
+// response rate = how many {currency} one US dollar buys, range
+// [0.0001, 100000]. These are the only three FX_NOW_* contracts in the
+// catalogue, so the panel is pinned to exactly those three codes; any
+// other well-formed code fails closed with 422 NO_DATA.
+//
+// Doctrine is identical to handleFx: the same five keyless sources fire
+// in parallel, pairwise agreement within 0.5% with the median served, a
+// straddled update serves the freshest dated source alone at 0.9, a
+// same-date disagreement beyond tolerance is refused, never averaged.
+// The keyed ExchangeRate-API leg keeps its EGP-only role and never joins
+// this panel. The served rate is USD -> {currency} (units of {currency}
+// per 1 USD), the contract's own direction.
+const FX_NOW_CURRENCIES = new Set(["EUR", "CAD", "SEK"]);
+const FX_NOW_RATE_MIN = 0.0001;
+const FX_NOW_RATE_MAX = 100000;
+
+export async function handleFxNow(
+  query: Record<string, string | undefined>,
+): Promise<Record<string, unknown>> {
+  const raw = query.currency?.trim();
+  if (!raw) {
+    throw badRequest("MISSING_PARAM", "currency is a required query parameter");
+  }
+  if (!CODE_RE.test(raw)) {
+    throw badRequest("INVALID_CURRENCY", `currency must be an ISO-4217 3-letter code; got ${raw}`);
+  }
+  const currency = raw.toUpperCase();
+  if (!FX_NOW_CURRENCIES.has(currency)) {
+    throw unprocessable(
+      "NO_DATA",
+      `FX_NOW serves only the reviewed contract currencies EUR, CAD and SEK; ${currency} has no FX_NOW contract`,
+    );
+  }
+  const intent = `FX_NOW_${currency}`;
+
+  const legs = [...SOURCES];
+  const settled = await settleWithStragglerGrace(
+    legs.map((s) => s.quote("USD", currency)),
+    STRAGGLER_GRACE_MS,
+    SOURCE_TIMEOUT_MS + 500,
+  );
+  const quotes: SourceQuote[] = [];
+  const failedSources: string[] = [];
+  const erroredSources: string[] = [];
+  const uncoveredSources: string[] = [];
+  settled.forEach((outcome, i) => {
+    if (outcome?.status === "fulfilled" && outcome.value !== null) {
+      quotes.push(outcome.value);
+    } else {
+      failedSources.push(legs[i].name);
+      if (outcome?.status === "fulfilled") {
+        uncoveredSources.push(legs[i].name);
+      } else {
+        erroredSources.push(legs[i].name);
+      }
+    }
+  });
+
+  if (quotes.length === 0) {
+    if (uncoveredSources.length === 0) {
+      throw upstreamUnavailable(
+        "FX_SOURCES_DOWN",
+        `every rate source errored for USD/${currency} (${erroredSources.join(", ")}); refusing to invent a rate`,
+      );
+    }
+    throw unprocessable(
+      "NO_DATA",
+      `no rate source covers USD/${currency} (answered without it: ${uncoveredSources.join(", ")}` +
+        (erroredSources.length ? `; errored: ${erroredSources.join(", ")}` : "") + `)`,
+    );
+  }
+
+  let serving = quotes;
+  let degradedReasons: string[] = [];
+  let straddledUpdate = false;
+  let straddleDetail = "";
+  if (quotes.length >= 2) {
+    const sorted = [...quotes].sort((a, b) => a.rate - b.rate);
+    const lo = sorted[0].rate;
+    const hi = sorted[sorted.length - 1].rate;
+    if ((hi - lo) / lo > AGREEMENT_TOLERANCE) {
+      const byFreshness = [...quotes].sort((a, b) => rateDayKey(b.rateDate) - rateDayKey(a.rateDate));
+      const freshest = byFreshness[0];
+      const stalest = byFreshness[byFreshness.length - 1];
+      if (rateDayKey(freshest.rateDate) > rateDayKey(stalest.rateDate)) {
+        straddledUpdate = true;
+        serving = [freshest];
+        straddleDetail =
+          `sources straddled a rate update: ${freshest.source} read ${freshest.rate} dated ` +
+          `${freshest.rateDate}, ${stalest.source} read ${stalest.rate} dated ${stalest.rateDate}`;
+        degradedReasons = [
+          `sources straddle a rate update for USD/${currency}: serving the freshest ` +
+            `(${freshest.source}=${freshest.rate} dated ${freshest.rateDate}); the stale source read ` +
+            `${stalest.rate} dated ${stalest.rateDate}`,
+        ];
+      } else {
+        const detail = quotes.map((q) => `${q.source}=${q.rate} (${q.rateDate})`).join("; ");
+        throw upstreamUnavailable(
+          "FX_SOURCES_DISAGREE",
+          `rate sources disagree on USD/${currency} beyond 0.5% on the SAME date: ${detail}; refusing to serve an averaged wrong answer`,
+        );
+      }
+    } else {
+      const median = sorted[Math.floor((sorted.length - 1) / 2)].rate;
+      serving = quotes.filter((q) => q.rate === median);
+      if (failedSources.length > 0) {
+        degradedReasons = [`sources unavailable or not covering: ${failedSources.join(", ")}`];
+      }
+    }
+  } else {
+    degradedReasons = [
+      `only ${quotes[0].source} covers USD/${currency} (${failedSources.join(", ")} did not answer)`,
+    ];
+  }
+  const winner = serving[0];
+  const rate = winner.rate;
+  if (!Number.isFinite(rate) || rate < FX_NOW_RATE_MIN || rate > FX_NOW_RATE_MAX) {
+    throw upstreamUnavailable(
+      "FX_RATE_OUT_OF_RANGE",
+      `served rate ${rate} is outside the contract range [${FX_NOW_RATE_MIN}, ${FX_NOW_RATE_MAX}]; refusing to serve it`,
+    );
+  }
+  const confidence = quotes.length >= 2 && degradedReasons.length === 0 && !straddledUpdate ? 1.0 : 0.9;
+
+  const receiptEvidence = JSON.stringify({
+    from_currency: "USD",
+    to_currency: currency,
+    rate_served: rate,
+    rate_direction: `units of ${currency} per 1 USD, the contract's own direction`,
+    agreement_tolerance: AGREEMENT_TOLERANCE,
+    sources: quotes.map((q) => ({
+      source: q.source,
+      url: q.url,
+      rate: q.rate,
+      rate_date: q.rateDate,
+      raw_body: q.rawBody,
+    })),
+    failed_sources: failedSources,
+  });
+  const receiptDoc: Receipt = makeReceipt(
+    intent,
+    winner.url,
+    receiptEvidence,
+    `${quotes.length}/${legs.length} rate sources`,
+  );
+  try {
+    await saveReceipt(receiptDoc, receiptEvidence);
+  } catch {
+    throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
+  }
+
+  const fields: Record<string, unknown> = {
+    rate,
+    currency,
+    rate_date: winner.rateDate,
+    sources_used: quotes.map((q) => q.source),
+  };
+
+  return envelope(intent, fields, receiptDoc, {
+    answer:
+      `1 USD buys ${rate} ${currency}` +
+      ` (${winner.source}, rates dated ${winner.rateDate}` +
+      (straddledUpdate
+        ? `; ${straddleDetail} — the freshest is served; they did NOT agree within 0.5%)`
+        : quotes.length > 1
+          ? `; cross-checked against ${quotes.length} sources agreeing within 0.5%)`
+          : "; single covering source)") +
+      ".",
+    verdict: "verified",
+    confidence,
+    source:
+      `Keyless public rate APIs (${quotes.map((q) => q.source).join(" + ")}); ` +
+      `sources snapshot at different times of day, so a 0.5% pairwise agreement tolerance is applied ` +
+      `and a wider split on the same snapshot date is refused, never averaged` +
+      (degradedReasons.length ? `; degraded: ${degradedReasons.join("; ")}` : ""),
+  });
+}

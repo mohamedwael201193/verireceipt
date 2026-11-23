@@ -18,7 +18,7 @@ import { handleValidator } from "./handlers/validator";
 import { handleGasPrice } from "./handlers/gasPrice";
 import { handleBalance } from "./handlers/walletBalance";
 import { handleTokenSupply } from "./handlers/tokenSupply";
-import { handleFx } from "./handlers/currencyConvert";
+import { handleFx, handleFxNow } from "./handlers/currencyConvert";
 import { handleDns } from "./handlers/dnsLookup";
 import { handleSsl } from "./handlers/sslVerification";
 import { handleCve } from "./handlers/cveLookup";
@@ -290,6 +290,9 @@ export function buildServer(): FastifyInstance {
   );
   app.get("/v1/fx", async (request) =>
     trackIntent("fx", () => handleFx(asQuery(request.query))),
+  );
+  app.get("/v1/fx-now", async (request) =>
+    trackIntent("fx-now", () => handleFxNow(asQuery(request.query))),
   );
   app.get("/v1/token-holders", async (request) =>
     trackIntent("token-holders", () => handleTokenHolders(asQuery(request.query))),
