@@ -154,7 +154,7 @@ describe("SSRF follow-ups (reviewer)", () => {
     const {measureGet}=await import("../src/handlers/ssrfGuard");
     const r=await measureGet({url:"http://example.com",hostname:"example.com",port:80,addresses:["2606:4700:4700::1111","93.184.216.34"]},1000,"test");
     expect(r.status).toBe(200);const call=vi.mocked(httpRequest).mock.calls.at(-1)! as any;
-    expect(call[1].family).toBe(4);expect(call[1].autoSelectFamily).toBe(false);
+    expect(call[1].family).toBe(4);
   });
   it("literal IPv6 uses the same global validation without an extra DNS resolution",async()=>{
     const target=await guardPublicHttpUrl("https://[2606:4700:4700::1111]", "url");

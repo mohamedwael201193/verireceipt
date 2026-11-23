@@ -117,7 +117,7 @@ export async function measureGet(target: GuardedTarget, timeoutMs: number, ua: s
     }, timeoutMs);
     try {
     request = (u.protocol === "https:" ? httpsRequest : httpRequest)(u, {
-      method: "GET", agent: false, autoSelectFamily: false, family: isIP(selected), headers: { "User-Agent": ua },
+      method: "GET", agent: false, family: isIP(selected), headers: { "User-Agent": ua },
       lookup: ((_host: string, options: any, callback: any) => {
         const record = { address: selected, family: isIP(selected) };
         // DNS lookup callbacks must be asynchronous, as the native resolver is.
