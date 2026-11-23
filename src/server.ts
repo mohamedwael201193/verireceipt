@@ -30,6 +30,7 @@ import { handleIpGeolocation } from "./handlers/ipGeolocation";
 import { handleGameResult } from "./handlers/gameResult";
 import { handleCorporateRegistry } from "./handlers/corporateRegistry";
 import { handleAirQuality } from "./handlers/airQuality";
+import { handleStormAlert } from "./handlers/stormAlert";
 import { handleEmailSecurity } from "./handlers/emailSecurity";
 import { exactQuery } from "./core/exactQuery";
 import { diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
@@ -244,6 +245,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/game-result", async (request) => trackIntent("game-result", () => handleGameResult(asQuery(request.query))));
   app.get("/v1/corporate-registry", async (request) => trackIntent("corporate-registry", () => handleCorporateRegistry(asQuery(request.query))));
   app.get("/v1/air-quality", async (request) => trackIntent("air-quality", () => handleAirQuality(asQuery(request.query))));
+  app.get("/v1/storm-alert", async (request) => trackIntent("storm-alert", () => handleStormAlert(asQuery(request.query))));
   app.get("/v1/email-security", async (request) => trackIntent("email-security", () => handleEmailSecurity(exactQuery(request.raw.url ?? "", ["domain", "record_type"])), "dns.google"));
   app.get("/v1/filings", async (request) =>
     trackIntent("filings", () => {
