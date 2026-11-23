@@ -14,7 +14,7 @@
 // (string), amount (number, optional); scored output converted_amount
 // (number, range [0.01, 1e8]).
 //
-// SOURCES (all keyless, no accounts):
+// SOURCES: five keyless, no accounts —
 //   1. Frankfurter (api.frankfurter.dev) — ECB euro reference rates,
 //      ~30 currencies, published daily on ECB business days.
 //   2. open.er-api.com — broad ISO coverage (used in-house by the grid
@@ -25,6 +25,9 @@
 //      codes.
 //   5. floatrates (www.floatrates.com) — daily fix snapshots with a
 //      per-currency date label, fiat codes.
+// — plus one KEYED leg, ExchangeRate-API v6 (env EXCHANGE_RATE_API_KEY,
+//   owner-directed testnet source 2026-11-23, to be registered with the owner's own email), restricted to the EGP
+//   panel and the NO_DATA coverage fallback. See quoteExchangeRateApi.
 // The three fix-anchored sources and the two recomputed ones snapshot
 // at different times; the served rate is the median of whichever subset
 // covers the pair (see SOURCES below for why the panel is five).
@@ -192,7 +195,11 @@ export function rateDayKey(rateDate: string): number {
  * stabler estimate of that reference than a three-source one, while a
  * stale or recomputed outlier can never move the middle value. Coverage
  * doctrine is unchanged: er-api and fawaz still carry the long tail of
- * non-ECB codes the three fix sources do not have. */
+ * non-ECB codes the three fix sources do not have. A KEYED sixth leg
+ * (ExchangeRate-API v6, owner-directed testnet source, 2026-11-23)
+ * exists outside this list and joins only in two narrow roles: the EGP
+ * panel, and the NO_DATA coverage fallback. Major-pair medians and the
+ * fix-dated outvote are untouched by it (see quoteExchangeRateApi). */
 const SOURCES: Array<{ name: string; quote: (from: string, to: string) => Promise<SourceQuote | null> }> = [
   { name: "frankfurter", quote: quoteFrankfurter },
   { name: "open-er-api", quote: quoteOpenErApi },
@@ -200,6 +207,46 @@ const SOURCES: Array<{ name: string; quote: (from: string, to: string) => Promis
   { name: "vatcomply", quote: quoteVatcomply },
   { name: "floatrates", quote: quoteFloatrates },
 ];
+
+/** ExchangeRate-API v6 (the KEYED sixth leg, 2026-11-23, owner-directed
+ * testnet source): GET /v6/<key>/latest/FROM, the same response shape as
+ * its keyless mirror open.er-api. The key exists ONLY in the fetch path
+ * (their sole auth mechanism is the URL path segment); the recorded
+ * evidence URL redacts it, and leg errors never carry the URL beyond the
+ * discarded error object. Participation is deliberately narrow so the
+ * five-source fix-weighted median for major pairs is untouched: the leg
+ * joins the initial parallel panel ONLY for pairs involving EGP (its
+ * named role: the keyless panel serves EGP from two recomputed sources
+ * only), and otherwise fires ALONE in the NO_DATA path, where it may
+ * cover a long-tail pair the keyless five lack. With no key configured
+ * the leg is absent entirely. */
+export async function quoteExchangeRateApi(from: string, to: string, key: string): Promise<SourceQuote | null> {
+  const url = `https://v6.exchangerate-api.com/v6/${key}/latest/${from}`;
+  let rawBody: string;
+  try {
+    rawBody = await fetchText(url, SOURCE_TIMEOUT_MS);
+  } catch {
+    // fetchText errors embed the full URL — including the key path
+    // segment. The leg's errors must be key-free in every
+    // materialization, so the original error is discarded here.
+    throw new Error("exchangerate-api leg fetch failed");
+  }
+  const parsed = JSON.parse(rawBody) as {
+    result?: unknown;
+    time_last_update_utc?: unknown;
+    rates?: Record<string, unknown>;
+  };
+  if (parsed.result !== "success") return null;
+  const rate = parsed.rates?.[to];
+  if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
+  return {
+    source: "exchangerate-api v6",
+    url: `https://v6.exchangerate-api.com/v6/<redacted-key>/latest/${from}`,
+    rawBody,
+    rate,
+    rateDate: String(parsed.time_last_update_utc ?? "unknown"),
+  };
+}
 
 /** Promise.allSettled with a straggler grace: resolves when every
  * promise settles, or when >= 2 fulfilled values exist and `graceMs`
@@ -278,8 +325,17 @@ export async function handleFx(
   // grace expires (a hung source costs ~0.8 s, never its full budget),
   // OR at the all-hung wall. Errors, no-coverage and still-hung sources
   // all count as failed and are named honestly in degradedReasons.
+  // The keyed sixth leg joins the panel only in its named EGP role;
+  // every other pair sees the exact five-source panel. With no key it
+  // is absent entirely (EXCHANGE_RATE_API_KEY, trimmed; blank = absent).
+  const exchangeKey = (process.env.EXCHANGE_RATE_API_KEY ?? "").trim();
+  const egpPair = from === "EGP" || to === "EGP";
+  const legs = [...SOURCES];
+  if (exchangeKey && egpPair) {
+    legs.push({ name: "exchangerate-api", quote: (f, t) => quoteExchangeRateApi(f, t, exchangeKey) });
+  }
   const settled = await settleWithStragglerGrace(
-    SOURCES.map((s) => s.quote(from, to)),
+    legs.map((s) => s.quote(from, to)),
     STRAGGLER_GRACE_MS,
     SOURCE_TIMEOUT_MS + 500,
   );
@@ -291,14 +347,34 @@ export async function handleFx(
     if (outcome?.status === "fulfilled" && outcome.value !== null) {
       quotes.push(outcome.value);
     } else {
-      failedSources.push(SOURCES[i].name);
+      failedSources.push(legs[i].name);
       if (outcome?.status === "fulfilled") {
-        uncoveredSources.push(SOURCES[i].name); // answered, but no rate for this pair
+        uncoveredSources.push(legs[i].name); // answered, but no rate for this pair
       } else {
-        erroredSources.push(SOURCES[i].name); // down, timed out, or bad response
+        erroredSources.push(legs[i].name); // down, timed out, or bad response
       }
     }
   });
+
+  // Coverage fallback: the keyless panel answered without this pair, so
+  // the keyed leg gets its one other shot — it may cover a long-tail
+  // pair the five lack. Same per-source budget, same honesty labels.
+  let fallbackFired = false;
+  if (quotes.length === 0 && uncoveredSources.length > 0 && exchangeKey && !egpPair) {
+    fallbackFired = true;
+    try {
+      const q = await quoteExchangeRateApi(from, to, exchangeKey);
+      if (q !== null) {
+        quotes.push(q);
+      } else {
+        failedSources.push("exchangerate-api");
+        uncoveredSources.push("exchangerate-api");
+      }
+    } catch {
+      failedSources.push("exchangerate-api");
+      erroredSources.push("exchangerate-api");
+    }
+  }
 
   if (quotes.length === 0) {
     if (uncoveredSources.length === 0) {
@@ -399,7 +475,7 @@ export async function handleFx(
     INTENT,
     winner.url,
     receiptEvidence,
-    `${quotes.length}/${SOURCES.length} rate sources`,
+    `${quotes.length}/${legs.length + (fallbackFired ? 1 : 0)} rate sources`,
   );
   try {
     await saveReceipt(receiptDoc, receiptEvidence);

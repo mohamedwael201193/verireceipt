@@ -19,7 +19,7 @@ afterAll(() => {
 import { ApiError } from "../src/core/errors";
 import { sha256Hex } from "../src/core/receipt";
 import { getReceiptEvidence } from "../src/core/storage";
-import { AGREEMENT_TOLERANCE, INTENT, handleFx, settleWithStragglerGrace } from "../src/handlers/currencyConvert";
+import { AGREEMENT_TOLERANCE, INTENT, handleFx, quoteExchangeRateApi, settleWithStragglerGrace } from "../src/handlers/currencyConvert";
 
 describe("settleWithStragglerGrace coverage accounting", () => {
   it("pending results are dense, explicit undefined slots and late completions cannot mutate the snapshot", async () => {
@@ -72,19 +72,29 @@ function floatratesBody(rate: number, date = "Sat, 21 Nov 2026 23:59:00 GMT"): s
   return JSON.stringify({ eur: { code: "EUR", rate: String(rate), date, inverseRate: "1" } });
 }
 
+function exchangeRateApiBody(rate: number, date = "Mon, 23 Nov 2026 00:02:27 +0000", to = "EUR"): string {
+  return JSON.stringify({
+    result: "success",
+    time_last_update_utc: date,
+    base_code: "USD",
+    rates: { [to]: rate },
+  });
+}
+
 interface StubOpts {
   frankfurter?: string | "ERR" | "HANG";
   openEr?: string | "ERR" | "HANG";
   fawaz?: string | "ERR" | "HANG";
   vatcomply?: string | "ERR" | "HANG";
   floatrates?: string | "ERR" | "HANG";
+  exchangeRateApi?: string | "ERR" | "HANG";
 }
 
 /** Stub global fetch across all five FX sources. "ERR" = source down;
  * "HANG" = source never answers (the 4 s per-source budget is NOT
  * shortened in tests — the failover assertions prove a hung source
  * never delays the answer). */
-function stubFxSources(opts: StubOpts): void {
+function stubFxSources(opts: StubOpts, counts?: { exchangeRateApi?: number }): void {
   const fetchStub = (url: unknown) => {
     const u = String(url);
     const pick = (body: string | "ERR" | "HANG" | undefined, label: string): Promise<Response> => {
@@ -93,6 +103,10 @@ function stubFxSources(opts: StubOpts): void {
       if (body === undefined) return Promise.reject(new Error(`unexpected fetch to ${u}`));
       return Promise.resolve(new Response(body, { status: 200 }));
     };
+    if (u.includes("v6.exchangerate-api.com")) {
+      if (counts) counts.exchangeRateApi = (counts.exchangeRateApi ?? 0) + 1;
+      return pick(opts.exchangeRateApi, "exchangerate-api");
+    }
     if (u.includes("frankfurter")) return pick(opts.frankfurter, "frankfurter");
     if (u.includes("open.er-api")) return pick(opts.openEr, "open.er-api");
     if (u.includes("jsdelivr")) return pick(opts.fawaz, "fawaz");
@@ -374,4 +388,163 @@ describe.skipIf(!FX_LIVE)("handleFx live (real keyless rate APIs, no mocks)", ()
     expect(rate).toBeLessThan(200);
     expect(result.converted_amount).toBeCloseTo(100 * rate, 4);
   }, 30000);
+});
+
+describe("keyed ExchangeRate-API sixth leg (EGP panel + NO_DATA fallback only)", () => {
+  const KEY = "synthetic-fx-key";
+  afterEach(() => {
+    delete process.env.EXCHANGE_RATE_API_KEY;
+  });
+
+  it("weekend split unchanged with the key set: the leg is never consulted for USD/EUR (fix-dated outvote holds)", async () => {
+    process.env.EXCHANGE_RATE_API_KEY = KEY;
+    const counts: { exchangeRateApi?: number } = {};
+    stubFxSources(
+      {
+        frankfurter: frankfurterBody(0.90992, "2026-11-20"),
+        vatcomply: vatcomplyBody(0.909918, "2026-11-20"),
+        floatrates: floatratesBody(0.90995, "Fri, 20 Nov 2026 23:59:00 GMT"),
+        openEr: openErBody(0.911256, "Sun, 22 Nov 2026 00:02:32 +0000"),
+        fawaz: fawazBody(0.91158, "2026-11-22"),
+        exchangeRateApi: exchangeRateApiBody(0.911),
+      },
+      counts,
+    );
+    const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
+    expect(result.rate).toBeCloseTo(0.90995, 6);
+    expect(result.confidence).toBe(1.0);
+    expect(result.sources_used).toHaveLength(5);
+    expect(counts.exchangeRateApi ?? 0).toBe(0);
+  });
+
+  it("EGP panel includes the keyed leg; the median is over the three EGP-capable sources and the key is nowhere in the evidence", async () => {
+    process.env.EXCHANGE_RATE_API_KEY = KEY;
+    stubFxSources({
+      frankfurter: frankfurterBody(0.91),
+      vatcomply: vatcomplyBody(0.91),
+      floatrates: floatratesBody(0.91),
+      openEr: openErBody(0.9101),
+      fawaz: fawazBody(0.9099),
+      exchangeRateApi: exchangeRateApiBody(47.63, "Mon, 23 Nov 2026 00:02:27 +0000", "EGP"),
+    });
+    const result = await handleFx({ from_currency: "USD", to_currency: "EGP", amount: "100" });
+    // EGP rates: open.er-api 47.65, fawaz 47.61, exchangerate-api 47.63 -> median 47.63.
+    expect(result.rate).toBeCloseTo(47.63, 6);
+    expect(result.converted_amount).toBeCloseTo(4763, 6);
+    expect(result.confidence).toBe(0.9); // three fix sources do not cover EGP: degraded, honestly
+    expect(result.sources_used).toHaveLength(3);
+    expect(result.sources_used).toContain("exchangerate-api v6");
+    const receipt = result.receipt as { receipt_id: string };
+    const ev = await getReceiptEvidence(receipt.receipt_id);
+    const evidence = ev.evidence!.toString("utf8");
+    expect(evidence).toContain("<redacted-key>");
+    expect(evidence).not.toContain(KEY);
+    expect(String(result.source)).not.toContain(KEY);
+  });
+
+  it("long-tail pair only the keyed leg covers is served alone at 0.9 with honest single-source naming", async () => {
+    process.env.EXCHANGE_RATE_API_KEY = KEY;
+    const counts: { exchangeRateApi?: number } = {};
+    stubFxSources(
+      {
+        frankfurter: frankfurterBody(0.91),
+        vatcomply: vatcomplyBody(0.91),
+        floatrates: floatratesBody(0.91),
+        openEr: openErBody(0.9101),
+        fawaz: fawazBody(0.9099),
+        exchangeRateApi: exchangeRateApiBody(3.25, "Mon, 23 Nov 2026 00:02:27 +0000", "ZZZ"),
+      },
+      counts,
+    );
+    const result = await handleFx({ from_currency: "USD", to_currency: "ZZZ" });
+    expect(counts.exchangeRateApi).toBe(1); // fallback fired exactly once, after the panel
+    expect(result.verdict).toBe("verified");
+    expect(result.rate).toBeCloseTo(3.25, 6);
+    expect(result.confidence).toBe(0.9);
+    expect(result.sources_used).toEqual(["exchangerate-api v6"]);
+    expect(String(result.answer)).toContain("single covering source");
+  });
+
+  it("NO_DATA stays 422 with the keyed leg named among the uncovered when it also lacks the pair", async () => {
+    process.env.EXCHANGE_RATE_API_KEY = KEY;
+    stubFxSources({
+      frankfurter: frankfurterBody(0.91),
+      vatcomply: vatcomplyBody(0.91),
+      floatrates: floatratesBody(0.91),
+      openEr: openErBody(0.9101),
+      fawaz: fawazBody(0.9099),
+      exchangeRateApi: exchangeRateApiBody(1.5, "Mon, 23 Nov 2026 00:02:27 +0000", "QQQ"),
+    });
+    await expectApiError(handleFx({ from_currency: "USD", to_currency: "ZZZ" }), 422, "NO_DATA");
+  });
+
+  it("no key: the leg is silently absent and the NO_DATA shape is unchanged", async () => {
+    const counts: { exchangeRateApi?: number } = {};
+    stubFxSources(
+      {
+        frankfurter: frankfurterBody(0.91),
+        vatcomply: vatcomplyBody(0.91),
+        floatrates: floatratesBody(0.91),
+        openEr: openErBody(0.9101),
+        fawaz: fawazBody(0.9099),
+        exchangeRateApi: exchangeRateApiBody(3.25, "Mon, 23 Nov 2026 00:02:27 +0000", "ZZZ"),
+      },
+      counts,
+    );
+    try {
+      await handleFx({ from_currency: "USD", to_currency: "ZZZ" });
+      throw new Error("expected NO_DATA");
+    } catch (err) {
+      const e = err as ApiError;
+      expect(e.code).toBe("NO_DATA");
+      expect(e.message).toContain("answered without it: frankfurter, open-er-api, fawaz, vatcomply, floatrates");
+      expect(e.message).not.toContain("exchangerate-api");
+    }
+    expect(counts.exchangeRateApi ?? 0).toBe(0);
+  });
+
+  it("EGP pair, keyed leg errors: the keyless panel answers degraded, naming the leg errored (legs/SOURCES index regression)", async () => {
+    process.env.EXCHANGE_RATE_API_KEY = KEY;
+    stubFxSources({
+      frankfurter: frankfurterBody(0.91),
+      vatcomply: vatcomplyBody(0.91),
+      floatrates: floatratesBody(0.91),
+      openEr: openErBody(0.9101),
+      fawaz: fawazBody(0.9099),
+      exchangeRateApi: "ERR",
+    });
+    const result = await handleFx({ from_currency: "USD", to_currency: "EGP" });
+    // open.er-api 47.65 + fawaz 47.61 -> lower-median 47.61, leg named errored.
+    expect(result.rate).toBeCloseTo(47.61, 6);
+    expect(result.confidence).toBe(0.9);
+    expect(result.sources_used).toHaveLength(2);
+    expect(String(result.source)).toContain("exchangerate-api");
+  });
+
+  it("EGP pair, keyed leg answers without EGP: uncovered, not a crash, keyless panel answers (legs/SOURCES index regression)", async () => {
+    process.env.EXCHANGE_RATE_API_KEY = KEY;
+    stubFxSources({
+      frankfurter: frankfurterBody(0.91),
+      vatcomply: vatcomplyBody(0.91),
+      floatrates: floatratesBody(0.91),
+      openEr: openErBody(0.9101),
+      fawaz: fawazBody(0.9099),
+      exchangeRateApi: exchangeRateApiBody(1.5, "Mon, 23 Nov 2026 00:02:27 +0000", "QQQ"),
+    });
+    const result = await handleFx({ from_currency: "USD", to_currency: "EGP" });
+    expect(result.rate).toBeCloseTo(47.61, 6);
+    expect(result.sources_used).toHaveLength(2);
+    expect(String(result.source)).toContain("exchangerate-api");
+  });
+
+  it("leg errors never carry the key", async () => {
+    stubFxSources({ exchangeRateApi: "ERR" });
+    try {
+      await quoteExchangeRateApi("USD", "EUR", KEY);
+      throw new Error("expected the leg to fail");
+    } catch (err) {
+      expect(String(err)).not.toContain(KEY);
+      expect(String(err)).not.toContain("v6.exchangerate-api.com/v6/" + KEY);
+    }
+  });
 });
