@@ -96,6 +96,7 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "hn.algolia.com": "hn-algolia",
   "router.project-osrm.org": "osrm",
   "mempool.space": "mempool-space",
+  "aviationweather.gov": "aviationweather-noaa",
   "api.coinbase.com": "coinbase",
   "feeds.bbci.co.uk": "bbc-rss",
   "ip-api.com": "ip-api",
@@ -225,6 +226,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "route-eta": "osrm",
   "mining-hashprice": "mempool-space",
   "crypto-price": "coinbase",
+  "weather-check": "aviationweather-noaa",
 };
 
 /**

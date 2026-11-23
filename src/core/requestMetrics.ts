@@ -26,6 +26,7 @@ const ROUTE_INTENTS: Record<string, string> = {
   "/v1/mining-hashprice": "MINING_HASHPRICE_VERIFY_GENERAL",
   "/v1/crypto-price": "CRYPTO_PRICE_USD",
   "/v1/crypto-transfer": "CRYPTO_TRANSFER_VERIFY_GENERAL",
+  "/v1/weather-check": "WEATHER_CHECK_TEMPERATURE",
 };
 // Only known parameter NAMES are emitted, including rejected aliases. Never values
 // or unknown names: callers can put a credential into an arbitrary query key.
