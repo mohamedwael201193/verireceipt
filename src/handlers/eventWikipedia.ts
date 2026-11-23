@@ -3,10 +3,10 @@ import {readPublicBody} from '../core/publicSource';
 import {envelope, makeReceipt} from '../core/receipt';
 import {saveReceipt} from '../core/storage';
 
-const normalize = (s: string) => s.normalize('NFKC').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const normalize = (s: string) => s.normalize('NFKC').toLowerCase().replace(/\bus\b/g, 'united states').replace(/[^a-z0-9]+/g, ' ').trim();
 /** Only a named event or a who-won question is supported, never an arbitrary proposition. */
 export function namedEvent(event: string): string {
-    const title = event.replace(/^who won (?:the )?/i, '').replace(/\?$/, '').trim();
+    const title = event.replace(/\bUS\b/gi, 'United States').replace(/^who won (?:the )?/i, '').replace(/\?$/, '').trim();
     if (/^(?:did|will|has|was|is|would|could|should|does|can)\b/i.test(title) || !/\b(?:19|20)\d{2}\b/.test(title))
         throw unprocessable('EVENT_NOT_FOUND', 'Wikipedia fallback requires an exact dated event title or who-won question; unsupported conditions are refused');
     return title;
@@ -16,7 +16,7 @@ export function electionWinner(summary: any, expectedTitle: string): {winner: st
         throw unprocessable('EVENT_NOT_FOUND', 'Wikipedia fallback currently supports completed past-year United States presidential elections only');
     if (summary.type !== 'standard' || normalize(summary.title ?? '') !== normalize(expectedTitle))
         throw unprocessable('EVENT_NOT_FOUND', 'Wikipedia event identity is not exact');
-    const winner = /^Election of ([A-Z][A-Za-z .'-]{2,70})$/.exec(summary.description ?? '')?.[1];
+    const winner = /^(?:Election|Re-election|Second election|First election) of ([A-Z][A-Za-z .'-]{2,70})$/.exec(summary.description ?? '')?.[1];
     const text = typeof summary.extract === 'string' ? summary.extract : '';
     const sentence = text.split(/(?<=[.!?])\s+/).find((s: string) => winner && s.includes(winner) && s.indexOf(winner) < s.indexOf(' defeated ') && !/\b(?:not|never|if|would|could|may|might|expected|projected)\b/i.test(s));
     const sourceUrl = summary.content_urls?.desktop?.page;

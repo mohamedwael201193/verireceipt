@@ -21,3 +21,15 @@ English Wikipedia contributors are credited under CC BY-SA 4.0. The source sente
 Eighteen event tests pass, including retained Polymarket controls, captured-body fallback, independent evidence digest, unsupported conditions, duplicate search identity, prospective/negated/contradictory text, future dates and persistence failure. Identity, negation and winner-evidence mutants are killed. Build passes.
 
 Generic sports summaries tested during research did not state winners, so sports support is deliberately not claimed. Additional event families need their own evidence parser and regression controls.
+
+## Election-description and title aliases
+
+Captured 2026-11-23 around 21:26 UTC from the Wikipedia summary endpoint:
+
+- https://en.wikipedia.org/api/rest_v1/page/summary/2024_United_States_presidential_election
+- https://en.wikipedia.org/api/rest_v1/page/summary/2016_United_States_presidential_election
+- https://en.wikipedia.org/api/rest_v1/page/summary/2012_United_States_presidential_election
+
+The source descriptions use Second election, First election and Re-election respectively. These descriptions are now accepted alongside Election, but still require the explicit past-tense winner-before-defeated sentence. The token US expands to United States before exact-title matching and search. No conditions or winner claims are stripped from the question.
+
+All three live local-handler checks succeeded for who-won questions using the US alias. Exact captured summary fixtures cover the same controls, plus refusal when the outcome sentence is removed. Existing negative/current/future/identity controls remain. Twenty-one event tests pass, both alias/description mutants are killed, and build passes.

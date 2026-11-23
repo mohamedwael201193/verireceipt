@@ -54,3 +54,11 @@ it('persistence failure cannot return a successful fallback',async()=>{
  stub();vi.mocked(saveReceipt).mockRejectedValueOnce(new Error('storage failure'));
  await expect(handleEventOutcome({event:title})).rejects.toMatchObject({code:'RECEIPT_PERSIST_FAILED'});
 });
+it.each([[2024,'Donald Trump'],[2016,'Donald Trump'],[2012,'Barack Obama']])('recognizes real captured %s election description while requiring the result sentence',async(year,winner)=>{
+ const captured=readFileSync(join(__dirname,'fixtures/event-wikipedia','summary-'+year+'.json'),'utf8');
+ const j=JSON.parse(captured);expect(electionWinner(j,j.title).winner).toBe(winner);
+ expect(()=>electionWinner({...j,extract:'The election was held in the United States.'},j.title)).toThrow();
+ vi.stubGlobal('fetch',async(url:unknown)=>new Response(String(url).includes('polymarket')?JSON.stringify({events:[]}):String(url).includes('/search/')?JSON.stringify({pages:[{title:j.title,key:j.title.replace(/ /g,'_')}]}):captured));
+ const out=await handleEventOutcome({event:'Who won the '+year+' US presidential election?'});expect(out.winner).toBe(winner);
+ expect(JSON.parse(vi.mocked(saveReceipt).mock.calls[0][1]).raw_bodies.summary).toBe(captured);
+});
