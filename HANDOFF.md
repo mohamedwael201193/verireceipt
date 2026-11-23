@@ -93,3 +93,5 @@ Private run directories: /home/sandbox/research-evidence/template-a3-20261123T15
 ## Unreviewed parser slice, 17:50 EET
 
 Implementation pending independent review: SEC reportDate retained/validated separately from filingDate, anchored issuer+CIK and report-period title grammar, structured recent assertion binding, duplicate report-date consistency, public replay rechecks hash-bound provider assertions against stored SEC bytes. Template/UI label tightened to Ethereum-contract implied valuation, not aggregate economic FDV. No paid run or retroactive result change. Existing real packets remain unchanged.
+
+SEC review correction pending: reportDate coverage checked before iteration, explicit punctuation normalization, filings_detail allowlist, and separate hash-bound providerResult assertion check in live Gate and public replay. Numeric/shaped reconciliation unchanged. No paid run.

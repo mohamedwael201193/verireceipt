@@ -584,7 +584,7 @@ export async function executeVerifiedPurchase(
     const primaryAnswer = reconciled?.result ?? body.result ?? {};
     let sourceVerification: SourceVerification | undefined;
     if (node.ok && input.intent === "REGULATORY_FILING_MONITOR_GENERAL") {
-      sourceVerification = await verifyFilingSource({ params: input.params, result: primaryAnswer }, { f, now: nowDate, secUserAgent: opts.secUserAgent });
+      sourceVerification = await verifyFilingSource({ params: input.params, result: primaryAnswer, providerResult: node.providerResponse }, { f, now: nowDate, secUserAgent: opts.secUserAgent });
       if (input.valueField !== "filing_count") {
         sourceVerification.status = "failed";
         sourceVerification.checks.push({name:"primary source supported filing field",ok:false,detail:"only independently recounted filing_count is supported"});

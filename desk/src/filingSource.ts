@@ -10,6 +10,7 @@ function parseRows(raw: unknown): Filing[] {
   if (arrays.some(x => !Array.isArray(x)) || arrays.some(x => x.length !== arrays[0].length) || arrays[0].length > 500000) {
     throw new Error('incomplete SEC filing arrays');
   }
+  if(j.reportDate!==undefined&&(!Array.isArray(j.reportDate)||j.reportDate.length!==arrays[0].length||!j.reportDate.every((d:unknown)=>typeof d==='string'&&(d===''||isoDate(d)))))throw new Error('malformed reportDate coverage');
   return j.accessionNumber.map((accession: unknown, i: number) => {
     const date = j.filingDate[i], form = j.form[i];
     if (typeof accession !== 'string' || !/^\d{10}-\d{2}-\d{6}$/.test(accession) || !isoDate(date) || typeof form !== 'string' || !form.trim()) {
@@ -43,7 +44,9 @@ function periodBounds(period: string, now: Date): {start: string; end: string} {
   }
   return {start:range[1],end:range[2]};
 }
-function nameKey(name: string): string { return name.toLowerCase().replace(/[^a-z0-9]/g,''); }
+// Case-fold ASCII and remove only explicitly permitted business-name punctuation.
+// Other scripts/symbols remain significant rather than silently disappearing.
+function nameKey(name: string): string { return name.toLowerCase().replace(/[ .,\-'&()]/g,''); }
 
 /** Bind optional paid assertions to the actual primary-matched rows. */
 function returnedAssertions(result:Record<string,unknown>, matching:Filing[], cik:number, issuer:string, form:string, queryEntity:string):boolean {
@@ -101,6 +104,7 @@ function returnedAssertions(result:Record<string,unknown>, matching:Filing[], ci
   }
   if(Array.isArray(result.filings_detail))for(const raw of result.filings_detail){
     let detail:Record<string,any>;try{detail=object(raw);}catch{return false;}
+    if(Object.keys(detail).some(k=>!['accession','accession_number','form','filing_date','cik','entity','url','report_date','title'].includes(k)))return false;
     const accession=detail.accession??detail.accession_number;
     if(typeof accession!=='string'||!byAccession.has(accession))return false;
     const row=byAccession.get(accession)!;
@@ -115,7 +119,7 @@ function returnedAssertions(result:Record<string,unknown>, matching:Filing[], ci
 }
 
 export async function verifyFilingSource(
-  input: { params: Record<string, string>; result: Record<string, unknown> },
+  input: { params: Record<string, string>; result: Record<string, unknown>; providerResult?: Record<string, unknown> },
   options: SourceOptions = {},
 ): Promise<SourceVerification> {
   const r = sourceResult();
@@ -186,7 +190,7 @@ export async function verifyFilingSource(
     r.details = {cik,form:spec.form,start:bounds.start,end:bounds.end,primary_count:matching.length,history_pages:names.size,unique_source_rows:unique.size};
     sourceCheck(r,'filing completeness',true,`read main document and all ${names.size} history pages, deduplicated by accession`);
     sourceCheck(r,'filing count',Number.isSafeInteger(input.result.filing_count) && input.result.filing_count === matching.length,`provider count ${String(input.result.filing_count)}; primary recount ${matching.length}`);
-    const assertionsOk = returnedAssertions(input.result,matching,cik,main.name,spec.form,input.params.entity);
+    const assertionsOk = returnedAssertions(input.result,matching,cik,main.name,spec.form,input.params.entity) && (!input.providerResult || returnedAssertions(input.providerResult,matching,cik,main.name,spec.form,input.params.entity));
     sourceCheck(r,'returned filing assertions',assertionsOk,'returned issuer, accession, URL, title, form and date assertions must bind to primary-matched rows');
   } catch (error) {
     sourceCheck(r,'filing evidence available',false,error instanceof Error?error.message:'source verification failed');

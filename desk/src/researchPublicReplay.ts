@@ -24,12 +24,12 @@ export async function replayPrimaryBytes(fact:FactSpec,o:Observation,historical_
  }catch{return false;}
 }
 // Re-evaluate provider assertions against fixed stored SEC bytes, never a paid fetch.
-export async function replayFilingAssertionsBytes(fact:FactSpec,o:Observation,answer:Record<string,unknown>,completed_at:string):Promise<boolean>{
+export async function replayFilingAssertionsBytes(fact:FactSpec,o:Observation,answer:Record<string,unknown>,completed_at:string,providerResult?:Record<string,unknown>):Promise<boolean>{
  try{
   if(!o.source||createHash('sha256').update(o.source.raw_text).digest('hex')!==o.source.content_sha256)return false;
   const reads=JSON.parse(o.source.raw_text);if(!Array.isArray(reads)||!reads.length)return false;let cursor=0;
   const stored:Fetch=async(input,init)=>{const row=reads[cursor++];if(!row||row.url!==String(input)||(row.method??'GET')!==(init?.method??'GET')||!Number.isFinite(Date.parse(row.observed_at))||Date.parse(row.observed_at)>Date.parse(completed_at))throw new Error('SEC assertion replay source mismatch');return new Response(row.raw_text,{status:200});};
-  const source=await verifyFilingSource({params:fact.params,result:answer},{f:stored,now:new Date(completed_at),secUserAgent:'Historical replay replay@example.invalid'});
+  const source=await verifyFilingSource({params:fact.params,result:answer,providerResult},{f:stored,now:new Date(completed_at),secUserAgent:'Historical replay replay@example.invalid'});
   return source.status==='verified'&&cursor===reads.length;
  }catch{return false;}
 }
@@ -53,7 +53,7 @@ export async function replayResearchDeskPublic(packet:ResearchPacket,expected_sp
    if(fact.intent==='REGULATORY_FILING_MONITOR_GENERAL'){
     if(!verified.ok||!verified.providerResponse)throw new Error('SEC assertion replay needs verified provider bytes');
     const answer=reconcilePrimaryAnswer(fact.intent,body.result??{},body.field_status??{},verified.providerResponse,true).result;
-    add(`${fact.id}: provider filing assertions replay`,await replayFilingAssertionsBytes(fact,o,answer,packet.completed_at),'Rechecked complete provider assertions against stored primary rows with distinct filing and report dates');
+    add(`${fact.id}: provider filing assertions replay`,await replayFilingAssertionsBytes(fact,o,answer,packet.completed_at,verified.providerResponse),'Rechecked complete provider assertions against stored primary rows with distinct filing and report dates');
    }
 
    const own=VERIRECEIPT_ONCHAIN_MINER_IDS.includes(String(receipt.miner));

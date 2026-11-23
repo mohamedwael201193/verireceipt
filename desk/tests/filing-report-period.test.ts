@@ -20,3 +20,18 @@ it('wallet-free assertion replay binds provider titles to stored reportDate byte
  const bad=answer();bad.recent[0].publication_date='2024-03-31';expect(await replayFilingAssertionsBytes(fact,observation,bad,at)).toBe(false);
  const shifted=structuredClone(observation);shifted.source.raw_text=shifted.source.raw_text.replace('2024-03-31','2024-03-30');expect(await replayFilingAssertionsBytes(fact,shifted,answer(),at)).toBe(false);
 });
+
+it.each(['Example Corp ☃ (CIK 987654)','Example Corp® (CIK 987654)','Example Corp\t(CIK 987654)'])('does not erase unlisted issuer characters: %s',async entity=>expect((await check({...answer(),entity})).status).toBe('failed'));
+it.each([null,{},['bad'],['2024-01-01']])('validates empty-row reportDate before iteration: %j',async reportDate=>expect((await check({filing_count:0},{accessionNumber:[],filingDate:[],form:[],reportDate})).status).toBe('failed'));
+it('permits explicitly listed punctuation and retains exact non-ASCII letters',async()=>{expect((await check({...answer(),entity:'Example Corp. (CIK 987654)'})).status).toBe('verified');expect((await check({...answer(),entity:'Example Cörp (CIK 987654)'})).status).toBe('failed');});
+
+it('does not let minimal shaped fields hide contradictory provider-only rows in source or replay',async()=>{
+ const {verifyResearchPrimary}=await import('../src/researchPrimary.js');const {replayFilingAssertionsBytes}=await import('../src/researchPublicReplay.js');const {reconcilePrimaryAnswer}=await import('../src/sourceTypes.js');
+ const fact={id:'filings',intent:'REGULATORY_FILING_MONITOR_GENERAL',params:{entity:'Form 10-Q filings by Example Corp (CIK 987654)',period:'2024'},field:'filing_count',unit:'filings',max_age_seconds:86400};
+ const provider=answer();provider.recent[0].publication_date='2024-03-31';const shaped={filing_count:1,entity:provider.entity};const result=reconcilePrimaryAnswer(fact.intent,shaped,{filing_count:'ok',entity:'ok'},provider,true).result;
+ const f=async()=>Response.json({cik:987654,name:'Example Corp',filings:{recent:recent(),files:[]}});const at='2026-01-01T00:00:00.000Z';
+ expect((await verifyFilingSource({params:fact.params,result,providerResult:provider},{f,now:new Date(at),secUserAgent:'Unit unit@example.invalid'})).status).toBe('failed');
+ const primary=await verifyResearchPrimary(fact,'1',{f,now:()=>new Date(at),secUserAgent:'Unit unit@example.invalid'});const observation={source:primary.source,as_of:primary.as_of,value:'1'} as any;
+ expect(await replayFilingAssertionsBytes(fact,observation,result,at,provider)).toBe(false);
+ const missing={...result,filing_count:null};expect((await verifyFilingSource({params:fact.params,result:missing,providerResult:answer()},{f,now:new Date(at),secUserAgent:'Unit unit@example.invalid'})).status).toBe('failed');
+});
