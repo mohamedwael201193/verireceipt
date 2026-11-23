@@ -89,7 +89,7 @@ async function aggregatedCrypto(asset: string, crypto: { id: string; symbol: str
   receipt.fetched_at = fetchedAt;
   try { await saveReceipt(receipt, evidence); } catch { throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable"); }
   return envelope(INTENT, { asset: crypto.symbol, resolved_name: crypto.name, market_cap_usd: cap,
-    volume_24h_usd: volume, metrics: ["methodology=CoinGecko aggregated market cap and rolling 24h volume", ...(staleReason ? [`stale=${staleReason}; original acquisition ${fetchedAt}`] : [])], as_of: asOf, stale: Boolean(staleReason) }, receipt,
+    volume_24h_usd: volume, metrics: ["methodology=CoinGecko aggregated market cap and rolling 24h volume", ...(staleReason ? [`stale=${staleReason}; original acquisition ${fetchedAt}`] : [])], as_of: asOf }, receipt,
     { answer: `${staleReason ? "STALE CACHED OBSERVATION, not current market data. " : ""}${crypto.name} (${crypto.symbol}) market cap: $${cap.toLocaleString("en-US")}; rolling 24h USD volume: $${volume.toLocaleString("en-US")}, source update ${asOf}. Source: CoinGecko aggregated market data, not the derived BTC emission-schedule methodology.${staleReason ? ` ${staleReason}; last real observation acquired ${fetchedAt}; no values estimated or updated.` : ""}`,
       verdict: staleReason ? "stale" : "verified", confidence: staleReason ? 0.5 : 0.85, source: `${url}; fetched ${fetchedAt}${staleReason ? `; STALE: ${staleReason}; attempted ${attemptedAt}` : ""}` });
 }

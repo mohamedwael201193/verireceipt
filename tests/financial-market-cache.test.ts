@@ -19,12 +19,12 @@ describe("bounded market observation cache", () => {
   it("reuses a validated observation for under30s across aliases, preserving raw bytes/acquisition", async () => {
     load(); const a = await eth(); vi.setSystemTime(start + 29999);
     const b = await handleFinancialData({ asset: "Ethereum" }); expect(fetch).toHaveBeenCalledTimes(1);
-    expect(b.stale).toBe(false); expect((b.receipt as any).fetched_at).toBe((a.receipt as any).fetched_at);
+    expect(b.verdict).toBe("verified"); expect(b).not.toHaveProperty("stale"); expect((b.receipt as any).fetched_at).toBe((a.receipt as any).fetched_at);
   });
   for (const status of [429, 500, 502, 503, 599]) {
     it(`discloses HTTP${status} fallback without changing source values or timestamps`, async () => {
       load(); const a = await eth(); vi.setSystemTime(start + 30000); load(status);
-      const b = await eth(); expect(b.stale).toBe(true); expect(b.verdict).toBe("stale");
+      const b = await eth(); expect(b).not.toHaveProperty("stale"); expect(b.verdict).toBe("stale");
       expect(b.confidence).toBe(0.5); expect(String(b.answer)).toMatch(/^STALE CACHED OBSERVATION/);
       expect(b.market_cap_usd).toBe(a.market_cap_usd); expect(b.volume_24h_usd).toBe(a.volume_24h_usd); expect(b.as_of).toBe(a.as_of);
       const r = b.receipt as any; expect(r.fetched_at).toBe((a.receipt as any).fetched_at);
@@ -37,7 +37,7 @@ describe("bounded market observation cache", () => {
   it("times out after6s and serves eligible prior evidence, never a late result", async () => {
     load(); await eth(); vi.setSystemTime(start + 30000);
     vi.stubGlobal("fetch", () => new Promise(() => {})); const p = eth(); await vi.advanceTimersByTimeAsync(6000);
-    expect((await p).stale).toBe(true);
+    expect((await p).verdict).toBe("stale");
   });
   it("does not mask a non-timeout transport failure", async () => {
     load(); await eth(); vi.setSystemTime(start + 30000); vi.stubGlobal("fetch", async () => { throw new Error("offline"); });
@@ -50,10 +50,10 @@ describe("bounded market observation cache", () => {
   }
   it("does not mask a malformed successful body or replace the good cache", async () => {
     load(); await eth(); vi.setSystemTime(start + 30000); load(200, "invalid-json");
-    await expect(eth()).rejects.toMatchObject({ code: "BAD_MARKET_DATA" }); load(502); expect((await eth()).stale).toBe(true);
+    await expect(eth()).rejects.toMatchObject({ code: "BAD_MARKET_DATA" }); load(502); expect((await eth()).verdict).toBe("stale");
   });
   it("requires both source and acquisition age <=5min, with no lifetime extension", async () => {
-    load(); await eth(); load(502); vi.setSystemTime(start + 298999); expect((await eth()).stale).toBe(true);
+    load(); await eth(); load(502); vi.setSystemTime(start + 298999); expect((await eth()).verdict).toBe("stale");
     vi.setSystemTime(start + 299001); await expect(eth()).rejects.toMatchObject({ status: 502 });
   });
   it("does not use a recent acquisition to renew a source update older than5min", async () => {
