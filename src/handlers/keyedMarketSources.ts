@@ -54,7 +54,7 @@ export interface GeckoTickerBinding {
 }
 /** Unconfigured keyed provider factory: no ticker binding is enabled here. */
 export function coinGeckoPriceSource(bindings: readonly GeckoTickerBinding[], approval: SourceApproval, apiKey: string): ObservationSource<PriceQuery, PriceValue> {
-    if (!apiKey)
+    if (!apiKey.trim())
         throw new Error('CoinGecko API key required');
     return {
         name: 'CoinGecko USD simple price', approval,
@@ -86,7 +86,7 @@ export interface CmcTickerBinding {
 }
 /** Unconfigured keyed provider factory: no ticker binding is enabled here. */
 export function coinMarketCapPriceSource(bindings: readonly CmcTickerBinding[], approval: SourceApproval, apiKey: string): ObservationSource<PriceQuery, PriceValue> {
-    if (!apiKey)
+    if (!apiKey.trim())
         throw new Error('CoinMarketCap API key required');
     return {
         name: 'CoinMarketCap USD latest quote', approval,
