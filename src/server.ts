@@ -1,3 +1,4 @@
+import { handleFraudDetection } from './handlers/fraudDetection';
 // VeriReceipt — Fastify server entrypoint.
 //
 // Zero-LLM. Routes the five deterministic intents to their handlers and
@@ -337,6 +338,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/gas-price", async (request) =>
     trackIntent("gas-price", () => handleGasPrice(asQuery(request.query))),
   );
+  app.get("/v1/fraud-detection", async (request) => trackIntent("fraud-detection", () => handleFraudDetection(asQuery(request.query))));
   app.get("/v1/transaction-risk", async (request) => trackIntent("transaction-risk", () => handleTransactionRisk(asQuery(request.query))));
   app.get("/v1/financial-data", async (request) => trackIntent("financial-data", () => handleFinancialData(asQuery(request.query))));
   app.get("/v1/cross-chain-state", async (request) => trackIntent("cross-chain-state", () => handleCrossChainState(asQuery(request.query))));

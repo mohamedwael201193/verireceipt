@@ -13,3 +13,5 @@
 *.md text eol=lf
 
 tests/fixtures/threat-context/feodo.txt -text
+
+tests/fixtures/fraud/sdn.csv -text
