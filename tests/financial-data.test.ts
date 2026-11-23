@@ -62,11 +62,13 @@ describe("FINANCIAL_DATA_GENERAL", () => {
     const result = await handleFinancialData({ asset: "aapl" });
     expect(result.asset).toBe("AAPL");
     expect(result.market_cap_usd).toBe(Math.round(342.56 * 14532182000));
-    expect(result.volume_24h_usd).toBe(Math.round(80692545 * 342.56));
+    expect(result.volume_24h_usd).toBeNull(); // rolling 24h is not served from a session figure
     const ans = String(result.answer);
     expect(ans).toContain("shares outstanding reported to the SEC as of 2026-10-23");
     expect(ans).toContain("derived");
     expect(ans).toContain("may be delayed");
+    expect(ans).toContain("Rolling 24h USD volume is not served");
+    expect((result.metrics as string[]).join(" ")).toContain("latest_regular_session_volume_usd=27642038215");
   });
   it("latestShares picks the most recent reporting date", () => {
     const s = latestShares(shares);

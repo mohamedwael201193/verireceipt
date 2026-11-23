@@ -20,10 +20,12 @@
 //     tip height (emission schedule formula published in the receipt).
 //   Everything else is 422 UNSUPPORTED_ASSET.
 //
-// VOLUME: equity volume_24h_usd = Yahoo regularMarketVolume x price
-// (the latest regular session, named as such). BTC has no keyless
-// measured 24h USD volume in this slice: the field is null and the
-// answer says why. No figure is ever invented.
+// VOLUME: the contract field is ROLLING 24h USD volume. Yahoo's
+// keyless chart carries only the latest regular session's share
+// volume, not a rolling 24h figure, so volume_24h_usd is null for
+// BOTH equities and BTC, with the reason named; the session volume is
+// reported separately in metrics, honestly labelled. No figure is
+// ever invented.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -158,13 +160,17 @@ export async function handleFinancialData(query: Record<string, string | undefin
   const marketTime = typeof meta.regularMarketTime === "number" ? new Date(meta.regularMarketTime * 1000).toISOString() : "unknown";
   const cap = Math.round(price * shares.val);
   if (cap <= 0 || cap > 1e15) throw unprocessable("OUT_OF_CONTRACT_RANGE", "the computed cap is outside the contract range; refusing to serve it");
-  const volumeUsd = Number.isFinite(volumeShares) && volumeShares >= 0 ? Math.round(volumeShares * price) : null;
+  // The contract field is rolling 24h USD volume; Yahoo's keyless chart
+  // carries only the latest regular session, so the field is null.
+  const volumeUsd: number | null = null;
+  const sessionVolumeUsd = Number.isFinite(volumeShares) && volumeShares >= 0 ? Math.round(volumeShares * price) : null;
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({ asset: upper, as_of: asOf, cik: cik10,
-    derivation: "market_cap_usd = Yahoo regularMarketPrice x SEC EDGAR dei:EntityCommonStockSharesOutstanding (latest reported); volume_24h_usd = Yahoo regularMarketVolume (latest regular session, named) x price; Yahoo's own market-cap endpoints are crumb-gated, so the cap is derived, not copied",
+    derivation: "market_cap_usd = Yahoo regularMarketPrice x SEC EDGAR dei:EntityCommonStockSharesOutstanding (latest reported); volume_24h_usd is null: the contract field is rolling 24h USD volume and Yahoo's keyless chart carries only the latest regular session (reported separately in metrics); Yahoo's own market-cap endpoints are crumb-gated, so the cap is derived, not copied",
     price_usd: price, market_time: marketTime, shares_outstanding: shares.val,
     shares_as_of: shares.end, shares_filed: shares.filed, shares_accession: shares.accn,
     volume_shares: Number.isFinite(volumeShares) ? volumeShares : null, market_cap_usd: cap, volume_24h_usd: volumeUsd,
+    session_volume_usd: sessionVolumeUsd,
     raw_bodies: { company_tickers: tickersBody, sec_shares: sharesBody, yahoo_chart: chartBody }, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, `${TICKERS_URL} + data.sec.gov + query1.finance.yahoo.com`, evidence, "SEC EDGAR shares outstanding x Yahoo regular-market price; derivation disclosed");
   receipt.fetched_at = fetchedAt;
@@ -174,11 +180,12 @@ export async function handleFinancialData(query: Record<string, string | undefin
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
   const answer = `${upper} market cap: $${cap.toLocaleString("en-US")}, derived as the Yahoo regular-market price ($${price}, exchange time ${marketTime}) x ${shares.val.toLocaleString("en-US")} shares outstanding reported to the SEC as of ${shares.end} (filed ${shares.filed}, accession ${shares.accn}). ` +
-    (volumeUsd !== null ? `Latest regular-session volume: $${volumeUsd.toLocaleString("en-US")} (${volumeShares.toLocaleString("en-US")} shares x the same price). ` : "Volume is not served: the price source carried none. ") +
+    (sessionVolumeUsd !== null ? `Rolling 24h USD volume is not served (the keyless source carries only the latest regular session: $${sessionVolumeUsd.toLocaleString("en-US")} in that session). ` : "Volume is not served: the price source carried none. ") +
     `The cap is derived from two named sources, not copied from a vendor; the quote may be delayed.`;
   return envelope(INTENT, {
     asset: upper, market_cap_usd: cap, volume_24h_usd: volumeUsd,
-    metrics: [`shares_outstanding=${shares.val} as of ${shares.end} (filed ${shares.filed}, ${shares.accn})`, `price_usd=${price} at ${marketTime}`, "derivation=price x shares outstanding"],
+    metrics: [`shares_outstanding=${shares.val} as of ${shares.end} (filed ${shares.filed}, ${shares.accn})`, `price_usd=${price} at ${marketTime}`, "derivation=price x shares outstanding",
+      `latest_regular_session_volume_usd=${sessionVolumeUsd ?? "none"} (not rolling 24h)`],
     as_of: asOf,
   }, receipt, { answer, verdict: "verified", confidence: 0.85,
     source: `SEC EDGAR (${TICKERS_URL} + companyconcept) + Yahoo chart; fetched ${fetchedAt}` });
