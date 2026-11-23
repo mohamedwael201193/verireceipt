@@ -17,6 +17,7 @@
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+import { cachedMarketBody } from "./marketSourceCache";
 
 const SOURCE_TIMEOUT_MS = 10000;
 const UA = "VeriReceipt/2.0 financial-data observer (+https://verireceipt.vercel.app)";
@@ -55,32 +56,42 @@ export function resolveSec(entries: SecEntry[], asset: string): SecEntry | undef
 
 async function aggregatedCrypto(asset: string, crypto: { id: string; symbol: string; name: string }): Promise<Record<string, unknown>> {
   const url = `https://api.coingecko.com/api/v3/simple/price?ids=${crypto.id}&vs_currencies=usd&include_market_cap=true&include_24hr_vol=true&include_last_updated_at=true`;
-  const fetchedAt = new Date().toISOString();
-  let body: string;
-  try { body = await fetchText(url); } catch { throw upstreamUnavailable("SOURCE_UNREACHABLE", "CoinGecko market data unavailable"); }
-  let data: Record<string, unknown>;
-  try { data = JSON.parse(body)?.[crypto.id]; } catch { throw upstreamUnavailable("BAD_MARKET_DATA", "CoinGecko returned malformed JSON"); }
-  const cap = data?.usd_market_cap;
-  const volume = data?.usd_24h_vol;
-  const updated = data?.last_updated_at;
-  if (typeof cap !== "number" || !Number.isFinite(cap) || cap <= 0 || cap > 1e15 ||
-      typeof volume !== "number" || !Number.isFinite(volume) || volume < 0 || volume > 1e15 ||
-      typeof updated !== "number" || !Number.isFinite(updated) || updated <= 0 ||
-      updated * 1000 > Date.now() + 60000 || Date.now() - updated * 1000 > 86400000) {
-    throw upstreamUnavailable("BAD_MARKET_DATA", "CoinGecko cap, volume or update time is missing, stale or outside the contract range");
+  const validate = (body: string): number => {
+    let data: Record<string, unknown>;
+    try { data = JSON.parse(body)?.[crypto.id]; } catch { throw upstreamUnavailable("BAD_MARKET_DATA", "CoinGecko returned malformed JSON"); }
+    const cap = data?.usd_market_cap;
+    const volume = data?.usd_24h_vol;
+    const updated = data?.last_updated_at;
+    if (typeof cap !== "number" || !Number.isFinite(cap) || cap <= 0 || cap > 1e15 ||
+        typeof volume !== "number" || !Number.isFinite(volume) || volume < 0 || volume > 1e15 ||
+        typeof updated !== "number" || !Number.isFinite(updated) || updated <= 0 ||
+        updated * 1000 > Date.now() + 60000 || Date.now() - updated * 1000 > 86400000) {
+      throw upstreamUnavailable("BAD_MARKET_DATA", "CoinGecko cap, volume or update time is missing, stale or outside the contract range");
+    }
+    return updated * 1000;
+  };
+  let observation: Awaited<ReturnType<typeof cachedMarketBody>>;
+  try { observation = await cachedMarketBody(crypto.id, validate); }
+  catch (error) {
+    if (error && typeof error === "object" && "code" in error) throw error;
+    throw upstreamUnavailable("SOURCE_UNREACHABLE", "CoinGecko market data unavailable");
   }
+  const { body, fetchedAt, staleReason, attemptedAt } = observation;
+  const data = JSON.parse(body)[crypto.id];
+  const cap = data.usd_market_cap as number, volume = data.usd_24h_vol as number, updated = data.last_updated_at as number;
   const asOf = new Date(updated * 1000).toISOString();
   const evidence = JSON.stringify({ requested_asset: asset, asset: crypto.symbol, resolved_name: crypto.name,
     methodology: "CoinGecko aggregated market cap and rolling 24h USD volume; not BTC emission-schedule supply x Coinbase spot",
     market_cap_usd: cap, volume_24h_usd: volume, as_of: asOf, source_url: url,
-    raw_bodies: { coingecko: body }, fetched_at: fetchedAt });
-  const receipt = makeReceipt(INTENT, url, evidence, "CoinGecko aggregated market data; methodology disclosed");
+    raw_bodies: { coingecko: body }, fetched_at: fetchedAt, stale: Boolean(staleReason),
+    ...(staleReason ? { stale_reason: staleReason, attempted_at: attemptedAt } : {}) });
+  const receipt = makeReceipt(INTENT, url, evidence, `CoinGecko aggregated market data; methodology disclosed${staleReason ? "; STALE DISCLOSED" : ""}`);
   receipt.fetched_at = fetchedAt;
   try { await saveReceipt(receipt, evidence); } catch { throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable"); }
   return envelope(INTENT, { asset: crypto.symbol, asset_type: "crypto", symbol: crypto.symbol, name: crypto.name, resolved_name: crypto.name, market_cap_usd: cap,
-    volume_24h_usd: volume, metrics: ["methodology=CoinGecko aggregated market cap and rolling 24h volume"], as_of: asOf }, receipt,
-    { answer: `${crypto.name} (${crypto.symbol}) market cap: $${cap.toLocaleString("en-US")}; rolling 24h USD volume: $${volume.toLocaleString("en-US")}, source update ${asOf}. Source: CoinGecko aggregated market data, not the derived BTC emission-schedule methodology.`,
-      verdict: "verified", confidence: 0.85, source: `${url}; fetched ${fetchedAt}` });
+    volume_24h_usd: volume, metrics: ["methodology=CoinGecko aggregated market cap and rolling 24h volume", ...(staleReason ? [`stale=${staleReason}; original acquisition ${fetchedAt}`] : [])], as_of: asOf }, receipt,
+    { answer: `${staleReason ? "STALE CACHED OBSERVATION, not current market data. " : ""}${crypto.name} (${crypto.symbol}) market cap: $${cap.toLocaleString("en-US")}; rolling 24h USD volume: $${volume.toLocaleString("en-US")}, source update ${asOf}. Source: CoinGecko aggregated market data, not the derived BTC emission-schedule methodology.${staleReason ? ` ${staleReason}; last real observation acquired ${fetchedAt}; no values estimated or updated.` : ""}`,
+      verdict: staleReason ? "stale" : "verified", confidence: staleReason ? 0.5 : 0.85, source: `${url}; fetched ${fetchedAt}${staleReason ? `; STALE: ${staleReason}; attempted ${attemptedAt}` : ""}` });
 }
 
 export interface EquityData {
