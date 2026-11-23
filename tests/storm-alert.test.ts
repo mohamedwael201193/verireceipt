@@ -160,3 +160,17 @@ describe("storm-alert horizon clause (reviewer follow-up)", () => {
     expect(wide.excluded).toHaveLength(0);
   });
 });
+
+describe('storm ranked-name policy, accepted actual geocoder capture',()=>{
+ const geo=readFileSync(join(__dirname,'fixtures/route-ranked/springfield.json'),'utf8');
+ it('accepts actual multi-result Springfield with chosen result and ambiguity disclosure',async()=>{
+  const top=JSON.parse(geo).results[0];vi.useFakeTimers();vi.setSystemTime(FROZEN);
+  vi.stubGlobal('fetch',async(input:unknown)=>{const u=String(input);return new Response(u.includes('geocoding-api')?geo:u.includes('/points/')?corpusPoints:corpusAlerts);});
+  const r=await handleStormAlert({location:'Springfield'});expect(r.location).toBe(top.latitude+','+top.longitude);expect(String(r.answer)).toContain('rank 1, provider order; not confirmed unique');expect(String(r.answer)).toContain(JSON.parse(geo).results.length+' matches returned');
+  const stored=await getReceiptEvidence((r.receipt as any).receipt_id);const ev=JSON.parse(stored.evidence!.toString());expect(ev.geocoder.raw_body).toBe(geo);expect(ev.geocoder.sha256).toBe(sha256Hex(Buffer.from(geo)));expect(sha256Hex(stored.evidence!)).toBe((r.receipt as any).raw_response_sha256);
+ });
+ it('invalid first result refuses instead of selecting valid later result',async()=>{
+  const j=JSON.parse(geo);j.results[0].latitude=91;const f=vi.fn(async()=>new Response(JSON.stringify(j)));vi.stubGlobal('fetch',f);
+  await expect(handleStormAlert({location:'Springfield'})).rejects.toMatchObject({status:502,code:'GEOCODER_UNREACHABLE'});expect(f).toHaveBeenCalledTimes(1);
+ });
+});
