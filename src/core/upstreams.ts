@@ -93,6 +93,8 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "ipwho.is": "ipwhois",
   "air-quality-api.open-meteo.com": "open-meteo",
   "api.weather.gov": "nws",
+  "hn.algolia.com": "hn-algolia",
+  "feeds.bbci.co.uk": "bbc-rss",
   "ip-api.com": "ip-api",
   "site.api.espn.com": "espn",
 };
@@ -215,6 +217,8 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "game-result": "espn",
   "air-quality": "open-meteo",
   "storm-alert": "nws",
+  "news-headlines": "hn-algolia",
+  "news-search": "hn-algolia",
 };
 
 /**
