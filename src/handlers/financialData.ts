@@ -1,4 +1,4 @@
-// FINANCIAL_DATA_GENERAL — GET /v1/financial-data?asset=<ticker|BTC>
+// FINANCIAL_DATA_GENERAL — GET /v1/financial-data?asset=<company|ticker|BTC|ETH|SOL>
 //
 // Zero-LLM. Market capitalisation and trading volume from named,
 // keyless, measured sources, with a SHA-256 receipt over the exact
@@ -8,24 +8,12 @@
 // market_cap_usd (number, [0, 1e15]); off-chain asset,
 // volume_24h_usd, metrics, as_of.
 //
-// SCOPE (honest, maintainer ruling: unsupported asset = 422, never an
-// interpolated cap):
-//   - US-listed equities (1-5 letter ticker): shares outstanding from
-//     SEC EDGAR companyconcept (dei EntityCommonStockSharesOutstanding,
-//     latest reported, filing accession + date named) x the Yahoo
-//     chart regular-market price. The cap is DERIVED (price x shares),
-//     and the derivation is disclosed; Yahoo's market-cap endpoints
-//     are crumb-gated, which is why no served cap is copied.
-//   - BTC: Coinbase spot x the deterministic supply at the mempool.space
-//     tip height (emission schedule formula published in the receipt).
-//   Everything else is 422 UNSUPPORTED_ASSET.
-//
-// VOLUME: the contract field is ROLLING 24h USD volume. Yahoo's
-// keyless chart carries only the latest regular session's share
-// volume, not a rolling 24h figure, so volume_24h_usd is null for
-// BOTH equities and BTC, with the reason named; the session volume is
-// reported separately in metrics, honestly labelled. No figure is
-// ever invented.
+// US equities use SEC-reported shares x Yahoo chart price. Company names
+// resolve through SEC titles, with Yahoo search as a discovery fallback;
+// all resolved tickers must still exist in the SEC index. Ambiguity refuses.
+// BTC retains its emission-schedule methodology. ETH and SOL use CoinGecko
+// aggregated market cap and rolling 24h volume, disclosed as a different
+// methodology. Equity session volume is NOT rolling 24h volume.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -48,7 +36,52 @@ async function fetchText(url: string, ua: string = UA): Promise<string> {
   }
 }
 
-const TICKER_RE = /^[A-Za-z]{1,5}([.-][A-Za-z]{1,2})?$/;
+interface SecEntry { cik_str?: number; ticker?: string; title?: string }
+const CRYPTO: Record<string, { id: string; symbol: string; name: string }> = {
+  ETH: { id: "ethereum", symbol: "ETH", name: "Ethereum" },
+  ETHEREUM: { id: "ethereum", symbol: "ETH", name: "Ethereum" },
+  SOL: { id: "solana", symbol: "SOL", name: "Solana" },
+  SOLANA: { id: "solana", symbol: "SOL", name: "Solana" },
+};
+const companyName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+  .replace(/(?:\s+(?:inc|incorporated|corp|corporation|co|company|ltd|limited))+$/, "").trim();
+
+export function resolveSec(entries: SecEntry[], asset: string): SecEntry | undefined {
+  const ticker = entries.filter((e) => e.ticker?.toUpperCase() === asset.toUpperCase());
+  const matches = ticker.length ? ticker : entries.filter((e) => companyName(e.title ?? "") === companyName(asset));
+  if (matches.length > 1) throw unprocessable("AMBIGUOUS_ASSET", "multiple SEC entries match; supply the exact ticker");
+  return matches[0];
+}
+
+async function aggregatedCrypto(asset: string, crypto: { id: string; symbol: string; name: string }): Promise<Record<string, unknown>> {
+  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${crypto.id}&vs_currencies=usd&include_market_cap=true&include_24hr_vol=true&include_last_updated_at=true`;
+  const fetchedAt = new Date().toISOString();
+  let body: string;
+  try { body = await fetchText(url); } catch { throw upstreamUnavailable("SOURCE_UNREACHABLE", "CoinGecko market data unavailable"); }
+  let data: Record<string, unknown>;
+  try { data = JSON.parse(body)?.[crypto.id]; } catch { throw upstreamUnavailable("BAD_MARKET_DATA", "CoinGecko returned malformed JSON"); }
+  const cap = data?.usd_market_cap;
+  const volume = data?.usd_24h_vol;
+  const updated = data?.last_updated_at;
+  if (typeof cap !== "number" || !Number.isFinite(cap) || cap <= 0 || cap > 1e15 ||
+      typeof volume !== "number" || !Number.isFinite(volume) || volume < 0 || volume > 1e15 ||
+      typeof updated !== "number" || !Number.isFinite(updated) || updated <= 0 ||
+      updated * 1000 > Date.now() + 60000 || Date.now() - updated * 1000 > 86400000) {
+    throw upstreamUnavailable("BAD_MARKET_DATA", "CoinGecko cap, volume or update time is missing, stale or outside the contract range");
+  }
+  const asOf = new Date(updated * 1000).toISOString();
+  const evidence = JSON.stringify({ requested_asset: asset, asset: crypto.symbol, resolved_name: crypto.name,
+    methodology: "CoinGecko aggregated market cap and rolling 24h USD volume; not BTC emission-schedule supply x Coinbase spot",
+    market_cap_usd: cap, volume_24h_usd: volume, as_of: asOf, source_url: url,
+    raw_bodies: { coingecko: body }, fetched_at: fetchedAt });
+  const receipt = makeReceipt(INTENT, url, evidence, "CoinGecko aggregated market data; methodology disclosed");
+  receipt.fetched_at = fetchedAt;
+  try { await saveReceipt(receipt, evidence); } catch { throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable"); }
+  return envelope(INTENT, { asset: crypto.symbol, resolved_name: crypto.name, market_cap_usd: cap,
+    volume_24h_usd: volume, metrics: ["methodology=CoinGecko aggregated market cap and rolling 24h volume"], as_of: asOf }, receipt,
+    { answer: `${crypto.name} (${crypto.symbol}) market cap: $${cap.toLocaleString("en-US")}; rolling 24h USD volume: $${volume.toLocaleString("en-US")}, source update ${asOf}. Source: CoinGecko aggregated market data, not the derived BTC emission-schedule methodology.`,
+      verdict: "verified", confidence: 0.85, source: `${url}; fetched ${fetchedAt}` });
+}
 
 export interface EquityData {
   ticker: string; cik10: string; shares: number; sharesAsOf: string; sharesFiled: string; accession: string;
@@ -79,12 +112,14 @@ export function latestShares(raw: string): { val: number; end: string; filed: st
 
 export async function handleFinancialData(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const asset = query.asset?.trim();
-  if (!asset) throw badRequest("MISSING_PARAM", "asset is required: a US-listed equity ticker (e.g. AAPL) or BTC");
-  if (asset.length > 12) throw badRequest("BAD_ASSET", "asset must be at most 12 characters");
+  if (!asset) throw badRequest("MISSING_PARAM", "asset is required: a US-listed company/ticker, BTC, ETH or SOL");
+  if (new TextEncoder().encode(asset).length > 256) throw badRequest("BAD_ASSET", "asset must be at most 256 UTF-8 bytes");
   const fetchedAt = new Date().toISOString();
   const upper = asset.toUpperCase();
 
-  if (upper === "BTC") {
+  if (CRYPTO[upper]) return aggregatedCrypto(asset, CRYPTO[upper]);
+
+  if (upper === "BTC" || upper === "BITCOIN") {
     let spotBody: string, tipBody: string;
     try {
       [spotBody, tipBody] = await Promise.all([
@@ -123,9 +158,6 @@ export async function handleFinancialData(query: Record<string, string | undefin
       source: `api.coinbase.com BTC-USD spot + mempool.space tip height; fetched ${fetchedAt}` });
   }
 
-  if (!TICKER_RE.test(asset)) {
-    throw unprocessable("UNSUPPORTED_ASSET", `"${asset}" is not a US-listed equity ticker or BTC; no figure is interpolated for unsupported assets`);
-  }
   const ua = process.env.SEC_USER_AGENT;
   if (!ua) throw upstreamUnavailable("SEC_USER_AGENT_MISSING", "SEC_USER_AGENT environment variable is required for SEC EDGAR requests");
   let tickersBody: string, sharesBody: string, chartBody: string;
@@ -134,25 +166,45 @@ export async function handleFinancialData(query: Record<string, string | undefin
   } catch (err) {
     throw upstreamUnavailable("SEC_UNAVAILABLE", `SEC company_tickers fetch failed: ${err instanceof Error ? err.message : "unknown"}`);
   }
-  const entries = Object.values(JSON.parse(tickersBody) as Record<string, { cik_str?: number; ticker?: string }>);
-  const row = entries.find((e) => String(e.ticker ?? "").toUpperCase() === upper);
-  if (!row || typeof row.cik_str !== "number") {
-    throw unprocessable("UNSUPPORTED_ASSET", `${upper} is not an SEC-listed ticker; no figure is interpolated for unsupported assets`);
+  const entries = Object.values(JSON.parse(tickersBody) as Record<string, SecEntry>);
+  let row = resolveSec(entries, asset);
+  let searchBody: string | null = null;
+  const searchUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(asset)}&quotesCount=10&newsCount=0`;
+  if (!row) {
+    try { searchBody = await fetchText(searchUrl); } catch {
+      throw upstreamUnavailable("ASSET_SEARCH_UNAVAILABLE", "SEC title/ticker had no match and Yahoo search is unavailable");
+    }
+    let quotes: { symbol?: string; quoteType?: string; shortname?: string; longname?: string }[];
+    try {
+      const parsed = JSON.parse(searchBody);
+      if (!Array.isArray(parsed.quotes)) throw new Error("invalid quotes");
+      quotes = parsed.quotes;
+    } catch { throw upstreamUnavailable("ASSET_SEARCH_UNAVAILABLE", "Yahoo search returned an invalid quote list"); }
+    const symbols = new Set(quotes.filter((q) => q && q.quoteType === "EQUITY" &&
+      [q.symbol, q.shortname, q.longname].some((n) => typeof n === "string" && companyName(n) === companyName(asset)))
+      .map((q) => q.symbol?.toUpperCase()));
+    const candidates = entries.filter((e) => symbols.has(e.ticker?.toUpperCase()));
+    if (candidates.length > 1) throw unprocessable("AMBIGUOUS_ASSET", "Yahoo search resolved multiple SEC-listed equities; supply an exact ticker");
+    row = candidates[0];
   }
+  if (!row || typeof row.cik_str !== "number") {
+    throw unprocessable("UNSUPPORTED_ASSET", `No unambiguous SEC-listed equity for "${asset}" after SEC title/ticker and Yahoo search; crypto coverage is BTC, ETH and SOL only`);
+  }
+  const ticker = String(row.ticker).toUpperCase();
   const cik10 = String(row.cik_str).padStart(10, "0");
   try {
     [sharesBody, chartBody] = await Promise.all([
       fetchText(`https://data.sec.gov/api/xbrl/companyconcept/CIK${cik10}/dei/EntityCommonStockSharesOutstanding.json`, ua),
-      fetchText(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upper)}`),
+      fetchText(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`),
     ]);
   } catch (err) {
     throw upstreamUnavailable("SOURCE_UNREACHABLE", `an equity source could not be reached: ${err instanceof Error ? err.message : "unknown"}`);
   }
   const shares = latestShares(sharesBody);
   const meta = (JSON.parse(chartBody) as { chart?: { result?: { meta?: Record<string, unknown> }[] | null } }).chart?.result?.[0]?.meta;
-  if (!meta) throw unprocessable("TICKER_NOT_FOUND", `Yahoo carried no chart for ${upper}`);
-  if (String(meta.symbol ?? "").toUpperCase() !== upper || meta.instrumentType !== "EQUITY" || meta.currency !== "USD") {
-    throw unprocessable("UNSUPPORTED_ASSET", `${upper} is not a USD US equity on the price source; refusing a mismatched figure`);
+  if (!meta) throw unprocessable("TICKER_NOT_FOUND", `Yahoo carried no chart for ${ticker}`);
+  if (String(meta.symbol ?? "").toUpperCase() !== ticker || meta.instrumentType !== "EQUITY" || meta.currency !== "USD") {
+    throw unprocessable("UNSUPPORTED_ASSET", `${ticker} is not a USD US equity on the price source; refusing a mismatched figure`);
   }
   const price = Number(meta.regularMarketPrice);
   const volumeShares = Number(meta.regularMarketVolume);
@@ -165,13 +217,14 @@ export async function handleFinancialData(query: Record<string, string | undefin
   const volumeUsd: number | null = null;
   const sessionVolumeUsd = Number.isFinite(volumeShares) && volumeShares >= 0 ? Math.round(volumeShares * price) : null;
   const asOf = new Date().toISOString();
-  const evidence = JSON.stringify({ asset: upper, as_of: asOf, cik: cik10,
+  const evidence = JSON.stringify({ asset: ticker, as_of: asOf, cik: cik10,
     derivation: "market_cap_usd = Yahoo regularMarketPrice x SEC EDGAR dei:EntityCommonStockSharesOutstanding (latest reported); volume_24h_usd is null: the contract field is rolling 24h USD volume and Yahoo's keyless chart carries only the latest regular session (reported separately in metrics); Yahoo's own market-cap endpoints are crumb-gated, so the cap is derived, not copied",
     price_usd: price, market_time: marketTime, shares_outstanding: shares.val,
     shares_as_of: shares.end, shares_filed: shares.filed, shares_accession: shares.accn,
     volume_shares: Number.isFinite(volumeShares) ? volumeShares : null, market_cap_usd: cap, volume_24h_usd: volumeUsd,
     session_volume_usd: sessionVolumeUsd,
-    raw_bodies: { company_tickers: tickersBody, sec_shares: sharesBody, yahoo_chart: chartBody }, fetched_at: fetchedAt });
+    resolution: { requested_asset: asset, resolved_name: row.title, ticker, yahoo_search_url: searchBody === null ? null : searchUrl },
+    raw_bodies: { company_tickers: tickersBody, yahoo_search: searchBody, sec_shares: sharesBody, yahoo_chart: chartBody }, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, `${TICKERS_URL} + data.sec.gov + query1.finance.yahoo.com`, evidence, "SEC EDGAR shares outstanding x Yahoo regular-market price; derivation disclosed");
   receipt.fetched_at = fetchedAt;
   try {
@@ -179,11 +232,11 @@ export async function handleFinancialData(query: Record<string, string | undefin
   } catch {
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
-  const answer = `${upper} market cap: $${cap.toLocaleString("en-US")}, derived as the Yahoo regular-market price ($${price}, exchange time ${marketTime}) x ${shares.val.toLocaleString("en-US")} shares outstanding reported to the SEC as of ${shares.end} (filed ${shares.filed}, accession ${shares.accn}). ` +
+  const answer = `${ticker} market cap: $${cap.toLocaleString("en-US")}, derived as the Yahoo regular-market price ($${price}, exchange time ${marketTime}) x ${shares.val.toLocaleString("en-US")} shares outstanding reported to the SEC as of ${shares.end} (filed ${shares.filed}, accession ${shares.accn}). ` +
     (sessionVolumeUsd !== null ? `Rolling 24h USD volume is not served (the keyless source carries only the latest regular session: $${sessionVolumeUsd.toLocaleString("en-US")} in that session). ` : "Volume is not served: the price source carried none. ") +
     `The cap is derived from two named sources, not copied from a vendor; the quote may be delayed.`;
   return envelope(INTENT, {
-    asset: upper, market_cap_usd: cap, volume_24h_usd: volumeUsd,
+    asset: ticker, resolved_name: row.title, market_cap_usd: cap, volume_24h_usd: volumeUsd,
     metrics: [`shares_outstanding=${shares.val} as of ${shares.end} (filed ${shares.filed}, ${shares.accn})`, `price_usd=${price} at ${marketTime}`, "derivation=price x shares outstanding",
       `latest_regular_session_volume_usd=${sessionVolumeUsd ?? "none"} (not rolling 24h)`],
     as_of: asOf,

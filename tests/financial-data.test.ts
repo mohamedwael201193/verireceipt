@@ -5,8 +5,8 @@ const scratch = mkdtempSync("/tmp/financial-data-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 beforeAll(() => { process.env.SEC_USER_AGENT = "VeriReceipt tests contact@example.com"; });
 afterAll(() => { delete process.env.SEC_USER_AGENT; rmSync(scratch, { recursive: true, force: true }); });
-afterEach(() => vi.unstubAllGlobals());
-import { handleFinancialData, btcSupplyAtHeight, latestShares } from "../src/handlers/financialData";
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+import { handleFinancialData, btcSupplyAtHeight, latestShares, resolveSec } from "../src/handlers/financialData";
 import { buildServer } from "../src/server";
 import { getReceiptEvidence } from "../src/core/storage";
 import { sha256Hex } from "../src/core/receipt";
@@ -16,11 +16,14 @@ import { sha256Hex } from "../src/core/receipt";
 const tickers = readFileSync(join(__dirname, "fixtures/corporate-registry/company-tickers-excerpt.json"), "utf8");
 const shares = readFileSync(join(__dirname, "fixtures/financial-data/sec-aapl-shares.json"), "utf8");
 const chart = readFileSync(join(__dirname, "fixtures/financial-data/yahoo-chart-aapl.json"), "utf8");
+const crypto = readFileSync(join(__dirname, "fixtures/financial-data/coingecko-eth-sol.json"), "utf8");
 const tip = readFileSync(join(__dirname, "fixtures/financial-data/mempool-tip.txt"), "utf8");
 const btcSpot = readFileSync(join(__dirname, "fixtures/financial-data/coinbase-btc-usd.json"), "utf8");
 function stub(opts: { secDown?: boolean; btcDown?: boolean } = {}): void {
   vi.stubGlobal("fetch", async (url: unknown) => {
     const u = String(url);
+    if (u.includes("coingecko")) return new Response(crypto, { status: 200 });
+    if (u.includes("finance/search")) return new Response(JSON.stringify({ quotes: [] }), { status: 200 });
     if (u.includes("sec.gov")) {
       if (opts.secDown) throw new Error("sec outage");
       return new Response(u.includes("companyconcept") ? shares : tickers, { status: 200 });
@@ -39,7 +42,7 @@ describe("FINANCIAL_DATA_GENERAL", () => {
     await expect(handleFinancialData({})).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
     stub();
     await expect(handleFinancialData({ asset: "ZZZZ9!" })).rejects.toMatchObject({ status: 422, code: "UNSUPPORTED_ASSET" });
-    await expect(handleFinancialData({ asset: "ETH" })).rejects.toMatchObject({ status: 422, code: "UNSUPPORTED_ASSET" });
+
   });
   it("BTC cap is the Coinbase spot x the emission-schedule supply at the tip", async () => {
     stub();
@@ -87,5 +90,81 @@ describe("FINANCIAL_DATA_GENERAL", () => {
     const app = buildServer();
     expect(app.hasRoute({ method: "GET", url: "/v1/financial-data" })).toBe(true);
     await app.close();
+  });
+});
+
+
+describe("financial name resolution and aggregated crypto", () => {
+  it("resolves SEC company names and suffixes without fuzzy guesses", () => {
+    const entries = Object.values(JSON.parse(tickers));
+    expect(resolveSec(entries, "Apple")?.ticker).toBe("AAPL");
+    expect(resolveSec(entries, "Microsoft")?.ticker).toBe("MSFT");
+    expect(resolveSec(entries, "Apple Inc.")?.ticker).toBe("AAPL");
+    expect(resolveSec(entries, "Apple Banana")).toBeUndefined();
+    expect(() => resolveSec([{ ticker: "AAA", title: "Acme Inc." }, { ticker: "BBB", title: "Acme Corp" }], "Acme"))
+      .toThrow("multiple SEC entries");
+  });
+  it("Apple resolves to AAPL without changing its recorded cap derivation", async () => {
+    stub();
+    const r = await handleFinancialData({ asset: "Apple" });
+    expect(r.asset).toBe("AAPL");
+    expect(r.resolved_name).toBe("Apple Inc.");
+    expect(r.market_cap_usd).toBe(4978144265920);
+    expect(r.volume_24h_usd).toBeNull();
+  });
+  for (const asset of ["ETH", "Ethereum", "Solana", "SOL"]) {
+    it(`serves aggregated cap and rolling 24h volume for ${asset}`, async () => {
+      stub();
+      const id = asset.toLowerCase().startsWith("sol") ? "solana" : "ethereum";
+      const data = JSON.parse(crypto)[id];
+      vi.useFakeTimers(); vi.setSystemTime(new Date(data.last_updated_at * 1000 + 1000));
+      const r = await handleFinancialData({ asset });
+      expect(r.market_cap_usd).toBe(data.usd_market_cap);
+      expect(r.volume_24h_usd).toBe(data.usd_24h_vol);
+      expect(String(r.answer)).toContain("CoinGecko aggregated");
+      expect(String(r.answer)).toContain("not the derived BTC");
+      const receipt = r.receipt as { receipt_id: string; raw_response_sha256: string };
+      const ev = await getReceiptEvidence(receipt.receipt_id);
+      expect(sha256Hex(ev.evidence!)).toBe(receipt.raw_response_sha256);
+      expect(JSON.parse(ev.evidence!.toString()).raw_bodies.coingecko).toBe(crypto);
+    });
+  }
+  it("rejects stale crypto market data instead of relabeling it as current", async () => {
+    stub();
+    vi.useFakeTimers(); vi.setSystemTime(new Date(JSON.parse(crypto).ethereum.last_updated_at * 1000 + 86400001));
+    await expect(handleFinancialData({ asset: "ETH" })).rejects.toMatchObject({ status: 502, code: "BAD_MARKET_DATA" });
+  });
+  it("fails closed when a crypto field is missing", async () => {
+    vi.stubGlobal("fetch", async () => new Response('{"ethereum":{"usd_market_cap":10}}'));
+    await expect(handleFinancialData({ asset: "ETH" })).rejects.toMatchObject({ status: 502, code: "BAD_MARKET_DATA" });
+  });
+});
+
+
+describe("Yahoo equity discovery remains SEC-bound", () => {
+  function discovery(quotes: unknown[]) {
+    vi.stubGlobal("fetch", async (input: unknown) => {
+      const u = String(input);
+      if (u.includes("company_tickers")) return new Response(tickers);
+      if (u.includes("finance/search")) return new Response(JSON.stringify({ quotes }));
+      if (u.includes("companyconcept")) return new Response(shares);
+      if (u.includes("finance/chart")) return new Response(chart);
+      throw new Error("unexpected source");
+    });
+  }
+  it("uses a matched search alias only for an SEC-listed ticker and binds the body", async () => {
+    discovery([{ symbol: "AAPL", quoteType: "EQUITY", shortname: "Apple Computers" }]);
+    const r = await handleFinancialData({ asset: "Apple Computers" });
+    expect(r.asset).toBe("AAPL");
+    const ev = await getReceiptEvidence((r.receipt as { receipt_id: string }).receipt_id);
+    expect(JSON.parse(ev.evidence!.toString()).raw_bodies.yahoo_search).toContain("Apple Computers");
+  });
+  it("does not choose between multiple matching SEC listings", async () => {
+    discovery([{ symbol: "AAPL", quoteType: "EQUITY", shortname: "Ambiguous" }, { symbol: "MSFT", quoteType: "EQUITY", shortname: "Ambiguous" }]);
+    await expect(handleFinancialData({ asset: "Ambiguous" })).rejects.toMatchObject({ code: "AMBIGUOUS_ASSET" });
+  });
+  it("refuses a search result absent from the SEC index", async () => {
+    discovery([{ symbol: "ZZZ", quoteType: "EQUITY", shortname: "Unknown" }]);
+    await expect(handleFinancialData({ asset: "Unknown" })).rejects.toMatchObject({ code: "UNSUPPORTED_ASSET" });
   });
 });
