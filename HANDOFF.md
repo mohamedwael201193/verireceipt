@@ -74,6 +74,8 @@ Live authoritative leaderboard at epoch 44 has no TVL ranking. Contract proposal
 
 ## Reviewed integration and real A/B, 2026-11-23 17:41 EET
 
+Provenance for this entire section: all execution, safety and account-state claims are builder-reported, not independently authenticated. This includes the executed code and payer, preflight checks, absence of other signers or on-chain transactions, SEC contact exclusion, temporary key deletion, and remote/ledger state. Independent code review does not authenticate those operational claims.
+
 Builder-reported local outcome: reviewed stack through e21152562283efebcd4df3cc721cd17018019c8c pushed to feat/research-integrated by pinned non-force refspec; fresh ls-remote matched at push time. No main merge or deploy. HANDOFF parent and exact two-passage correction diff were verified against the reviewed patch. Current remote state may change after that check.
 
 Fresh A3 and B1 ran on that exact detached reviewed commit, existing approved payer and existing shared ledger. Epoch44 preflights were safely more than 90 minutes before the boundary; no other signer was detected and main confirmed no registry signer active/imminent. No on-chain transactions, escalation or reuse. Runtime SEC contact stayed out of repository, logs and final packets. Temporary key files deleted after each run.
@@ -81,7 +83,7 @@ Fresh A3 and B1 ran on that exact detached reviewed commit, existing approved pa
 - A3: frozen spec 5a34bcd63536d45281e86c48211e05951a865159e21d250475851da9c2c7f320; packet 0013618f9505aa7f1da7c4da369e981562e8dddbfe4df3c1e25de81b661164d7. HOLD. 27.942 seconds frozen-to-complete. Price 5.1606 accepted external L1. Supply 885496418.7861971 rejected against whole-token on-chain total supply. TVL shaped3101186272.66 versus provider3101186272.6553764 rejected, raw diagnostic only. No final calculation. Reserved/reported30000 micro testUSDC, wasted20000, uncertain0, no settlement assertion.
 - B1: frozen spec 605fb0f3fe14899e7dc32860681ecf2875914a7751e7b086779b3862303a289f; packet 0c2b8368a9a00514630e86b1850ccbdcc8841cbb05406a52936ac56cf55f847c. HOLD. 32.066 seconds frozen-to-complete. TSLA393.103 and US2024 unemployment4.022 accepted external L1. Filing_count3 rejected because provider filing assertions did not bind to SEC rows. Reserved/reported30000 micro testUSDC, wasted10000, uncertain0, no settlement assertion.
 
-This pair: independent local acceptance3/6, not audited truth accuracy; useful completed notes0/2. Both offline and public wallet-free replays return false/HOLD. Public replay exits at offline HOLD gate, so partial accepted facts are not independently replayed by that command. As-run packets are immutable. Do not tune gold, tolerance or selectors after seeing results.
+This pair: adapter-reported acceptance3/6, not independent truth or receipt certification and not audited accuracy; useful completed notes0/2. Both offline and public wallet-free replays return false/HOLD. Public replay exits at offline HOLD gate, so partial accepted facts are not independently replayed by that command. As-run packets are immutable. Do not tune gold, tolerance or selectors after seeing results.
 
 Post-run live account snapshot observed available1420000, unbilled60000, rootbalance1480000 micro testUSDC; not a claim of final settlement. Today's A1+A2+A3+B1 research reserved/reported total120000 micro testUSDC. Existing shared ledger remains intact.
 
