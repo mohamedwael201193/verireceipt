@@ -55,6 +55,10 @@ shape and non-aggregator prose are unchanged. The focused route suite passed
 31 tests across route-aggregator, route-explanation and
 route-persistence-required; TypeScript and diff checks passed.
 
-Both implementation commits were pushed to main after review. Neither slice
-changes `miner.yaml`. Deployment is a separate operation, not performed by
-this handoff update.
+Main was verified at `2ef1f931cc660a258c9425421e5da81dfd299677` by an
+uncached `git ls-remote` check on November 23, 2026. Slice F,
+`e8c19f95a88b0ed5970dac36a692279bcb9277fb`, is an ancestor of that commit.
+The deployment handoff at 17:02 EET reported F live as
+`dep-dc258juk1f9s738gc52g` and D2 not yet deployed. Neither slice changes
+`miner.yaml`. Deployment is separate and was not performed by this handoff
+update.
