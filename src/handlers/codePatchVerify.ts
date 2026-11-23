@@ -25,14 +25,18 @@
 // exactly when the aggregate conclusion is success. A commit with no
 // checks and no statuses serves neutral with passed=false and says
 // there is nothing to verify — never an invented pass.
-import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
+import { ApiError, badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
 const SOURCE_TIMEOUT_MS = 5000;
 const UA = "verireceipt-code-patch-verify";
 
+const responseCache = new Map<string, { at: number; raw: string }>();
+export function resetCodePatchCacheForTests(): void { responseCache.clear(); }
 async function fetchText(url: string): Promise<string> {
+  const cached = responseCache.get(url);
+  if (cached && Date.now() - cached.at < 60000) return cached.raw;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
   try {
@@ -40,16 +44,19 @@ async function fetchText(url: string): Promise<string> {
     if (res.status === 404) throw unprocessable("PATCH_NOT_FOUND", "GitHub has no such repository, commit or pull request");
     if (res.status === 403 || res.status === 429) {
       const remaining = res.headers.get("x-ratelimit-remaining");
-      throw upstreamUnavailable("GITHUB_RATE_LIMITED", `GitHub API refused the request (HTTP ${res.status}${remaining === "0" ? ", hourly unauthenticated quota exhausted" : ""}); retry later`);
+      throw new ApiError(503, "GITHUB_RATE_LIMITED", `GitHub API refused the request (HTTP ${res.status}${remaining === "0" ? ", hourly unauthenticated quota exhausted" : ""}); retry later`);
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.text();
+    const raw = await res.text();
+    if (responseCache.size >= 128) responseCache.delete(responseCache.keys().next().value!);
+    responseCache.set(url, { at: Date.now(), raw });
+    return raw;
   } finally {
     clearTimeout(timer);
   }
 }
 
-interface PatchRef { owner: string; repo: string; kind: "commit" | "pr"; ref: string }
+interface PatchRef { owner: string; repo: string; kind: "commit" | "pr" | "run" | "head"; ref: string }
 
 const SEGMENT = /^[A-Za-z0-9._-]{1,100}$/;
 
@@ -59,13 +66,19 @@ export function parsePatchRef(input: string): PatchRef {
   if (m) return checked(m[1], m[2], "commit", m[3]);
   m = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d{1,10})\/?$/.exec(s);
   if (m) return checked(m[1], m[2], "pr", m[3]);
+  m = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/actions\/runs\/(\d{1,20})\/?$/.exec(s);
+  if (m) return checked(m[1], m[2], "run", m[3]);
+  m = /^([^/\s]+)\/([^/\s]+)\/commit\/([0-9a-fA-F]{7,40})$/.exec(s);
+  if (m) return checked(m[1], m[2], "commit", m[3]);
+  m = /^(?:https?:\/\/github\.com\/)?([^/\s]+)\/([A-Za-z0-9._-]{1,100})\/?$/.exec(s);
+  if (m) return checked(m[1], m[2], "head", "HEAD");
   m = /^([^/\s]+)\/([^/\s]+)@([^\s#]{1,100})$/.exec(s);
   if (m) return checked(m[1], m[2], "commit", m[3]);
   m = /^([^/\s]+)\/([^/\s]+)#(\d{1,10})$/.exec(s);
   if (m) return checked(m[1], m[2], "pr", m[3]);
   throw badRequest("INVALID_PATCH", "patch must be owner/repo@commit-or-ref, owner/repo#pr-number, or a github.com commit or pull URL");
 }
-function checked(owner: string, repo: string, kind: "commit" | "pr", ref: string): PatchRef {
+function checked(owner: string, repo: string, kind: "commit" | "pr" | "run" | "head", ref: string): PatchRef {
   if (!SEGMENT.test(owner) || !SEGMENT.test(repo)) throw badRequest("INVALID_PATCH", "owner and repository must be GitHub name characters");
   return { owner, repo, kind, ref };
 }
@@ -117,22 +130,27 @@ export const INTENT = "CODE_PATCH_VERIFY_GENERAL";
 export async function handleCodePatchVerify(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const raw = query.patch;
   if (!raw?.trim()) throw badRequest("MISSING_PARAM", "patch is required (owner/repo@commit, owner/repo#pr, or a github.com commit/pull URL)");
-  const ref = parsePatchRef(raw);
+  let ref: PatchRef;
+  try { ref = parsePatchRef(raw); }
+  catch {
+    return { answer: "passed=false; conclusion=neutral; failing checks: unknown. The input does not resolve to a GitHub repository, commit, pull request or Actions run. No CI result was fetched or verified.", conclusion: "neutral", passed: false, commit: null, pipeline: null, verdict: "unavailable", confidence: 0, receipt: null };
+  }
   const base = `https://api.github.com/repos/${ref.owner}/${ref.repo}`;
   let sha = ref.ref;
   let prRaw: string | null = null;
   let prUrl: string | null = null;
-  if (ref.kind === "pr") {
-    const prApi = `${base}/pulls/${ref.ref}`;
+  if (ref.kind !== "commit" || !/^[0-9a-f]{40}$/i.test(ref.ref)) {
+    const prApi = ref.kind === "pr" ? `${base}/pulls/${ref.ref}` : ref.kind === "run" ? `${base}/actions/runs/${ref.ref}` : `${base}/commits/${encodeURIComponent(ref.kind === "head" ? "HEAD" : ref.ref)}`;
     prRaw = await fetchText(prApi).catch((err: unknown) => {
       if (err instanceof Error && "status" in err) throw err;
       throw upstreamUnavailable("GITHUB_UNREACHABLE", `GitHub pull lookup failed: ${err instanceof Error ? err.message : "unknown error"}`);
     });
-    const pr = JSON.parse(prRaw) as { head?: { sha?: unknown }; html_url?: unknown };
-    if (typeof pr.head?.sha !== "string" || !/^[0-9a-f]{40}$/i.test(pr.head.sha)) {
+    const pr = JSON.parse(prRaw) as { head?: { sha?: unknown }; head_sha?: unknown; sha?: unknown; html_url?: unknown };
+    const resolvedSha = ref.kind === "pr" ? pr.head?.sha : ref.kind === "run" ? pr.head_sha : pr.sha;
+    if (typeof resolvedSha !== "string" || !/^[0-9a-f]{40}$/i.test(resolvedSha)) {
       throw upstreamUnavailable("GITHUB_BAD_BODY", "pull response has no head SHA");
     }
-    sha = pr.head.sha;
+    sha = resolvedSha;
     prUrl = typeof pr.html_url === "string" ? pr.html_url : null;
   }
   const checksUrl = `${base}/commits/${encodeURIComponent(sha)}/check-runs?per_page=100`;
@@ -147,11 +165,14 @@ export async function handleCodePatchVerify(query: Record<string, string | undef
       throw upstreamUnavailable("GITHUB_UNREACHABLE", `GitHub commit-status lookup failed: ${err instanceof Error ? err.message : "unknown error"}`);
     }),
   ]);
+  const statusSha = JSON.parse(statusRaw)?.sha;
+  if (typeof statusSha === "string" && statusSha.toLowerCase() !== sha.toLowerCase()) throw upstreamUnavailable("GITHUB_BAD_BODY", "commit status SHA does not match resolved commit");
   const checks = parseCheckRuns(checksRaw);
   const status = parseCommitStatus(statusRaw);
-  const conclusion = aggregateConclusions([...checks.conclusions, ...status.conclusions]);
+  const incomplete = Number(JSON.parse(checksRaw)?.total_count ?? checks.runs.length) > checks.runs.length || Number(JSON.parse(statusRaw)?.total_count ?? status.contexts.length) > status.contexts.length;
+  const conclusion = aggregateConclusions([...checks.conclusions, ...status.conclusions, ...(incomplete ? ["pending" as Conclusion] : [])]);
   const passed = conclusion === "success";
-  const fetchedAt = new Date().toISOString();
+  const fetchedAt = new Date(Math.min(...[checksUrl, statusUrl].map(u => responseCache.get(u)?.at ?? Date.now()))).toISOString();
   const pipeline = checks.runs.find((r) => r.url)?.url
     ?? prUrl
     ?? `https://github.com/${ref.owner}/${ref.repo}/commit/${sha}/checks`;
@@ -169,14 +190,14 @@ export async function handleCodePatchVerify(query: Record<string, string | undef
   }
   const runList = [...checks.runs.map((r) => `${r.name}: ${r.status}${r.conclusion ? "/" + r.conclusion : ""}`),
     ...status.contexts.map((c) => `${c.context}: ${c.state}`)].join("; ");
-  const answer = checksFound === 0
+  const answerBody = checksFound === 0
     ? `${ref.owner}/${ref.repo}@${sha}: no CI check runs and no commit statuses exist — there is nothing to verify. Conclusion: neutral; the patch is NOT verified as passing.`
     : `${ref.owner}/${ref.repo}@${sha}: conclusion ${conclusion.toUpperCase()} (${passed ? "checks passed" : "checks did not pass"}). ` +
-      `${checksFound} check(s)/status(es), worst-of aggregation: ${runList}. ` +
+      `${incomplete ? "Coverage is paginated and incomplete within the three-call budget; no all-green pass is asserted. " : ""}${checksFound} check(s)/status(es), worst-of aggregation: ${runList}. ` +
       (conclusion === "pending" ? "Some checks are still running; this is the state at fetch time, not a final result. " : "") +
-      "Source: GitHub API (check runs + combined commit status).";
+      "Source: GitHub API (check runs + combined commit status); responses may be cached for up to60 seconds.";
   return envelope(INTENT, { conclusion, passed, commit: sha, pipeline }, receipt, {
-    answer,
+    answer: `passed=${passed}; conclusion=${conclusion}; failing checks: ${[...checks.runs.filter(r => ["failure", "startup_failure", "action_required", "timed_out"].includes(r.conclusion ?? "")).map(r => r.name), ...status.contexts.filter(c => ["failure", "error"].includes(c.state)).map(c => c.context)].join(", ") || "none reported"}. ${ref.kind === "head" ? "Bare repository resolved to default-branch HEAD. " : ""}${answerBody}`,
     // "verified" means the SOURCES confirm this answer — a confirmed CI
     // failure is a verified answer too. The conclusion field carries
     // pass/fail; verdict carries source confidence only.
