@@ -50,7 +50,8 @@ export function dexScreenerLiquiditySource(bindings: readonly PoolBinding[], app
             if (signal.aborted)
                 throw new Error('aborted');
             const url = `https://api.dexscreener.com/latest/dex/pairs/${p.dexScreenerChain}/${p.address}`;
-            const b = await readPublicBody(url, 200000, 850);
+            // Allow normal public-API latency while remaining inside the runner deadline.
+            const b = await readPublicBody(url, 200000, 2500);
             if (signal.aborted)
                 throw new Error('aborted');
             const j = JSON.parse(b.raw);
