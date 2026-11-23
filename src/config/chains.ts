@@ -94,6 +94,19 @@ export const CHAIN_RPCS: Record<string, string[]> = {
     "https://polygon.drpc.org",
     "https://polygon.gateway.tenderly.co",
   ],
+  // Avalanche C-Chain (G2, verified live 2026-11-23 with ALL THREE
+  // methods on a real tx of block 0x607794f, plus an unknown hash):
+  // official api.avax.network, drpc and publicnode all return
+  // eth_gasPrice 0x1bf08eb96, tx+receipt for the real tx, and null/null
+  // for the unknown hash with no archive gate. Tenderly
+  // (avalanche.gateway.tenderly.co) passes the same gate and is the
+  // documented spare; blastapi (avalanche.public.blastapi.io) returned
+  // an empty body and is NOT included.
+  avalanche: [
+    "https://api.avax.network/ext/bc/C/rpc",
+    "https://avalanche.drpc.org",
+    "https://avalanche-c-chain-rpc.publicnode.com",
+  ],
   sepolia: [
     "https://ethereum-sepolia-rpc.publicnode.com",
     "https://sepolia.gateway.tenderly.co",

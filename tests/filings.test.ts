@@ -73,9 +73,11 @@ const TICKERS_FIXTURE = {
   '8': { cik_str: 723125, ticker: 'MU', title: 'Micron Technology, Inc.' },
   '9': { cik_str: 1050446, ticker: 'MSTR', title: 'MicroStrategy Inc' },
   // APLE is a real second "Apple": Apple Hospitality REIT, Inc. (CIK
-  // 1418121). Live, bare 'apple' matches TWO distinct companies (Apple
-  // Inc. + Apple Hospitality REIT) and must 422 AMBIGUOUS_ENTITY — never
-  // resolve to Apple Inc. by fiat.
+  // 1418121). Live, bare 'apple' prefix-matches TWO distinct companies
+  // (Apple Inc. + Apple Hospitality REIT). F2 dominance: 'apple' is the
+  // exact suffix-stripped name of Apple Inc. only, so it resolves to CIK
+  // 320193 as the clearly dominant match; genuinely comparable sets still
+  // 422 AMBIGUOUS_ENTITY.
   '10': { cik_str: 1418121, ticker: 'APLE', title: 'Apple Hospitality REIT, Inc.' },
 };
 
@@ -218,12 +220,10 @@ describe('handleFilings — validation (400s)', () => {
   it('unparseable period -> 400', async () => {
     for (const bad of [
       'sometime',
-      'last year',
       '2026-13-01..2026-13-02',
       '2026-02-30..2026-03-01',
       '2026-05-01..2026-01-01',
       'last 0 months',
-      'Q1 2026',
       '12 months',
     ]) {
       await expectApiError(
@@ -339,13 +339,35 @@ describe('resolveCikFromTickers', () => {
   it('company-name prefix resolves when exactly one distinct company matches', () => {
     // "microsoft" matches only Microsoft; "Tesla" only Tesla. Bare
     // "apple" does NOT resolve: live it matches two distinct companies
-    // (Apple Inc. + Apple Hospitality REIT, APLE) and must 422.
+    // (Apple Inc. + Apple Hospitality REIT, APLE); the dominant stem match
+  // (F2) resolves it to Apple Inc.
     expect(resolveCikFromTickers('microsoft', TICKERS_FIXTURE)?.cik).toBe(789019);
     expect(resolveCikFromTickers('Tesla', TICKERS_FIXTURE)?.cik).toBe(1318605);
   });
 
-  it('bare "apple" is ambiguous live (Apple Inc. + Apple Hospitality REIT) -> 422 AMBIGUOUS_ENTITY', () => {
+  it('bare "apple" resolves to Apple Inc. as the clearly dominant match (F2)', () => {
+    // The suffix-stripped title of Apple Inc. IS "apple"; Apple
+    // Hospitality REIT, Inc.'s stem is "apple hospitality reit". Exactly
+    // one dominant name-level match exists, so the query resolves instead
+    // of refusing at the front door.
     for (const q of ['apple', 'Apple', 'APPLE']) {
+      const m = resolveCikFromTickers(q, TICKERS_FIXTURE);
+      expect(m?.cik).toBe(320193);
+      expect(m?.matchKind).toBe('name');
+    }
+    // Exact full titles resolve as before.
+    expect(resolveCikFromTickers('Apple Inc.', TICKERS_FIXTURE)?.cik).toBe(320193);
+    expect(resolveCikFromTickers('Apple Hospitality REIT, Inc.', TICKERS_FIXTURE)?.cik).toBe(
+      1418121,
+    );
+    // Apple Hospitality stays directly addressable by its ticker and name.
+    expect(resolveCikFromTickers('APLE', TICKERS_FIXTURE)?.cik).toBe(1418121);
+    expect(resolveCikFromTickers('apple hospitality', TICKERS_FIXTURE)?.cik).toBe(1418121);
+  });
+
+  it('F2 dominance still refuses genuinely comparable matches', () => {
+    // No candidate's suffix-stripped title equals the query: refuse.
+    for (const q of ['bank', 'american', 'micro']) {
       try {
         resolveCikFromTickers(q, TICKERS_FIXTURE);
         throw new Error(`expected resolveCikFromTickers(${q}) to throw`);
@@ -355,11 +377,22 @@ describe('resolveCikFromTickers', () => {
         expect((err as ApiError).code).toBe('AMBIGUOUS_ENTITY');
       }
     }
-    // Exact full titles still beat ambiguity: "Apple Inc." resolves.
-    expect(resolveCikFromTickers('Apple Inc.', TICKERS_FIXTURE)?.cik).toBe(320193);
-    expect(resolveCikFromTickers('Apple Hospitality REIT, Inc.', TICKERS_FIXTURE)?.cik).toBe(
-      1418121,
-    );
+    // Two companies with the SAME dominant stem: no dominance, refuse.
+    const tied = {
+      ...TICKERS_FIXTURE,
+      '900': { cik_str: 900001, ticker: 'CNTA', title: 'Contoso Inc' },
+      '901': { cik_str: 900002, ticker: 'CNTB', title: 'Contoso Corp' },
+    };
+    try {
+      resolveCikFromTickers('contoso', tied);
+      throw new Error('expected a stem tie to refuse');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe('AMBIGUOUS_ENTITY');
+    }
+    // ...but with only ONE stem holder the same query resolves (dominant).
+    const single = { ...TICKERS_FIXTURE, '900': { cik_str: 900001, ticker: 'CNTA', title: 'Contoso Inc' } };
+    expect(resolveCikFromTickers('contoso', single)?.cik).toBe(900001);
   });
 
   it('exact full-title match resolves (and beats ambiguity)', () => {
@@ -407,17 +440,9 @@ describe('resolveCikFromTickers', () => {
     expect(isTooGenericEntity('the')).toBe(true);
     expect(isTooGenericEntity('inc')).toBe(true);
     expect(isTooGenericEntity('Apple')).toBe(false);
-    // Legitimate names still resolve, including a word-boundary prefix —
-    // but bare 'Apple' is ambiguous live (Apple Inc. + Apple Hospitality
-    // REIT), so it must 422, not resolve to Apple Inc.
-    try {
-      resolveCikFromTickers('Apple', TICKERS_FIXTURE);
-      throw new Error('expected resolveCikFromTickers(Apple) to throw');
-    } catch (err) {
-      expect(err).toBeInstanceOf(ApiError);
-      expect((err as ApiError).status).toBe(422);
-      expect((err as ApiError).code).toBe('AMBIGUOUS_ENTITY');
-    }
+    // Legitimate names still resolve, including a word-boundary prefix;
+    // bare 'Apple' resolves to Apple Inc. via the F2 dominant stem match.
+    expect(resolveCikFromTickers('Apple', TICKERS_FIXTURE)?.cik).toBe(320193);
     expect(resolveCikFromTickers('Microsoft', TICKERS_FIXTURE)?.cik).toBe(789019);
   });
 });
@@ -770,13 +795,12 @@ describe('handleFilings — upstream hardening (stubbed upstream)', () => {
     }
   });
 
-  it('bare "Apple" is ambiguous live (Apple Inc. + Apple Hospitality REIT) -> 422 AMBIGUOUS_ENTITY', async () => {
+  it('bare "Apple" resolves to Apple Inc. via the F2 dominant stem match', async () => {
     const fetchImpl = stubFetchFactory({ submissions: SUBMISSIONS_FIXTURE });
-    await expectApiError(
-      handleFilings({ entity: 'Apple', period: '2026' }, { fetchImpl }),
-      422,
-      'AMBIGUOUS_ENTITY',
-    );
+    const res = await handleFilings({ entity: 'Apple', period: '2026' }, { fetchImpl });
+    expect(res.confidence).toBe(0.9);
+    expect(res.filing_count).toBe(1);
+    expect(res.source).toBe('SEC EDGAR Submissions API');
   });
 
   it('ambiguous name prefixes -> 422 AMBIGUOUS_ENTITY (bank / american / micro)', async () => {
@@ -793,15 +817,13 @@ describe('handleFilings — upstream hardening (stubbed upstream)', () => {
     }
   });
 
-  it('single-candidate names still resolve: microsoft at 0.9; apple 422s', async () => {
-    // Bare 'apple' is ambiguous live (Apple Inc. + Apple Hospitality
-    // REIT, APLE) and must refuse, never resolve to Apple Inc. by fiat.
+  it('single-candidate and dominant names still resolve: microsoft and apple at 0.9', async () => {
+    // Bare 'apple' resolves to Apple Inc. (F2 dominant stem match; Apple
+    // Hospitality REIT's stem differs).
     const appleFetch = stubFetchFactory({ submissions: SUBMISSIONS_FIXTURE });
-    await expectApiError(
-      handleFilings({ entity: 'apple', period: '2026' }, { fetchImpl: appleFetch }),
-      422,
-      'AMBIGUOUS_ENTITY',
-    );
+    const apple = await handleFilings({ entity: 'apple', period: '2026' }, { fetchImpl: appleFetch });
+    expect(apple.confidence).toBe(0.9);
+    expect(apple.filing_count).toBe(1);
 
     // The stub submissions payload must carry Microsoft's CIK (789019)
     // or the CIK-match check below 502s.
@@ -1921,7 +1943,7 @@ describe('handleFilings — adversarial inputs + refusal matrix (stubbed upstrea
     await expectApiError(handleFilings({ entity: 'AAPL', period: '2027' }), 400, 'INVALID_PERIOD');
     // 422 — ambiguous / not found (seeded tickers, stubbed FedReg zero).
     const zeroFetch = stubFetchFactory({ fedreg: { count: 0, results: [] } });
-    await expectApiError(handleFilings({ entity: 'apple', period: '2026' }, { fetchImpl: zeroFetch }), 422, 'AMBIGUOUS_ENTITY');
+    await expectApiError(handleFilings({ entity: 'bank', period: '2026' }, { fetchImpl: zeroFetch }), 422, 'AMBIGUOUS_ENTITY');
     await expectApiError(handleFilings({ entity: 'ZZZZNOTREAL', period: '2026' }, { fetchImpl: zeroFetch }), 422, 'ENTITY_NOT_FOUND');
     // 502 — EDGAR down for a resolved ticker (FedReg never called).
     const calls = { fedreg: 0, submissions: 0, tickers: 0 };
@@ -5180,7 +5202,7 @@ describe('A1 unit: parsePeriod calendar phrasings', () => {
         expect((e as ApiError).code, p).toBe('FISCAL_PERIOD_UNSUPPORTED');
       }
     }
-    for (const p of ['calendar', 'calendar 2023 x', 'Q1 2023', 'calendar 1990']) {
+    for (const p of ['calendar', 'calendar 2023 x', 'calendar 1990']) {
       expect(() => parsePeriod(p), p).toThrowError(ApiError);
     }
   });

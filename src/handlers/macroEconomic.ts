@@ -45,6 +45,34 @@ const CATALOG_TTL_MS = 60 * 60 * 1000;
  * "unemployment rate"; matching is case/whitespace-insensitive). */
 const SUPPORTED_INDICATOR = "unemployment rate";
 
+/** Normalized spellings of the ONE contract-enum indicator. Matching
+ * lowercases, collapses whitespace and removes only unit asides such
+ * as "(%)" — other parentheticals stay in the text, so a phrase that
+ * merely CONTAINS an aside cannot smuggle a different statistic past
+ * the alias check. Anything outside the alias set stays 422
+ * UNSUPPORTED_INDICATOR; the registered surface is unchanged. A served
+ * normalization is always disclosed. */
+const INDICATOR_ALIASES = new Set([
+  "unemployment rate",
+  "unemployment",
+  "jobless rate",
+  "unemployment % of total labor force",
+  "unemployment rate % of total labor force",
+  "unemployment total",
+  "unemployment total of total labor force",
+]);
+
+/** Normalize an indicator input; returns the canonical enum value when
+ * it is a known variant, else null. */
+export function normalizeIndicator(input: string): string | null {
+  const stripped = input
+    .toLowerCase()
+    .replace(/\(\s*(%|percent|percentage)\s*\)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return INDICATOR_ALIASES.has(stripped) ? SUPPORTED_INDICATOR : null;
+}
+
 /**
  * Common short names whose World Bank catalog name (or ISO code)
  * differs. Keys are lowercased inputs; values are the ISO-3166 alpha-2
@@ -175,18 +203,21 @@ export function resolveCountry(
 export async function handleMacro(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
-  const indicatorRaw = query.indicator?.trim().toLowerCase().replace(/\s+/g, " ");
+  const indicatorInput = query.indicator?.trim();
+  const indicatorRaw = indicatorInput?.toLowerCase().replace(/\s+/g, " ");
   const countryRaw = query.country?.trim();
   const yearRaw = query.year?.trim();
   if (!indicatorRaw || !countryRaw) {
     throw badRequest("MISSING_PARAM", "indicator and country are required query parameters");
   }
-  if (indicatorRaw !== SUPPORTED_INDICATOR) {
+  const indicator = indicatorRaw === SUPPORTED_INDICATOR ? SUPPORTED_INDICATOR : normalizeIndicator(indicatorRaw);
+  if (indicator === null) {
     throw unprocessable(
       "UNSUPPORTED_INDICATOR",
       `unsupported indicator: ${query.indicator}; this miner serves "${SUPPORTED_INDICATOR}" (World Bank ${INDICATOR_ID})`,
     );
   }
+  const indicatorNormalized = indicatorInput !== undefined && indicatorInput !== SUPPORTED_INDICATOR;
   if (yearRaw !== undefined && !/^\d{4}$/.test(yearRaw)) {
     throw badRequest("INVALID_YEAR", "year must be a 4-digit calendar year (1960-2100)");
   }
@@ -268,6 +299,7 @@ export async function handleMacro(
     rate_pct: ratePct,
     indicator: SUPPORTED_INDICATOR,
     indicator_id: INDICATOR_ID,
+    indicator_input: indicatorInput,
     country: country.name,
     country_iso3: country.iso3 || country.id,
     year,
@@ -286,7 +318,7 @@ export async function handleMacro(
   }
 
   return envelope(INTENT, fields, receiptDoc, {
-    answer: `${country.name} ${requestedYear === undefined ? "latest published " : ""}unemployment rate in ${year}: ${ratePct}% of the total labour force (World Bank ${INDICATOR_ID}).`,
+    answer: `${indicatorNormalized ? `"${indicatorInput}" read as "${SUPPORTED_INDICATOR}" (the contract's only enum value; the normalization is disclosed). ` : ""}${country.name} ${requestedYear === undefined ? "latest published " : ""}unemployment rate in ${year}: ${ratePct}% of the total labour force (World Bank ${INDICATOR_ID}).`,
     verdict: "verified",
     confidence: 1.0,
     source: "World Bank API (api.worldbank.org, authoritative publisher)",

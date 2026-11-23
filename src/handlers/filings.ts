@@ -297,6 +297,42 @@ export function parsePeriod(periodRaw: string): Period {
   }
 
 
+  // Calendar quarters in the forms requests actually use ("Q3 2026",
+  // "third quarter of 2026"). These are always read as CALENDAR quarters
+  // and the resolved range is disclosed in the label, never silently.
+  const quarterWord: Record<string, number> = {
+    first: 1, second: 2, third: 3, fourth: 4, '1st': 1, '2nd': 2, '3rd': 3, '4th': 4,
+  };
+  const qNumeric = /^(?:(?:in|during|for|over)\s+)?(?:the\s+)?q([1-4])(?:\s+of)?\s+(\d{4})$/i.exec(period);
+  const qWord = /^(?:(?:in|during|for|over)\s+)?(?:the\s+)?(first|second|third|fourth|1st|2nd|3rd|4th)\s+quarter(?:\s+of)?\s+(\d{4})$/i.exec(period);
+  if (qNumeric || qWord) {
+    const year = Number((qNumeric ?? qWord)![2]);
+    const number = qNumeric ? Number(qNumeric[1]) : quarterWord[qWord![1].toLowerCase()];
+    if (!yearInRange(year)) throw badRequest('INVALID_PERIOD', `Unparseable period: "${periodRaw}"`);
+    const start = new Date(Date.UTC(year, (number - 1) * 3, 1)).toISOString().slice(0, 10);
+    const end = new Date(Date.UTC(year, number * 3, 0)).toISOString().slice(0, 10);
+    return { start, end, label: `${label} (calendar quarter ${start}..${end})` };
+  }
+
+  // "last quarter": the most recent COMPLETED calendar quarter.
+  if (/^(?:the\s+)?last\s+quarter$/i.test(period)) {
+    const now = new Date();
+    const currentQ = Math.floor(now.getUTCMonth() / 3);
+    const year = currentQ === 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear();
+    const number = currentQ === 0 ? 4 : currentQ;
+    const start = new Date(Date.UTC(year, (number - 1) * 3, 1)).toISOString().slice(0, 10);
+    const end = new Date(Date.UTC(year, number * 3, 0)).toISOString().slice(0, 10);
+    return { start, end, label: `${label} (calendar quarter ${start}..${end})` };
+  }
+
+  // "year to date" / "YTD": January 1 of the current calendar year to today (UTC).
+  if (/^(?:the\s+)?(?:year[\s-]*to[\s-]*date|ytd)$/i.test(period)) {
+    const now = new Date();
+    const start = `${now.getUTCFullYear()}-01-01`;
+    const end = formatUtcDate(now);
+    return { start, end, label: `${label} (${start}..${end})` };
+  }
+
   // "2023 to 2023", "2021 through 2023", "2023-01-01 to 2023-03-31".
   const toRange = /^(\d{4}(?:-\d{2}-\d{2})?)\s+(?:to|through|thru|until)\s+(\d{4}(?:-\d{2}-\d{2})?)$/i.exec(period);
   if (toRange) {
@@ -315,7 +351,10 @@ export function parsePeriod(periodRaw: string): Period {
     return { start: a, end: b, label };
   }
 
-  const lastMonths = /^last\s+(\d+)\s+months?$/i.exec(period);
+  // "the past year" / "the last year": the trailing twelve months, same
+  // semantics as "last 12 months".
+  const pastYear = /^(?:the\s+)?(?:past|last)\s+year$/i.exec(period);
+  const lastMonths = pastYear ? ['', '12'] : /^(?:the\s+)?(?:past|last)\s+(\d+)\s+months?$/i.exec(period);
   if (lastMonths) {
     const n = Number(lastMonths[1]);
     if (!Number.isInteger(n) || n < 1 || n > 1200) {
@@ -941,6 +980,28 @@ export function resolveCikFromTickers(entity: string, tickers: TickersMap): CikM
     const cik = tickerEntryCik(only);
     if (cik === null) return null;
     return { cik, cik10: padCik(cik), matchKind: 'name' };
+  }
+  // F2 — dominance inside the prefix round (exact ticker > exact name >
+  // prefix): a candidate whose title equals the query once its legal
+  // suffix is stripped ("apple" vs "Apple Inc") is a name-level match,
+  // strictly stronger than the bare prefix matches around it ("Apple
+  // Hospitality REIT Inc"). When EXACTLY ONE candidate matches at that
+  // level it is the clearly dominant resolution and resolves; when zero
+  // or several do, the matches are genuinely comparable and the request
+  // still refuses with AMBIGUOUS_ENTITY.
+  const stemMatches: TickerEntry[] = [];
+  for (const e of candidates.values()) {
+    const title = normalizeCompanyName(e.title as string);
+    const tokens = title.split(' ');
+    // Strip at most ONE trailing legal suffix: "apple inc" -> "apple",
+    // but "acme holdings inc" -> "acme holdings" (never "acme"), so a
+    // Holdings/Industries pair around one stem stays genuinely comparable.
+    if (tokens.length > 1 && COMPANY_SUFFIX_TOKENS.has(tokens[tokens.length - 1])) tokens.pop();
+    if (tokens.join(' ') === normQuery) stemMatches.push(e);
+  }
+  if (stemMatches.length === 1) {
+    const cik = tickerEntryCik(stemMatches[0]);
+    if (cik !== null) return { cik, cik10: padCik(cik), matchKind: 'name' };
   }
   throw unprocessable(
     'AMBIGUOUS_ENTITY',

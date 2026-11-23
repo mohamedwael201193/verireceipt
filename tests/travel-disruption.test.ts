@@ -78,3 +78,53 @@ describe("TRAVEL_DISRUPTION_GENERAL", () => {
     await app.close();
   });
 });
+
+describe("A1 airport names via the bundled list", () => {
+  it("a listed airport name resolves with disclosure", async () => {
+    stub();
+    const result = await handleTravelDisruption({ route_or_flight: "Los Angeles" });
+    expect(result.route_or_flight).toBe("LAX");
+    expect(String(result.answer)).toContain('"Los Angeles" resolved to LAX (Los Angeles Intl) via the bundled airport list');
+    const rc = result.receipt as { receipt_id: string };
+    const ev = await getReceiptEvidence(rc.receipt_id);
+    const parsed = JSON.parse(ev.evidence!) as { name_resolution: { input: string; resolved_to: string } };
+    expect(parsed.name_resolution.input).toBe("Los Angeles");
+    expect(parsed.name_resolution.resolved_to).toBe("LAX");
+  });
+
+  it("a disrupted airport reached by name keeps status and reason", async () => {
+    stub();
+    const result = await handleTravelDisruption({ route_or_flight: "LaGuardia" });
+    expect(result.route_or_flight).toBe("LGA");
+    expect(result.disrupted).toBe(true);
+    expect(String(result.status)).toContain("ground delay program");
+  });
+
+  it("a multi-airport city refuses ambiguous, naming the candidates", async () => {
+    for (const [city, codes] of [["Washington", ["IAD", "DCA"]], ["New York", ["JFK", "LGA"]], ["Dallas", ["DFW", "DAL"]], ["Chicago", ["ORD", "MDW"]], ["Houston", ["IAH", "HOU"]]] as const) {
+      let err: unknown;
+      try {
+        await handleTravelDisruption({ route_or_flight: city });
+      } catch (e) { err = e; }
+      const e = err as { status?: number; code?: string; message?: string };
+      expect(e.status, city).toBe(422);
+      expect(e.code, city).toBe("AMBIGUOUS_AIRPORT");
+      for (const c of codes) expect(String(e.message), `${city} ${c}`).toContain(c);
+    }
+  });
+
+  it("an unlisted name keeps the honest AIRPORT_CODE_REQUIRED refusal", async () => {
+    await expect(handleTravelDisruption({ route_or_flight: "Springfield" })).rejects.toMatchObject({ status: 400, code: "AIRPORT_CODE_REQUIRED" });
+  });
+
+  it("a 3-letter code still answers directly with no resolution disclosure", async () => {
+    stub();
+    const result = await handleTravelDisruption({ route_or_flight: "LAX" });
+    expect(result.route_or_flight).toBe("LAX");
+    expect(String(result.answer)).not.toContain("resolved to");
+    const rc = result.receipt as { receipt_id: string };
+    const ev = await getReceiptEvidence(rc.receipt_id);
+    const parsed = JSON.parse(ev.evidence!) as { name_resolution: string };
+    expect(parsed.name_resolution).toBe("not used (3-letter code given directly)");
+  });
+});

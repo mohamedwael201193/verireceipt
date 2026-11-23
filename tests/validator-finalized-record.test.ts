@@ -74,8 +74,15 @@ describe("complete finalized validator record", () => {
       balance: "34302537532", balance_unit: "gwei", effective_balance: 34000000000,
       slashed: false, activation_eligibility_epoch: "0", activation_epoch: "0",
       exit_epoch: farFuture, withdrawable_epoch: farFuture, finalized_state_root: root });
-    expect(String(result.answer)).toContain("34302537532 gwei");
+    // V1 framing: status and slashed first, ETH balances (effective in
+    // both ETH and gwei), then activation and exit, pubkey last and
+    // shortened. Fields stay in gwei.
+    expect(String(result.answer)).toContain("Validator 0 is active_ongoing and has not been slashed");
+    expect(String(result.answer)).toContain("balance 34.302537532 ETH (effective 34 ETH = 34000000000 gwei)");
+    expect(String(result.answer)).toContain("active since epoch 0");
+    expect(String(result.answer)).toContain("no exit scheduled");
     expect(String(result.answer)).toContain("far-future sentinel");
+    expect(String(result.answer)).toMatch(/pubkey 0x[0-9a-f]{4}\.\.\.[0-9a-f]{4}\./);
   });
 
   it("omits the far-future explanation when no returned epoch is the sentinel", async () => {
@@ -86,8 +93,15 @@ describe("complete finalized validator record", () => {
     });
     const result = await handleValidator({ validator_index: "0" }, { fetchImpl });
     expect(String(result.answer)).not.toContain("far-future sentinel");
-    expect(String(result.answer)).toContain("exit epoch 0; withdrawable epoch 0.");
+    expect(String(result.answer)).toContain("exit scheduled at epoch 0, withdrawable epoch 0.");
     expect(result.balance).toBe(fixture.data.balance);
+  });
+
+  it("renders a dust balance exactly (1 gwei = 0.000000001 ETH)", async () => {
+    const fetchImpl = transport((b) => { b.data.balance = "1"; });
+    const result = await handleValidator({ validator_index: "0" }, { fetchImpl });
+    expect(String(result.answer)).toContain("balance 0.000000001 ETH");
+    expect(result.balance).toBe("1");
   });
 
   for (const sentinelField of ["activation_eligibility_epoch", "activation_epoch", "exit_epoch", "withdrawable_epoch"] as const) {

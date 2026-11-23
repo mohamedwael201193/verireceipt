@@ -110,6 +110,21 @@ import { TIMEOUT_MS } from "../config/limits";
 
 export const INTENT = "VALIDATOR_PERFORMANCE_VERIFY_GENERAL";
 
+/** Exact gwei-to-ETH text: integer whole part plus the 9-digit
+ * fractional part, trailing zeros trimmed (no float rounding). */
+function gweiToEth(gwei: string | number): string {
+  const v = BigInt(gwei);
+  const whole = v / 1_000_000_000n;
+  const frac = (v % 1_000_000_000n).toString().padStart(9, "0").replace(/0+$/, "");
+  return frac === "" ? `${whole}` : `${whole}.${frac}`;
+}
+
+/** Pubkey, shortened for the answer text: 0x plus four hex chars on
+ * each side. The full pubkey stays in the envelope field. */
+function shortenPubkey(pubkey: string): string {
+  return /^0x[0-9a-fA-F]{10,}$/.test(pubkey) ? `${pubkey.slice(0, 6)}...${pubkey.slice(-4)}` : pubkey;
+}
+
 /**
  * Per-source capabilities for the four keyless mainnet beacon REST bases
  * (four independent operators). BEACON_SOURCES is derived from this
@@ -1477,12 +1492,12 @@ export async function handleValidator(
     ? "Epoch 18446744073709551615 is the beacon far-future sentinel, not a scheduled date. "
     : "";
   const answer =
-    `Validator ${leg.index} (${leg.pubkey}) has an effective balance of ${leg.effectiveBalance} gwei ` +
-    `and balance ${leg.balance} gwei; status ${leg.status}; slashed ${leg.slashed}; ` +
-    `activation eligibility epoch ${leg.activationEligibilityEpoch}; activation epoch ${leg.activationEpoch}; ` +
-    `exit epoch ${leg.exitEpoch}; withdrawable epoch ${leg.withdrawableEpoch}. ` +
+    `Validator ${leg.index} is ${leg.status} and ${leg.slashed ? "HAS been slashed" : "has not been slashed"}; ` +
+    `balance ${gweiToEth(leg.balance)} ETH (effective ${gweiToEth(leg.effectiveBalance)} ETH = ${leg.effectiveBalance} gwei), ` +
+    `active since epoch ${leg.activationEpoch} (eligible from epoch ${leg.activationEligibilityEpoch}), ` +
+    `${leg.exitEpoch === "18446744073709551615" ? "no exit scheduled" : `exit scheduled at epoch ${leg.exitEpoch}, withdrawable epoch ${leg.withdrawableEpoch}`}. ` +
     sentinelNote +
-    `Verified by ${votes} at finalized state root ${agreedRoot}.` +
+    `Finalized beacon state verified by ${votes} at state root ${agreedRoot}; pubkey ${shortenPubkey(leg.pubkey)}.` +
     perfSentence;
   const result = envelope(
     INTENT,

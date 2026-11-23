@@ -24,6 +24,9 @@ describe("shared exact chain aliases", () => {
     ["Ethereum Mainnet", "ethereum"],
     ["base-sepolia", "base-sepolia"],
     ["sepolia", "sepolia"],
+    ["avax", "avalanche"],
+    ["Avalanche C-Chain", "avalanche"],
+    ["c-chain", "avalanche"],
   ])("%s selects exactly %s", (input, expected) => {
     expect(normalizeChain(input)).toBe(expected);
   });

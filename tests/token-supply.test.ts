@@ -120,8 +120,41 @@ describe("handleTokenSupply validation (no network use)", () => {
 });
 
 describe("display-label input validation", () => {
-  it("does not silently choose a network for a chainless symbol", async () => {
-    await expectApiError(handleTokenSupply({ token: "USDC" }), 400, "MISSING_PARAM");
+  it("a chainless listed symbol resolves to its canonical home chain, disclosed", async () => {
+    stubSupplyFetch(Object.fromEntries(ETH.map((url) => [url, supplyBehavior(41000000123456n, 6, "USDC")])));
+    const out = await handleTokenSupply({ token: "USDC" });
+    expect(out.chain).toBe("ethereum");
+    expect(out.total_supply).toBe(41000000.123456);
+    expect(String(out.answer)).toContain("No chain was given");
+    expect(String(out.answer)).toContain("canonical home chain ethereum");
+    const receipt = out.receipt as { receipt_id: string };
+    const evidence = await getReceiptEvidence(receipt.receipt_id);
+    const parsed = JSON.parse(evidence.evidence!) as { chain_resolution: { resolved_chain: string } | string };
+    expect(typeof parsed.chain_resolution).toBe("object");
+    expect((parsed.chain_resolution as { resolved_chain: string }).resolved_chain).toBe("ethereum");
+  });
+
+  it("a single-chain listed symbol resolves to its only chain (ARB on arbitrum)", async () => {
+    const ARB_RPCS = CHAIN_RPCS.arbitrum;
+    stubSupplyFetch(Object.fromEntries(ARB_RPCS.map((url) => [url, supplyBehavior(10000000000n * 10n ** 18n, 18, "ARB")])));
+    const out = await handleTokenSupply({ token: "ARB" });
+    expect(out.chain).toBe("arbitrum");
+    expect(String(out.answer)).toContain("canonical home chain arbitrum");
+  });
+
+  it("a chainless UNLISTED symbol still refuses, and a raw address still needs a chain", async () => {
+    await expectApiError(handleTokenSupply({ token: "NOSUCHTOKEN" }), 400, "MISSING_PARAM");
+    await expectApiError(handleTokenSupply({ token: USDC_ETH }), 400, "MISSING_PARAM");
+  });
+
+  it("an explicit chain is unchanged and carries no home-chain disclosure", async () => {
+    stubSupplyFetch(Object.fromEntries(ETH.map((url) => [url, supplyBehavior(1000n, 6, "USDC")])));
+    const out = await handleTokenSupply({ token: "USDC on ethereum" });
+    expect(String(out.answer)).not.toContain("canonical home chain");
+    const receipt = out.receipt as { receipt_id: string };
+    const evidence = await getReceiptEvidence(receipt.receipt_id);
+    const parsed = JSON.parse(evidence.evidence!) as { chain_resolution: string };
+    expect(parsed.chain_resolution).toBe("not used (chain given)");
   });
 
   it.each([
@@ -141,6 +174,31 @@ describe("display-label input validation", () => {
 
   it("still rejects a contradictory chain before reading the explicit address", async () => {
     await expectApiError(handleTokenSupply({ token: `USDC (${USDC_ETH}) on base`, chain: "ethereum" }), 400, "CHAIN_MISMATCH");
+  });
+});
+
+describe("T2 expanded registry", () => {
+  it("lists the 21 newly verified ethereum symbols", () => {
+    const added = ["STETH","WSTETH","RETH","AAVE","CRV","LDO","COMP","SNX","GRT","ENS","APE","SAND","MANA","FRAX","BAT","ZRX","BNB","CRO","USDP","PYUSD","ONDO"];
+    for (const sym of added) expect(TOKEN_CONTRACTS.ethereum[sym], sym).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    expect(TOKEN_CONTRACTS.ethereum.MKR).toBeUndefined(); // bytes32 symbol: honestly excluded
+  });
+
+  it("answers a newly listed 6-decimal symbol (PYUSD) through the quorum", async () => {
+    stubSupplyFetch(Object.fromEntries(ETH.map((url) => [url, supplyBehavior(500000123456n, 6, "PYUSD")])));
+    const out = await handleTokenSupply({ token: "PYUSD on ethereum" });
+    expect(out.total_supply).toBe(500000.123456);
+    expect(out.token_symbol).toBe("PYUSD");
+  });
+
+  it("a newly listed symbol keeps its on-chain symbol case in the evidence (stETH)", async () => {
+    stubSupplyFetch(Object.fromEntries(ETH.map((url) => [url, supplyBehavior(9000000n * 10n ** 18n, 18, "stETH")])));
+    const out = await handleTokenSupply({ token: "STETH on ethereum" });
+    expect(out.total_supply).toBe(9000000);
+    const receipt = out.receipt as { receipt_id: string };
+    const evidence = await getReceiptEvidence(receipt.receipt_id);
+    const parsed = JSON.parse(evidence.evidence!) as { token_symbol_onchain: string };
+    expect(parsed.token_symbol_onchain).toBe("stETH");
   });
 });
 
