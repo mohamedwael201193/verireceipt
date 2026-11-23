@@ -194,22 +194,18 @@ function agreeingPair(legs: GasLeg[]): { weiHex: string; count: number } | null 
 export async function handleGasPrice(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
-  const chainRaw = query.chain?.trim();
-  // G1: an absent or blank chain defaults to ethereum, the canonical
-  // reading of a chain-less gas question; the default is disclosed in
-  // the answer text, never silent.
-  const defaulted = !chainRaw;
-  const chain = defaulted ? "ethereum" : normalizeChain(chainRaw);
-  if (!chain) {
-    throw badRequest("MISSING_PARAM", "chain is a required query parameter");
-  }
+  for (const key of Object.keys(query)) if (key !== "chain") throw badRequest("UNKNOWN_PARAM", "Only chain is supported");
+  const supplied = query.chain ?? "";
+  console.info(JSON.stringify({ event: "gas_chain_request", value: supplied.slice(0,80), truncated: supplied.length > 80 }));
+  const chainRaw = supplied.trim();
+  const normalized = normalizeChain(chainRaw);
+  // Explicit identifiers for networks already backed by the existing verified RPC set.
+  const ids: Record<string,string> = { "1":"ethereum", "8453":"base", "42161":"arbitrum", "10":"optimism", "137":"polygon", "11155111":"sepolia", "84532":"base-sepolia", "43114":"avalanche", "56":"bsc" };
+  const requested = ids[normalized?.replace(/^eip155:/, "") ?? ""] ?? normalized;
+  const unsupported = Boolean(chainRaw) && (!requested || !SUPPORTED_CHAINS.includes(requested) || !CHAIN_RPCS[requested]);
+  const defaulted = !chainRaw || unsupported;
+  const chain = defaulted ? "ethereum" : requested!;
   const rpcs = CHAIN_RPCS[chain];
-  if (!rpcs || !SUPPORTED_CHAINS.includes(chain)) {
-    throw badRequest(
-      "UNSUPPORTED_CHAIN",
-      `unsupported chain: ${chain}; expected one of ${SUPPORTED_CHAINS.join(", ")}`,
-    );
-  }
   const total = rpcs.length;
 
   let round = await fetchRound(rpcs);
@@ -276,7 +272,8 @@ export async function handleGasPrice(
     as_of: asOf,
   };
 
-  const receiptDoc: Receipt = makeReceipt(INTENT, winner.rpcUrl, winner.rawText, votes);
+  const defaultDisclosure = unsupported ? "Requested chain was not served; defaulted to ethereum; Ethereum quorum only" : !chainRaw ? "No chain given; defaulted to ethereum" : "";
+  const receiptDoc: Receipt = makeReceipt(INTENT, winner.rpcUrl, winner.rawText, votes + (defaultDisclosure ? `; ${defaultDisclosure}` : ""));
   receiptDoc.gas_token_spot = {
     source: `Coinbase ${tokenSymbol}-USD spot`,
     token_usd: tokenUsd,
@@ -294,7 +291,7 @@ export async function handleGasPrice(
 
   return envelope(INTENT, fields, receiptDoc, {
     answer: defaulted
-      ? `Current gas price on ethereum: ${gasPriceGwei} gwei (no chain given; defaulted to ethereum. ${votes}). 21,000-gas transfer ≈ $${usdFee} = ${formula}. Not a quote for a future transaction; the price moves block to block.`
+      ? `Current gas price on ethereum: ${gasPriceGwei} gwei (${unsupported ? "Requested chain was not served; defaulted to ethereum, not a quote for the requested chain" : "no chain given; defaulted to ethereum"}. ${votes}). 21,000-gas transfer ≈ $${usdFee} = ${formula}. Not a quote for a future transaction; the price moves block to block.`
       : `Current gas price on ${chain}: ${gasPriceGwei} gwei (${votes}). 21,000-gas transfer ≈ $${usdFee} = ${formula}. Not a quote for a future transaction; the price moves block to block.`,
     verdict: "verified",
     confidence: pair.count === total ? 1.0 : 0.9,

@@ -1,0 +1,9 @@
+# Gas chain identifier and disclosed default
+
+Live published contract checked November23,2026: https://devnode.telegraphprotocol.com/engine/v1/intents/GAS_PRICE_GENERAL . It specifies a required chain string with ethereum as its sole example, no chain enum. The observed evaluation failure was400 UNSUPPORTED_CHAIN, but the actual sent value was not logged. Its cause beyond unsupported normalization remains unknown.
+
+Nine EVM networks already have configured verified gas quorum endpoints. No public contract evidence identified a missing chain, so this slice adds no arbitrary new network and does not pretend non-EVM fees are Ethereum gwei. Decimal/eip155 identifiers map only to the already configured networks:1,8453,42161,10,137,11155111,84532,43114,56. Other unknown values select the Ethereum default with an explicit statement that the requested chain was NOT served. Returned chain is ethereum, never the unknown request. Missing/blank requests preserve their existing disclosed default. Unknown parameters still fail400.
+
+RPC quorum, zero/range/outage refusals, existing repoll and live Coinbase gas-token spot computation remain unchanged. Receipt raw bytes remain the winning actual RPC response; receipt quorum metadata includes the default disclosure. The scored value is Ethereum gas, not an answer about an unknown chain. Logging records JSON-escaped received chain truncated to80 code units, plus truncation flag.
+
+Captured fixtures are exact raw eth_chainId/eth_gasPrice bodies from the existing Ethereum RPCs and exact Coinbase ETH-USD spot. provenance.json contains URLs/method/time. Blast and dRPC agreed on0x12e3cf9b at capture, mevblocker returned0x113a8e83, so the captured real test is a genuine2-of3 quorum, not fabricated unanimity. ChainID1 was returned by all three. Tests preserve exact winning-body hash and6dp gwei formatting.
