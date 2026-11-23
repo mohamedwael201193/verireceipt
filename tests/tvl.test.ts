@@ -4764,7 +4764,7 @@ describe('catalog parent protocol resolution (epoch-35 Curve Finance regression)
 
 describe('TVL process memory safety', () => {
   beforeEach(() => __seedTvlCachesForTests(PROTOCOLS_FIXTURE, CHAINS_FIXTURE));
-  // 322 x 128 KiB = 41,238,528 B > the 40 MiB /protocol/{slug} cap
+  // 322 x 128 KiB = 42,205,184 B > the 40 MiB /protocol/{slug} cap
   // (raised from 2 MiB 2026-11-23: real umbrella payloads are 11-31 MB).
   const oversizeStream = (cancelled: () => void) => {
     let chunks = 0;
