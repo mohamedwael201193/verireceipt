@@ -110,7 +110,15 @@ async function fetchGasTokenUsd(
       `gas-token USD spot unavailable (Coinbase ${symbol}-USD HTTP ${res.status}); transfer_fee_usd cannot be computed, refusing`,
     );
   }
-  const body = JSON.parse(rawText) as { data?: { amount?: string } };
+  let body: { data?: { amount?: string } };
+  try {
+    body = JSON.parse(rawText) as { data?: { amount?: string } };
+  } catch {
+    throw upstreamUnavailable(
+      "SPOT_UNAVAILABLE",
+      `gas-token USD spot unparseable (Coinbase ${symbol}-USD not JSON); transfer_fee_usd cannot be computed, refusing`,
+    );
+  }
   const amount = Number(body?.data?.amount);
   if (!Number.isFinite(amount) || amount <= 0) {
     throw upstreamUnavailable(
@@ -252,6 +260,14 @@ export async function handleGasPrice(
   const spotBodies: string[] = [];
   const tokenUsd = await fetchGasTokenUsd(tokenSymbol, spotBodies);
   const usdFee = Math.round(transferFeeUsd(gasPriceGwei, tokenUsd) * 1e6) / 1e6;
+  // G4b: a computed fee outside [0, 10000] USD for a plain transfer is
+  // implausible on every supported chain — refuse, never serve it.
+  if (!(usdFee >= 0 && usdFee <= 10000)) {
+    throw upstreamUnavailable(
+      "IMPLAUSIBLE_VALUE",
+      `computed transfer_fee_usd ${usdFee} USD is outside the plausible 0..10000 range; refusing to serve it`,
+    );
+  }
   const formula = `${gasPriceGwei} gwei x 21000 gas x ${tokenSymbol} $${Math.round(tokenUsd * 100) / 100} (Coinbase spot) / 1e9`;
 
   const fields: Record<string, unknown> = {

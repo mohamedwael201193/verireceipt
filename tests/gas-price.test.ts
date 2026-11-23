@@ -409,6 +409,26 @@ describe("G4 transfer_fee_usd (stubbed fetch)", () => {
     await expectApiError(handleGasPrice({ chain: "ethereum" }), 502, "SPOT_UNAVAILABLE");
   });
 
+  it("refuses when the spot body is not JSON", async () => {
+    stubGasFetch("ethereum", {
+      [ETH[0]]: { kind: "ok", value: "0x3b9aca00" },
+      [ETH[1]]: { kind: "ok", value: "0x3b9aca00" },
+      [ETH[2]]: { kind: "ok", value: "0x3b9aca00" },
+    });
+    spotOutcome = { kind: "badjson" };
+    await expectApiError(handleGasPrice({ chain: "ethereum" }), 502, "SPOT_UNAVAILABLE");
+  });
+
+  it("refuses an implausible computed transfer_fee_usd", async () => {
+    stubGasFetch("ethereum", {
+      [ETH[0]]: { kind: "ok", value: "0x174876e800" }, // 100 gwei
+      [ETH[1]]: { kind: "ok", value: "0x174876e800" },
+      [ETH[2]]: { kind: "ok", value: "0x174876e800" },
+    });
+    spotOutcome = { kind: "spot", value: "5000000" }; // $5M ETH => $10500 transfer
+    await expectApiError(handleGasPrice({ chain: "ethereum" }), 502, "IMPLAUSIBLE_VALUE");
+  });
+
   it("refuses when the spot serves an HTTP error", async () => {
     stubGasFetch("ethereum", {
       [ETH[0]]: { kind: "ok", value: "0x3b9aca00" },
