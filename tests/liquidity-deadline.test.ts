@@ -47,11 +47,17 @@ it('runner rejects at 3000 ms even when fetch ignores abort, without a late rece
     await vi.advanceTimersByTimeAsync(1500);
     expect(saveReceipt).not.toHaveBeenCalled();
 });
-it('price and yield keep their 900 ms runner deadlines', async () => {
-    vi.useFakeTimers(); vi.stubGlobal('fetch', delayedFetch(4000, false));
+it('price keeps its 900 ms per-source deadline and yield keeps its reviewed 5000 ms deadline', async () => {
+    vi.useFakeTimers(); vi.stubGlobal('fetch', () => new Promise<Response>(() => {}));
     const h = createWiredFinanceHandlers({});
     const price = expect(h.price({symbol:'ETH'})).rejects.toMatchObject({code:'APPROVED_SOURCES_UNAVAILABLE'});
-    const yieldResult = expect(h.yield({project:'aave-v3',symbol:'USDC',chain:'ethereum'})).rejects.toMatchObject({code:'APPROVED_SOURCES_UNAVAILABLE'});
-    await vi.advanceTimersByTimeAsync(1800); await price; await yieldResult;
+    let yieldSettled=false;
+    const yieldPending=h.yield({project:'aave-v3',symbol:'USDC',chain:'ethereum'}).finally(()=>{yieldSettled=true;});
+    const yieldResult=expect(yieldPending).rejects.toMatchObject({code:'APPROVED_SOURCES_UNAVAILABLE'});
+    await vi.advanceTimersByTimeAsync(1800); await price;
+    expect(saveReceipt).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(3199); expect(yieldSettled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); await yieldResult;
+    await vi.advanceTimersByTimeAsync(5000);
     expect(saveReceipt).not.toHaveBeenCalled();
 });
