@@ -7,9 +7,9 @@ import { handleFinancialData } from "../src/handlers/financialData";
 import { resetMarketCacheForTests } from "../src/handlers/marketSourceCache";
 import { getReceiptEvidence } from "../src/core/storage";
 import { sha256Hex } from "../src/core/receipt";
-const raw = readFileSync(join(__dirname, "fixtures/financial-data/coingecko-eth-sol.json"), "utf8");
+const raw = readFileSync(join(__dirname, "fixtures/financial-data/paprika-eth-ethereum.json"), "utf8");
 const data = JSON.parse(raw);
-const start = data.ethereum.last_updated_at * 1000 + 1000;
+const start = Date.parse(data.last_updated) + 1000;
 beforeEach(() => { resetMarketCacheForTests(); vi.useFakeTimers(); vi.setSystemTime(start); });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); resetMarketCacheForTests(); });
 afterAll(() => { rmSync(scratch, { recursive: true, force: true }); });
@@ -30,7 +30,7 @@ describe("bounded market observation cache", () => {
       const r = b.receipt as any; expect(r.fetched_at).toBe((a.receipt as any).fetched_at);
       const ev = (await getReceiptEvidence(r.receipt_id)).evidence!;
       expect(sha256Hex(ev)).toBe(r.raw_response_sha256); const j = JSON.parse(ev.toString());
-      expect(j.raw_bodies.coingecko).toBe(raw); expect(j.stale_reason).toContain(`HTTP ${status}`);
+      expect(j.raw_bodies.coinpaprika).toBe(raw); expect(j.stale_reason).toContain(`HTTP ${status}`);
       expect(j.attempted_at).toBe(new Date(start + 30000).toISOString());
     });
   }

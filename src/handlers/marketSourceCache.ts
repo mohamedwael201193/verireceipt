@@ -1,4 +1,4 @@
-// Process-local CoinGecko observation cache. Raw bytes and acquisition time stay atomic.
+// Process-local CoinPaprika observation cache. Raw bytes and acquisition time stay atomic.
 const FRESH_MS = 30_000;
 const STALE_MS = 5 * 60_000;
 const TIMEOUT_MS = 6_000;
@@ -8,7 +8,7 @@ const cache = new Map<string, MarketObservation>();
 const inFlight = new Map<string, Promise<MarketObservation>>();
 export function resetMarketCacheForTests(): void { cache.clear(); inFlight.clear(); }
 export async function cachedMarketBody(id: string, validate: (body: string) => number): Promise<MarketObservation> {
-  if (id !== "ethereum" && id !== "solana") throw new Error("unsupported market identity");
+  if (id !== "eth-ethereum" && id !== "sol-solana") throw new Error("unsupported market identity");
   const prior = cache.get(id);
   const age = prior ? Date.now() - Date.parse(prior.fetchedAt) : Infinity;
   if (prior && age >= 0 && age < FRESH_MS) { validate(prior.body); return prior; }
@@ -33,16 +33,16 @@ export async function cachedMarketBody(id: string, validate: (body: string) => n
       const request = (async (): Promise<MarketObservation> => {
         let response: Response;
         try {
-          response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd&include_market_cap=true&include_24hr_vol=true&include_last_updated_at=true`, {
+          response = await fetch(`https://api.coinpaprika.com/v1/tickers/${id}`, {
             signal: controller.signal, headers: { Accept: "application/json", "User-Agent": "VeriReceipt/2.0 financial-data observer (+https://verireceipt.vercel.app)" },
           });
         } catch {
-          if (controller.signal.aborted) return fail("CoinGecko request timeout");
+          if (controller.signal.aborted) return fail("CoinPaprika request timeout");
           throw new Error("market transport failure");
         }
         if (!response.ok) {
           void response.body?.cancel().catch(() => undefined);
-          if (response.status === 429 || response.status >= 500 && response.status <= 599) return fail(`CoinGecko HTTP ${response.status}`);
+          if (response.status === 429 || response.status >= 500 && response.status <= 599) return fail(`CoinPaprika HTTP ${response.status}`);
           throw new Error("market source returned a non-retryable HTTP status");
         }
         // Keep the deadline active until the complete bounded body is consumed.
@@ -69,7 +69,7 @@ export async function cachedMarketBody(id: string, validate: (body: string) => n
         return observation;
       })();
       return await Promise.race([request, new Promise<MarketObservation>((resolve, reject) => {
-        timer = setTimeout(() => { controller.abort(); try { resolve(fail("CoinGecko request timeout")); } catch (e) { reject(e); } }, TIMEOUT_MS);
+        timer = setTimeout(() => { controller.abort(); try { resolve(fail("CoinPaprika request timeout")); } catch (e) { reject(e); } }, TIMEOUT_MS);
       })]);
     } finally { if (timer) clearTimeout(timer); controller.abort(); }
   })();

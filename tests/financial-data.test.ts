@@ -17,13 +17,14 @@ import { sha256Hex } from "../src/core/receipt";
 const tickers = readFileSync(join(__dirname, "fixtures/corporate-registry/company-tickers-excerpt.json"), "utf8");
 const shares = readFileSync(join(__dirname, "fixtures/financial-data/sec-aapl-shares.json"), "utf8");
 const chart = readFileSync(join(__dirname, "fixtures/financial-data/yahoo-chart-aapl.json"), "utf8");
-const crypto = readFileSync(join(__dirname, "fixtures/financial-data/coingecko-eth-sol.json"), "utf8");
+const crypto = readFileSync(join(__dirname, "fixtures/financial-data/paprika-eth-ethereum.json"), "utf8");
+const sol = readFileSync(join(__dirname, "fixtures/financial-data/paprika-sol-solana.json"), "utf8");
 const tip = readFileSync(join(__dirname, "fixtures/financial-data/mempool-tip.txt"), "utf8");
 const btcSpot = readFileSync(join(__dirname, "fixtures/financial-data/coinbase-btc-usd.json"), "utf8");
 function stub(opts: { secDown?: boolean; btcDown?: boolean } = {}): void {
   vi.stubGlobal("fetch", async (url: unknown) => {
     const u = String(url);
-    if (u.includes("coingecko")) return new Response(crypto, { status: 200 });
+    if (u.includes("coinpaprika")) return new Response(u.endsWith("sol-solana") ? sol : crypto, { status: 200 });
     if (u.includes("finance/search")) return new Response(JSON.stringify({ quotes: [] }), { status: 200 });
     if (u.includes("sec.gov")) {
       if (opts.secDown) throw new Error("sec outage");
@@ -119,27 +120,27 @@ describe("financial name resolution and aggregated crypto", () => {
     it(`serves aggregated cap and rolling 24h volume for ${asset}`, async () => {
       stub();
       const id = asset.toLowerCase().startsWith("sol") ? "solana" : "ethereum";
-      const data = JSON.parse(crypto)[id];
-      vi.useFakeTimers(); vi.setSystemTime(new Date(data.last_updated_at * 1000 + 1000));
+      const data = JSON.parse(id === "solana" ? sol : crypto);
+      vi.useFakeTimers(); vi.setSystemTime(new Date(Date.parse(data.last_updated) + 1000));
       const r = await handleFinancialData({ asset });
-      expect(r.market_cap_usd).toBe(data.usd_market_cap);
+      expect(r.market_cap_usd).toBe(data.quotes.USD.market_cap);
       expect(r.asset_type).toBe("crypto"); expect(r.symbol).toBe(id==="ethereum"?"ETH":"SOL"); expect(r.name).toBe(id==="ethereum"?"Ethereum":"Solana");
-      expect(r.volume_24h_usd).toBe(data.usd_24h_vol);
-      expect(String(r.answer)).toContain("CoinGecko aggregated");
+      expect(r.volume_24h_usd).toBe(data.quotes.USD.volume_24h);
+      expect(String(r.answer)).toContain("CoinPaprika aggregated");
       expect(String(r.answer)).toContain("not the derived BTC");
       const receipt = r.receipt as { receipt_id: string; raw_response_sha256: string };
       const ev = await getReceiptEvidence(receipt.receipt_id);
       expect(sha256Hex(ev.evidence!)).toBe(receipt.raw_response_sha256);
-      expect(JSON.parse(ev.evidence!.toString()).raw_bodies.coingecko).toBe(crypto);
+      expect(JSON.parse(ev.evidence!.toString()).raw_bodies.coinpaprika).toBe(id === "solana" ? sol : crypto);
     });
   }
   it("rejects stale crypto market data instead of relabeling it as current", async () => {
     stub();
-    vi.useFakeTimers(); vi.setSystemTime(new Date(JSON.parse(crypto).ethereum.last_updated_at * 1000 + 86400001));
+    vi.useFakeTimers(); vi.setSystemTime(new Date(Date.parse(JSON.parse(crypto).last_updated) + 86400001));
     await expect(handleFinancialData({ asset: "ETH" })).rejects.toMatchObject({ status: 502, code: "BAD_MARKET_DATA" });
   });
   it("fails closed when a crypto field is missing", async () => {
-    vi.stubGlobal("fetch", async () => new Response('{"ethereum":{"usd_market_cap":10}}'));
+    vi.stubGlobal("fetch", async () => new Response('{"ethereum":{"market_cap":10}}'));
     await expect(handleFinancialData({ asset: "ETH" })).rejects.toMatchObject({ status: 502, code: "BAD_MARKET_DATA" });
   });
 });
@@ -176,15 +177,15 @@ describe("Yahoo equity discovery remains SEC-bound", () => {
 
 describe("financial fail-closed boundaries", () => {
   for (const [label, key, value] of [
-    ["future update", "last_updated_at", 9999999999],
-    ["cap above contract range", "usd_market_cap", 1000000000000001],
-    ["negative volume", "usd_24h_vol", -1],
-    ["zero cap", "usd_market_cap", 0],
+    ["future update", "last_updated", "2099-01-01T00:00:00Z"],
+    ["cap above contract range", "market_cap", 1000000000000001],
+    ["negative volume", "volume_24h", -1],
+    ["zero cap", "market_cap", 0],
   ] as const) {
     it(`rejects ${label}`, async () => {
       const d = JSON.parse(crypto);
-      vi.useFakeTimers(); vi.setSystemTime(new Date(d.ethereum.last_updated_at * 1000 + 1000));
-      d.ethereum[key] = value;
+      vi.useFakeTimers(); vi.setSystemTime(new Date(Date.parse(d.last_updated) + 1000));
+      if(key === "last_updated") d.last_updated = value; else d.quotes.USD[key] = value;
       vi.stubGlobal("fetch", async () => new Response(JSON.stringify(d)));
       await expect(handleFinancialData({ asset: "ETH" })).rejects.toMatchObject({ status: 502, code: "BAD_MARKET_DATA" });
     });
@@ -209,4 +210,20 @@ describe("SEC ticker container validation", () => {
    await expect(handleFinancialData({ asset: "AAPL" })).rejects.toMatchObject({ status:502, code:"SEC_MALFORMED" });
   });
  }
+});
+
+describe('CoinPaprika source identity and receipt scope',()=>{
+ it.each([{id:'sol-solana'},{symbol:'SOL'},{id:null},{symbol:null}])('refuses wrong/missing identity: %j',async change=>{
+  const d={...JSON.parse(crypto),...change};vi.useFakeTimers();vi.setSystemTime(Date.parse(d.last_updated)+1000);
+  vi.stubGlobal('fetch',async()=>new Response(JSON.stringify(d)));
+  await expect(handleFinancialData({asset:'ETH'})).rejects.toMatchObject({code:'BAD_MARKET_DATA'});
+ });
+ it('uses only the bound keyless ticker and preserves the dated risk record, not a licence grant',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(Date.parse(JSON.parse(crypto).last_updated)+1000);
+  const urls:string[]=[];vi.stubGlobal('fetch',async(u:unknown)=>{urls.push(String(u));return new Response(crypto);});
+  const r=await handleFinancialData({asset:'ETH'});expect(urls).toEqual(['https://api.coinpaprika.com/v1/tickers/eth-ethereum']);
+  const ev=JSON.parse((await getReceiptEvidence((r.receipt as any).receipt_id)).evidence!);
+  expect(ev.raw_bodies.coinpaprika).toBe(crypto);expect(ev.terms.commercialUse).toBe(false);expect(ev.terms.redistribution).toBe(false);
+  expect(ev.terms.ownerRiskAcceptance.acceptedAt).toBe('2026-11-23');expect(ev.attribution).toBe('Data by CoinPaprika');
+ });
 });

@@ -11,12 +11,13 @@
 // US equities use SEC-reported shares x Yahoo chart price. Company names
 // resolve through SEC titles, with Yahoo search as a discovery fallback;
 // all resolved tickers must still exist in the SEC index. Ambiguity refuses.
-// BTC retains its emission-schedule methodology. ETH and SOL use CoinGecko
+// BTC retains its emission-schedule methodology. ETH and SOL use CoinPaprika
 // aggregated market cap and rolling 24h volume, disclosed as a different
 // methodology. Equity session volume is NOT rolling 24h volume.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+import { COINPAPRIKA_APPROVAL } from "./financeWired";
 import { cachedMarketBody } from "./marketSourceCache";
 
 const SOURCE_TIMEOUT_MS = 10000;
@@ -39,10 +40,10 @@ async function fetchText(url: string, ua: string = UA): Promise<string> {
 
 interface SecEntry { cik_str?: number; ticker?: string; title?: string }
 const CRYPTO: Record<string, { id: string; symbol: string; name: string }> = {
-  ETH: { id: "ethereum", symbol: "ETH", name: "Ethereum" },
-  ETHEREUM: { id: "ethereum", symbol: "ETH", name: "Ethereum" },
-  SOL: { id: "solana", symbol: "SOL", name: "Solana" },
-  SOLANA: { id: "solana", symbol: "SOL", name: "Solana" },
+  ETH: { id: "eth-ethereum", symbol: "ETH", name: "Ethereum" },
+  ETHEREUM: { id: "eth-ethereum", symbol: "ETH", name: "Ethereum" },
+  SOL: { id: "sol-solana", symbol: "SOL", name: "Solana" },
+  SOLANA: { id: "sol-solana", symbol: "SOL", name: "Solana" },
 };
 const companyName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
   .replace(/(?:\s+(?:inc|incorporated|corp|corporation|co|company|ltd|limited))+$/, "").trim();
@@ -55,42 +56,42 @@ export function resolveSec(entries: SecEntry[], asset: string): SecEntry | undef
 }
 
 async function aggregatedCrypto(asset: string, crypto: { id: string; symbol: string; name: string }): Promise<Record<string, unknown>> {
-  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${crypto.id}&vs_currencies=usd&include_market_cap=true&include_24hr_vol=true&include_last_updated_at=true`;
+  const url = `https://api.coinpaprika.com/v1/tickers/${crypto.id}`;
   const validate = (body: string): number => {
     let data: Record<string, unknown>;
-    try { data = JSON.parse(body)?.[crypto.id]; } catch { throw upstreamUnavailable("BAD_MARKET_DATA", "CoinGecko returned malformed JSON"); }
-    const cap = data?.usd_market_cap;
-    const volume = data?.usd_24h_vol;
-    const updated = data?.last_updated_at;
-    if (typeof cap !== "number" || !Number.isFinite(cap) || cap <= 0 || cap > 1e15 ||
+    try { data = JSON.parse(body); } catch { throw upstreamUnavailable("BAD_MARKET_DATA", "CoinPaprika returned malformed JSON"); }
+    const cap = (data?.quotes as any)?.USD?.market_cap;
+    const volume = (data?.quotes as any)?.USD?.volume_24h;
+    const updated = typeof data?.last_updated === "string" ? Date.parse(data.last_updated) : NaN;
+    if (data?.id !== crypto.id || data?.symbol !== crypto.symbol || typeof cap !== "number" || !Number.isFinite(cap) || cap <= 0 || cap > 1e15 ||
         typeof volume !== "number" || !Number.isFinite(volume) || volume < 0 || volume > 1e15 ||
         typeof updated !== "number" || !Number.isFinite(updated) || updated <= 0 ||
-        updated * 1000 > Date.now() + 60000 || Date.now() - updated * 1000 > 86400000) {
-      throw upstreamUnavailable("BAD_MARKET_DATA", "CoinGecko cap, volume or update time is missing, stale or outside the contract range");
+        updated > Date.now() + 60000 || Date.now() - updated > 86400000) {
+      throw upstreamUnavailable("BAD_MARKET_DATA", "CoinPaprika cap, volume or update time is missing, stale or outside the contract range");
     }
-    return updated * 1000;
+    return updated;
   };
   let observation: Awaited<ReturnType<typeof cachedMarketBody>>;
   try { observation = await cachedMarketBody(crypto.id, validate); }
   catch (error) {
     if (error && typeof error === "object" && "code" in error) throw error;
-    throw upstreamUnavailable("SOURCE_UNREACHABLE", "CoinGecko market data unavailable");
+    throw upstreamUnavailable("SOURCE_UNREACHABLE", "CoinPaprika market data unavailable");
   }
   const { body, fetchedAt, staleReason, attemptedAt } = observation;
-  const data = JSON.parse(body)[crypto.id];
-  const cap = data.usd_market_cap as number, volume = data.usd_24h_vol as number, updated = data.last_updated_at as number;
-  const asOf = new Date(updated * 1000).toISOString();
+  const data = JSON.parse(body);
+  const cap = data.quotes.USD.market_cap as number, volume = data.quotes.USD.volume_24h as number, updated = Date.parse(data.last_updated);
+  const asOf = new Date(updated).toISOString();
   const evidence = JSON.stringify({ requested_asset: asset, asset: crypto.symbol, resolved_name: crypto.name,
-    methodology: "CoinGecko aggregated market cap and rolling 24h USD volume; not BTC emission-schedule supply x Coinbase spot",
+    methodology: "CoinPaprika aggregated market cap and rolling 24h USD volume; not BTC emission-schedule supply x Coinbase spot",
     market_cap_usd: cap, volume_24h_usd: volume, as_of: asOf, source_url: url,
-    raw_bodies: { coingecko: body }, fetched_at: fetchedAt, stale: Boolean(staleReason),
+    terms: COINPAPRIKA_APPROVAL, attribution: "Data by CoinPaprika", raw_bodies: { coinpaprika: body }, fetched_at: fetchedAt, stale: Boolean(staleReason),
     ...(staleReason ? { stale_reason: staleReason, attempted_at: attemptedAt } : {}) });
-  const receipt = makeReceipt(INTENT, url, evidence, `CoinGecko aggregated market data; methodology disclosed${staleReason ? "; STALE DISCLOSED" : ""}`);
+  const receipt = makeReceipt(INTENT, url, evidence, `CoinPaprika aggregated market data; methodology disclosed${staleReason ? "; STALE DISCLOSED" : ""}`);
   receipt.fetched_at = fetchedAt;
   try { await saveReceipt(receipt, evidence); } catch { throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable"); }
   return envelope(INTENT, { asset: crypto.symbol, asset_type: "crypto", symbol: crypto.symbol, name: crypto.name, resolved_name: crypto.name, market_cap_usd: cap,
-    volume_24h_usd: volume, metrics: ["methodology=CoinGecko aggregated market cap and rolling 24h volume", ...(staleReason ? [`stale=${staleReason}; original acquisition ${fetchedAt}`] : [])], as_of: asOf }, receipt,
-    { answer: `${staleReason ? "STALE CACHED OBSERVATION, not current market data. " : ""}${crypto.name} (${crypto.symbol}) market cap: $${cap.toLocaleString("en-US")}; rolling 24h USD volume: $${volume.toLocaleString("en-US")}, source update ${asOf}. Source: CoinGecko aggregated market data, not the derived BTC emission-schedule methodology.${staleReason ? ` ${staleReason}; last real observation acquired ${fetchedAt}; no values estimated or updated.` : ""}`,
+    volume_24h_usd: volume, metrics: ["methodology=CoinPaprika aggregated market cap and rolling 24h volume", ...(staleReason ? [`stale=${staleReason}; original acquisition ${fetchedAt}`] : [])], as_of: asOf }, receipt,
+    { answer: `${staleReason ? "STALE CACHED OBSERVATION, not current market data. " : ""}${crypto.name} (${crypto.symbol}) market cap: $${cap.toLocaleString("en-US")}; rolling 24h USD volume: $${volume.toLocaleString("en-US")}, source update ${asOf}. Source: CoinPaprika aggregated market data, not the derived BTC emission-schedule methodology.${staleReason ? ` ${staleReason}; last real observation acquired ${fetchedAt}; no values estimated or updated.` : ""}`,
       verdict: staleReason ? "stale" : "verified", confidence: staleReason ? 0.5 : 0.85, source: `${url}; fetched ${fetchedAt}${staleReason ? `; STALE: ${staleReason}; attempted ${attemptedAt}` : ""}` });
 }
 
