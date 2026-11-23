@@ -77,7 +77,7 @@ async function aggregatedCrypto(asset: string, crypto: { id: string; symbol: str
   const receipt = makeReceipt(INTENT, url, evidence, "CoinGecko aggregated market data; methodology disclosed");
   receipt.fetched_at = fetchedAt;
   try { await saveReceipt(receipt, evidence); } catch { throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable"); }
-  return envelope(INTENT, { asset: crypto.symbol, resolved_name: crypto.name, market_cap_usd: cap,
+  return envelope(INTENT, { asset: crypto.symbol, asset_type: "crypto", symbol: crypto.symbol, name: crypto.name, resolved_name: crypto.name, market_cap_usd: cap,
     volume_24h_usd: volume, metrics: ["methodology=CoinGecko aggregated market cap and rolling 24h volume"], as_of: asOf }, receipt,
     { answer: `${crypto.name} (${crypto.symbol}) market cap: $${cap.toLocaleString("en-US")}; rolling 24h USD volume: $${volume.toLocaleString("en-US")}, source update ${asOf}. Source: CoinGecko aggregated market data, not the derived BTC emission-schedule methodology.`,
       verdict: "verified", confidence: 0.85, source: `${url}; fetched ${fetchedAt}` });
@@ -151,7 +151,7 @@ export async function handleFinancialData(query: Record<string, string | undefin
     const answer = `BTC market cap: $${cap.toLocaleString("en-US")} as of ${asOf}, derived as the Coinbase spot ($${price}) x ${supply.toLocaleString("en-US")} BTC issued at tip height ${height} (emission schedule in the receipt). ` +
       `24h USD volume is not served: this slice has no keyless measured source for it. The cap is derived from two named sources, not copied from a market-data vendor.`;
     return envelope(INTENT, {
-      asset: "BTC", market_cap_usd: cap, volume_24h_usd: null,
+      asset: "BTC", asset_type: "crypto", symbol: "BTC", name: "Bitcoin", market_cap_usd: cap, volume_24h_usd: null,
       metrics: [`supply_btc=${supply} at tip ${height}`, `spot_usd=${price}`, "derivation=spot x emission-schedule supply"],
       as_of: asOf,
     }, receipt, { answer, verdict: "verified", confidence: 0.9,
@@ -245,9 +245,9 @@ export async function handleFinancialData(query: Record<string, string | undefin
   }
   const answer = `${ticker} market cap: $${cap.toLocaleString("en-US")}, derived as the Yahoo regular-market price ($${price}, exchange time ${marketTime}) x ${shares.val.toLocaleString("en-US")} shares outstanding reported to the SEC as of ${shares.end} (filed ${shares.filed}, accession ${shares.accn}). ` +
     (sessionVolumeUsd !== null ? `Rolling 24h USD volume is not served (the keyless source carries only the latest regular session: $${sessionVolumeUsd.toLocaleString("en-US")} in that session). ` : "Volume is not served: the price source carried none. ") +
-    `The cap is derived from two named sources, not copied from a vendor; the quote may be delayed.`;
+    `The cap is derived from two named sources, not copied from a vendor; the quote may be delayed. P/E, revenue, net income and EPS are not served: those figures are not present in the retrieved shares/price records.`;
   return envelope(INTENT, {
-    asset: ticker, resolved_name: row.title, market_cap_usd: cap, volume_24h_usd: volumeUsd,
+    asset: ticker, asset_type: "equity", symbol: ticker, name: row.title, resolved_name: row.title, market_cap_usd: cap, volume_24h_usd: volumeUsd,
     metrics: [`shares_outstanding=${shares.val} as of ${shares.end} (filed ${shares.filed}, ${shares.accn})`, `price_usd=${price} at ${marketTime}`, "derivation=price x shares outstanding",
       `latest_regular_session_volume_usd=${sessionVolumeUsd ?? "none"} (not rolling 24h)`],
     as_of: asOf,

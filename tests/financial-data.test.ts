@@ -64,6 +64,8 @@ describe("FINANCIAL_DATA_GENERAL", () => {
     stub();
     const result = await handleFinancialData({ asset: "aapl" });
     expect(result.asset).toBe("AAPL");
+    expect(result.asset_type).toBe("equity"); expect(result.symbol).toBe("AAPL"); expect(result.name).toBe("Apple Inc.");
+    expect(result).not.toHaveProperty("pe_ratio"); expect(String(result.answer)).toContain("P/E, revenue, net income and EPS are not served");
     expect(result.market_cap_usd).toBe(Math.round(342.56 * 14532182000));
     expect(result.volume_24h_usd).toBeNull(); // rolling 24h is not served from a session figure
     const ans = String(result.answer);
@@ -120,6 +122,7 @@ describe("financial name resolution and aggregated crypto", () => {
       vi.useFakeTimers(); vi.setSystemTime(new Date(data.last_updated_at * 1000 + 1000));
       const r = await handleFinancialData({ asset });
       expect(r.market_cap_usd).toBe(data.usd_market_cap);
+      expect(r.asset_type).toBe("crypto"); expect(r.symbol).toBe(id==="ethereum"?"ETH":"SOL"); expect(r.name).toBe(id==="ethereum"?"Ethereum":"Solana");
       expect(r.volume_24h_usd).toBe(data.usd_24h_vol);
       expect(String(r.answer)).toContain("CoinGecko aggregated");
       expect(String(r.answer)).toContain("not the derived BTC");
