@@ -50,7 +50,7 @@ describe("QA-10 identity and release labels", () => {
   it("footer names both IDs and shows the backend SHA from /health", async () => {
     renderAt("/docs");
     expect(await screen.findByText(/miner\.yaml id 774921 · verireceipt/)).toBeTruthy();
-    expect(screen.getByText(/node registration 6177 \(on-chain bond\)/)).toBeTruthy();
+    expect(screen.getByText(/node registration 6188 \(on-chain bond\)/)).toBeTruthy();
     const link = await screen.findByRole("link", { name: SHA });
     expect(link.getAttribute("href")).toContain(`/commit/${SHA}`);
     expect(screen.getByText(/frontend and backend deploy separately/)).toBeTruthy();
