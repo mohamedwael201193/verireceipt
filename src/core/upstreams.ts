@@ -31,6 +31,7 @@
 //   nyiso            mis.nyiso.com
 //   elering          dashboard.elering.ee
 //   miso-marketreports docs.misoenergy.org
+//   ercot-cdr        www.ercot.com
 //   fx-er-api        open.er-api.com (EUR→USD, ingester only)
 //   beacon-api       both beacon hosts (lodestar-mainnet.chainsafe.io,
 //                    ethereum-beacon-api.publicnode.com)
@@ -79,6 +80,7 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "mis.nyiso.com": "nyiso",
   "dashboard.elering.ee": "elering",
   "docs.misoenergy.org": "miso-marketreports",
+  "www.ercot.com": "ercot-cdr",
   "open.er-api.com": "fx-er-api",
   "lodestar-mainnet.chainsafe.io": "beacon-api",
   "ethereum-beacon-api.publicnode.com": "beacon-api",
@@ -275,6 +277,9 @@ export function primaryUpstreamForGridZone(zone: string | undefined): string {
     // MISO classic hubs (ARKANSAS.HUB .. TEXAS.HUB) are served from the
     // docs.misoenergy.org marketreports DA ExPost CSV.
     if (z.endsWith(".HUB")) return "miso-marketreports";
+    // ERCOT settlement points (HB_* hubs, LZ_* load zones) are served
+    // from the www.ercot.com cdr html DAM pages.
+    if (z.startsWith("HB_") || z.startsWith("LZ_")) return "ercot-cdr";
     return "caiso-oasis";
   } catch {
     return "caiso-oasis";

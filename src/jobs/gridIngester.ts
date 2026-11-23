@@ -61,6 +61,8 @@ export const MISO_REPORTS_URL = "https://docs.misoenergy.org/marketreports/";
 export const MISO_SOURCE = "MISO day-ahead ExPost LMP (public market reports)";
 /** Fixed EST offset (MISO labels intervals in EST year-round). */
 export const MISO_EST_OFFSET_MS = -5 * 3600_000;
+export const ERCOT_CDR_URL = "https://www.ercot.com/content/cdr/html/";
+export const ERCOT_SOURCE = "ERCOT day-ahead SPP (public cdr html)";
 export const NYISO_BASE_URL = "https://mis.nyiso.com/public/csv/realtime/";
 export const CAISO_OASIS_URL = "https://oasis.caiso.com/oasisapi/SingleZip";
 export const FX_EUR_USD_URL = "https://open.er-api.com/v6/latest/EUR";
@@ -110,6 +112,28 @@ export const SUPPORTED_ZONES: Record<string, GridZoneInfo> = {
   "MINN.HUB": { market: "MISO", source: MISO_SOURCE, url: MISO_REPORTS_URL, windowMin: 60 },
   "MS.HUB": { market: "MISO", source: MISO_SOURCE, url: MISO_REPORTS_URL, windowMin: 60 },
   "TEXAS.HUB": { market: "MISO", source: MISO_SOURCE, url: MISO_REPORTS_URL, windowMin: 60 },
+  // ERCOT day-ahead settlement point prices (hourly, CPT). The cdr
+  // real-time page carries only the current operating day's latest
+  // SCED intervals — a different product at 15-minute granularity —
+  // so coverage here is day-ahead hourly only (measured 2026-11-23
+  // against the live pages). The 2026-11-01 fall-back day's DAM page
+  // is not published at the dated URL (its neighbors are): those
+  // intervals fail closed.
+  HB_BUSAVG: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
+  HB_HOUSTON: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
+  HB_HUBAVG: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
+  HB_NORTH: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
+  HB_PAN: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
+  HB_SOUTH: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
+  HB_WEST: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
+  LZ_AEN: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
+  LZ_CPS: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
+  LZ_HOUSTON: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
+  LZ_LCRA: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
+  LZ_NORTH: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
+  LZ_RAYBN: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
+  LZ_SOUTH: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
+  LZ_WEST: { market: "ERCOT", source: ERCOT_SOURCE, url: ERCOT_CDR_URL, windowMin: 60 },
 };
 
 /**
@@ -386,6 +410,7 @@ export const GRID_UPSTREAM_ORIGINS: ReadonlySet<string> = new Set([
   "mis.nyiso.com",
   "oasis.caiso.com",
   "docs.misoenergy.org",
+  "www.ercot.com",
   "open.er-api.com",
 ]);
 
@@ -1759,6 +1784,123 @@ export async function fetchMisoDaLmp(
   return null; // node absent from the file: no price exists to serve
 }
 
+/** Shared America/Chicago wall-clock formatter, constructed ONCE (the
+ * same hoisting lesson as NY_TZ_FORMAT — see its comment above). */
+const CPT_TZ_FORMAT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Chicago",
+  hourCycle: "h23",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
+/** Wall-clock parts in America/Chicago (CPT, DST-aware) for a UTC instant. */
+function cptWallParts(utcMs: number): { y: number; mo: number; d: number; h: number; min: number; s: number } {
+  const parts = CPT_TZ_FORMAT.formatToParts(new Date(utcMs));
+  const v = (t: string): number => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  return { y: v("year"), mo: v("month"), d: v("day"), h: v("hour") % 24, min: v("minute"), s: v("second") };
+}
+
+/**
+ * A whole-hour wall start in America/Chicago -> UTC epoch ms, or null
+ * when the wall time does not exist (the spring-forward gap, e.g.
+ * 02:00 on 2026-03-08). Iterates the offset to convergence, then
+ * round-trip verifies (the same defence as nyWallToUtcMs): an
+ * ambiguous fall-back wall resolves to the SECOND occurrence (CST),
+ * which this function alone cannot distinguish from the first.
+ */
+export function ercotWallHourToUtcMs(y: number, mo: number, d: number, h: number): number | null {
+  if (!Number.isInteger(y) || !Number.isInteger(mo) || !Number.isInteger(d) || !Number.isInteger(h)) return null;
+  if (mo < 1 || mo > 12 || d < 1 || d > daysInMonth(y, mo) || h < 0 || h > 23) return null;
+  const target = Date.UTC(y, mo - 1, d, h);
+  if (y >= 0 && y < 100) {
+    // Date.UTC maps years 0-99 to 1900-1999; reject rather than repair
+    // (the ERCOT pages never label such dates).
+    return null;
+  }
+  let t = target;
+  for (let i = 0; i < 4; i++) {
+    const parts = cptWallParts(t);
+    const localAsUtc = Date.UTC(parts.y, parts.mo - 1, parts.d, parts.h, parts.min, parts.s);
+    t = target - (localAsUtc - t);
+  }
+  const back = cptWallParts(t);
+  if (back.y !== y || back.mo !== mo || back.d !== d || back.h !== h) return null;
+  return t;
+}
+
+/** Minimal cell extraction for the cdr html price tables (no DOM). */
+function parseErcotTable(html: string): { header: string[]; rows: string[][] } | null {
+  const table = /<table[\s\S]*?<\/table>/i.exec(html);
+  if (!table) return null;
+  const rows: string[][] = [];
+  const clean = (cell: string) =>
+    cell.replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").replace(/&amp;/g, "&").trim();
+  for (const tr of table[0].match(/<tr[\s\S]*?<\/tr>/gi) ?? []) {
+    const cells: string[] = [];
+    for (const td of tr.match(/<t[dh][^>]*>[\s\S]*?<\/t[dh]>/gi) ?? []) {
+      cells.push(clean(td));
+    }
+    if (cells.length > 0) rows.push(cells);
+  }
+  const headerIdx = rows.findIndex((r) => r[0] === "Oper Day" && /^Hour Ending|^Interval Ending/.test(r[1] ?? ""));
+  if (headerIdx < 0) return null;
+  return { header: rows[headerIdx], rows: rows.slice(headerIdx + 1) };
+}
+
+/**
+ * On-demand fetch of one ERCOT day-ahead settlement point price from
+ * the dated cdr html page ({YYYYMMDD}_dam_spp). The page labels rows
+ * by Oper Day + Hour Ending in CPT (America/Chicago, DST-aware);
+ * HE n is the hour whose START is wall (n-1):00 on the oper day, so
+ * the file date is the Chicago date of the interval start — no wrap.
+ * Measured shapes (2026-11-23): ordinary days carry HE 1-24; the
+ * 2026-03-08 spring-forward page skips HE 3 (23 rows, genuine miss);
+ * the 2026-11-01 fall-back page is not published at the dated URL.
+ * A missing table/header/column or a non-numeric cell throws (fail
+ * closed); a well-formed page with no row for the hour returns null.
+ */
+export async function fetchErcotDamSpp(
+  node: string,
+  intervalStartIso: string,
+): Promise<{ lmp: number; upstreamUrl: string } | null> {
+  const startMs = Date.parse(intervalStartIso);
+  if (Number.isNaN(startMs)) return null;
+  const parts = cptWallParts(startMs);
+  // The interval must start exactly on a Chicago hour boundary.
+  if (parts.min !== 0 || parts.s !== 0) return null;
+  const yyyymmdd = String(parts.y) + String(parts.mo).padStart(2, "0") + String(parts.d).padStart(2, "0");
+  const operDay = String(parts.mo).padStart(2, "0") + "/" + String(parts.d).padStart(2, "0") + "/" + parts.y;
+  const hourEnding = parts.h + 1;
+  const upstreamUrl = ERCOT_CDR_URL + yyyymmdd + "_dam_spp";
+  const text = await fetchText(upstreamUrl);
+  const parsed = parseErcotTable(text);
+  if (!parsed) {
+    throw new Error("ERCOT cdr page missing Oper Day table: " + upstreamUrl);
+  }
+  const col = parsed.header.indexOf(node);
+  if (col < 0) {
+    throw new Error("ERCOT cdr page missing settlement point column " + node + ": " + upstreamUrl);
+  }
+  for (const cells of parsed.rows) {
+    if (cells[0] !== operDay || Number(cells[1]) !== hourEnding) continue;
+    // Fail closed on a blank cell: Number("")/Number("  ") is 0, so a
+    // partial page would otherwise serve and cache a $0.00 price.
+    const cell = (cells[col] ?? "").trim();
+    if (cell === "") {
+      throw new Error("ERCOT cdr page blank SPP cell for " + node + " HE " + hourEnding);
+    }
+    const lmp = Number(cell);
+    if (!Number.isFinite(lmp)) {
+      throw new Error("ERCOT cdr page non-numeric SPP for " + node + " HE " + hourEnding);
+    }
+    return { lmp, upstreamUrl };
+  }
+  return null; // hour absent from the page (e.g. spring-forward HE 3)
+}
 
 export interface NyisoRtLbmp {
   lmp: number;

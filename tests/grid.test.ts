@@ -172,8 +172,11 @@ describe("handleGridPrice validation", () => {
     expect(String(res.answer)).toContain("latest finished interval starting " + served);
   });
 
+  // Edited by the ERCOT packet (2026-11-23): "HB_NORTH" swapped for
+  // "HB_NOTREAL" — HB_NORTH is a supported ERCOT hub now; an unknown
+  // settlement point spelling must still refuse before storage/fetch.
   it("unsupported zone -> 422 UNSUPPORTED_ZONE", async () => {
-    for (const zone of ["MARS_ZONE", "HB_NORTH", "PJM", ""]) {
+    for (const zone of ["MARS_ZONE", "HB_NOTREAL", "PJM", ""]) {
       if (!zone) continue;
       await expectApiError(
         handleGridPrice({ node_or_zone: zone, interval_start: pastIso(2) }),
@@ -4443,11 +4446,14 @@ describe("handleGridPrice natural-name aliases", () => {
   // Edited by the MISO packet (2026-11-23): "MISO" removed from the
   // no-feed list — MISO now has a feed (docs.misoenergy.org DA ExPost
   // CSV) and bare "MISO" is answered for the Illinois hub with
-  // disclosure (tests/grid-miso.test.ts). ERCOT, PJM and plain "Texas"
-  // (the ERCOT region, not the MISO "texas hub" alias) still refuse.
-  it("operators with no feed stay an honest 422 (ERCOT, PJM, Texas)", async () => {
+  // disclosure (tests/grid-miso.test.ts). Edited again by the ERCOT
+  // packet: "ERCOT" removed — bare "ercot" is answered for the hub
+  // average HB_HUBAVG with disclosure (tests/grid-ercot.test.ts).
+  // PJM and plain "Texas" (the ERCOT region's common name — the MISO
+  // alias is "texas hub") still refuse.
+  it("operators with no feed stay an honest 422 (PJM, Texas)", async () => {
     const interval = pastIso(8);
-    for (const name of ["ERCOT", "PJM", "Texas"]) {
+    for (const name of ["PJM", "Texas"]) {
       await expectApiError(
         handleGridPrice({ node_or_zone: name, interval_start: interval }),
         422,

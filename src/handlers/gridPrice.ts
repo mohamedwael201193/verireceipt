@@ -56,6 +56,7 @@ import {
 import {
   SUPPORTED_ZONES,
   fetchCaisoDamLmp,
+  fetchErcotDamSpp,
   fetchMisoDaLmp,
   fetchNyisoRtLbmp,
   gridFallbackUrl,
@@ -171,6 +172,20 @@ export const MISO_SYSTEM_MARKET =
   "MISO day-ahead ExPost LMP (Illinois hub ILLINOIS.HUB; request named no MISO hub)";
 
 /**
+ * ERCOT system requests (A13): bare "ercot" / "ercot system". Answered
+ * for the ERCOT hub average HB_HUBAVG, the conventional ERCOT-wide
+ * reference; the choice is disclosed in node_or_zone, market and the
+ * answer prose.
+ */
+const ERCOT_SYSTEM_REQUESTS: Record<string, true> = {
+  ercot: true,
+  "ercot system": true,
+};
+export const ERCOT_SYSTEM_NODE = "HB_HUBAVG";
+export const ERCOT_SYSTEM_MARKET =
+  "ERCOT day-ahead SPP (hub average HB_HUBAVG; request named no ERCOT settlement point)";
+
+/**
  * Natural-name aliases (A11): the name a person uses for a place —
  * the Elering countries and the NYISO load zones by their common
  * names — matched on the whitespace-normalised, lower-cased
@@ -256,6 +271,7 @@ const QUESTION_ZONE_CANDIDATES: ReadonlyArray<{ re: RegExp; spelling: string; ex
     ...Object.keys(CAISO_HUB_ALIASES),
     ...Object.keys(CAISO_SYSTEM_REQUESTS).filter((k) => k.length > 0),
     ...Object.keys(MISO_SYSTEM_REQUESTS),
+    ...Object.keys(ERCOT_SYSTEM_REQUESTS),
     // A11: natural place names are safe case-insensitive candidates
     // (proper nouns and multi-word names, no english-word collisions).
     ...Object.keys(GRID_NATURAL_ZONE_ALIASES),
@@ -277,6 +293,9 @@ function resolveZoneSpelling(spelling: string): string | undefined {
   }
   if (Object.hasOwn(MISO_SYSTEM_REQUESTS, req.toLowerCase())) {
     return MISO_SYSTEM_NODE;
+  }
+  if (Object.hasOwn(ERCOT_SYSTEM_REQUESTS, req.toLowerCase())) {
+    return ERCOT_SYSTEM_NODE;
   }
   const hub = resolveCaisoHubAlias(req);
   if (hub) return hub;
@@ -555,10 +574,12 @@ export async function handleGridPrice(
   const isCaisoSystem = Object.hasOwn(CAISO_SYSTEM_REQUESTS, systemKey);
   const isMisoSystem =
     !isCaisoSystem && Object.hasOwn(MISO_SYSTEM_REQUESTS, systemKey);
-  const hubAlias = isCaisoSystem || isMisoSystem ? undefined : resolveCaisoHubAlias(requestedZone);
+  const isErcotSystem =
+    !isCaisoSystem && !isMisoSystem && Object.hasOwn(ERCOT_SYSTEM_REQUESTS, systemKey);
+  const hubAlias = isCaisoSystem || isMisoSystem || isErcotSystem ? undefined : resolveCaisoHubAlias(requestedZone);
   // A11: a natural place name resolves to its supported zone after the
   // CAISO system/hub spellings and before the exact-key lookup.
-  const naturalAlias = isCaisoSystem || isMisoSystem || hubAlias !== undefined
+  const naturalAlias = isCaisoSystem || isMisoSystem || isErcotSystem || hubAlias !== undefined
     ? undefined
     : resolveNaturalZoneAlias(requestedZone);
   // Fold ASCII only: Unicode lookalikes, unknown prefixes and near matches
@@ -571,7 +592,9 @@ export async function handleGridPrice(
     ? CAISO_SYSTEM_NODE
     : isMisoSystem
       ? MISO_SYSTEM_NODE
-      : hubAlias ?? naturalAlias ?? zoneKey;
+      : isErcotSystem
+        ? ERCOT_SYSTEM_NODE
+        : hubAlias ?? naturalAlias ?? zoneKey;
   // An explicit source qualifier may name only an existing identifier in
   // that same source. Strip it once, never recursively or across markets.
   const qualified = /^(NYISO|ELERING) (.+)$/.exec(zoneKey);
@@ -710,6 +733,29 @@ export async function handleGridPrice(
       nowMs = Date.now();
     }
   }
+  // A13: an ERCOT settlement point hour is fetched on demand from the
+  // dated cdr DAM page — the same cache-before-serving rule as the
+  // CAISO/MISO paths above; a fetch/parse failure falls through to 502.
+  if (!row && zone.market === "ERCOT") {
+    let fetched: { lmp: number; upstreamUrl: string } | null = null;
+    try {
+      fetched = await fetchErcotDamSpp(normalizedZone, intervalStart);
+    } catch {
+      fetched = null;
+    }
+    if (fetched) {
+      const ingestedAt = new Date().toISOString();
+      await saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "ERCOT", ingestedAt, fetched.upstreamUrl);
+      row = {
+        lmp_usd_per_mwh: fetched.lmp,
+        market: "ERCOT",
+        ingested_at: ingestedAt,
+        upstream_url: fetched.upstreamUrl,
+      };
+      fetchedLive = true;
+      nowMs = Date.now();
+    }
+  }
   if (!row) {
     throw upstreamUnavailable(
       "GRID_CACHE_MISS",
@@ -788,6 +834,34 @@ export async function handleGridPrice(
       fetchedLive = true;
       stale = false;
     } else if (!corruptRow && !stale && needsRefresh) {
+      await markGridRevalidateAttempt(normalizedZone, intervalStart, new Date().toISOString());
+      unconfirmed = true;
+    }
+  }
+  // ERCOT live path: the dated cdr DAM page is re-fetchable on demand,
+  // so a stale, corrupt or revalidation-due row is refreshed like the
+  // CAISO/MISO paths (same cache-before-serving rule).
+  if (zone.market === "ERCOT" && (stale || corruptRow || needsRefresh)) {
+    let fetched: { lmp: number; upstreamUrl: string } | null = null;
+    try {
+      fetched = await fetchErcotDamSpp(normalizedZone, intervalStart);
+    } catch {
+      fetched = null;
+    }
+    if (fetched) {
+      const ingestedAt = new Date().toISOString();
+      await saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "ERCOT", ingestedAt, fetched.upstreamUrl);
+      row = {
+        lmp_usd_per_mwh: fetched.lmp,
+        market: "ERCOT",
+        ingested_at: ingestedAt,
+        upstream_url: fetched.upstreamUrl,
+      };
+      fetchedLive = true;
+      stale = false;
+    } else if (!corruptRow && !stale && needsRefresh) {
+      // Valid post-provisional row, revalidation failed: keep it,
+      // but do not label it verified / 1.0.
       await markGridRevalidateAttempt(normalizedZone, intervalStart, new Date().toISOString());
       unconfirmed = true;
     }
@@ -927,7 +1001,9 @@ export async function handleGridPrice(
     ? CAISO_SYSTEM_MARKET
     : isMisoSystem
       ? MISO_SYSTEM_MARKET
-      : row.market;
+      : isErcotSystem
+        ? ERCOT_SYSTEM_MARKET
+        : row.market;
   const rawBody = JSON.stringify({
     node_or_zone: normalizedZone,
     interval_start: intervalStart,
@@ -941,6 +1017,8 @@ export async function handleGridPrice(
     quorumVotes = "1/1 live NYISO MIS realtime LBMP fetch (on-demand, cached before serving)";
   } else if (fetchedLive && zone.market === "MISO") {
     quorumVotes = "1/1 live MISO day-ahead ExPost LMP fetch (on-demand, cached before serving)";
+  } else if (fetchedLive && zone.market === "ERCOT") {
+    quorumVotes = "1/1 live ERCOT day-ahead SPP fetch (on-demand, cached before serving)";
   } else if (unconfirmed && gridMarketKind(zone.market) === "ELERING") {
     quorumVotes = "1/1 cache row from official Elering/Nord Pool feed; " + ELERING_NO_HISTORICAL_REFETCH;
   } else if (unconfirmed) {
@@ -953,6 +1031,9 @@ export async function handleGridPrice(
   }
   if (isMisoSystem) {
     quorumVotes += "; MISO request with no hub named, answered for the Illinois hub " + MISO_SYSTEM_NODE;
+  }
+  if (isErcotSystem) {
+    quorumVotes += "; ERCOT request with no settlement point named, answered for the hub average " + ERCOT_SYSTEM_NODE;
   }
   const receipt = makeReceipt(
     "GRID_POWER_PRICE_GENERAL",
@@ -990,7 +1071,15 @@ export async function handleGridPrice(
         " USD per MWh for the interval starting " +
         intervalStart +
         ". The request named no MISO hub, so it was answered for the Illinois hub; ask for MICHIGAN.HUB, INDIANA.HUB, MINN.HUB, ARKANSAS.HUB, LOUISIANA.HUB, MS.HUB or TEXAS.HUB for the other MISO hubs."
-      : "The LMP at " +
+      : isErcotSystem
+        ? "The ERCOT day-ahead SPP at the hub average (" +
+          ERCOT_SYSTEM_NODE +
+          ") was $" +
+          plainDecimal(row.lmp_usd_per_mwh) +
+          " USD per MWh for the interval starting " +
+          intervalStart +
+          ". The request named no ERCOT settlement point, so it was answered for the hub average; ask for HB_NORTH, HB_SOUTH, HB_WEST, HB_HOUSTON, HB_PAN, HB_BUSAVG or a load zone such as LZ_HOUSTON for a specific point."
+        : "The LMP at " +
       normalizedZone +
       " was $" +
       plainDecimal(row.lmp_usd_per_mwh) +

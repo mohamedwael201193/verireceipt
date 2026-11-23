@@ -116,7 +116,7 @@
 // comment that "CAISO DAM [is] immutable once the hour has closed",
 // are withdrawn: they do not match §35.2 / §35.3.
 
-export type GridMarketKind = "CAISO" | "NYISO" | "ELERING" | "MISO";
+export type GridMarketKind = "CAISO" | "NYISO" | "ELERING" | "MISO" | "ERCOT";
 export type GridFinalityPhase = "provisional" | "correction" | "final";
 
 export interface Ymd {
@@ -174,6 +174,16 @@ export const MISO_TIME_ZONE = "EST";
 // calendar is claimed), after which cache age alone is not a reason
 // to re-query. There is no separate correction window.
 export const MISO_DA_PROVISIONAL_BUSINESS_DAYS = 1;
+// ERCOT labels its cdr pages in CPT — Central Prevailing Time, the
+// DST-aware America/Chicago zone (CST in winter, CDT in summer).
+export const ERCOT_TIME_ZONE = "America/Chicago";
+// ERCOT freshness-retention rule (NOT a tariff citation): the dated
+// DAM SPP page for a delivery day is the operator's post-market
+// publication; rows are treated as settled one weekday after the
+// delivery day (a plain Mon-Fri rule — no ERCOT holiday calendar is
+// claimed), after which cache age alone is not a reason to re-query.
+// There is no separate correction window.
+export const ERCOT_DA_PROVISIONAL_BUSINESS_DAYS = 1;
 
 /** DAM §35.2: end of the 3rd Business Day following the Trading Day. */
 export const CAISO_DAM_PROVISIONAL_BUSINESS_DAYS = 3;
@@ -199,6 +209,7 @@ export function gridMarketKind(
   if (m === "NYISO") return "NYISO";
   if (m.startsWith("ELERING")) return "ELERING";
   if (m === "MISO" || m.startsWith("MISO ")) return "MISO";
+  if (m === "ERCOT" || m.startsWith("ERCOT ")) return "ERCOT";
   if (windowMin === 60) return "CAISO";
   if (windowMin === 5) return "NYISO";
   if (windowMin === 15) return "ELERING";
@@ -449,6 +460,8 @@ function businessDayFn(kind: GridMarketKind): (ymd: Ymd) => boolean {
   if (kind === "CAISO") return isCaisoBusinessDay;
   if (kind === "NYISO") return isNyisoBusinessDay;
   if (kind === "MISO") return isWeekdayBusinessDay;
+  // Plain Mon-Fri rule (ERCOT retention rule — no holiday calendar claimed).
+  if (kind === "ERCOT") return isWeekdayBusinessDay;
   return isEleringBusinessDay;
 }
 
@@ -462,6 +475,7 @@ function timeZoneOf(kind: GridMarketKind): string {
   if (kind === "CAISO") return CAISO_TIME_ZONE;
   if (kind === "NYISO") return NYISO_TIME_ZONE;
   if (kind === "MISO") return MISO_TIME_ZONE;
+  if (kind === "ERCOT") return ERCOT_TIME_ZONE;
   return ELERING_TIME_ZONE;
 }
 
@@ -469,6 +483,7 @@ function provisionalBusinessDays(kind: GridMarketKind): number {
   if (kind === "CAISO") return CAISO_DAM_PROVISIONAL_BUSINESS_DAYS;
   if (kind === "NYISO") return NYISO_RT_PROVISIONAL_BUSINESS_DAYS;
   if (kind === "MISO") return MISO_DA_PROVISIONAL_BUSINESS_DAYS;
+  if (kind === "ERCOT") return ERCOT_DA_PROVISIONAL_BUSINESS_DAYS;
   return ELERING_PROVISIONAL_BUSINESS_DAYS;
 }
 
@@ -498,6 +513,9 @@ export function correctionCloseMs(kind: GridMarketKind, intervalStartMs: number)
   const trading = tradingDayYmd(intervalStartMs, tz);
   if (!trading) return null;
   if (kind === "NYISO") return provisionalCloseMs(kind, intervalStartMs);
+  // ERCOT: like MISO, no separate correction window — close equals the
+  // provisional close.
+  if (kind === "ERCOT") return provisionalCloseMs(kind, intervalStartMs);
   // MISO: no separate correction window — close equals the
   // provisional close (same shape as NYISO).
   if (kind === "MISO") return provisionalCloseMs(kind, intervalStartMs);
