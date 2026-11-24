@@ -2,11 +2,11 @@ import { upstreamUnavailable } from './errors';
 
 /** Small bounded public-source reader. URLs are constructed by adapters, never user URLs. */
 export interface PublicBody { url: string; raw: string; fetchedAt: string }
-export async function readPublicBody(url: string, maxBytes = 1_000_000, timeoutMs = 4000): Promise<PublicBody> {
+export async function readPublicBody(url: string, maxBytes = 1_000_000, timeoutMs = 4000, userAgent = 'VeriReceipt/2.0 public-source observer'): Promise<PublicBody> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { signal: controller.signal, redirect: 'error', headers: { accept: 'application/json', 'user-agent': 'VeriReceipt/2.0 public-source observer' } });
+    const response = await fetch(url, { signal: controller.signal, redirect: 'error', headers: { accept: 'application/json', 'user-agent': userAgent } });
     if (!response.ok) throw upstreamUnavailable('PUBLIC_SOURCE_HTTP', `public source returned HTTP ${response.status}`);
     const size = response.headers.get('content-length');
     if (size && Number(size) > maxBytes) { await response.body?.cancel(); throw new Error('source body exceeds limit'); }

@@ -32,7 +32,7 @@ import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
-import {readPublicBody} from '../core/publicSource';
+import {readSlaBody} from './slaSourceCache';
 
 const SOURCE_TIMEOUT_MS = 10000;
 const UA = "VeriReceipt/2.0 sla-compliance observer (+https://verireceipt.vercel.app)";
@@ -41,7 +41,7 @@ export const INTENT = "SLA_COMPLIANCE_GENERAL";
 
 // statuspage.io-hosted status pages verified keyless 2026-11-23.
 // (status.stripe.com is NOT statuspage-hosted and is deliberately absent.)
-const STATUSPAGES: Record<string, string> = {
+export const STATUSPAGES: Readonly<Record<string, string>> = Object.freeze({
   github: "www.githubstatus.com",
   cloudflare: "www.cloudflarestatus.com",
   openai: "status.openai.com",
@@ -49,7 +49,26 @@ const STATUSPAGES: Record<string, string> = {
   reddit: "www.redditstatus.com",
   atlassian: "status.atlassian.com",
   digitalocean: "status.digitalocean.com",
-};
+  vercel:"www.vercel-status.com",netlify:"www.netlifystatus.com",discord:"discordstatus.com",
+  dropbox:"status.dropbox.com",npm:"status.npmjs.org",figma:"status.figma.com",
+  coinbase:"status.coinbase.com",shopify:"www.shopifystatus.com",sentry:"status.sentry.io",
+  mongodb:"status.mongodb.com",circleci:"status.circleci.com",snowflake:"status.snowflake.com",
+});
+export function resolveSlaHost(input:string):string|null{
+ const service=input.trim().toLowerCase().replace(/\s+/g,' ');
+ const exactHost=Object.values(STATUSPAGES).find(host=>host===service);
+ if(exactHost)return exactHost;
+ let candidate=service;
+ // Strip whole filler words only, not substrings or punctuation near-matches.
+ for(let i=0;i<4;i++){
+  const prior=candidate;
+  candidate=candidate.replace(/\.(com|io)$/,'').replace(/(?:^| )(api|status|inc|service|cloud)$/,'').trim();
+  if(candidate===prior)break;
+ }
+ candidate=candidate.replace(/ /g,'');
+ if(Object.hasOwn(STATUSPAGES,candidate))return STATUSPAGES[candidate];
+ return /^[a-z0-9][a-z0-9-]{1,60}\.statuspage\.io$/.test(service)?service:null;
+}
 
 const MAX_PAGES = 5; // 500 incidents worst case; a full log can be longer, and then we fail closed.
 const COUNTED_IMPACTS = new Set(["major", "critical"]);
@@ -74,20 +93,10 @@ function parsePeriod(raw: string | undefined): { days: number } | null {
   return { days };
 }
 
-async function fetchPage(host: string, page: number): Promise<{ body: string; incidents: Incident[] }> {
+async function fetchPage(host: string, page: number): Promise<{ body: string; fetchedAt:string; incidents: Incident[] }> {
   const url = `https://${host}/api/v2/incidents.json?per_page=100&page=${page}`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-  let res: Response;
-  try {
-    res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
-  } catch (e) {
-    throw upstreamUnavailable("STATUSPAGE_UNREACHABLE", `the status page at ${host} could not be reached: ${e instanceof Error ? e.message : String(e)}`);
-  } finally {
-    clearTimeout(timer);
-  }
-  const body = await res.text();
-  if (!res.ok) throw upstreamUnavailable("STATUSPAGE_DEGRADED", `${host} answered HTTP ${res.status}; refusing to guess an uptime`);
+  let got;try{got=await readSlaBody(url,host,UA,SOURCE_TIMEOUT_MS);}catch{throw upstreamUnavailable('STATUSPAGE_UNREACHABLE','statuspage incident source could not be read; no uptime asserted');}
+  const body=got.raw;
   let parsed: { incidents?: Incident[] };
   try {
     parsed = JSON.parse(body);
@@ -102,7 +111,7 @@ async function fetchPage(host: string, page: number): Promise<{ body: string; in
       throw upstreamUnavailable("STATUSPAGE_MALFORMED", "an incident has no parseable started_at; refusing to compute on partial data");
     }
   }
-  return { body, incidents: parsed.incidents };
+  return { body, fetchedAt:got.fetchedAt, incidents: parsed.incidents };
 }
 
 /** Union of intervals [startMs, endMs], clipped to [winStart, winEnd]; returns covered ms. */
@@ -133,8 +142,7 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
   if (service.length > 64) throw badRequest("INVALID_SERVICE", "service is over 64 characters");
   const resolvedPeriod = parsePeriod(query.period);
   const days = resolvedPeriod?.days;
-  const alias=service.replace(/[^a-z0-9.]/g,'');
-  const host = STATUSPAGES[alias] ?? Object.values(STATUSPAGES).find(host=>host===service) ?? (/^[a-z0-9][a-z0-9-]{1,60}\.statuspage\.io$/.test(service)?service:null);
+  const host=resolveSlaHost(service);
   if (!host || days === undefined) {
     const at=new Date().toISOString();
     const status=!host?'not_found':'unknown';
@@ -148,9 +156,9 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
     return envelope(INTENT,{service,period,status,uptime_pct:null,sla_target_pct:null,compliant:null,summary:answer},receipt,{answer,verdict:'unverified',confidence:0,source:'Verified statuspage binding list only; no provider observation'});
   }
   const summaryUrl=`https://${host}/api/v2/summary.json`;
-  let summaryBody:string, summary:any;
+  let summaryBody:string,summaryFetchedAt:string, summary:any;
   try {
-    const got=await readPublicBody(summaryUrl,1000000,2500);summaryBody=got.raw;summary=JSON.parse(got.raw);
+    const got=await readSlaBody(summaryUrl,host,UA,2500);summaryBody=got.raw;summaryFetchedAt=got.fetchedAt;summary=JSON.parse(summaryBody);
     if(!summary.page || typeof summary.page.id!=='string' || !Array.isArray(summary.components))throw new Error('missing page/components');
     const declared=new URL(summary.page.url);if(!['https:','http:'].includes(declared.protocol)||declared.hostname!==host||declared.username||declared.password||declared.port)throw new Error('wrong statuspage identity');
     // Some provider metadata declares http while the actual fetch uses HTTPS.
@@ -161,12 +169,12 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
   const winStart = now - days * 86400_000;
 
   // Page the incident log until it reaches older than the window (or ends).
-  const bodies: string[] = [];
+  const bodies: string[] = [],pageFetchedAt:string[]=[];
   const incidents: Incident[] = [];
   let coveredHistory = false;
   for (let page = 1; page <= MAX_PAGES; page++) {
     const got = await fetchPage(host, page);
-    bodies.push(got.body);
+    bodies.push(got.body);pageFetchedAt.push(got.fetchedAt);
     incidents.push(...got.incidents);
     const oldest = got.incidents.length ? Date.parse(got.incidents[got.incidents.length - 1].started_at) : now;
     if (got.incidents.length === 0 || oldest <= winStart) {
@@ -193,7 +201,7 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
     .filter((i) => Date.parse(i.started_at) >= winStart || (i.resolved_at && Date.parse(i.resolved_at) > winStart))
     .map((i) => ({ name: i.name, impact: i.impact, started_at: i.started_at, resolved_at: i.resolved_at }));
   const evidence = JSON.stringify({
-    service, host, summary_url:summaryUrl, summary_raw_body:summaryBody, components:summary.components, period_days: days, window_start: new Date(winStart).toISOString(), as_of: asOf,
+    service, host, summary_url:summaryUrl, summary_raw_body:summaryBody,summary_fetched_at:summaryFetchedAt,incident_pages_fetched_at:pageFetchedAt, components:summary.components, period_days: days, window_start: new Date(winStart).toISOString(), as_of: asOf,
     downtime_rule: "downtime = union of [started_at, resolved_at-or-now] for statuspage impact major|critical, clipped to the window; minor/none degradations excluded and counted separately",
     counted_incidents: countedList,
     excluded_degradations: excluded.length,
@@ -215,7 +223,7 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
 
   const downtimeMin = Math.round(downtimeMs / 60000);
   const answer =
-    `${service} has ${uptimeRounded}% incident-log estimated uptime over the last ${days} days as of ${asOf}, under this disclosed rule: ` +
+    `${service} has ${uptimeRounded}% incident-log estimated uptime over the last ${days} days as of ${asOf}, under this disclosed rule (source bodies cached up to5minutes): ` +
     `downtime counts only major/critical incidents from its statuspage.io log (${countedList.length} such incident(s), ~${downtimeMin} minutes); ` +
     `${excluded.length} minor/none degradation(s) are excluded from downtime. ` +
     `sla_target_pct and compliant are NOT provided: a machine-readable SLA target was not established by this endpoint, so a compliance verdict would be invented, not observed.`;
@@ -225,6 +233,8 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
     uptime_pct: uptimeRounded,
     status: "found",
     components: summary.components.map((c:any)=>({id:c.id,name:c.name,status:c.status,updated_at:c.updated_at})),
+    source_fetched_at:{summary:summaryFetchedAt,incident_pages:pageFetchedAt},
+    source_cache_max_age_seconds:300,
     uptime_semantics: "incident-log estimate, not measured availability or component uptime history",
     sla_target_pct: null,
     compliant: null,

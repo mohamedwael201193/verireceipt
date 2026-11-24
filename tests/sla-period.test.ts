@@ -1,3 +1,4 @@
+vi.mock('../src/handlers/slaSourceCache',()=>({readSlaBody:async(url:string,_host:string,ua:string)=>{const r=await fetch(url,{headers:{'User-Agent':ua}});if(!r.ok)throw new Error('source unavailable');return {url,raw:await r.text(),fetchedAt:new Date().toISOString()};}}));
 import {afterEach,expect,it,vi} from 'vitest';
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
