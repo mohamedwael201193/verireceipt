@@ -224,7 +224,6 @@ describe('handleFilings — validation (400s)', () => {
       '2026-02-30..2026-03-01',
       '2026-05-01..2026-01-01',
       'last 0 months',
-      '12 months',
     ]) {
       await expectApiError(
         handleFilings({ entity: 'AAPL', period: bad }),

@@ -196,8 +196,29 @@ function formatUtcDate(dt: Date): string {
  * wrong count as verified. Anything else is returned unchanged for the
  * strict grammar below.
  */
+/** Normalize only complete, bounded relative/calendar phrases, never ISO dates. */
+export function normalizeCompactPeriod(raw: string): string {
+  if (/\s-\d/.test(raw)) throw badRequest("INVALID_PERIOD", "negative relative periods are not supported");
+  const text = raw.trim().toLowerCase();
+  const compact = text.replace(/[\s_-]+/g, "");
+  if (["ytd", "yeartodate"].includes(compact)) return "ytd";
+  const relative = /^(?:(?:last|past|trailing)[ _-]*)?(\d+)[ _-]*(months?|years?)$/.exec(text);
+  if (relative) {
+    const n = Number(relative[1]);
+    const months = relative[2].startsWith("year") ? n * 12 : n;
+    if (!Number.isSafeInteger(months) || months < 1 || months > 1200) throw badRequest("INVALID_PERIOD", "relative period is outside 1..1200 months");
+    return `last ${months} months`;
+  }
+  const quarter = /^(?:calendar[ _-]*)?q([1-4])[ _-]*(\d{4})$/.exec(text);
+  if (quarter) return `${compact.startsWith("calendar") ? "calendar " : ""}Q${quarter[1]} ${quarter[2]}`;
+  if (compact === "lastquarter") return "last quarter";
+  const year = /^(?:calendar(?:[ _-]*year)?|cy)[ _-]*(\d{4})$/.exec(text);
+  if (year) return `calendar year ${year[1]}`;
+  return raw;
+}
+
 function foldPeriodPhrase(period: string): string {
-  const p = period.replace(/\s+/g, ' ').trim();
+  const p = normalizeCompactPeriod(period).replace(/\s+/g, ' ').trim();
   if (/\b(fiscal|fy)\b|^fy\s?\d{2,4}$|^fy\d{2,4}$/i.test(p)) {
     throw badRequest(
       'FISCAL_PERIOD_UNSUPPORTED',
