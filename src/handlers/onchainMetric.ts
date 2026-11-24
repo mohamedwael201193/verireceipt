@@ -18,12 +18,19 @@ interface Leg {
     nonce: string;
     raw: string[];
 }
+// A timed-out caller does not release ownership of an abort-ignoring source.
+const activeMetricCalls = new Set<string>();
+export function resetMetricCallsForTests() { activeMetricCalls.clear(); }
 async function call(url: string, method: string, params: unknown[], deadline: number): Promise<{
     result: any;
     raw: string;
 }> {
+    if (activeMetricCalls.has(url) || activeMetricCalls.size >= 16) throw Error('metric source capacity unavailable');
+    if (Date.now() >= deadline) throw Error('metric deadline');
+    activeMetricCalls.add(url);
     const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), Math.max(1, Math.min(1800, deadline - Date.now())));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const io = (async () => {
     try {
         if (Date.now() >= deadline)
             throw new Error('metric deadline');
@@ -57,9 +64,19 @@ async function call(url: string, method: string, params: unknown[], deadline: nu
             throw new Error('invalid RPC envelope');
         return { result: j.result, raw };
     }
-    finally {
+    finally { activeMetricCalls.delete(url); }
+    })();
+    try {
+        return await Promise.race([io, new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+                abort.abort();
+                reject(Error('metric deadline'));
+            }, Math.max(0, Math.min(1800, deadline - Date.now())));
+        })]);
+    } finally {
         clearTimeout(timer);
     }
+
 }
 const qty = (x: unknown): bigint => { if (typeof x !== 'string' || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(x))
     throw new Error('invalid hex quantity'); return BigInt(x); };
