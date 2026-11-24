@@ -53,9 +53,9 @@ describe("handleTx validation (unit, no network)", () => {
     );
   });
 
-  it("rejects a hash without the 0x prefix with 400 INVALID_TX_HASH", async () => {
+  it("rejects a short bare hash with 400 INVALID_TX_HASH", async () => {
     await expectApiError(
-      handleTx({ tx_hash: "1b9e2b48eb3510ee1a8aae2fc402139784f32d43b76d5853387cacb484a9a9d3", chain: "ethereum" }),
+      handleTx({ tx_hash: "b9e2b48eb3510ee1a8aae2fc402139784f32d43b76d5853387cacb484a9a9d3", chain: "ethereum" }),
       400,
       "INVALID_TX_HASH",
     );
@@ -1006,8 +1006,8 @@ describe("handleTx refusal matrix + adversarial inputs (zero-tolerance gate)", (
       "0x" + "a".repeat(63) + "\0", // null byte
       "0x" + "a".repeat(32) + " " + "a".repeat(31), // inner space
       "not-a-hash",
-      "0X" + "a".repeat(64), // wrong prefix case
-      "1b9e2b48eb3510ee1a8aae2fc402139784f32d43b76d5853387cacb484a9a9d3", // no 0x
+      "0XX" + "a".repeat(64), // malformed prefix
+      "b9e2b48eb3510ee1a8aae2fc402139784f32d43b76d5853387cacb484a9a9d3", // short bare hash
     ];
     for (const bad of badHashes) {
       const { requests } = installStub(() => CONFIRMED_LEG);

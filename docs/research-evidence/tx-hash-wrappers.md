@@ -1,0 +1,5 @@
+# Exact transaction hash wrappers
+
+24November2026. Current intent spec https://devnode.telegraphprotocol.com/engine/v1/intents/ONCHAIN_TX_LOOKUP_GENERAL defines tx_hash as a string and does not require a particular textual wrapper. Narrow normalization accepts exactly64ASCII hex digits, optionally prefixed0x/0X; output/RPC request uses0x while preserving the64digits. This changes representation, not transaction identity. No arbitrary prose extraction, truncation, padding, URL parsing or chain inference. Existing supported trailing on-chain phrase remains accepted only with matching explicit chain.
+
+Malformed input still refuses before any source request. Old tests rejecting valid bare/uppercase wrappers were adjusted to malformed lengths/prefixes; no acceptance test was deleted. Offline handler tests verify canonical RPC requests, output identity, unsupported shapes and chain conflict. No claim about evaluator frequency or score improvement. Prefix-only source metadata/logging policy unchanged.

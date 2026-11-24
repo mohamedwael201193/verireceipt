@@ -796,7 +796,7 @@ export async function handleTx(
   // hash and use it as the chain when no chain param was sent. The hash
   // itself is validated strictly below, so trailing prose can never smuggle
   // a malformed hash through.
-  const onChainMatch = txHash?.match(/^(0x[0-9a-fA-F]{64})\s+on\s+(.+)$/i);
+  const onChainMatch = txHash?.match(/^((?:0x)?[0-9a-fA-F]{64})\s+on\s+(.+)$/i);
   if (onChainMatch) {
     txHash = onChainMatch[1];
     // A2-fix (J2 F3): when an explicit `chain` param is ALSO sent, the
@@ -816,6 +816,7 @@ export async function handleTx(
       chainRaw = onChainMatch[2].trim();
     }
   }
+  if(txHash&&/^(?:0x)?[0-9a-f]{64}$/i.test(txHash))txHash="0x"+txHash.replace(/^0x/i,"");
   const chain = normalizeChain(chainRaw);
   if (!txHash || !chain) {
     throw badRequest("MISSING_PARAM", "tx_hash and chain are required query parameters");
