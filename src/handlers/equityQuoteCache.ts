@@ -11,9 +11,15 @@ export function noteYahooRateLimit(retryAfter:string|null):void{
  blockedUntil=Math.max(blockedUntil,Date.now()+Math.max(60_000,Number.isFinite(delay)?delay:0));
 }
 export async function cachedEquityQuote(ticker:string,load:()=>Promise<string>,validate:(body:string)=>void):Promise<EquityObservation>{
+ return cachedYahooBody(`quote:${ticker.toUpperCase().replace(".","-")}`,load,validate);
+}
+export async function cachedYahooSearch(asset:string,load:()=>Promise<string>,validate:(body:string)=>void):Promise<EquityObservation>{
+ return cachedYahooBody(`search:${asset.trim().toLowerCase().replace(/\s+/g," ")}`,load,validate);
+}
+async function cachedYahooBody(ticker:string,load:()=>Promise<string>,validate:(body:string)=>void):Promise<EquityObservation>{
  const prior=cache.get(ticker),age=prior?Date.now()-Date.parse(prior.fetchedAt):Infinity;
  if(prior&&age>=0&&age<FRESH_MS){validate(prior.body);return prior;}
- const pending=inFlight.get(ticker);if(pending)return pending;
+ const pending=inFlight.get(ticker);if(pending){const result=await pending;validate(result.body);return result;}
  const work=(async()=>{
   let body:string;
   try{assertYahooAllowed();body=await load();}

@@ -18,7 +18,7 @@ import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { COINPAPRIKA_APPROVAL } from "./financeWired";
-import { cachedEquityQuote, assertYahooAllowed, noteYahooRateLimit, type EquityObservation } from "./equityQuoteCache";
+import { cachedEquityQuote, cachedYahooSearch, assertYahooAllowed, noteYahooRateLimit, type EquityObservation } from "./equityQuoteCache";
 import { cachedMarketBody } from "./marketSourceCache";
 
 const SOURCE_TIMEOUT_MS = 10000;
@@ -191,23 +191,32 @@ export async function handleFinancialData(query: Record<string, string | undefin
   } catch { throw upstreamUnavailable("SEC_MALFORMED", "SEC company ticker response was malformed; no asset guessed"); }
   let row = resolveSec(entries, asset);
   let searchBody: string | null = null;
-  const searchUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(asset)}&quotesCount=10&newsCount=0`;
+  const searchUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(asset.trim().toLowerCase().replace(/\s+/g," "))}&quotesCount=10&newsCount=0`;
+  let searchObservation: EquityObservation | undefined;
   if (!row) {
-    try { searchBody = await fetchText(searchUrl); } catch {
+    const resolveSearch = (body: string): SecEntry => {
+      let quotes: { symbol?: string; quoteType?: string; shortname?: string; longname?: string }[];
+      try {
+        const parsed = JSON.parse(body);
+        if (!Array.isArray(parsed.quotes)) throw new Error("invalid quotes");
+        quotes = parsed.quotes;
+      } catch { throw upstreamUnavailable("ASSET_SEARCH_UNAVAILABLE", "Yahoo search returned an invalid quote list"); }
+      const symbols = new Set(quotes.filter((q) => q && q.quoteType === "EQUITY" &&
+        [q.symbol, q.shortname, q.longname].some((n) => typeof n === "string" && companyName(n) === companyName(asset)))
+        .map((q) => q.symbol?.toUpperCase()));
+      const candidates = entries.filter((e) => symbols.has(e.ticker?.toUpperCase()));
+      if (candidates.length > 1) throw unprocessable("AMBIGUOUS_ASSET", "Yahoo search resolved multiple SEC-listed equities; supply an exact ticker");
+      if (!candidates[0] || typeof candidates[0].cik_str !== "number") throw unprocessable("UNSUPPORTED_ASSET", "Yahoo search had no unambiguous SEC-listed equity");
+      return candidates[0];
+    };
+    try {
+      searchObservation = await cachedYahooSearch(asset, () => fetchText(searchUrl), body => { resolveSearch(body); });
+      searchBody = searchObservation.body;
+      row = resolveSearch(searchBody);
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err) throw err;
       throw upstreamUnavailable("ASSET_SEARCH_UNAVAILABLE", "SEC title/ticker had no match and Yahoo search is unavailable");
     }
-    let quotes: { symbol?: string; quoteType?: string; shortname?: string; longname?: string }[];
-    try {
-      const parsed = JSON.parse(searchBody);
-      if (!Array.isArray(parsed.quotes)) throw new Error("invalid quotes");
-      quotes = parsed.quotes;
-    } catch { throw upstreamUnavailable("ASSET_SEARCH_UNAVAILABLE", "Yahoo search returned an invalid quote list"); }
-    const symbols = new Set(quotes.filter((q) => q && q.quoteType === "EQUITY" &&
-      [q.symbol, q.shortname, q.longname].some((n) => typeof n === "string" && companyName(n) === companyName(asset)))
-      .map((q) => q.symbol?.toUpperCase()));
-    const candidates = entries.filter((e) => symbols.has(e.ticker?.toUpperCase()));
-    if (candidates.length > 1) throw unprocessable("AMBIGUOUS_ASSET", "Yahoo search resolved multiple SEC-listed equities; supply an exact ticker");
-    row = candidates[0];
   }
   if (!row || typeof row.cik_str !== "number") {
     throw unprocessable("UNSUPPORTED_ASSET", `No unambiguous SEC-listed equity for "${asset}" after SEC title/ticker and Yahoo search; crypto coverage is BTC, ETH and SOL only`);
@@ -218,7 +227,7 @@ export async function handleFinancialData(query: Record<string, string | undefin
   try {
     [sharesBody, quote] = await Promise.all([
       fetchText(`https://data.sec.gov/api/xbrl/companyconcept/CIK${cik10}/dei/EntityCommonStockSharesOutstanding.json`, ua),
-      cachedEquityQuote(ticker, () => fetchText(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`), body => {
+      cachedEquityQuote(ticker, () => fetchText(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`), body => {
         const m = JSON.parse(body)?.chart?.result?.[0]?.meta;
         if (!m || m.symbol !== ticker || m.instrumentType !== "EQUITY" || m.currency !== "USD" || typeof m.regularMarketPrice !== "number" || !Number.isFinite(m.regularMarketPrice) || m.regularMarketPrice <= 0 || typeof m.regularMarketTime !== "number" || !Number.isFinite(m.regularMarketTime) || m.regularMarketTime * 1000 > Date.now()+60_000 || Date.now()-m.regularMarketTime*1000 > 7*86400000) throw new Error("invalid or over7day quote");
       }),
@@ -229,6 +238,10 @@ export async function handleFinancialData(query: Record<string, string | undefin
   chartBody = quote.body;
   const quoteAgeSeconds = Math.floor((Date.now()-Date.parse(quote.fetchedAt))/1000);
   const quoteStale = Boolean(quote.staleReason);
+  const searchStale = Boolean(searchObservation?.staleReason), anyStale = quoteStale || searchStale;
+  const staleReason = [quote.staleReason, searchStale ? `name-to-ticker resolution: ${searchObservation!.staleReason}` : undefined].filter(Boolean).join("; ");
+  const resolutionEvidence = searchObservation ? { stale:searchStale, fetched_at:searchObservation.fetchedAt,
+    age_seconds:Math.floor((Date.now()-Date.parse(searchObservation.fetchedAt))/1000), stale_reason:searchObservation.staleReason } : null;
   let shares: ReturnType<typeof latestShares>;
   let meta: Record<string, unknown> | undefined;
   try { JSON.parse(sharesBody); } catch { throw upstreamUnavailable("SEC_MALFORMED", "SEC shares response was malformed JSON"); }
@@ -251,15 +264,15 @@ export async function handleFinancialData(query: Record<string, string | undefin
   const volumeUsd: number | null = null;
   const sessionVolumeUsd = Number.isFinite(volumeShares) && volumeShares >= 0 ? Math.round(volumeShares * price) : null;
   const asOf = new Date().toISOString();
-  const evidence = JSON.stringify({ asset: ticker, as_of: quote.fetchedAt, derivation_at: asOf, cik: cik10, stale: quoteStale, stale_reason: quote.staleReason, quote_fetched_at: quote.fetchedAt, quote_age_seconds: quoteAgeSeconds,
+  const evidence = JSON.stringify({ asset: ticker, as_of: quote.fetchedAt, derivation_at: asOf, cik: cik10, stale: anyStale, quote_stale: quoteStale, resolution_observation: resolutionEvidence, stale_reason: staleReason || undefined, quote_fetched_at: quote.fetchedAt, quote_age_seconds: quoteAgeSeconds,
     derivation: "market_cap_usd = Yahoo regularMarketPrice x SEC EDGAR dei:EntityCommonStockSharesOutstanding (latest reported); volume_24h_usd is null: the contract field is rolling 24h USD volume and Yahoo's keyless chart carries only the latest regular session (reported separately in metrics); Yahoo's own market-cap endpoints are crumb-gated, so the cap is derived, not copied",
     price_usd: price, market_time: marketTime, shares_outstanding: shares.val,
     shares_as_of: shares.end, shares_filed: shares.filed, shares_accession: shares.accn,
     volume_shares: Number.isFinite(volumeShares) ? volumeShares : null, market_cap_usd: cap, volume_24h_usd: volumeUsd,
     session_volume_usd: sessionVolumeUsd,
-    resolution: { requested_asset: asset, resolved_name: row.title, ticker, yahoo_search_url: searchBody === null ? null : searchUrl },
+    resolution: { requested_asset: asset, resolved_name: row.title, ticker, yahoo_search_url: searchBody === null ? null : searchUrl, observation: resolutionEvidence },
     raw_bodies: { company_tickers: tickersBody, yahoo_search: searchBody, sec_shares: sharesBody, yahoo_chart: chartBody }, fetched_at: fetchedAt });
-  const receipt = makeReceipt(INTENT, `${TICKERS_URL} + data.sec.gov + query1.finance.yahoo.com`, evidence, `SEC EDGAR shares outstanding x Yahoo regular-market price; derivation disclosed${quoteStale ? "; STALE QUOTE DISCLOSED" : ""}`);
+  const receipt = makeReceipt(INTENT, `${TICKERS_URL} + data.sec.gov + query1.finance.yahoo.com`, evidence, `SEC EDGAR shares outstanding x Yahoo regular-market price; derivation disclosed${anyStale ? "; STALE SOURCE DISCLOSED" : ""}`);
   receipt.fetched_at = fetchedAt;
   try {
     await saveReceipt(receipt, evidence);
@@ -273,7 +286,7 @@ export async function handleFinancialData(query: Record<string, string | undefin
     asset: ticker, asset_type: "equity", symbol: ticker, name: row.title, resolved_name: row.title, market_cap_usd: cap, volume_24h_usd: volumeUsd,
     metrics: [`shares_outstanding=${shares.val} as of ${shares.end} (filed ${shares.filed}, ${shares.accn})`, `price_usd=${price} at ${marketTime}`, "derivation=price x shares outstanding",
       `latest_regular_session_volume_usd=${sessionVolumeUsd ?? "none"} (not rolling 24h)`],
-    as_of: quote.fetchedAt, stale: quoteStale, quote_fetched_at: quote.fetchedAt, quote_age_seconds: quoteAgeSeconds, ...(quoteStale ? {stale_reason:quote.staleReason}:{}),
-  }, receipt, { answer: answer + ` Quote acquired ${quote.fetchedAt}, age ${quoteAgeSeconds}s; exchange time ${marketTime}. ${quoteStale ? quote.staleReason + "; original exact quote retained; SEC shares fetched independently now, mixed-age derivation, no price estimated or updated." : "Quote may be cached up to5minutes."}`, verdict: quoteStale ? "stale" : "verified", confidence: quoteStale ? 0.5 : 0.85,
+    as_of: quote.fetchedAt, stale: anyStale, quote_stale: quoteStale, resolution_observation: resolutionEvidence, quote_fetched_at: quote.fetchedAt, quote_age_seconds: quoteAgeSeconds, ...(anyStale ? {stale_reason:staleReason}:{}),
+  }, receipt, { answer: (searchStale ? `STALE CACHED NAME-TO-TICKER RESOLUTION. Original search acquired ${searchObservation!.fetchedAt}, age ${resolutionEvidence!.age_seconds}s; ${searchObservation!.staleReason}; revalidated against the current SEC index, not a fresh search. ` : "") + answer + ` Quote acquired ${quote.fetchedAt}, age ${quoteAgeSeconds}s; exchange time ${marketTime}. ${quoteStale ? quote.staleReason + "; original exact quote retained; SEC shares fetched independently now, mixed-age derivation, no price estimated or updated." : "Quote may be cached up to5minutes."}`, verdict: anyStale ? "stale" : "verified", confidence: anyStale ? 0.5 : 0.85,
     source: `SEC EDGAR (${TICKERS_URL} + companyconcept) + Yahoo chart; fetched ${fetchedAt}` });
 }
