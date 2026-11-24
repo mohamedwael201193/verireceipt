@@ -1,10 +1,11 @@
+import {resetAcademicCacheForTests} from "../src/handlers/academicSourceCache";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 const scratch = mkdtempSync("/tmp/academic-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { resetAcademicCacheForTests(); vi.unstubAllGlobals(); });
 import { handleAcademicSearch, parseCrossrefWorks } from "../src/handlers/academicSearch";
 import { buildServer } from "../src/server";
 import { getReceiptEvidence } from "../src/core/storage";

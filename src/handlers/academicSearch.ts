@@ -31,22 +31,8 @@ import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
-/** Local fetch with a hard timeout. One fixed public host, query value
- * URL-encoded, so there is no SSRF surface. */
-async function fetchText(url: string, timeoutMs: number, userAgent: string): Promise<string> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": userAgent } });
-    if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
-    return await res.text();
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
+import {cachedAcademicBody,normalizeAcademicQuery} from './academicSourceCache';
 export const INTENT = "ACADEMIC_SEARCH_GENERAL";
-const SOURCE_TIMEOUT_MS = 5000;
 const ROWS = 5;
 /** Onchain request slot caps query at 256 bytes. */
 const MAX_QUERY_BYTES = 256;
@@ -67,14 +53,16 @@ export function parseCrossrefWorks(raw: string): { total: number; papers: { titl
     throw upstreamUnavailable("CROSSREF_BAD_BODY", "Crossref body has no message object");
   }
   const totalRaw = (message as { "total-results"?: unknown })["total-results"];
-  if (typeof totalRaw !== "number" || !Number.isFinite(totalRaw) || totalRaw < 0) {
+  if (typeof totalRaw !== "number" || !Number.isSafeInteger(totalRaw) || totalRaw < 0 || totalRaw > 1e8) {
     throw upstreamUnavailable("CROSSREF_BAD_BODY", "Crossref body has no numeric total-results");
   }
   const items = (message as { items?: unknown }).items;
+  if(!Array.isArray(items))throw upstreamUnavailable("CROSSREF_BAD_BODY","Crossref body has no items array");
   const papers: { title: string; doi: string }[] = [];
   let skipped = 0;
   if (Array.isArray(items)) {
     for (const item of items.slice(0, ROWS)) {
+      if(!item || typeof item!=="object"){skipped++;continue;}
       const titles = (item as { title?: unknown }).title;
       const doi = (item as { DOI?: unknown }).DOI;
       const title = Array.isArray(titles) && typeof titles[0] === "string" ? titles[0].trim() : "";
@@ -91,13 +79,15 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
   if (Buffer.byteLength(q, "utf8") > MAX_QUERY_BYTES) {
     throw badRequest("QUERY_TOO_LONG", `query must fit the onchain 256-byte request slot (got ${Buffer.byteLength(q, "utf8")} bytes)`);
   }
-  const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(q)}&rows=${ROWS}`;
-  const fetchedAt = new Date().toISOString();
-  const raw = await fetchText(url, SOURCE_TIMEOUT_MS, UA).catch((err: unknown) => {
+  const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(normalizeAcademicQuery(q))}&rows=${ROWS}`;
+  const observation = await cachedAcademicBody(q,url,UA,body=>{parseCrossrefWorks(body);}).catch((err: unknown) => {
+    if(err && typeof err === "object" && "code" in err)throw err;
     throw upstreamUnavailable("CROSSREF_UNREACHABLE", `Crossref search failed: ${err instanceof Error ? err.message : "unknown error"}`);
   });
+  const {body:raw,fetchedAt,staleReason}=observation;
+  const ageSeconds=Math.floor((Date.now()-Date.parse(fetchedAt))/1000),stale=Boolean(staleReason);
   const { total, papers, skipped } = parseCrossrefWorks(raw);
-  const asOf = new Date().toISOString();
+  const asOf = fetchedAt;
   const titles = papers.map((p) => p.title);
   const dois = papers.map((p) => p.doi);
   const listing = papers.map((p, i) => `${i + 1}. ${p.title} (DOI ${p.doi})`).join("; ");
@@ -106,9 +96,9 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
   const briefRaw = papers.length
     ? `${papers.length} of ${total} Crossref matches; top: ${papers[0].title}`
     : `No Crossref matches for this query`;
-  const brief = Array.from(briefRaw).slice(0, 80).join("");
+  const brief = Array.from((stale ? "STALE cached search; " : "")+briefRaw).slice(0, 80).join("");
   const evidence = JSON.stringify({ query: q, as_of: asOf, total_matches: total,
-    papers, skipped_items: skipped,
+    papers, skipped_items: skipped, stale, stale_reason:staleReason, age_seconds:ageSeconds,
     source_policy: "Crossref REST API, keyless public pool (no mailto: maintainer decision 2026-11-23; project User-Agent instead); single source, Crossref relevance order",
     raw_body: raw, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, url, evidence, "Crossref bibliographic search; relevance order and match count are Crossref's own");
@@ -125,15 +115,15 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
     paper_titles: titles,
     dois,
     total_matches: total,
-    brief,
+    brief, as_of:asOf, fetched_at:fetchedAt, age_seconds:ageSeconds, stale, ...(stale?{stale_reason:staleReason}:{}),
   }, receipt, {
-    answer: papers.length
+    answer: (stale ? `STALE CACHED SEARCH, not a current index query. ${staleReason}; exact result acquired ${fetchedAt}, age ${ageSeconds}s, no titles or counts updated. ` : `Crossref observation acquired ${fetchedAt}, age ${ageSeconds}s; may be cached up to15minutes. `) + (papers.length
       ? `Crossref index: ${total} works match "${q}". Top ${papers.length} by Crossref relevance: ${listing}. ` +
         (skipped ? `${skipped} returned item(s) lacked a title or DOI and were skipped. ` : "") +
         "The ranking is Crossref's own relevance order, not a quality judgment; the count is Crossref's index match count, not all scholarly papers on the topic."
-      : `Crossref index: no works match "${q}" (0 matches). The Crossref corpus is large but not exhaustive; absence here is not proof no paper exists.`,
-    verdict: "verified",
-    confidence: 0.9,
+      : `Crossref index: no works match "${q}" (0 matches). The Crossref corpus is large but not exhaustive; absence here is not proof no paper exists.`),
+    verdict: stale ? "stale" : "verified",
+    confidence: stale ? 0.5 : 0.9,
     source: `${url}; Crossref REST API single source, Crossref relevance order; fetched ${fetchedAt}; checked ${asOf}`,
   });
 }
