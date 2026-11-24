@@ -166,6 +166,7 @@ export async function handleWeatherForecast(query: Record<string, string | undef
   const fcBody = await fetchText(fcUrl, "the Open-Meteo forecast API");
 
   interface FcBody { utc_offset_seconds?: number; timezone?: string; timezone_abbreviation?: string; latitude?: number; longitude?: number;
+    hourly_units?: {time?:string;temperature_2m?:string;precipitation_probability?:string;weather_code?:string};
     hourly?: { time?: string[]; temperature_2m?: (number | null)[]; precipitation_probability?: (number | null)[]; weather_code?: (number | null)[] } }
   let fc: FcBody;
   try {
@@ -177,12 +178,16 @@ export async function handleWeatherForecast(query: Record<string, string | undef
   if (!h?.time?.length || !h.temperature_2m || h.time.length !== h.temperature_2m.length) {
     throw upstreamUnavailable("FORECAST_MALFORMED", "the forecast body is missing aligned hourly arrays; refusing to answer from a partial view");
   }
-  const offsetSec = fc.utc_offset_seconds ?? 0;
+  if(fc.hourly_units?.time!=='iso8601'||fc.hourly_units.temperature_2m!=='°C'||fc.hourly_units.precipitation_probability!=='%'||fc.hourly_units.weather_code!=='wmo code')
+    throw upstreamUnavailable('FORECAST_MALFORMED','forecast units do not match the requested Celsius, percentage and WMO hourly fields');
+  if(typeof fc.utc_offset_seconds!=='number'||!Number.isInteger(fc.utc_offset_seconds)||Math.abs(fc.utc_offset_seconds)>14*3600)
+    throw upstreamUnavailable('FORECAST_MALFORMED','forecast UTC offset is missing or invalid');
+  const offsetSec = fc.utc_offset_seconds;
   const tzName = fc.timezone ?? "UTC", tzAbbr = fc.timezone_abbreviation ?? "UTC";
   // Current local hour at the place, as the upstream formats it.
   const localNow = new Date(Date.now() + offsetSec * 1000);
   const localHour = localNow.toISOString().slice(0, 13) + ":00";
-  const startIdx = h.time.findIndex((t) => t >= localHour);
+  const startIdx = h.time.findIndex((t) => t === localHour);
   if (startIdx < 0) {
     throw unprocessable("FORECAST_WINDOW_UNCOVERED", `the forecast starts after the window or the place's current hour (${localHour} ${tzAbbr}) is beyond the retrieved range; nothing is extrapolated`);
   }
@@ -192,16 +197,23 @@ export async function handleWeatherForecast(query: Record<string, string | undef
       `only ${h.time.length - startIdx} of the requested ${windowHours} hours are covered by the retrieved forecast (${h.time[startIdx]} to ${h.time[h.time.length - 1]} ${tzAbbr}); the window is refused, not extrapolated`);
   }
   const times = h.time.slice(startIdx, endIdx);
-  const temps = h.temperature_2m.slice(startIdx, endIdx).filter((t): t is number => t !== null);
-  if (temps.length === 0) {
-    throw upstreamUnavailable("FORECAST_MALFORMED", "every hourly temperature in the window is null; refusing to answer from a partial view");
-  }
-  const tempMax = Math.max(...temps), tempMin = Math.min(...temps);
-  const precipRaw = (h.precipitation_probability ?? []).slice(startIdx, endIdx);
-  const precipVals = precipRaw.filter((p): p is number => p !== null && p !== undefined);
-  const precipPeak = precipVals.length > 0 ? Math.max(...precipVals) : null;
-  const codes = (h.weather_code ?? []).slice(startIdx, endIdx).filter((c): c is number => c !== null && c !== undefined);
-  const condition = codes.length > 0 ? dominantCondition(codes) : "unknown";
+  const localStart=Date.parse(localHour+':00Z');
+  if(times.some((t,i)=>typeof t!=='string'||t!==new Date(localStart+i*3600000).toISOString().slice(0,16)))
+    throw upstreamUnavailable('FORECAST_MALFORMED','requested hourly window has gaps, duplicates or invalid local times');
+  const temps = h.temperature_2m.slice(startIdx,endIdx);
+  if(temps.length!==windowHours||temps.some(t=>typeof t!=='number'||!Number.isFinite(t)||t< -90||t>60))
+    throw upstreamUnavailable('FORECAST_MALFORMED','requested hourly temperature window is incomplete or invalid; full-window extrema are not inferred');
+  const tempMax = Math.max(...temps as number[]), tempMin = Math.min(...temps as number[]);
+  const precipRaw = (h.precipitation_probability ?? []).slice(startIdx,endIdx);
+  if(precipRaw.length!==windowHours||precipRaw.some(p=>typeof p!=='number'||!Number.isFinite(p)||p<0||p>100))
+    throw upstreamUnavailable('FORECAST_MALFORMED','requested precipitation-probability window is incomplete or invalid');
+  const precipVals=precipRaw as number[];
+  const precipPeak=Math.max(...precipVals);
+  const codesRaw=(h.weather_code ?? []).slice(startIdx,endIdx);
+  if(codesRaw.length!==windowHours||codesRaw.some(c=>typeof c!=='number'||!Number.isInteger(c)||!Object.hasOwn(WMO_CONDITIONS,c)))
+    throw upstreamUnavailable('FORECAST_MALFORMED','requested WMO weather-code window is incomplete or invalid');
+  const codes=codesRaw as number[];
+  const condition=dominantCondition(codes);
   const asOf = new Date().toISOString();
   const when = `${times[0]} to ${times[times.length - 1]} ${tzAbbr} (${windowHours}h window)`;
 
@@ -213,7 +225,7 @@ export async function handleWeatherForecast(query: Record<string, string | undef
     condition,
     method: "Open-Meteo best-match NWP model forecast (single model, no ensemble spread), hourly values sliced from the current local hour; NOT a measurement",
     geocode_upstream: geoUrl ? { url: geoUrl, raw_body: geoBody, sha256: sha256Hex(Buffer.from(geoBody!, "utf8")) } : "not used (coordinates given directly)",
-    forecast_upstream: { url: fcUrl, sha256: sha256Hex(Buffer.from(fcBody, "utf8")) },
+    forecast_upstream: { url: fcUrl, raw_body: fcBody, sha256: sha256Hex(Buffer.from(fcBody, "utf8")) },
     fetched_at: asOf,
   });
   const receipt = makeReceipt(INTENT, fcUrl, evidence, "single model forecast over the exact retrieved hourly arrays; geocoder body receipted when used");

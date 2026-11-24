@@ -224,3 +224,28 @@ describe("ranked place validation controls",()=>{
   await expect(handleWeatherForecast({location:"A".repeat(257)})).rejects.toMatchObject({status:400,code:"INVALID_LOCATION"});expect(requested).toHaveLength(1);
  });
 });
+
+describe('complete typed forecast window, not partial extrema',()=>{
+ function altered(change:(d:any)=>void){const d=JSON.parse(FC_CAIRO);change(d);vi.stubGlobal('fetch',async()=>new Response(JSON.stringify(d)));}
+ it.each([null,'30',61,-91])('rejects one invalid selected temperature %s instead of filtering it',async value=>{
+  altered(d=>d.hourly.temperature_2m[12]=value);
+  await expect(handleWeatherForecast({location:'30.06,31.25'})).rejects.toMatchObject({code:'FORECAST_MALFORMED'});
+ });
+ it.each(['units','offset','precip','codes','gap','duplicate','starts-late'])('rejects %s without fabricating a complete forecast',async mode=>{
+  altered(d=>{
+   if(mode==='units')d.hourly_units.temperature_2m='°F';
+   if(mode==='offset')delete d.utc_offset_seconds;
+   if(mode==='precip')d.hourly.precipitation_probability[12]=101;
+   if(mode==='codes')d.hourly.weather_code[12]=999;
+   if(mode==='gap')d.hourly.time[13]='2026-11-23T14:00';
+   if(mode==='duplicate')d.hourly.time[13]=d.hourly.time[12];
+   if(mode==='starts-late'){for(const key of Object.keys(d.hourly))d.hourly[key]=d.hourly[key].slice(13);}
+  });
+  await expect(handleWeatherForecast({location:'30.06,31.25'})).rejects.toMatchObject({code:mode==='starts-late'?'FORECAST_WINDOW_UNCOVERED':'FORECAST_MALFORMED'});
+ });
+ it('valid fixture extrema stay unchanged and actual forecast bytes are recoverable with matching hash',async()=>{
+  stub();const out=await handleWeatherForecast({location:'30.06,31.25'});expect(out.temp_max_c).toBe(expectedWindow(24).max);
+  const stored=await getReceiptEvidence((out.receipt as any).receipt_id);const evidence=JSON.parse(stored.evidence!.toString());
+  expect(evidence.forecast_upstream.raw_body).toBe(FC_CAIRO);expect(sha256Hex(evidence.forecast_upstream.raw_body)).toBe(evidence.forecast_upstream.sha256);
+ });
+});
