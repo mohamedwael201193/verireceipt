@@ -1,4 +1,4 @@
-# VeriReceipt Gate - pre-execution evidence gate (Track 3)
+# VeriReceipt Gate - pre-execution evidence gate (Apps & Agents)
 
 The Gate is the live buyer flow: give it a decision question, it buys the
 answer through the Telegraph network's own ranked routing, verifies the

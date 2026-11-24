@@ -2,11 +2,12 @@
 
 **Sourced answers. Re-checkable bytes. Explicit limits.**
 
-VeriReceipt is a deterministic six-intent miner and a Mission Desk app for
-Telegraph Season II, Tracks 1 and 3. The miner fetches data without a language
-model. Every successful answer includes the SHA-256 of its stored upstream
-bytes. The Desk agent buys answers through testnet escrow and verifies the
-signal, answer and stored bytes before saving a purchase.
+VeriReceipt is a deterministic keyless miner for the Miners / Providers
+track (54 intents registered on Sepolia, registration 6188) and a Mission
+Desk app for the Apps & Agents track, Telegraph Season II. The miner fetches data
+without a language model. Every successful answer includes the SHA-256 of its
+stored upstream bytes. The Desk agent buys answers through testnet escrow and
+verifies the signal, answer and stored bytes before saving a purchase.
 
 [Live app](https://verireceipt.vercel.app/) ·
 [API docs](https://verireceipt.vercel.app/docs) ·
@@ -40,8 +41,9 @@ new input, failure mode or mission outcome.
 
 ### Where the project stands
 
-- **Shipped:** six callable endpoints, stored-byte receipt inspection, browser
-  Mission 12/13 workbench, testnet escrow Desk agent and public purchase ledger.
+- **Shipped:** deterministic keyless endpoints, stored-byte receipt
+  inspection, browser Mission 12/13 workbench, testnet escrow Desk agent and
+  public purchase ledger.
 - **Being checked:** weak-pair evaluator scores and additional purposeful input
   coverage. A correct direct answer is not proof of a high network score.
 - **Still to prove:** paid purchases linked to explicit mission-policy outcomes,
@@ -52,7 +54,11 @@ new input, failure mode or mission outcome.
 *Production docs screenshot, 2026-11-21 18:39 UTC. See the live docs for current
 state. Registration 6160 and YAML miner id 774921 are different identifiers.*
 
-## The six intents
+## Selected intents
+
+54 intents are registered on Sepolia under registration 6188; the registered
+set lives in the pinned `miner.yaml` (see /docs). Six of the served
+intents:
 
 | Intent | Endpoint | What it returns |
 | --- | --- | --- |
@@ -124,13 +130,13 @@ Field names vary per endpoint; `confidence`, `verdict`, `source`, and
 
 ## Registration facts
 
-- **registrationId:** `6160` on Ethereum Sepolia (chainId 11155111). Node status `active` at
-  `GET https://devnode.telegraphprotocol.com/api/miners/6160` (checked 2026-11-21 17:38 UTC).
-  Created by `updateMiner(6152, …)` in tx
-  [`0x93a5f833726da803d39396e208c5404889e0b64dbeb78519914fe1d18e3c1a8e`](https://sepolia.etherscan.io/tx/0x93a5f833726da803d39396e208c5404889e0b64dbeb78519914fe1d18e3c1a8e)
-  (block 12183278). The earlier registration 6152 is superseded and shows `deregistered` on the node.
-- **Registered YAML:** [`miner.yaml` @ `70d7a15`](https://raw.githubusercontent.com/mohamedwael201193/verireceipt/70d7a15ec1fa61569e4a003fd21b8af46a97cfa9/miner.yaml),
-  SHA-256 `0xa97b1cb87dbaaba87cf4b15e284352407a4a72c06cc568c47bfe3980e5cba06a`
+- **registrationId:** `6188` on Ethereum Sepolia (chainId 11155111). Node status `active` at
+  `GET https://devnode.telegraphprotocol.com/api/miners/6188` (checked 2026-11-24 17:47 UTC).
+  Created by `updateMiner(6181, …)` in tx
+  [`0x115e0e237ad66992ed52b8c2cf571806dedf9bff6e2338bd8bbe280853c9cb56`](https://sepolia.etherscan.io/tx/0x115e0e237ad66992ed52b8c2cf571806dedf9bff6e2338bd8bbe280853c9cb56)
+  (block 12197330). The earlier registrations (6152, 6160, 6174, 6176, 6177, 6181) are superseded.
+- **Registered YAML:** [`miner.yaml` @ `680fbdbf`](https://raw.githubusercontent.com/mohamedwael201193/verireceipt/680fbdbf8b77b640ba0d62c088dc9c154ab9acf7/miner.yaml),
+  SHA-256 `0x30195e677e413b623445d82593b22e05402bf0176dea3912e053725ac7ca08f1`
 - **Diamond (Telegraph):** `0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b`
 - **Floor price (on-chain):** `minPriceUsdc = 10000` = $0.01, the protocol minimum (getMiner(6160)).
   Telegraph docs (using/api-keys.md): a request costs "usually about $0.01" per miner call.
@@ -140,7 +146,7 @@ Field names vary per endpoint; `confidence`, `verdict`, `source`, and
 
 ## How it works
 
-1. A request hits one of the six deterministic endpoints.
+1. A request hits one of the deterministic endpoints.
 2. The server queries the official upstream source(s) directly — archive
    RPCs, SEC EDGAR, DeFiLlama, on-chain DEX pools,
    official ISO price feeds. No language model is involved anywhere.
@@ -163,7 +169,7 @@ Field names vary per endpoint; `confidence`, `verdict`, `source`, and
   through the Telegraph engine's escrow rail (see the Desk section below);
   escrow sponsorship of visitor checks is not shipped.
 
-## Desk (Track 3): escrow-paid purchases
+## Desk (Apps & Agents): escrow-paid purchases
 
 `desk/` is the VeriReceipt Desk agent (its own package; it touches no miner
 file). Run once, it buys answers on its own through the Telegraph engine,

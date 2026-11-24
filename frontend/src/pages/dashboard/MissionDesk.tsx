@@ -209,7 +209,7 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
     <div className="wrap">
       <div className="view-head">
         <div>
-          <div className="kicker">// track 3 · apps &amp; agents · zero-wallet workbench</div>
+          <div className="kicker">// apps &amp; agents · zero-wallet workbench</div>
           <h1 className="h1-ed">
             VeriReceipt <span className="serif-i">Mission Desk.</span>
           </h1>
