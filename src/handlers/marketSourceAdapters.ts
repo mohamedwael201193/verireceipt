@@ -1,6 +1,7 @@
 import type { ObservationSource, SourceApproval } from '../core/observedSources';
 import type { PriceQuery, PriceValue, PoolQuery, PoolValue } from './financeObservations';
-import { readPublicBody } from '../core/publicSource';
+import {withAnswerClass} from '../core/answerClass';
+import { readPublicBody, publicSourceFailure } from '../core/publicSource';
 export interface TickerBinding {
     symbol: string;
     coinpaprikaId: string;
@@ -41,6 +42,8 @@ export function dexScreenerLiquiditySource(bindings: readonly PoolBinding[], app
     return {
         name: 'DEX Screener named pool reserve liquidity', approval,
         read: async (q, signal) => {
+            let failure='binding';
+            try {
             const matches = bindings.filter(b => b.chain.toLowerCase() === q.chain.toLowerCase() && (b.pool.toLowerCase() === q.pool.toLowerCase() || b.address.toLowerCase() === q.pool.toLowerCase()));
             if (matches.length !== 1)
                 throw new Error('ambiguous pool binding');
@@ -51,10 +54,13 @@ export function dexScreenerLiquiditySource(bindings: readonly PoolBinding[], app
                 throw new Error('aborted');
             const url = `https://api.dexscreener.com/latest/dex/pairs/${p.dexScreenerChain}/${p.address}`;
             // Allow normal public-API latency while remaining inside the runner deadline.
-            const b = await readPublicBody(url, 200000, 2500);
+            let b;try{b=await readPublicBody(url,200000,2500);}catch(error){failure=publicSourceFailure(error);throw error;}
+            failure='aborted';
             if (signal.aborted)
                 throw new Error('aborted');
+            failure='malformed';
             const j = JSON.parse(b.raw);
+            failure='identity_or_value';
             const rows = Array.isArray(j.pairs) ? j.pairs.filter((r: any) => r.chainId === p.dexScreenerChain && r.pairAddress?.toLowerCase() === p.address.toLowerCase() && (!p.dexId || r.dexId === p.dexId)) : [];
             if (rows.length !== 1 || typeof rows[0].liquidity?.usd !== 'number' || !Number.isFinite(rows[0].liquidity.usd) || rows[0].liquidity.usd < 0)
                 throw new Error('wrong or duplicate pool identity');
@@ -62,6 +68,7 @@ export function dexScreenerLiquiditySource(bindings: readonly PoolBinding[], app
             // observation time is the retrieval time, disclosed as such in
             // the receipted evidence (same pattern as the NOAA archive).
             return { identity: JSON.stringify([q.chain.toLowerCase(), q.pool.toLowerCase()]), sourceUrl: url, rawBody: JSON.stringify({ source_raw_body: b.raw, observed_at_semantics: 'retrieval time; the API exposes no per-pair observation timestamp' }), observedAt: b.fetchedAt, fetchedAt: b.fetchedAt, value: { chain: q.chain, pool: q.pool, liquidityUsd: rows[0].liquidity.usd } };
+            }catch(error){try{if(error!==null&&typeof error==='object')withAnswerClass(error,'LIQUIDITY_DEPTH_VERIFY_GENERAL',{dexscreener_failure:failure});}catch{}throw error;}
         }
     };
 }

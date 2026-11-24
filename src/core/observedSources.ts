@@ -1,3 +1,4 @@
+import {answerDiagnostics,withAnswerClass} from './answerClass';
 import { upstreamUnavailable } from './errors';
 import { envelope, makeReceipt } from './receipt';
 import { saveReceipt } from './storage';
@@ -50,6 +51,7 @@ function approved(a: SourceApproval): boolean {
 export async function observeFromSources<Q, T>(query: Q, sources: readonly ObservationSource<Q, T>[], policy: ObservationPolicy<Q, T>): Promise<Record<string, unknown>> {
     const identity = policy.identity(query);
     const failed: string[] = [];
+    let liquidityClass:Record<string,unknown>|undefined;
     for (const source of sources) {
         if (!approved(source.approval)) {
             failed.push(source.name + ':unapproved');
@@ -58,7 +60,7 @@ export async function observeFromSources<Q, T>(query: Q, sources: readonly Obser
         const controller = new AbortController();
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
-            const timeout = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('source deadline')); }, policy.sourceTimeoutMs); });
+            const timeout = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => { controller.abort(); const deadlineError=new Error('source deadline');if(policy.intent==='LIQUIDITY_DEPTH_VERIFY_GENERAL'&&source.name==='DEX Screener named pool reserve liquidity')withAnswerClass(deadlineError,policy.intent,{dexscreener_failure:'timeout'});reject(deadlineError); }, policy.sourceTimeoutMs); });
             const observation = await Promise.race([source.read(query, controller.signal), timeout]);
             if (controller.signal.aborted)
                 throw new Error('source deadline');
@@ -87,6 +89,7 @@ export async function observeFromSources<Q, T>(query: Q, sources: readonly Obser
         catch (error) {
             if (timer === undefined)
                 throw error;
+            if(policy.intent==='LIQUIDITY_DEPTH_VERIFY_GENERAL')liquidityClass=answerDiagnostics(policy.intent,error).answerClass??liquidityClass;
             failed.push(source.name + ':unavailable');
         }
         finally {
@@ -95,5 +98,7 @@ export async function observeFromSources<Q, T>(query: Q, sources: readonly Obser
             controller.abort();
         }
     }
-    throw upstreamUnavailable('APPROVED_SOURCES_UNAVAILABLE', 'no current identity-matching observation from a source with reviewed terms or scoped owner risk acceptance');
+    const error=upstreamUnavailable('APPROVED_SOURCES_UNAVAILABLE', 'no current identity-matching observation from a source with reviewed terms or scoped owner risk acceptance');
+    if(liquidityClass)withAnswerClass(error,policy.intent,liquidityClass);
+    throw error;
 }

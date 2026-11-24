@@ -1,13 +1,18 @@
 import { upstreamUnavailable } from './errors';
 
+// Private diagnostic labels, set only where the reader observes the failure.
+const publicFailures=new WeakMap<object,string>();
+export function publicSourceFailure(error:unknown):string {try{return error!==null&&typeof error==='object'?publicFailures.get(error)??'unknown':'unknown';}catch{return 'unknown';}}
 /** Small bounded public-source reader. URLs are constructed by adapters, never user URLs. */
 export interface PublicBody { url: string; raw: string; fetchedAt: string }
 export async function readPublicBody(url: string, maxBytes = 1_000_000, timeoutMs = 4000, userAgent = 'VeriReceipt/2.0 public-source observer'): Promise<PublicBody> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let failure="transport";
   try {
     const response = await fetch(url, { signal: controller.signal, redirect: 'error', headers: { accept: 'application/json', 'user-agent': userAgent } });
-    if (!response.ok) throw upstreamUnavailable('PUBLIC_SOURCE_HTTP', `public source returned HTTP ${response.status}`);
+    if (!response.ok) { failure=response.status===403?'http_403':response.status===429?'http_429':response.status>=400&&response.status<500?'http_4xx':response.status>=500?'http_5xx':'http_other'; throw upstreamUnavailable('PUBLIC_SOURCE_HTTP', `public source returned HTTP ${response.status}`); }
+    failure="body_read";
     const size = response.headers.get('content-length');
     if (size && Number(size) > maxBytes) { await response.body?.cancel(); throw new Error('source body exceeds limit'); }
     const reader = response.body?.getReader();
@@ -22,7 +27,7 @@ export async function readPublicBody(url: string, maxBytes = 1_000_000, timeoutM
       }
     } finally { reader.releaseLock(); }
     return { url, raw: Buffer.concat(parts).toString('utf8'), fetchedAt: new Date().toISOString() };
-  } finally { clearTimeout(timer); }
+  } catch(error) {try{if(error!==null&&typeof error==='object')publicFailures.set(error,controller.signal.aborted?'timeout':failure);}catch{}throw error;} finally { clearTimeout(timer); }
 }
 
 /** Single-process start budget; never queues callers past their response budget. */
