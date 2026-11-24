@@ -3,6 +3,7 @@ import {sanitizeAnswerClass} from "./answerClass";
 // Never retain free text, URL/query strings, bodies, headers, IPs or user ids.
 import { EDGAR_FORM_TYPES } from "../handlers/edgarFormTypes";
 const ROUTE_INTENTS: Record<string, string> = {
+  "/v1/onchain-metric": "ONCHAIN_METRIC_VERIFY_GENERAL",
   "/v1/tx": "ONCHAIN_TX_LOOKUP_GENERAL", "/v1/tvl": "TVL_LOOKUP_GENERAL",
   "/v1/grid-price": "GRID_POWER_PRICE_GENERAL", "/v1/filings": "REGULATORY_FILING_MONITOR_GENERAL",
   "/v1/route": "OPTIMAL_EXECUTION_ROUTE_GENERAL", "/v1/validator": "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
@@ -40,9 +41,9 @@ const ROUTE_INTENTS: Record<string, string> = {
 // Only known parameter NAMES are emitted, including rejected aliases. Never values
 // or unknown names: callers can put a credential into an arbitrary query key.
 const KNOWN_QUERY_KEYS = [
-  "address", "amount", "base", "block", "block_height", "chain", "country", "cve", "domain",
+  "address", "asset", "amount", "base", "block", "block_height", "chain", "country", "cve", "domain",
   "company", "entity", "event", "form_type", "form", "cik", "patch", "from", "game", "jurisdiction", "destination", "host", "indicator", "lat", "location", "lon", "window_hours", "ip", "interval_start", "node_or_zone",
-  "origin", "pair", "period", "symbol", "protocol", "query", "question", "quote", "record_type", "route_or_flight",
+  "metric", "origin", "pair", "period", "symbol", "protocol", "query", "question", "quote", "record_type", "route_or_flight",
   "ticker", "to", "token", "topic", "url", "transaction", "tx_hash", "validator_index", "year",
 ] as const;
 // Fixed internal categories only. A regex alone could admit a secret-looking code.
@@ -122,7 +123,7 @@ export function diagnosticErrorCode(value: unknown): string {
 }
 interface Counts { arrived: number; completed: number; total_latency_ms: number; max_latency_ms: number; statuses: Record<string, number> }
 const counts = new Map<string, Counts>();
-function intentFor(route: string | undefined): string { return route && Object.hasOwn(ROUTE_INTENTS, route) ? ROUTE_INTENTS[route] : "other"; }
+export function intentFor(route: string | undefined): string { return route && Object.hasOwn(ROUTE_INTENTS, route) ? ROUTE_INTENTS[route] : "other"; }
 function bucket(intent: string): Counts {
   let value = counts.get(intent);
   if (!value) { value = { arrived: 0, completed: 0, total_latency_ms: 0, max_latency_ms: 0, statuses: {} }; counts.set(intent, value); }
@@ -192,7 +193,7 @@ export function recordRequestCompletion(route: string | undefined, status: numbe
         has_whitespace_inside: /\s/.test(input),
       };
       const receiptId=status===200&&typeof details.receiptId==='string'&&/^rcpt_[A-Z0-9]{26}$/.test(details.receiptId)?details.receiptId:undefined;
-      const refused=status>=400 ? intent==='EVENT_OUTCOME_RESOLUTION_GENERAL'?{outcome:'refused',source:'none'}:intent==='ONCHAIN_METRIC_VERIFY_GENERAL'?{metric_kind:ownString(details.query,'metric')??'balance',result:'refused'}:undefined:undefined;
+      const refused=status>=400 ? intent==='EVENT_OUTCOME_RESOLUTION_GENERAL'?{outcome:'refused',source:'none'}:intent==='ONCHAIN_METRIC_VERIFY_GENERAL'?{metric_kind:ownString(details.query,'metric')??'balance',leg:'none',result:'refused',refusal_reason:status===400?'invalid_input':'other'}:undefined:undefined;
       const answerClass=sanitizeAnswerClass(intent,details.answerClass??refused);
       console.info(JSON.stringify({ event: "request_complete", intent, path: route, param_keys,
         ...(input_shape ? { input_shape } : {}), ...(receiptId?{receipt_id:receiptId}:{}), ...(answerClass?{answer_class:answerClass}:{}),

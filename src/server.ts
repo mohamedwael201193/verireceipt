@@ -62,7 +62,7 @@ import { handleEventOutcome } from "./handlers/eventOutcome";
 import { handleTravelDisruption } from "./handlers/travelDisruption";
 import { handleEmailSecurity } from "./handlers/emailSecurity";
 import { exactQuery } from "./core/exactQuery";
-import { diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
+import { intentFor, diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
 import { handleMacro } from "./handlers/macroEconomic";
 import { handleTokenHolders, holderUpstreamForQuery } from "./handlers/tokenHolders";
 import { createWiredFinanceHandlers } from "./handlers/financeWired";
@@ -179,7 +179,8 @@ export function buildServer(): FastifyInstance {
   const requestAnswers = new WeakMap<object, {receiptId?:string;answerClass?:Record<string,unknown>}>();
   app.addHook("preSerialization",async(request,reply,payload)=>{
     try { if(reply.statusCode===200){const intent=payload && typeof payload==='object' ? Object.getOwnPropertyDescriptor(Object.getOwnPropertyDescriptor(payload,'receipt')?.value??{},'intent')?.value : undefined;
-      if(typeof intent==='string')requestAnswers.set(request,answerDiagnostics(intent,payload));} }catch{}return payload;
+      const routeIntent=intentFor(request.routeOptions.url);
+      if(typeof intent==='string'||routeIntent!=='other')requestAnswers.set(request,answerDiagnostics(typeof intent==='string'?intent:routeIntent,payload));} }catch{}return payload;
   });
   app.addHook("onRequest", async (request) => {
     requestStart.set(request, process.hrtime.bigint());
@@ -208,6 +209,7 @@ export function buildServer(): FastifyInstance {
   app.setErrorHandler((err, request, reply) => {
     if (err instanceof ApiError) {
       requestErrors.set(request, diagnosticErrorCode(err.code));
+      try { const info=answerDiagnostics(intentFor(request.routeOptions.url),err); if(info.answerClass)requestAnswers.set(request,info); } catch {}
       void reply.status(err.status).send(err.responseBody ?? errorBody(err));
       return;
     }

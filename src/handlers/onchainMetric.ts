@@ -19,6 +19,7 @@ interface Leg {
     raw: string[];
 }
 // A timed-out caller does not release ownership of an abort-ignoring source.
+class MetricDeadline extends Error {}
 const activeMetricCalls = new Set<string>();
 export function resetMetricCallsForTests() { activeMetricCalls.clear(); }
 async function call(url: string, method: string, params: unknown[], deadline: number): Promise<{
@@ -26,14 +27,14 @@ async function call(url: string, method: string, params: unknown[], deadline: nu
     raw: string;
 }> {
     if (activeMetricCalls.has(url) || activeMetricCalls.size >= 16) throw Error('metric source capacity unavailable');
-    if (Date.now() >= deadline) throw Error('metric deadline');
+    if (Date.now() >= deadline) throw new MetricDeadline('metric deadline');
     activeMetricCalls.add(url);
     const abort = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const io = (async () => {
     try {
         if (Date.now() >= deadline)
-            throw new Error('metric deadline');
+            throw new MetricDeadline('metric deadline');
         const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), redirect: 'error', signal: abort.signal });
         if (!r.ok)
             throw new Error(`RPC HTTP ${r.status}`);
@@ -70,7 +71,7 @@ async function call(url: string, method: string, params: unknown[], deadline: nu
         return await Promise.race([io, new Promise<never>((_, reject) => {
             timer = setTimeout(() => {
                 abort.abort();
-                reject(Error('metric deadline'));
+                reject(new MetricDeadline('metric deadline'));
             }, Math.max(0, Math.min(1800, deadline - Date.now())));
         })]);
     } finally {
@@ -98,6 +99,7 @@ export async function handleOnchainMetric(query: Record<string, string | undefin
     const deadline = Date.now() + 9000;
     const legs: Leg[] = [];
     const errors: string[] = [];
+    let deadlineHit = false;
     for (const url of CHAIN_RPCS[chain]) {
         try {
             const raw: string[] = [];
@@ -119,7 +121,8 @@ export async function handleOnchainMetric(query: Record<string, string | undefin
                 throw new Error('value outside canonical range');
             legs.push({ url, hash: before.hash.toLowerCase(), balance: balance.toString(), nonce: nonce.toString(), raw });
         }
-        catch {
+        catch (err) {
+            if (err instanceof MetricDeadline) deadlineHit = true;
             errors.push(url);
         }
         const groups = new Map<string, Leg[]>();
@@ -139,7 +142,13 @@ export async function handleOnchainMetric(query: Record<string, string | undefin
         const evidence = JSON.stringify({ chain, address: address.toLowerCase(), block: block.toString(), block_hash: w.hash, balance_wei: w.balance, tx_count: w.nonce, sources: legs, unavailable_sources: errors });
         const receipt = makeReceipt('ONCHAIN_METRIC_VERIFY_GENERAL', w.url, evidence, `${wins.length}/${CHAIN_RPCS[chain].length} same finalized block hash, balance and nonce`);
         await saveReceipt(receipt, evidence);
-        return withAnswerClass(envelope('ONCHAIN_METRIC_VERIFY_GENERAL', { address, chain, block: block.toString(), block_hash: w.hash, balance_gwei: balanceGwei, balance_wei: w.balance, tx_count: count, metric }, receipt, { answer: metric === 'balance' ? balanceSentence : `${address} had sent ${count} transactions (nonce) on ${chain} at finalized block ${block}. ${balanceSentence}`, verdict: 'verified', confidence: wins.length === CHAIN_RPCS[chain].length ? 1 : 0.95, source: `Block-pinned RPC agreement; ${w.url}; balance is Gwei, not ETH/POL; nonce is not received transfers.` }),'ONCHAIN_METRIC_VERIFY_GENERAL',{metric_kind:metric,result:'value'});
+        return withAnswerClass(envelope('ONCHAIN_METRIC_VERIFY_GENERAL', { address, chain, block: block.toString(), block_hash: w.hash, balance_gwei: balanceGwei, balance_wei: w.balance, tx_count: count, metric }, receipt, { answer: metric === 'balance' ? balanceSentence : `${address} had sent ${count} transactions (nonce) on ${chain} at finalized block ${block}. ${balanceSentence}`, verdict: 'verified', confidence: wins.length === CHAIN_RPCS[chain].length ? 1 : 0.95, source: `Block-pinned RPC agreement; ${w.url}; balance is Gwei, not ETH/POL; nonce is not received transfers.` }),'ONCHAIN_METRIC_VERIFY_GENERAL',{metric_kind:metric,leg:'quorum',result:'value'});
     }
-    throw upstreamUnavailable('METRIC_QUORUM_UNAVAILABLE', 'two sources did not agree on the exact finalized block identity, balance and nonce');
+    let refusalReason = deadlineHit ? 'deadline' : 'insufficient_providers';
+    if (!deadlineHit && legs.length >= 2) {
+        refusalReason = new Set(legs.map(l => l.hash)).size > 1 ? 'hash_mismatch'
+            : new Set(legs.map(l => l.balance)).size > 1 ? 'balance_mismatch' : 'nonce_mismatch';
+    }
+    throw withAnswerClass(upstreamUnavailable('METRIC_QUORUM_UNAVAILABLE', 'two sources did not agree on the exact finalized block identity, balance and nonce'),
+        'ONCHAIN_METRIC_VERIFY_GENERAL', {metric_kind:metric,leg:'none',result:'refused',refusal_reason:refusalReason});
 }

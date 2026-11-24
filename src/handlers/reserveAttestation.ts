@@ -27,6 +27,7 @@
 // updatedAt is always named with its age; the feed's heartbeat is
 // 86400s, and a stale attestation is served with the staleness stated,
 // never silently refreshed.
+import {withAnswerClass} from "../core/answerClass";
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -158,10 +159,10 @@ export async function handleReserveAttestation(query: Record<string, string | un
   const key = addressKey ?? assetRaw.toUpperCase();
   const feed = Object.hasOwn(POR_FEEDS, key) ? POR_FEEDS[key] : undefined;
   if (!feed) {
-    return { answer: `No probed-live Chainlink PoR feed is enabled for "${assetRaw.slice(0, 80)}". Covered assets: ${Object.values(POR_FEEDS).map(f => f.asset).join(", ")}. No reserve is asserted; this coverage-only response is outside the scored numeric attestation contract.`,
+    return withAnswerClass({ answer: `No probed-live Chainlink PoR feed is enabled for "${assetRaw.slice(0, 80)}". Covered assets: ${Object.values(POR_FEEDS).map(f => f.asset).join(", ")}. No reserve is asserted; this coverage-only response is outside the scored numeric attestation contract.`,
       asset: assetRaw.slice(0, 80), attested_reserve: null, ethereum_total_supply: null,
       reserve_vs_ethereum_supply_pct: null, collateral_ratio_pct: null,
-      verdict: "unavailable", confidence: 0, receipt: null };
+      verdict: "unavailable", confidence: 0, receipt: null }, INTENT, {asset_known:false,source_kind:"coverage_only",numeric_vs_null:"null"});
   }
   const fetchedAt = new Date().toISOString();
   const rpcs = CHAIN_RPCS.ethereum;
@@ -231,7 +232,7 @@ export async function handleReserveAttestation(query: Record<string, string | un
   const answer = `${feed.asset} attested reserve: ${human.toLocaleString("en-US", { maximumFractionDigits: decimals })} ${feed.asset} (${micro.toString()} micro-units) per the Chainlink ${feed.feedName} feed${feed.issuer ? ` (issuer ${feed.issuer})` : ""}, round ${data.roundId}, attested ${updatedIso} (${Math.floor(ageS / 3600)}h ago${stale ? `, OLDER than the ${HEARTBEAT_S / 3600}h heartbeat` : ""}). ` +
     `${ethereumSupply === null ? "Ethereum total supply unavailable; no ratio asserted. " : `Ethereum total supply ${ethereumSupply} ${feed.asset}; reserve versus Ethereum-only supply ${ethereumRatio}%. `}This is not a global collateral ratio: the reserve feed covers wider issuance and other native chains are excluded from the supply denominator; collateral_ratio_pct is null. Supply is read at latest while the reserve is the timestamped feed attestation, not a time-matched solvency audit. ` +
     `Read on ethereum mainnet through the RPC quorum; this is the feed's own attestation, not an independent audit.${remainder ? ` Micro-unit remainder floored: ${remainder}.` : ""}`;
-  return envelope(INTENT, {
+  return withAnswerClass(envelope(INTENT, {
     attested_reserve: Number(micro),
     asset: feed.asset,
     reserve_units: human, ethereum_total_supply: ethereumSupply,
@@ -244,5 +245,5 @@ export async function handleReserveAttestation(query: Record<string, string | un
     // the evidence.
     source_feed: `Chainlink ${feed.feedName} feed ${feed.proxy} via ethereum RPC quorum; fetched ${fetchedAt}`,
   }, receipt, { answer, verdict: "verified", confidence: 0.9,
-    source: `Chainlink ${feed.feedName} ${feed.proxy} via ethereum RPC quorum (${rpcs.join(", ")}); fetched ${fetchedAt}` });
+    source: `Chainlink ${feed.feedName} ${feed.proxy} via ethereum RPC quorum (${rpcs.join(", ")}); fetched ${fetchedAt}` }), INTENT, {asset_known:true,source_kind:"por_feed",numeric_vs_null:"numeric"});
 }
