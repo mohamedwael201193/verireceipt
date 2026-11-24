@@ -81,6 +81,37 @@ async function resolveEndpoint(raw:string|undefined,which:'origin'|'destination'
  return {lat:hit.latitude,lon:hit.longitude,label,selection:'chose '+label+' of '+hit.count+' matches returned by '+hit.provider+' (rank 1, provider order; not confirmed unique)',geocoders:captures};
 }
 
+// At most four demo-server operations, no queue. A timed-out read retains
+// its slot until the underlying fetch/body settles. Healthy overlap is allowed.
+let routeSourceActive = 0;
+export function resetRouteSourceForTests() { routeSourceActive = 0; }
+async function readRouteBody(url: string): Promise<string> {
+  if (routeSourceActive >= 4) throw Error("route source busy");
+  routeSourceActive++;
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const io = (async () => {
+    try {
+      const res = await fetch(url, {redirect:"error",signal:controller.signal,headers:{"User-Agent":UA,Accept:"application/json"}});
+      if (!res.ok || !res.body) throw Error("route source unavailable");
+      const reader = res.body.getReader();
+      const parts: Uint8Array[] = []; let size=0;
+      while (true) {
+        const part=await reader.read(); if(part.done)break;
+        size+=part.value.byteLength;
+        if(size>262144){void reader.cancel().catch(()=>{});throw Error("route body limit");}
+        parts.push(part.value);
+      }
+      return Buffer.concat(parts).toString("utf8");
+    } finally {routeSourceActive--;}
+  })();
+  try {
+    return await Promise.race([io,new Promise<never>((_,reject)=>{
+      timer=setTimeout(()=>{controller.abort();reject(Error("route source deadline"));},SOURCE_TIMEOUT_MS);
+    })]);
+  } finally {clearTimeout(timer);}
+}
+
 export async function handleRouteEta(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const o = await resolveEndpoint(query.origin, "origin");
   const dst = await resolveEndpoint(query.destination, "destination");
@@ -89,15 +120,7 @@ export async function handleRouteEta(query: Record<string, string | undefined>):
   const fetchedAt = new Date().toISOString();
   let body: string;
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-    try {
-      const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      body = await res.text();
-    } finally {
-      clearTimeout(timer);
-    }
+    body = await readRouteBody(url);
   } catch {
     throw upstreamUnavailable("OSRM_UNREACHABLE", "the OSRM demo server could not be reached");
   }
