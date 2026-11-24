@@ -1,4 +1,4 @@
-import {withAnswerClass} from '../core/answerClass';
+import {withAnswerClass,answerDiagnostics} from '../core/answerClass';
 // SLA_COMPLIANCE_GENERAL — GET /v1/sla-compliance?service=<alias>&period=<Nd>
 //
 // Zero-LLM. Answers "what uptime did this service deliver over the
@@ -137,7 +137,7 @@ function coveredMs(intervals: [number, number][], winStart: number, winEnd: numb
   return covered;
 }
 
-export async function handleSlaCompliance(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+async function handleSlaComplianceInternal(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const service = query.service?.trim().toLowerCase();
   if (!service) throw badRequest("MISSING_PARAM", `service is required: one of ${Object.keys(STATUSPAGES).join(", ")}`);
   if (service.length > 64) throw badRequest("INVALID_SERVICE", "service is over 64 characters");
@@ -245,4 +245,14 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
     downtime_minutes: downtimeMin,
     summary: `${service} ${uptimeRounded}% uptime over ${days}d per the disclosed major/critical-only rule (${countedList.length} counted incidents); sla_target_pct/compliant not provided (SLA target not established).`,
   }, receipt, { answer, verdict: "verified", confidence: 0.85, source: upstreamDesc }),INTENT,{service_bound:true,alias_name:aliasName,window_covered:true});
+}
+
+export async function handleSlaCompliance(q:Record<string,string|undefined>):Promise<Record<string,unknown>> {
+ const service=q.service?.trim().toLowerCase(),period=q.period?.trim();
+ const serviceClass=!service?'missing':service.length>64?'invalid':/^https?:\/\//i.test(service)?'url':resolveSlaHost(service)?'bound':'unbound';
+ let periodClass='missing';
+ if(period){const m=/^(?:(?:the\s+)?(?:last|past)\s+)?(\d{1,3})\s*(?:d|days?)$/i.exec(period);periodClass=m&&Number(m[1])>=1&&Number(m[1])<=90?'rolling_days':/\b(?:january|february|march|april|may|june|july|august|september|october|november|december|month|quarter|year)\b|^\d{4}-\d{2}$/i.test(period)?'calendar':'unsupported';}
+ const cls={sla_service_input_class:serviceClass,sla_period_input_class:periodClass};
+ try{const out=await handleSlaComplianceInternal(q);return withAnswerClass(out,INTENT,{...answerDiagnostics(INTENT,out).answerClass,...cls});}
+ catch(error){if(error!==null&&typeof error==='object')withAnswerClass(error,INTENT,{...answerDiagnostics(INTENT,error).answerClass,...cls});throw error;}
 }

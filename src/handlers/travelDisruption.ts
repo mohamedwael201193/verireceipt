@@ -18,6 +18,7 @@
 // (route_or_flight accepts a 3-letter FAA/IATA airport code or a name
 // from the bundled US airport list, disclosed when resolved), or a
 // two-endpoint route. A flight number alone does not establish its origin.
+import {withAnswerClass} from '../core/answerClass';
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -74,7 +75,7 @@ export function parseNasStatus(raw: string, airport: string): { updateTime: stri
   return { updateTime, entries };
 }
 
-export async function handleTravelDisruption(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+async function handleTravelDisruptionInternal(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const rawInput = query.route_or_flight?.trim();
   if (!rawInput) throw badRequest("MISSING_PARAM", "route_or_flight is required as a 3-letter airport code, e.g. LGA, or a US airport name");
   if (rawInput.length > 200 || /[\x00-\x1f]/.test(rawInput)) throw badRequest('INVALID_ROUTE','route_or_flight must be at most 200 printable characters');
@@ -153,4 +154,22 @@ export async function handleTravelDisruption(query: Record<string, string | unde
     reason: reason || null,
   }, receipt, { answer, verdict: "verified", confidence: 0.9,
     source: `${NAS_URL}; FAA NAS status snapshot, airport-level only; feed updated ${updateTime}; fetched ${fetchedAt}` });
+}
+
+function travelInputClass(q:Record<string,string|undefined>):string {
+ const raw=q.route_or_flight?.trim();
+ if(!raw)return 'missing';
+ if(raw.length>200||/[\x00-\x1f]/.test(raw))return 'invalid';
+ if(/^[A-Za-z]{2,3}\s*\d{1,4}[A-Za-z]?(?:\s.*)?$/.test(raw))return 'flight_number';
+ const route=/^(.+?)\s+to\s+(.+)$/i.exec(raw)??/^([a-z]{3})\s*[-/]\s*([a-z]{3})$/i.exec(raw);
+ const names=route?[route[1].trim(),route[2].trim()]:[raw];
+ const kinds=names.map(n=>/^[a-z]{3}$/i.test(n)?'code':resolveAirportName(n).length===1?'name':resolveAirportName(n).length>1?'ambiguous':'unsupported');
+ if(kinds.includes('ambiguous'))return 'ambiguous_airport';
+ if(kinds.includes('unsupported'))return 'unsupported';
+ return route?'airport_route':kinds[0]==='code'?'airport_code':'airport_name';
+}
+export async function handleTravelDisruption(q:Record<string,string|undefined>):Promise<Record<string,unknown>> {
+ const cls={travel_input_class:travelInputClass(q)};
+ try{return withAnswerClass(await handleTravelDisruptionInternal(q),INTENT,cls);}
+ catch(error){if(error!==null&&typeof error==='object')withAnswerClass(error,INTENT,cls);throw error;}
 }

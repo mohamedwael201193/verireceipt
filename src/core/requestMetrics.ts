@@ -45,7 +45,7 @@ const ROUTE_INTENTS: Record<string, string> = {
 const KNOWN_QUERY_KEYS = [
   "retailer", "address", "asset", "amount", "base", "bin", "block", "block_height", "chain", "chains", "country", "cve", "domain",
   "company", "entity", "event", "form_type", "form", "cik", "patch", "from", "game", "jurisdiction", "destination", "host", "indicator", "lat", "location", "lon", "window_hours", "ip", "interval_start", "node_or_zone",
-  "metric", "origin", "pair", "period", "symbol", "protocol", "query", "question", "quote", "record_type", "reference", "route_or_flight",
+  "service", "metric", "origin", "pair", "period", "symbol", "protocol", "query", "question", "quote", "record_type", "reference", "route_or_flight",
   "target", "ticker", "to", "token", "topic", "url", "transaction", "tx_hash", "validator_index", "year",
 ] as const;
 // Fixed internal categories only. A regex alone could admit a secret-looking code.
