@@ -69,7 +69,7 @@ it('keyed failover legs appear only with a non-blank key, order stays Chainlink,
     expect(blank.priceSourceNames).toEqual(bare.priceSourceNames);
     const keyed = createWiredFinanceHandlers({ COINGECKO_API_KEY: 'k1', COINMARKETCAP_API_KEY: 'k2' } as NodeJS.ProcessEnv);
     expect(keyed.priceSourceNames).toEqual(['Chainlink USD finalized proxy state', 'CoinPaprika USD ticker', 'CoinGecko USD simple price', 'CoinMarketCap USD latest quote']);
-    expect(keyed.liquiditySourceNames).toEqual(['DEX Screener named pool reserve liquidity']);
+    expect(keyed.liquiditySourceNames).toEqual(['DEX Screener named pool reserve liquidity','GeckoTerminal exact pool reserve liquidity']);
 });
 
 it('yield is wired to the Aave on-chain rate; unbound queries fail closed without network', async () => {

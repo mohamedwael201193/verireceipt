@@ -1,3 +1,4 @@
+import {geckoPoolLiquiditySource} from './geckoPoolLiquidity';
 // WIRED finance observation configuration (expansion slice, 2026-11-23).
 //
 // This is the first file that ENABLES named providers for the finance
@@ -51,6 +52,7 @@ export const CHAINLINK_APPROVAL = termsRiskApproval('https://chain.link/terms', 
 export const COINPAPRIKA_APPROVAL = termsRiskApproval('https://docs.coinpaprika.com/api-plans', '2026-11-23');
 export const COINGECKO_APPROVAL = termsRiskApproval('https://www.coingecko.com/en/api_terms', '2026-11-23');
 export const COINMARKETCAP_APPROVAL = termsRiskApproval('https://coinmarketcap.com/api/terms/v1/', '2026-11-23');
+export const GECKOTERMINAL_APPROVAL = termsRiskApproval('https://www.coingecko.com/en/api_terms', '2026-11-24');
 export const DEXSCREENER_APPROVAL = termsRiskApproval('https://docs.dexscreener.com/api/api-terms-and-conditions', '2026-11-23');
 /** On-chain public state carries no provider terms; the record keeps the
  * shared approval-gate shape and the same owner-risk pointer as above. */
@@ -127,6 +129,7 @@ export function createWiredFinanceHandlers(env: NodeJS.ProcessEnv = process.env)
         price.push(coinMarketCapPriceSource(COINMARKETCAP_TICKERS, COINMARKETCAP_APPROVAL, cmcKey));
     const liquidity: ObservationSource<PoolQuery, PoolValue>[] = [
         dexScreenerLiquiditySource(DEXSCREENER_POOLS, DEXSCREENER_APPROVAL),
+        geckoPoolLiquiditySource(DEXSCREENER_POOLS,GECKOTERMINAL_APPROVAL),
     ];
     const yieldSources: ObservationSource<YieldQuery, YieldValue>[] = [
         aaveYieldSource(AAVE_V3_RESERVES, ethereumPinnedLegs(), AAVE_V3_APPROVAL),

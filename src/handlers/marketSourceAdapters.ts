@@ -40,6 +40,15 @@ export interface PoolBinding {
 // Canonical EVM chain slugs supported by the exact-pair endpoint. No arbitrary
 // URL paths, chain guessing, token-address search or similar-name substitution.
 const DEX_EVM_CHAINS=new Set(['ethereum','base','arbitrum','optimism','polygon','bsc','avalanche','linea','scroll','gnosis','zksync','blast','mantle','celo','sonic','unichain']);
+export function resolvePoolBinding(q:PoolQuery,bindings:readonly PoolBinding[]):PoolBinding {
+    const matches = bindings.filter(b => b.chain.toLowerCase() === q.chain.toLowerCase() && (b.pool.toLowerCase() === q.pool.toLowerCase() || b.address.toLowerCase() === q.pool.toLowerCase()));
+    const exactAddress=/^0x[0-9a-fA-F]{40}$/.test(q.pool);
+    const chain=q.chain.toLowerCase();
+    if(matches.length>1 || (!exactAddress && matches.length!==1) || (exactAddress&&!DEX_EVM_CHAINS.has(chain)))
+        throw new Error('ambiguous pool binding');
+    const p:PoolBinding=matches[0]??{pool:q.pool,chain,address:q.pool,dexScreenerChain:chain};
+    return p;
+}
 /** Unconfigured provider factory: names require a unique reviewed binding. */
 export function dexScreenerLiquiditySource(bindings: readonly PoolBinding[], approval: SourceApproval): ObservationSource<PoolQuery, PoolValue> {
     return {
@@ -47,12 +56,7 @@ export function dexScreenerLiquiditySource(bindings: readonly PoolBinding[], app
         read: async (q, signal) => {
             let failure='binding';
             try {
-            const matches = bindings.filter(b => b.chain.toLowerCase() === q.chain.toLowerCase() && (b.pool.toLowerCase() === q.pool.toLowerCase() || b.address.toLowerCase() === q.pool.toLowerCase()));
-            const exactAddress=/^0x[0-9a-fA-F]{40}$/.test(q.pool);
-            const chain=q.chain.toLowerCase();
-            if(matches.length>1 || (!exactAddress && matches.length!==1) || (exactAddress&&!DEX_EVM_CHAINS.has(chain)))
-                throw new Error('ambiguous pool binding');
-            const p:PoolBinding=matches[0]??{pool:q.pool,chain,address:q.pool,dexScreenerChain:chain};
+            const p=resolvePoolBinding(q,bindings);
             if (!/^[a-z0-9-]+$/.test(p.dexScreenerChain) || !/^[A-Za-z0-9]{20,100}$/.test(p.address))
                 throw new Error('invalid pool identity');
             if (signal.aborted)
