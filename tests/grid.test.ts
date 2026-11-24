@@ -375,16 +375,20 @@ describe("handleGridPrice staleness bound (1 hour)", () => {
 
   it("settled historical Elering row older than the TTL is served (A9)", async () => {
     const intervalYear = "2025-11-19T05:00:00.000Z";
-    saveGridPrice(
-      "EE",
-      intervalYear,
-      99.99,
-      "Elering EE",
-      new Date(Date.now() - 365 * 24 * 3600_000).toISOString(),
-    );
-    const res = await handleGridPrice({ node_or_zone: "EE", interval_start: intervalYear });
+    const close = provisionalCloseMs("ELERING", Date.parse(intervalYear))!;
+    // Keep the ingest before close and the request safely after close/TTL,
+    // regardless of the wall-clock date on the machine running the suite.
+    const ingestedAt = new Date(close - 1).toISOString();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(close + 2 * 86400_000);
+    let res: Record<string, unknown>;
+    try {
+      saveGridPrice("EE", intervalYear, 99.99, "Elering EE", ingestedAt);
+      res = await handleGridPrice({ node_or_zone: "EE", interval_start: intervalYear });
+    } finally {
+      clock.mockRestore();
+    }
     expect(res.lmp_usd_per_mwh).toBe(99.99);
-    // Ingested a year ago, before the 3-BD close of 2025-11-19, and
+    // Ingested before the 3-BD close of 2025-11-19, and
     // Elering has no historical re-fetch: served, but not as verified 1.0 (r3).
     expect(res.verdict).toBe(GRID_UNCONFIRMED_VERDICT);
     expect(res.confidence).toBe(GRID_UNCONFIRMED_CONFIDENCE);
