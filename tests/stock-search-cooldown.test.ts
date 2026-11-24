@@ -38,3 +38,17 @@ it('pending shared cache revalidates body for every caller',async()=>{const load
 
 it.each([500,503])('search/stock stale fallback for HTTP%s without a429 cooldown',async code=>{await finance('Synthetic Apple Alias');await vi.advanceTimersByTimeAsync(300001);searchStatus=code;status=code;const result=await finance('Synthetic Apple Alias');expect(result.stale).toBe(true);expect(result.resolution_observation).toMatchObject({stale:true,stale_reason:'Yahoo server failure'});expect((await stock()).stale).toBe(true);});
 it('stale search alone lowers confidence and is distinct from a fresh quote',async()=>{await finance('Synthetic Apple Alias');await vi.advanceTimersByTimeAsync(300001);await stock();searchStatus=429;const result=await finance('Synthetic Apple Alias');expect(result.quote_stale).toBe(false);expect(result.stale).toBe(true);expect(result.verdict).toBe('stale');expect(result.confidence).toBe(0.5);expect(result.stale_reason).toContain('resolution');expect(result.answer).toContain('not a fresh search');expect(result.quote_age_seconds).toBe(0);});
+it.each(['financial-first','stock-first'])('canonical URL stays exact and reusable with %s acquisition',async direction=>{
+ const first=direction==='financial-first'?await finance():await stock();
+ expect(yahoo).toEqual(['https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&range=1d']);
+ const second=direction==='financial-first'?await stock():await finance();
+ expect(yahoo).toEqual(['https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&range=1d']);
+ expect(first.stale).toBe(false);expect(second.stale).toBe(false);
+});
+it('identical raw key text cannot collide between chart and search namespaces',async()=>{
+ const {cachedEquityQuote}=await import('../src/handlers/equityQuoteCache');
+ const quoteLoad=vi.fn(async()=>chart),searchLoad=vi.fn(async()=>search);
+ expect((await cachedEquityQuote('AAPL',quoteLoad,()=>{})).body).toBe(chart);
+ expect((await cachedYahooSearch('AAPL',searchLoad,()=>{})).body).toBe(search);
+ expect(quoteLoad).toHaveBeenCalledTimes(1);expect(searchLoad).toHaveBeenCalledTimes(1);
+});
