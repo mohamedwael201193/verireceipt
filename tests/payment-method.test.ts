@@ -204,3 +204,18 @@ it.each([200,404])('cache preserves source acquisition time after a delayed HTTP
   expect(calls).toBe(3); // first pair plus second unavailable open source; primary stays cached.
  }finally{vi.useRealTimers();}
 });
+
+it('retains real six-digit parent coverage for the allowed seven-digit input without asserting exact allocation',async()=>{
+ const body=readFileSync(join(FX,'open-bin-411111.json'),'utf8');
+ vi.stubGlobal('fetch',async(u:unknown)=>{if(String(u).includes('api.dharun.dev'))return new Response(body);throw Error('primary down');});
+ const out=await handlePaymentMethod({bin:'4111110'});
+ expect(out.valid).toBe(true);expect(out.issuing_bank).toBe('CONOTOXIA SP. Z O.O');
+ expect(out.allocation_scope).toEqual([{source:'open BIN list',requested_bin:'4111110',allocation_prefix:'411111',scope:'six-digit parent only; not an exact seven-digit allocation'}]);
+ expect(out.answer).toContain('no exact seven-digit allocation is asserted');expect(out.summary).toContain('no exact seven-digit allocation asserted');
+ const stored=await getReceiptEvidence((out.receipt as {receipt_id:string}).receipt_id);expect(String(stored.evidence)).toContain(JSON.stringify(body));
+});
+it.each(['411112','41111','41111100'])('rejects unrelated or wrongly-sized source identity for seven-digit input: %s',async identity=>{
+ const body=JSON.parse(readFileSync(join(FX,'open-bin-411111.json'),'utf8'));body.data.bin=identity;
+ vi.stubGlobal('fetch',async(u:unknown)=>{if(String(u).includes('api.dharun.dev'))return new Response(JSON.stringify(body));throw Error('primary down');});
+ await expect(handlePaymentMethod({bin:'4111110'})).rejects.toMatchObject({code:'BIN_SOURCES_UNAVAILABLE'});
+});

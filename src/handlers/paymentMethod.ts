@@ -88,7 +88,7 @@ async function openLookup(bin: string): Promise<SourceResult> {
   const data = response.status === 404 ? {} : JSON.parse(body)?.data;
   if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("invalid data object");
   if(response.status!==404 && (typeof data.bin!=="string" ||
-    !(data.bin===bin || (bin.length===8 && data.bin.length===6 && /^\d{6}$/.test(data.bin) && bin.startsWith(data.bin)))))throw new Error("BIN identity mismatch");
+    !(data.bin===bin || ((bin.length===7 || bin.length===8) && data.bin.length===6 && /^\d{6}$/.test(data.bin) && bin.startsWith(data.bin)))))throw new Error("BIN identity mismatch");
   const info: BinlistReply = { scheme: text(data.network)?.toLowerCase(), type: text(data.type)?.toLowerCase(), bank: { name: text(data.issuer) }, country: { alpha2: text(data.country), name: text(data.country_name) } };
   const result = { name: "open BIN list", url, body, found: !!(info.scheme || info.country?.alpha2 || info.country?.name), cached: false, fetchedAt, info, ...(response.status!==404?{allocationPrefix:data.bin}:{}) };
   openCache.set(bin, result); return result;
@@ -116,7 +116,7 @@ export async function handlePaymentMethod(query: Record<string, string | undefin
     values[field] = candidates[0]?.v ?? null; fieldSources[field] = candidates[0]?.s.name ?? null;
     if (new Set(candidates.map(c => c.v!.toLowerCase())).size > 1) conflicts.push(field);
   }
-  const parentCoverage=successful.filter(s=>s.found&&s.allocationPrefix&&s.allocationPrefix!==raw).map(s=>({source:s.name,requested_bin:raw,allocation_prefix:s.allocationPrefix,scope:'six-digit parent only; not an exact eight-digit allocation'}));
+  const parentCoverage=successful.filter(s=>s.found&&s.allocationPrefix&&s.allocationPrefix!==raw).map(s=>({source:s.name,requested_bin:raw,allocation_prefix:s.allocationPrefix,scope:raw.length===7?'six-digit parent only; not an exact seven-digit allocation':'six-digit parent only; not an exact eight-digit allocation'}));
   const asOf = new Date().toISOString();
   const fetchedAt = successful.map(s => s.fetchedAt).sort()[0];
   const evidence = JSON.stringify({ bin: raw, valid, ...values, field_sources: fieldSources, conflicts, sources, allocation_scope:parentCoverage, attribution: credit, scope: "no checksum: valid means a known prefix in at least one reference; no guarantee a card is real, active or safe", as_of: asOf });
@@ -126,6 +126,6 @@ export async function handlePaymentMethod(query: Record<string, string | undefin
   const { network, issuing_bank, issuing_country, card_type } = values;
   const answer = (valid ? `Yes, BIN ${raw}${parentCoverage.length ? " has a known six-digit parent allocation reference" : " is an allocated, known card prefix"}: ${network ?? "unknown network"}${card_type ? " " + card_type : ""}${issuing_bank ? ", issued by " + issuing_bank : ""}${issuing_country ? ", " + issuing_country : ""}. ` : `No record for BIN ${raw} in either reference. That is not proof the prefix is unallocated. `) +
     `Allocation-only reference check, no checksum, no guarantee a card is real, active or safe. Sources fetched ${fetchedAt}${sources.some(s => s.cached) ? ", up to24h cache" : ""}.` +
-    (sources.some(s => s.error) ? " One source unavailable; partial coverage." : "") + (conflicts.length ? ` Sources disagree on ${conflicts.join(", ")}; binlist.net non-empty fields take precedence.` : "") + (parentCoverage.length?` Parent-prefix coverage only from ${parentCoverage.map(s=>s.source+': '+s.allocation_prefix).join('; ')}; no exact eight-digit allocation is asserted.`:"") + " " + credit;
-  return envelope(INTENT, { bin: raw, valid, ...values, field_sources: fieldSources, source_conflicts: conflicts, allocation_scope:parentCoverage, attribution: credit, summary: `${raw}: ${valid ? parentCoverage.length ? "known parent-prefix reference, no exact eight-digit allocation asserted" : "known prefix" : "no record"}; allocation-only check.` }, receipt, { answer, verdict: "verified", confidence: conflicts.length || sources.some(s => s.error) ? 0.6 : 0.9, source: successful.map(s => `${s.name} ${s.url} fetched ${s.fetchedAt}`).join("; ") });
+    (sources.some(s => s.error) ? " One source unavailable; partial coverage." : "") + (conflicts.length ? ` Sources disagree on ${conflicts.join(", ")}; binlist.net non-empty fields take precedence.` : "") + (parentCoverage.length?` Parent-prefix coverage only from ${parentCoverage.map(s=>s.source+': '+s.allocation_prefix).join('; ')}; no exact ${raw.length===7?"seven":"eight"}-digit allocation is asserted.`:"") + " " + credit;
+  return envelope(INTENT, { bin: raw, valid, ...values, field_sources: fieldSources, source_conflicts: conflicts, allocation_scope:parentCoverage, attribution: credit, summary: `${raw}: ${valid ? parentCoverage.length ? `known parent-prefix reference, no exact ${raw.length===7?"seven":"eight"}-digit allocation asserted` : "known prefix" : "no record"}; allocation-only check.` }, receipt, { answer, verdict: "verified", confidence: conflicts.length || sources.some(s => s.error) ? 0.6 : 0.9, source: successful.map(s => `${s.name} ${s.url} fetched ${s.fetchedAt}`).join("; ") });
 }
