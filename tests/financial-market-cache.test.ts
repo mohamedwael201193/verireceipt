@@ -1,3 +1,4 @@
+import {resetSecFinancialCacheForTests} from '../src/handlers/secFinancialCache';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -11,7 +12,7 @@ const raw = readFileSync(join(__dirname, "fixtures/financial-data/paprika-eth-et
 const data = JSON.parse(raw);
 const start = Date.parse(data.last_updated) + 1000;
 beforeEach(() => { resetMarketCacheForTests(); vi.useFakeTimers(); vi.setSystemTime(start); });
-afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); resetMarketCacheForTests(); });
+afterEach(() => { resetSecFinancialCacheForTests(); vi.unstubAllGlobals(); vi.useRealTimers(); resetMarketCacheForTests(); });
 afterAll(() => { rmSync(scratch, { recursive: true, force: true }); });
 const load = (status = 200, body = raw) => vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status })));
 const eth = () => handleFinancialData({ asset: "ETH" });
