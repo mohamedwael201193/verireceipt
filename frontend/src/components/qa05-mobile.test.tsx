@@ -28,14 +28,14 @@ function renderShell(path = "/") {
 }
 
 describe("QA-05 mobile navigation menu", () => {
-  it("opens with all seven destinations and navigates", () => {
+  it("opens with all eight destinations and navigates", () => {
     renderShell("/");
     const btn = screen.getByRole("button", { name: "Open menu" });
     expect(btn.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(btn);
     const nav = screen.getByRole("navigation", { name: "Primary (mobile)" });
     const labels = [...nav.querySelectorAll("a")].map((a) => a.textContent);
-    expect(labels).toEqual(["Home", "Dashboard", "Receipts", "Benchmarks", "Status", "Docs", "Research"]);
+    expect(labels).toEqual(["Home", "Dashboard", "Receipts", "Benchmarks", "Status", "Docs", "Try it", "Research"]);
     expect(screen.getByRole("button", { name: "Close menu" }).getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(nav.querySelectorAll("a")[2]);
     expect(screen.getByTestId("where").textContent).toBe("/receipts");

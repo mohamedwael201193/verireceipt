@@ -27,6 +27,7 @@ const NAV_LINKS = [
   { to: "/benchmarks", label: "Benchmarks" },
   { to: "/status", label: "Status" },
   { to: "/docs", label: "Docs" },
+  { to: "/try", label: "Try it" },
   { to: "/research", label: "Research" },
 ];
 
