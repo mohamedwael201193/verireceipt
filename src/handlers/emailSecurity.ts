@@ -36,6 +36,16 @@ export function normalizeEmailDnsType(value: string): string {
   if (!Object.hasOwn(DNS_TYPES, input)) throw badRequest("INVALID_RECORD_TYPE", "record_type must be an IANA DNS type name or numeric type (1-65535)");
   return input;
 }
+export function resolveEmailDnsQuery(domain: string, requested: string): { name: string; type: string; mapping: string } {
+  const label = requested.trim().toUpperCase();
+  const aliases: Record<string, string> = { SPF: "", DMARC: "_dmarc.", DKIM: "", BIMI: "default._bimi.", "MTA-STS": "_mta-sts.", "TLS-RPT": "_smtp._tls." };
+  if (Object.hasOwn(aliases, label)) {
+    const name = normalizeEmailDnsName(aliases[label] + domain);
+    return { name, type: "TXT", mapping: `${label} mapped to TXT at ${name}${label === "DKIM" ? "; no selector supplied or guessed, bare-domain TXT only, not a DKIM selector check" : ""}` };
+  }
+  try { const type = normalizeEmailDnsType(requested); return { name: domain, type, mapping: `${label} queried as DNS type ${type} at ${domain}` }; }
+  catch { return { name: domain, type: "TXT", mapping: `Unrecognized record_type defaulted to TXT at ${domain}; no requested security mechanism inferred` }; }
+}
 interface DnsObservation { resolver: string; url: string; raw_body: string; fetched_at: string; status: number; truncated: boolean }
 export function parseEmailDnsStatus(raw: string, domain: string, type: string): { status: number; truncated: boolean } {
   const data: unknown = JSON.parse(raw);
@@ -58,15 +68,17 @@ export async function handleEmailSecurity(query: Record<string, string | undefin
   for (const key of Object.keys(query)) if (!["domain", "record_type"].includes(key)) throw badRequest("UNKNOWN_PARAM", `Unsupported query parameter: ${key}`);
   if (!query.domain?.trim() || !query.record_type?.trim()) throw badRequest("MISSING_PARAM", "domain and record_type are required");
   const domain = normalizeEmailDnsName(query.domain);
-  const type = normalizeEmailDnsType(query.record_type);
-  const suffix = `name=${encodeURIComponent(domain)}&type=${encodeURIComponent(String(DNS_TYPES[type] ?? type))}`;
+  const { name, type, mapping } = resolveEmailDnsQuery(domain, query.record_type);
+  // Bounded, structured diagnostic. The prior invalid-label cause is an inference.
+  console.info(JSON.stringify({ event: "email_record_type", value: query.record_type.slice(0, 80), truncated: query.record_type.length > 80 }));
+  const suffix = `name=${encodeURIComponent(name)}&type=${encodeURIComponent(String(DNS_TYPES[type] ?? type))}`;
   const sources = [
     { resolver: "Google Public DNS", url: `https://dns.google/resolve?${suffix}`, headers: { accept: "application/json" } },
     { resolver: "Cloudflare", url: `https://cloudflare-dns.com/dns-query?${suffix}`, headers: { accept: "application/dns-json" } },
   ];
   const settled = await Promise.allSettled(sources.map(async (source): Promise<DnsObservation> => {
     const fetched = await boundedSourceText(source.url, { timeoutMs: SOURCE_TIMEOUT_MS, maxBytes: MAX_BODY_BYTES, headers: source.headers });
-    const status = parseEmailDnsStatus(fetched.raw, domain, type);
+    const status = parseEmailDnsStatus(fetched.raw, name, type);
     return { resolver: source.resolver, url: source.url, raw_body: fetched.raw, fetched_at: fetched.fetchedAt, ...status };
   }));
   const observations = settled.flatMap((row) => row.status === "fulfilled" ? [row.value] : []);
@@ -81,13 +93,13 @@ export async function handleEmailSecurity(query: Record<string, string | undefin
     throw upstreamUnavailable("EMAIL_DNS_STATUS_DISAGREEMENT", "Resolvers disagree on lookup status; refusing to choose a positive or negative result");
   }
   const unavailable = settled.flatMap((row, i) => row.status === "rejected" ? [{ resolver: sources[i].resolver, reason: row.reason instanceof SourceReadError ? row.reason.code : "INVALID_DNS_RESPONSE" }] : []);
-  const evidence = JSON.stringify({ domain, record_type: type, lookup_ok: lookupOk, rule: "DNS Status 0 is true; other valid DNS statuses are false", observations, unavailable_sources: unavailable });
+  const evidence = JSON.stringify({ domain, queried_name: name, mapping, record_type: type, lookup_ok: lookupOk, rule: "DNS Status 0 is true; other valid DNS statuses are false", observations, unavailable_sources: unavailable });
   const receipt = makeReceipt(INTENT, observations[0].url, evidence, `${observations.length}/2 resolver responses; agreement on DNS lookup status, not email safety`);
   receipt.fetched_at = observations[0].fetched_at;
   await saveReceipt(receipt, evidence);
   const details = observations.map((row) => `${row.resolver}: DNS Status ${row.status}${row.truncated ? " (truncated response)" : ""}`).join("; ");
   return envelope(INTENT, { domain, record_type: type, lookup_ok: lookupOk, dns_statuses: observations.map((row) => ({ resolver: row.resolver, status: row.status, truncated: row.truncated })) }, receipt, {
-    answer: `${domain} ${type}: lookup_ok=${lookupOk}. ${details}. This reports DNS lookup status only, not record presence, mailbox delivery, message authenticity or email safety.${unavailable.length ? " Only one resolver returned usable evidence; coverage is degraded." : ""}`,
+    answer: `${mapping}. ${name} ${type}: lookup_ok=${lookupOk}. ${details}. This reports DNS lookup status only, not record presence, mailbox delivery, message authenticity or email safety.${unavailable.length ? " Only one resolver returned usable evidence; coverage is degraded." : ""}`,
     verdict: lookupOk ? "verified" : "lookup_failed",
     confidence: unavailable.length ? 0.9 : 1,
     source: `Public DNS-over-HTTPS; exact source responses and query binding are in the receipt. No model or threat-safety inference.`,

@@ -52,3 +52,45 @@ it("wires an actual non-ApiError to INTERNAL without logging its message", async
     expect(JSON.stringify(log.mock.calls)).not.toContain("PRIVATE");
   } finally { await app.close(); }
 });
+it('wires malformed risk hash to shape-only diagnostics without its value',async()=>{
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{});const app=buildServer();
+ try {const response=await app.inject({method:'GET',url:'/v1/transaction-risk?transaction=0Xprivate-canary'});expect(response.statusCode).toBe(400);
+ const row=JSON.parse(log.mock.calls.at(-1)![0]);expect(row).toMatchObject({error_code:'INVALID_TX_HASH',input_shape:{length:16,prefix:'0X',charset:'other',hex_digits:5,has_whitespace_inside:false}});
+ expect(JSON.stringify(log.mock.calls)).not.toContain('private-canary');} finally {await app.close();}
+});
+it.each([
+ ['0x'+'a'.repeat(63),65,'0x','hex',63],['0X'+'A'.repeat(66),68,'0X','hex',66],
+ ['f'.repeat(65),65,'none','hex',65],['0x'+'a1'.repeat(31)+'Zz',66,'0x','other',62],
+ ['0x'+'aA'.repeat(31)+'b',65,'0x','hex_mixed_case',63],
+])('logs specified shape without any 8-character value fragment',async(input,length,prefix,charset,hex_digits)=>{
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{}),app=buildServer();
+ try {const response=await app.inject({method:'GET',url:'/v1/transaction-risk?transaction='+encodeURIComponent(input)});expect(response.statusCode).toBe(400);
+ const text=String(log.mock.calls.at(-1)![0]),row=JSON.parse(text);expect(row).toMatchObject({param_keys:['transaction'],error_code:'INVALID_TX_HASH',input_shape:{length,prefix,charset,hex_digits,has_whitespace_inside:false}});
+ for(let i=0;i<=input.length-8;i++)expect(text).not.toContain(input.slice(i,i+8));
+ }finally{await app.close();}
+});
+it('emits privacy-safe start before completion on a real failing request',async()=>{
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{});const app=buildServer();
+ try {const response=await app.inject({method:'GET',url:'/v1/filings?entity=PRIVATE_PERSON&period=2026&form_type=NOT_A_FORM'});expect(response.statusCode).toBe(422);
+ const rows=log.mock.calls.map(c=>{try{return JSON.parse(String(c[0]));}catch{return null;}}).filter(r=>r?.event==='request_start'||r?.event==='request_complete');
+ expect(rows.map(r=>r.event)).toEqual(['request_start','request_complete']);expect(rows[0].input_enums).toEqual({form_type:'other',period_kind:'year'});expect(rows[1].error_code).toBe('UNKNOWN_FORM');expect(JSON.stringify(rows)).not.toContain('PRIVATE_PERSON');expect(JSON.stringify(rows)).not.toContain('NOT_A_FORM');
+ }finally{await app.close();}
+});
+it('security review actual invalid-target HTTP request emits fixed start and completion, target name only',async()=>{
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{});const app=buildServer();
+ try{const response=await app.inject({method:'GET',url:'/v1/security-review?target=PRIVATE_TARGET'});expect(response.statusCode).toBe(400);expect(response.json().code).toBe('INVALID_TARGET');const rows=log.mock.calls.map(c=>{try{return JSON.parse(String(c[0]));}catch{return null;}}).filter(r=>r?.event==='request_start'||r?.event==='request_complete');expect(rows).toHaveLength(2);expect(rows.map(r=>r.event)).toEqual(['request_start','request_complete']);for(const row of rows)expect(row).toMatchObject({path:'/v1/security-review',intent:'SECURITY_REVIEW_GENERAL',param_keys:['target']});expect(rows[1].status).toBe('400');expect(JSON.stringify(rows)).not.toContain('PRIVATE_TARGET');}finally{await app.close();}
+});
+it('security target getter and arbitrary key are never read or logged, success status remains200',()=>{
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{});const query=Object.defineProperty({PRIVATE_KEY:'PRIVATE_VALUE'},'target',{enumerable:true,get(){throw Error('PRIVATE_GETTER');}});recordRequestCompletion('/v1/security-review',200,1,{query});expect(log).toHaveBeenCalledTimes(1);expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({intent:'SECURITY_REVIEW_GENERAL',status:'200',param_keys:['target'],error_code:null});expect(JSON.stringify(log.mock.calls)).not.toContain('PRIVATE');
+});
+it.each(['EVENT_NOT_FOUND','AMBIGUOUS_EVENT','NON_BINARY_MARKET','EVENT_NOT_RESOLVED','UNCLEAN_RESOLUTION','POLYMARKET_UNREACHABLE','EVENT_TOO_LONG'])('event fixed error %s survives diagnostic allowlist without free text',code=>{
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{});recordRequestCompletion('/v1/event-outcome',422,1,{query:{event:'PRIVATE_QUESTION',PRIVATE_KEY:'PRIVATE_VALUE'},errorCode:code});expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({intent:'EVENT_OUTCOME_RESOLUTION_GENERAL',error_code:code,param_keys:['event'],answer_class:{outcome:'refused',source:'none'}});expect(JSON.stringify(log.mock.calls)).not.toContain('PRIVATE');
+});
+it('event code prefixes, suffixes and case variants remain generic, not allowlist patterns',()=>{
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{});for(const errorCode of ['EVENT_NOT_FOUND_PRIVATE','PRIVATE_EVENT_NOT_FOUND','event_not_found','EVENT_NOT_FOUND PRIVATE'])recordRequestCompletion('/v1/event-outcome',422,1,{errorCode});for(const c of log.mock.calls)expect(JSON.parse(c[0]).error_code).toBe('OTHER_ERROR');expect(JSON.stringify(log.mock.calls)).not.toContain('PRIVATE');
+});
+it('actual event HTTP missing-match keeps422 body and exposes fixed no-match category only',async()=>{
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{});vi.stubGlobal('fetch',async()=>new Response(JSON.stringify({events:[]})));const app=buildServer();try{const res=await app.inject({method:'GET',url:'/v1/event-outcome?event=PRIVATE_QUESTION'});expect(res.statusCode).toBe(422);expect(res.json().code).toBe('EVENT_NOT_FOUND');expect(res.json().message).toContain('exact dated event title');const row=JSON.parse(log.mock.calls.at(-1)![0]);expect(row).toMatchObject({error_code:'EVENT_NOT_FOUND',answer_class:{outcome:'refused',source:'none'},status:'422'});expect(JSON.stringify(log.mock.calls)).not.toContain('PRIVATE_QUESTION');}finally{await app.close();vi.unstubAllGlobals();}
+});
+it('cross-chain actual missing chains request logs reference key only, no value',async()=>{const log=vi.spyOn(console,'info').mockImplementation(()=>{}),app=buildServer();try{const reference='0x'+'e'.repeat(40);const res=await app.inject({method:'GET',url:'/v1/cross-chain-state?reference='+reference});expect(res.statusCode).toBe(400);expect(res.json().code).toBe('MISSING_PARAM');const rows=log.mock.calls.map(c=>{try{return JSON.parse(String(c[0]));}catch{return null;}}).filter(x=>x?.event==='request_start'||x?.event==='request_complete');expect(rows).toHaveLength(2);for(const row of rows)expect(row).toMatchObject({intent:'CROSS_CHAIN_STATE_VERIFY_GENERAL',param_keys:['reference']});expect(JSON.stringify(rows)).not.toContain(reference);}finally{await app.close();}});
+it('cross-chain completion recognizes only reference and chains names without getters or unknown key logging',()=>{const log=vi.spyOn(console,'info').mockImplementation(()=>{});const query=Object.defineProperties({PRIVATE_KEY:'PRIVATE_VALUE'},{reference:{enumerable:true,get(){throw Error('PRIVATE_REFERENCE');}},chains:{enumerable:true,get(){throw Error('PRIVATE_CHAINS');}}});recordRequestCompletion('/v1/cross-chain-state',200,1,{query});expect(log).toHaveBeenCalledTimes(1);expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({intent:'CROSS_CHAIN_STATE_VERIFY_GENERAL',param_keys:['chains','reference'],status:'200'});expect(JSON.stringify(log.mock.calls)).not.toContain('PRIVATE');});

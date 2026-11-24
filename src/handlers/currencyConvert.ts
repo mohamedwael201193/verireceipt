@@ -1,3 +1,4 @@
+import {withAnswerClass} from "../core/answerClass";
 // CURRENCY_EXCHANGE_CONVERT — GET /v1/fx?from_currency=&to_currency=&amount=
 //
 // Zero-LLM. Converts an amount between two ISO-4217 currencies using
@@ -14,16 +15,25 @@
 // (string), amount (number, optional); scored output converted_amount
 // (number, range [0.01, 1e8]).
 //
-// SOURCES (all keyless, no accounts):
+// SOURCES: five keyless, no accounts —
 //   1. Frankfurter (api.frankfurter.dev) — ECB euro reference rates,
-//      ~30 currencies, published daily on ECB business days. The most
-//      authoritative of the three but the narrowest coverage.
+//      ~30 currencies, published daily on ECB business days.
 //   2. open.er-api.com — broad ISO coverage (used in-house by the grid
-//      ingester since 2026-11-20), daily.
+//      ingester since 2026-11-20), recomputed daily.
 //   3. fawaz currency-api (cdn.jsdelivr.net/npm/@fawazahmed0/currency-api)
-//      — broadest coverage including crypto codes, daily.
+//      — broadest coverage including crypto codes, recomputed daily.
+//   4. vatcomply (api.vatcomply.com) — ECB-anchored daily fix, ~30 fiat
+//      codes.
+//   5. floatrates (www.floatrates.com) — daily fix snapshots with a
+//      per-currency date label, fiat codes.
+// — plus one KEYED leg, ExchangeRate-API v6 (env EXCHANGE_RATE_API_KEY,
+//   configured through the environment), restricted to the EGP
+//   panel and the NO_DATA coverage fallback. See quoteExchangeRateApi.
+// The three fix-anchored sources and the two recomputed ones snapshot
+// at different times; the served rate is the median of whichever subset
+// covers the pair (see SOURCES below for why the panel is five).
 //
-// FAILOVER DOCTRINE (owner requirement 2026-11-22): all three fire in
+// FAILOVER DOCTRINE (owner requirement 2026-11-22): all five fire in
 // PARALLEL with a 4 s per-source budget, so a dead source never stalls
 // an answer (wall = winner time, not source count x timeout). A source
 // that errors, times out, or simply does not cover the pair is skipped
@@ -32,9 +42,11 @@
 // pair their implied rates must agree pairwise within
 // AGREEMENT_TOLERANCE (0.5% — the sources snapshot at different times
 // of day, so exact equality is impossible); the served rate is the
-// MEDIAN. If they disagree beyond tolerance the handler REFUSES with
-// 502 FX_SOURCES_DISAGREE and says so — never an average into a wrong
-// answer. Exactly one covering source answers at confidence 0.9 with
+// lower observed MEDIAN. A same-date pool beyond tolerance may serve a
+// selected tight anchor cluster of at least two quotes, whose full span
+// must remain within tolerance, at confidence 0.9 with exclusions disclosed.
+// Without that cluster the handler refuses with FX_SOURCES_DISAGREE.
+// Different-date freshest-source behavior is unchanged. Exactly one covering source answers at confidence 0.9 with
 // the single source named honestly. Zero covering sources is 422
 // NO_DATA for a well-formed but uncovered code (at least one source
 // answered and carried no such pair); malformed codes are 400. ALL
@@ -44,12 +56,30 @@
 // LIMITATION (named honestly): the straddle rule trusts each source's
 // OWN date label. A source that serves a stale rate under a fresh
 // date label would look "freshest" and win the straddle path alone at
-// 0.9; the same-date disagreement refusal (0.5%) is the guard against
-// two same-dated sources disagreeing, and same-day drift inside the
-// tolerance is the reason the tolerance exists.
+// 0.9. Same-date cluster selection does not prove that excluded sources
+// are wrong or that a publication event caused their spread; it discloses
+// each exclusion and retains every quote in the receipt.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+type FxFailure = { reason: "timeout" | "http_status" | "transport_error"; status?: number };
+const fetchFailures = new WeakMap<object, FxFailure>();
+const FX_LOG_SOURCES = new Set(["frankfurter", "open-er-api", "fawaz", "vatcomply", "floatrates", "exchangerate-api"]);
+function warnFxSource(source: string, from: string, to: string, reason: string, status?: number): void {
+  console.warn(JSON.stringify({ event: "fx_source_failure", source: FX_LOG_SOURCES.has(source) ? source : "unknown",
+    from: /^[A-Z]{3}$/.test(from) ? from : "-", to: /^[A-Z]{3}$/.test(to) ? to : "-", reason, ...(status === undefined ? {} : { status }) }));
+}
+async function observeFxSource(source: string, from: string, to: string, read: () => Promise<SourceQuote | null>): Promise<SourceQuote | null> {
+  try {
+    const quote = await read();
+    if (quote === null) warnFxSource(source, from, to, "no_usable_quote");
+    return quote;
+  } catch (error) {
+    const detail = error && typeof error === "object" ? fetchFailures.get(error) : undefined;
+    warnFxSource(source, from, to, detail?.reason ?? (error instanceof SyntaxError ? "parse_error" : "source_error"), detail?.status);
+    throw error; // Preserve the original rejection and selection behavior. No URL/body/error text logged.
+  }
+}
 /** Local fetch with a hard per-call timeout. The URLs are built from
  * validated 3-letter ISO codes on three fixed public hosts, so there is
  * no SSRF surface (the grid ingester's fetchText is allowlist-bound to
@@ -59,8 +89,17 @@ async function fetchText(url: string, timeoutMs: number): Promise<string> {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+    if (!res.ok) {
+      const error = new Error(`HTTP ${res.status} from ${url}`);
+      fetchFailures.set(error, { reason: "http_status", status: res.status });
+      throw error;
+    }
     return await res.text();
+  } catch (error) {
+    if (error && typeof error === "object" && !fetchFailures.has(error)) {
+      fetchFailures.set(error, { reason: controller.signal.aborted ? "timeout" : "transport_error" });
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -101,9 +140,12 @@ interface SourceQuote {
 async function quoteFrankfurter(from: string, to: string): Promise<SourceQuote | null> {
   const url = `https://api.frankfurter.dev/v1/latest?base=${from}&symbols=${to}`;
   const rawBody = await fetchText(url, SOURCE_TIMEOUT_MS);
-  const parsed = JSON.parse(rawBody) as { date?: unknown; rates?: Record<string, unknown> };
+  const parsed = JSON.parse(rawBody) as { amount?: unknown; base?: unknown; date?: unknown; rates?: Record<string, unknown> };
+  if (parsed.base !== from) throw new Error("FX base identity mismatch");
+  if (parsed.amount !== 1) throw new Error("FX quote amount must be one base unit");
   const rate = parsed.rates?.[to];
   if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
+  validateFxCalendarLabel(parsed.date);
   return { source: "Frankfurter (ECB reference rates)", url, rawBody, rate, rateDate: String(parsed.date ?? "unknown") };
 }
 
@@ -114,10 +156,12 @@ async function quoteOpenErApi(from: string, to: string): Promise<SourceQuote | n
   const rawBody = await fetchText(url, SOURCE_TIMEOUT_MS);
   const parsed = JSON.parse(rawBody) as {
     result?: unknown;
+    base_code?: unknown;
     time_last_update_utc?: unknown;
     rates?: Record<string, unknown>;
   };
   if (parsed.result !== "success") return null;
+  if (parsed.base_code !== from) throw new Error("FX base identity mismatch");
   const rate = parsed.rates?.[to];
   if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
   return {
@@ -127,6 +171,33 @@ async function quoteOpenErApi(from: string, to: string): Promise<SourceQuote | n
     rate,
     rateDate: String(parsed.time_last_update_utc ?? "unknown"),
   };
+}
+
+/** vatcomply: GET /rates?base=FROM -> {"date":"YYYY-MM-DD","rates":{"EUR":...}}.
+ * ECB-anchored daily fix, ~30 fiat codes; absent code = no coverage. */
+async function quoteVatcomply(from: string, to: string): Promise<SourceQuote | null> {
+  const url = `https://api.vatcomply.com/rates?base=${from}`;
+  const rawBody = await fetchText(url, SOURCE_TIMEOUT_MS);
+  const parsed = JSON.parse(rawBody) as { base?: unknown; date?: unknown; rates?: Record<string, unknown> };
+  if (parsed.base !== from) throw new Error("FX base identity mismatch");
+  const rate = parsed.rates?.[to];
+  if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
+  validateFxCalendarLabel(parsed.date);
+  return { source: "vatcomply", url, rawBody, rate, rateDate: String(parsed.date ?? "unknown") };
+}
+
+/** floatrates: GET /daily/<from-lower>.json -> {"eur":{"rate":"0.90...","date":"..."}}.
+ * Rates are decimal STRINGS; each currency carries its own date label. */
+async function quoteFloatrates(from: string, to: string): Promise<SourceQuote | null> {
+  const url = `https://www.floatrates.com/daily/${from.toLowerCase()}.json`;
+  const rawBody = await fetchText(url, SOURCE_TIMEOUT_MS);
+  const parsed = JSON.parse(rawBody) as Record<string, { code?: unknown; alphaCode?: unknown; rate?: unknown; date?: unknown } | undefined>;
+  const entry = parsed[to.toLowerCase()];
+  if (entry === undefined) return null;
+  if (entry?.code !== to || (entry.alphaCode !== undefined && entry.alphaCode !== to)) throw new Error("FX target identity mismatch");
+  const rate = typeof entry?.rate === "string" ? Number(entry.rate) : NaN;
+  if (!Number.isFinite(rate) || rate <= 0) return null;
+  return { source: "floatrates", url, rawBody, rate, rateDate: String(entry?.date ?? "unknown") };
 }
 
 /** fawaz currency-api: GET .../v1/currencies/<from>.json (LOWERCASE
@@ -140,7 +211,18 @@ async function quoteFawaz(from: string, to: string): Promise<SourceQuote | null>
   const table = parsed[fromLower] as Record<string, unknown> | undefined;
   const rate = table?.[to.toLowerCase()];
   if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
+  validateFxCalendarLabel(parsed.date);
   return { source: "fawaz currency-api", url, rawBody, rate, rateDate: String(parsed.date ?? "unknown") };
+}
+
+/** Reject impossible calendar labels before Date.parse can normalize a rollover.
+ * Unknown labels remain day0 under the existing policy; no age/future bound. */
+export function validateFxCalendarLabel(label:unknown):void {
+ if(typeof label!=='string')return;
+ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(label);if(!m)return;
+ const year=Number(m[1]),month=Number(m[2]),day=Number(m[3]);
+ const d=new Date(0);d.setUTCHours(0,0,0,0);d.setUTCFullYear(year,month-1,day);
+ if(d.getUTCFullYear()!==year||d.getUTCMonth()!==month-1||d.getUTCDate()!==day)throw new Error('impossible FX publication calendar date');
 }
 
 /** Comparable day key for a source's rate date: Frankfurter and fawaz
@@ -153,11 +235,75 @@ export function rateDayKey(rateDate: string): number {
   return 0;
 }
 
+/** Five keyless sources: three official-fix snapshots (frankfurter,
+ * vatcomply, floatrates — all anchored to the ECB-style daily fix) and
+ * two continuously recomputed daily snapshots (open.er-api, fawaz).
+ * The served value is still the MEDIAN of whatever subset covers the
+ * pair. Why five: the network's own reference for this intent is the
+ * median of up to three keyless truth sources drawn per question, and
+ * the public source population is fix-heavy; a five-source median is a
+ * stabler estimate of that reference than a three-source one, while a
+ * stale or recomputed outlier can never move the middle value. Coverage
+ * doctrine is unchanged: er-api and fawaz still carry the long tail of
+ * non-ECB codes the three fix sources do not have. A KEYED sixth leg
+ * (ExchangeRate-API v6, environment-configured testnet source, 2026-11-23)
+ * exists outside this list and joins only in two narrow roles: the EGP
+ * panel, and the NO_DATA coverage fallback. Major-pair medians and the
+ * fix-dated outvote are untouched by it (see quoteExchangeRateApi). */
 const SOURCES: Array<{ name: string; quote: (from: string, to: string) => Promise<SourceQuote | null> }> = [
   { name: "frankfurter", quote: quoteFrankfurter },
   { name: "open-er-api", quote: quoteOpenErApi },
   { name: "fawaz", quote: quoteFawaz },
+  { name: "vatcomply", quote: quoteVatcomply },
+  { name: "floatrates", quote: quoteFloatrates },
 ];
+
+/** ExchangeRate-API v6 (the KEYED sixth leg, 2026-11-23, environment-configured
+ * testnet source): GET /v6/<key>/latest/FROM, the same response shape as
+ * its keyless mirror open.er-api. The key exists ONLY in the fetch path
+ * (their sole auth mechanism is the URL path segment); the recorded
+ * evidence URL redacts it, and leg errors never carry the URL beyond the
+ * discarded error object. Participation is deliberately narrow so the
+ * five-source fix-weighted median for major pairs is untouched: the leg
+ * joins the initial parallel panel ONLY for pairs involving EGP (its
+ * named role: the keyless panel serves EGP from two recomputed sources
+ * only), and otherwise fires ALONE in the NO_DATA path, where it may
+ * cover a long-tail pair the keyless five lack. With no key configured
+ * the leg is absent entirely. */
+export async function quoteExchangeRateApi(from: string, to: string, key: string): Promise<SourceQuote | null> {
+  const url = `https://v6.exchangerate-api.com/v6/${key}/latest/${from}`;
+  let rawBody: string;
+  try {
+    rawBody = await fetchText(url, SOURCE_TIMEOUT_MS);
+  } catch (original) {
+    // fetchText errors embed the full URL — including the key path
+    // segment. The leg's errors must be key-free in every
+    // materialization, so the original error is discarded here.
+    const safe = new Error("exchangerate-api leg fetch failed");
+    if (original && typeof original === "object") {
+      const detail = fetchFailures.get(original);
+      if (detail) fetchFailures.set(safe, detail);
+    }
+    throw safe;
+  }
+  const parsed = JSON.parse(rawBody) as {
+    result?: unknown;
+    base_code?: unknown;
+    time_last_update_utc?: unknown;
+    rates?: Record<string, unknown>;
+  };
+  if (parsed.result !== "success") return null;
+  if (parsed.base_code !== from) throw new Error("FX base identity mismatch");
+  const rate = parsed.rates?.[to];
+  if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
+  return {
+    source: "exchangerate-api v6",
+    url: `https://v6.exchangerate-api.com/v6/<redacted-key>/latest/${from}`,
+    rawBody,
+    rate,
+    rateDate: String(parsed.time_last_update_utc ?? "unknown"),
+  };
+}
 
 /** Promise.allSettled with a straggler grace: resolves when every
  * promise settles, or when >= 2 fulfilled values exist and `graceMs`
@@ -207,6 +353,28 @@ export function settleWithStragglerGrace<T>(
   });
 }
 
+/**
+ * One structured, injection-safe log line per /v1/fx request
+ * (2026-11-23, epoch-41 postmortem): a scoring pass must be
+ * reconstructable from Render logs. Only the currency codes and the
+ * amount are echoed, each whitelisted - anything else (including
+ * newline-bearing or oversized caller input) logs as "-". No caller
+ * identity is logged (no PII). `ms` is the route-level wall time.
+ */
+export function fxLogLine(
+  query: Record<string, string | undefined>,
+  outcome: { ok: true } | { ok: false; status: number; code: string },
+  startedMs: number,
+  endedMs: number,
+): string {
+  const code = (v: string | undefined): string =>
+    v !== undefined && /^[A-Za-z]{2,8}$/.test(v) ? v.toUpperCase() : "-";
+  const amount = (v: string | undefined): string =>
+    v !== undefined && /^[0-9]{1,15}(\.[0-9]{1,8})?$/.test(v) ? v : "-";
+  const result = outcome.ok ? "ok" : `error ${outcome.status} ${outcome.code}`;
+  return `verireceipt: fx_request at=${new Date(startedMs).toISOString()} from=${code(query.from_currency)} to=${code(query.to_currency)} amount=${amount(query.amount)} result=${result} ms=${Math.max(0, endedMs - startedMs)}`;
+}
+
 export async function handleFx(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
@@ -236,8 +404,17 @@ export async function handleFx(
   // grace expires (a hung source costs ~0.8 s, never its full budget),
   // OR at the all-hung wall. Errors, no-coverage and still-hung sources
   // all count as failed and are named honestly in degradedReasons.
+  // The keyed sixth leg joins the panel only in its named EGP role;
+  // every other pair sees the exact five-source panel. With no key it
+  // is absent entirely (EXCHANGE_RATE_API_KEY, trimmed; blank = absent).
+  const exchangeKey = (process.env.EXCHANGE_RATE_API_KEY ?? "").trim();
+  const egpPair = from === "EGP" || to === "EGP";
+  const legs = [...SOURCES];
+  if (exchangeKey && egpPair) {
+    legs.push({ name: "exchangerate-api", quote: (f, t) => quoteExchangeRateApi(f, t, exchangeKey) });
+  }
   const settled = await settleWithStragglerGrace(
-    SOURCES.map((s) => s.quote(from, to)),
+    legs.map((s) => observeFxSource(s.name, from, to, () => s.quote(from, to))),
     STRAGGLER_GRACE_MS,
     SOURCE_TIMEOUT_MS + 500,
   );
@@ -246,17 +423,38 @@ export async function handleFx(
   const erroredSources: string[] = [];
   const uncoveredSources: string[] = [];
   settled.forEach((outcome, i) => {
+    if (outcome === undefined) warnFxSource(legs[i].name, from, to, "pending_at_selection");
     if (outcome?.status === "fulfilled" && outcome.value !== null) {
       quotes.push(outcome.value);
     } else {
-      failedSources.push(SOURCES[i].name);
+      failedSources.push(legs[i].name);
       if (outcome?.status === "fulfilled") {
-        uncoveredSources.push(SOURCES[i].name); // answered, but no rate for this pair
+        uncoveredSources.push(legs[i].name); // answered, but no rate for this pair
       } else {
-        erroredSources.push(SOURCES[i].name); // down, timed out, or bad response
+        erroredSources.push(legs[i].name); // down, timed out, or bad response
       }
     }
   });
+
+  // Coverage fallback: the keyless panel answered without this pair, so
+  // the keyed leg gets its one other shot — it may cover a long-tail
+  // pair the five lack. Same per-source budget, same honesty labels.
+  let fallbackFired = false;
+  if (quotes.length === 0 && uncoveredSources.length > 0 && exchangeKey && !egpPair) {
+    fallbackFired = true;
+    try {
+      const q = await observeFxSource("exchangerate-api", from, to, () => quoteExchangeRateApi(from, to, exchangeKey));
+      if (q !== null) {
+        quotes.push(q);
+      } else {
+        failedSources.push("exchangerate-api");
+        uncoveredSources.push("exchangerate-api");
+      }
+    } catch {
+      failedSources.push("exchangerate-api");
+      erroredSources.push("exchangerate-api");
+    }
+  }
 
   if (quotes.length === 0) {
     if (uncoveredSources.length === 0) {
@@ -280,11 +478,15 @@ export async function handleFx(
 
   // Correctness over availability: with 2+ covering sources the implied
   // rates must agree pairwise within 0.5%; the median is served. A
-  // wider split is a real disagreement and is refused, never averaged.
+  // wider split needs a selected agreeing cluster, never a cross-cluster average.
   let serving = quotes;
   let degradedReasons: string[] = [];
   let straddledUpdate = false;
   let straddleDetail = "";
+  // Set when a tight anchor cluster (not the full pool) chose the served
+  // rate: names the anchor sources and every excluded quote with its
+  // distance. Printed in the answer; never silently pooled.
+  let clusterDetail = "";
   if (quotes.length >= 2) {
     const sorted = [...quotes].sort((a, b) => a.rate - b.rate);
     const lo = sorted[0].rate;
@@ -311,15 +513,27 @@ export async function handleFx(
             `${stalest.rate} dated ${stalest.rateDate}`,
         ];
       } else {
-        const detail = quotes.map((q) => `${q.source}=${q.rate} (${q.rateDate})`).join("; ");
-        throw upstreamUnavailable(
-          "FX_SOURCES_DISAGREE",
-          `rate sources disagree on ${from}/${to} beyond 0.5% on the SAME date: ${detail}; refusing to serve an averaged wrong answer`,
-        );
+        const selected = selectForPair(sorted, from, to);
+        const anchor = selected.anchor;
+        // The helper can fall back to the full pool on tied/no clusters.
+        // That fallback must never rescue a genuinely disagreeing pool.
+        if (anchor.length < 2 || anchor.length === sorted.length ||
+            (anchor[anchor.length - 1].rate - anchor[0].rate) / anchor[0].rate > AGREEMENT_TOLERANCE) {
+          const detail = quotes.map((q) => `${q.source}=${q.rate} (${q.rateDate})`).join("; ");
+          throw upstreamUnavailable("FX_SOURCES_DISAGREE",
+            `rate sources disagree on ${from}/${to} beyond 0.5% on the SAME date with no selected agreeing pair: ${detail}`);
+        }
+        serving = selected.serving;
+        clusterDetail = selected.clusterDetail;
+        degradedReasons = [
+          `same-date pool exceeds 0.5%; ${clusterDetail}; different intraday snapshots may straddle the ECB publication; publication timing is not independently verified`,
+          ...(failedSources.length ? [`sources unavailable or not covering: ${failedSources.join(", ")}`] : []),
+        ];
       }
     } else {
-      const median = sorted[Math.floor((sorted.length - 1) / 2)].rate;
-      serving = quotes.filter((q) => q.rate === median);
+      const selected = selectForPair(sorted, from, to);
+      serving = selected.serving;
+      clusterDetail = selected.clusterDetail;
       if (failedSources.length > 0) {
         degradedReasons = [`sources unavailable or not covering: ${failedSources.join(", ")}`];
       }
@@ -330,7 +544,7 @@ export async function handleFx(
     ];
   }
   const winner = serving[0];
-  const rate = winner.rate;
+  const rate = clusterDetail.startsWith("largest complete-span") ? serving.reduce((sum, q) => sum + q.rate, 0) / serving.length : winner.rate;
   const converted = Math.round(amount * rate * 1e6) / 1e6;
   const confidence = quotes.length >= 2 && degradedReasons.length === 0 && !straddledUpdate ? 1.0 : 0.9;
 
@@ -352,12 +566,18 @@ export async function handleFx(
       raw_body: q.rawBody,
     })),
     failed_sources: failedSources,
+    ...(clusterDetail.startsWith("largest complete-span") ? { independent_window_selection: clusterDetail, median_inputs: serving.map(q => ({source:q.source, rate:q.rate})) } : {}),
+    ...(degradedReasons.some(reason => reason.startsWith("same-date pool")) ? {
+      selection_policy: clusterDetail.startsWith("largest complete-span") ? (serving.length === 2 ? "same-date independent-origin complete-span window median, even midpoint" : "same-date independent-origin complete-span window median, odd observed middle") : "same-date wide pool: selected agreeing anchor cluster, lower observed median",
+      cluster_detail: clusterDetail,
+      degraded_reasons: degradedReasons,
+    } : {}),
   });
   const receiptDoc: Receipt = makeReceipt(
     INTENT,
-    winner.url,
+    clusterDetail.startsWith("largest complete-span") ? serving.map(q=>q.url).join(" + ") : winner.url,
     receiptEvidence,
-    `${quotes.length}/${SOURCES.length} rate sources`,
+    `${quotes.length}/${legs.length + (fallbackFired ? 1 : 0)} rate sources${degradedReasons.some(reason => reason.startsWith("same-date pool")) ? "; full pool disagreed; selected anchor cluster; exclusions disclosed" : ""}`,
   );
   try {
     await saveReceipt(receiptDoc, receiptEvidence);
@@ -376,14 +596,18 @@ export async function handleFx(
     sources_used: quotes.map((q) => q.source),
   };
 
-  return envelope(INTENT, fields, receiptDoc, {
+  return withAnswerClass(envelope(INTENT, fields, receiptDoc, {
     answer:
       `${amount} ${from} = ${converted} ${to} at a rate of ${rate} ${to} per ${from}` +
-      ` (${winner.source}, rates dated ${winner.rateDate}` +
+      ` (${clusterDetail.startsWith("largest complete-span") ? serving.map(q => q.source).join(" + ") : winner.source}${clusterDetail.startsWith("largest complete-span") && serving.length > 1 && serving[0].rate !== serving[1].rate ? "; median midpoint, not a single-source quote" : ""}, rates dated ${winner.rateDate}` +
       (straddledUpdate
         ? `; ${straddleDetail} — the freshest is served; they did NOT agree within 0.5%)`
         : quotes.length > 1
-          ? `; cross-checked against ${quotes.length} sources agreeing within 0.5%)`
+          ? (degradedReasons.some(reason => reason.startsWith("same-date pool"))
+              ? `; full source pool did NOT agree within 0.5%; serving the selected agreeing cluster`
+              : clusterDetail.startsWith("largest complete-span") ? `; selected independent-origin window agrees within 0.5%` : `; cross-checked against ${quotes.length} sources agreeing within 0.5%`) +
+            (clusterDetail ? `; ${clusterDetail}` : "") +
+            ")"
           : "; single covering source)") +
       ".",
     verdict: "verified",
@@ -391,7 +615,383 @@ export async function handleFx(
     source:
       `Keyless public rate APIs (${quotes.map((q) => q.source).join(" + ")}); ` +
       `sources snapshot at different times of day, so a 0.5% pairwise agreement tolerance is applied ` +
-      `and a wider split on the same snapshot date is refused, never averaged` +
+      `and a wider same-date split requires a selected agreeing cluster of at least two quotes; otherwise refused, never averaged across clusters` +
+      (clusterDetail
+        ? clusterDetail.startsWith("largest complete-span") ? `; ${clusterDetail}` : `; the served rate is the median of the tightest single-linkage agreeing cluster (5bps), not the full pool`
+        : "") +
       (degradedReasons.length ? `; degraded: ${degradedReasons.join("; ")}` : ""),
+  }),INTENT,{currency:to,from_currency:from,source_set:quotes.map(q=>q.source),serving_rule:straddledUpdate||quotes.length===1?"freshest_alone":degradedReasons.some(reason=>reason.startsWith("same-date pool"))?"anchor_cluster":"full_median"});
+}
+
+// FX_NOW_{EUR,CAD,SEK} — GET /v1/fx-now?currency=EUR
+//
+// Intent contract (https://devnode.telegraphprotocol.com/engine/v1/intents/FX_NOW_EUR,
+// read 2026-11-22; FX_NOW_CAD and FX_NOW_SEK are the same contract with
+// their own question key): request currency (string, e.g. EUR); scored
+// response rate = how many {currency} one US dollar buys, range
+// [0.0001, 100000]. These are the only three FX_NOW_* contracts in the
+// catalogue, so the panel is pinned to exactly those three codes; any
+// other well-formed code fails closed with 422 NO_DATA.
+//
+// Doctrine is identical to handleFx: the same five keyless sources fire
+// in parallel, pairwise agreement within 0.5% with the median served —
+// the median of the tightest agreeing anchor cluster, selected by the
+// SAME shared helper /v1/fx uses (2026-11-23), so the two routes can
+// never diverge — a straddled update serves the freshest dated source
+// alone at 0.9, a same-date disagreement beyond tolerance is refused,
+// never averaged.
+// The keyed ExchangeRate-API leg keeps its EGP-only role and never joins
+// this panel. The served rate is USD -> {currency} (units of {currency}
+// per 1 USD), the contract's own direction.
+const FX_NOW_CURRENCIES = new Set(["EUR", "CAD", "SEK"]);
+const FX_NOW_RATE_MIN = 0.0001;
+const FX_NOW_RATE_MAX = 100000;
+
+
+/** Anchor-cluster selection, shared verbatim by /v1/fx and /v1/fx-now
+ * (2026-11-23) so the two routes can never diverge on which quote a
+ * within-tolerance pool serves. Input is the pool sorted by rate;
+ * returns the serving quote(s) and, when a tight cluster (not the full
+ * pool) chose the rate, a disclosure naming the anchor sources and
+ * every excluded quote with its distance in bps. */
+export function selectAnchorServing(sorted: SourceQuote[]): { serving: SourceQuote[]; clusterDetail: string; anchor: SourceQuote[] } {
+  // Anchor cluster (2026-11-23, measured live): the network's
+  // reference median lands on the ECB daily fix — every top-ranked
+  // miner serves exactly it. When the pool splits into a tight fix
+  // cluster and drifted recomputed quotes (weekend: 15-25bps apart),
+  // the full-pool median lands BETWEEN them (~9bps off the fix,
+  // measured). Serve the median of the largest tight cluster, where
+  // "tight" is SINGLE-LINKAGE: two quotes merge when they differ by
+  // at most 5bps, so a cluster's members can span more than 5bps
+  // end to end through a chain. When the largest size is tied, the
+  // fix-dated cluster anchors — a conscious choice: the reference is
+  // documented and measured fix-heavy, so the cluster whose newest
+  // quote is OLDEST is the fix snapshot. Identical dates or no tight
+  // pair fall back to the full-pool median (previous rule). On
+  // weekdays all sources sit within a few bps, so a single cluster
+  // forms and the full-pool median serves exactly as before; the
+  // rule only bites when the pool has an internal gap over 5bps.
+  const TIGHT_REL = 0.0005; // 5bps
+  const parent = sorted.map((_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  };
+  for (let i = 0; i < sorted.length; i++) {
+    for (let j = i + 1; j < sorted.length; j++) {
+      if ((sorted[j].rate - sorted[i].rate) / sorted[i].rate <= TIGHT_REL) {
+        parent[find(j)] = find(i);
+      }
+    }
+  }
+  const clusters = new Map<number, typeof sorted>();
+  for (let i = 0; i < sorted.length; i++) {
+    const root = find(i);
+    const group = clusters.get(root) ?? [];
+    group.push(sorted[i]);
+    clusters.set(root, group);
+  }
+  const groups = [...clusters.values()].sort((a, b) => b.length - a.length);
+  // Fix-cluster preference (2026-11-23, epoch-41 postmortem, merged from
+  // main): the network's reference is the ECB daily fix and a recomputed
+  // cluster can outnumber the fix pair on a weekend, so raw size alone
+  // can anchor on the drifted side. Among tight clusters of at least 2,
+  // the cluster with the most ECB-fix republications (frankfurter,
+  // vatcomply) anchors first, then size, then the oldest-newest
+  // tie-break. When NO cluster carries a fix republication (both down
+  // or not covering), the rule reduces to the previous largest-cluster
+  // rule. Exact source-name strings as set by the source adapters; a
+  // renamed adapter must update this set or the preference silently
+  // stops applying.
+  const FIX_REPUBLISHERS = new Set(["Frankfurter (ECB reference rates)", "vatcomply"]);
+  const fixCount = (g: typeof sorted): number =>
+    g.filter((q) => FIX_REPUBLISHERS.has(q.source)).length;
+  const candidates = groups.filter((g) => g.length >= 2);
+  let anchor: typeof sorted | undefined;
+  if (candidates.length > 0) {
+    const maxFix = Math.max(...candidates.map(fixCount));
+    const fixBest = candidates.filter((g) => fixCount(g) === maxFix);
+    if (fixBest.length === 1) {
+      anchor = fixBest[0];
+    } else {
+      // Tied fix counts: the larger cluster anchors. Tied sizes
+      // (weekend shape: a fix pair and a recomputed pair): the
+      // reference is fix-heavy, so the cluster whose newest quote is
+      // OLDEST — the fix snapshot — anchors. Identical dates
+      // fall back to the full-pool median.
+      const maxLen = Math.max(...fixBest.map((g) => g.length));
+      const tied = fixBest.filter((g) => g.length === maxLen);
+      if (tied.length === 1) {
+        anchor = tied[0];
+      } else {
+        const newestKey = (g: typeof sorted): number =>
+          Math.max(...g.map((q) => rateDayKey(q.rateDate)));
+        const keys = tied.map(newestKey);
+        const oldest = Math.min(...keys);
+        anchor = keys.filter((k) => k === oldest).length === 1
+          ? tied[keys.indexOf(oldest)]
+          : undefined;
+      }
+    }
+  }
+  anchor ??= sorted;
+  const median = anchor[Math.floor((anchor.length - 1) / 2)].rate;
+  // Exact-median ties: when two sources quote the identical median rate,
+  // the NAMED winner is whichever sorts first by rate order — the served
+  // rate is identical either way (review nuance 2026-11-23).
+  const serving = sorted.filter((q) => q.rate === median);
+  let clusterDetail = "";
+  if (anchor !== sorted) {
+    const anchorRates = new Set(anchor.map((q) => q.rate));
+    const excluded = sorted
+      .filter((q) => !anchorRates.has(q.rate))
+      .map((q) => {
+        const bps = Math.round(((q.rate - median) / median) * 10000);
+        return `${q.source}=${q.rate} (${bps >= 0 ? "+" : ""}${bps}bps)`;
+      });
+    clusterDetail =
+      `anchored on the tightest agreeing cluster ${anchor.map((q) => `${q.source}=${q.rate}`).join(", ")}` +
+      (excluded.length ? `; excluded ${excluded.join(", ")}` : "");
+  }
+  return { serving, clusterDetail, anchor };
+}
+
+/** Reviewed USD->EUR/CAD policy: complete-span windows, one vote per known origin.
+ * Other pairs retain the existing selection, including SEK and USD identity pairs.
+ * Named providers are not proof of wholly independent upstream price discovery.
+ */
+export function selectIndependentWindow(sorted: SourceQuote[]): { serving: SourceQuote[]; clusterDetail: string; anchor: SourceQuote[] } {
+  const origin = (q: SourceQuote): string =>
+    ["Frankfurter (ECB reference rates)", "vatcomply"].includes(q.source) ? "ECB" :
+    ["open.er-api.com", "exchangerate-api v6"].includes(q.source) ? "ExchangeRate-API" : q.source;
+  // Stable representative: Frankfurter before vatcomply, public before keyed mirror.
+  const priority = (q: SourceQuote): number => q.source === "Frankfurter (ECB reference rates)" || q.source === "open.er-api.com" ? 0 : 1;
+  const representatives = new Map<string, SourceQuote>();
+  for (const q of sorted) {
+    const old = representatives.get(origin(q));
+    if (!old || priority(q) < priority(old)) representatives.set(origin(q), q);
+  }
+  const independent = [...representatives.values()].sort((a,b) => a.rate-b.rate || a.source.localeCompare(b.source));
+  const windows: SourceQuote[][] = [];
+  for (let i=0;i<independent.length;i++) {
+    for (let j=i+1;j<independent.length;j++) {
+      if ((independent[j].rate-independent[i].rate)/independent[i].rate <= AGREEMENT_TOLERANCE) windows.push(independent.slice(i,j+1));
+    }
+  }
+  const span = (g: SourceQuote[]) => (g[g.length-1].rate-g[0].rate)/g[0].rate;
+  windows.sort((a,b) => b.length-a.length || span(a)-span(b) || a[0].rate-b[0].rate);
+  const anchor = windows[0];
+  if (!anchor) throw upstreamUnavailable("FX_SOURCES_DISAGREE", "no agreeing window with at least two independent source origins");
+  const n=anchor.length;
+  const serving = n%2 ? [anchor[Math.floor(n/2)]] : [anchor[n/2-1],anchor[n/2]];
+  const median = serving.reduce((sum,q) => sum+q.rate,0)/serving.length;
+  const gap = (q: SourceQuote) => { const bps = (q.rate-median)/median*10000; return `${bps>=0?"+":""}${bps.toFixed(2)}bps`; };
+  const all = sorted.map(q => `${q.source}=${q.rate} (${gap(q)})`).join(", ");
+  const ecb = sorted.filter(q => origin(q)==="ECB");
+  const tied = windows.filter(g => g.length===n).length>1;
+  const clusterDetail = `largest complete-span<=0.5% agreeing window of ${n} distinct known source origins: ${anchor.map(q=>`${q.source}=${q.rate}`).join(", ")}; ` +
+    `median=${median}${serving.length===2 ? "; even count: arithmetic mean of the two middle observed rates" : "; odd count: middle observed rate"}; ` +
+    `known duplicate origins counted once (ECB and ExchangeRate-API); provider upstream independence is not established; ` +
+    (tied ? "equal-support windows resolved by smallest full relative span, then lower start; " : "") +
+    `all fetched quotes and signed gaps to served median: ${all}; ECB fix reference: ${ecb.length?ecb.map(q=>`${q.source}=${q.rate} (${gap(q)})`).join(", "):"unavailable"}; ` +
+    `excluded from window: ${sorted.filter(q=>!anchor.includes(q)).map(q=>`${q.source}=${q.rate}`).join(", ") || "none"}`;
+  return { serving, anchor, clusterDetail };
+}
+function selectForPair(sorted: SourceQuote[], from: string, to: string) {
+  if (from === "USD" && (to === "EUR" || to === "CAD") && sorted.every(q=>rateDayKey(q.rateDate)===rateDayKey(sorted[0].rateDate)) && rateDayKey(sorted[0].rateDate)>0) return selectIndependentWindow(sorted);
+  return selectAnchorServing(sorted);
+}
+
+export async function handleFxNow(
+  query: Record<string, string | undefined>,
+): Promise<Record<string, unknown>> {
+  const raw = query.currency?.trim();
+  if (!raw) {
+    throw badRequest("MISSING_PARAM", "currency is a required query parameter");
+  }
+  if (!CODE_RE.test(raw)) {
+    throw badRequest("INVALID_CURRENCY", `currency must be an ISO-4217 3-letter code; got ${raw}`);
+  }
+  const currency = raw.toUpperCase();
+  if (!FX_NOW_CURRENCIES.has(currency)) {
+    throw unprocessable(
+      "NO_DATA",
+      `FX_NOW serves only the reviewed contract currencies EUR, CAD and SEK; ${currency} has no FX_NOW contract`,
+    );
+  }
+  const intent = `FX_NOW_${currency}`;
+
+  const legs = [...SOURCES];
+  const settled = await settleWithStragglerGrace(
+    legs.map((s) => observeFxSource(s.name, "USD", currency, () => s.quote("USD", currency))),
+    STRAGGLER_GRACE_MS,
+    SOURCE_TIMEOUT_MS + 500,
+  );
+  const quotes: SourceQuote[] = [];
+  const failedSources: string[] = [];
+  const erroredSources: string[] = [];
+  const uncoveredSources: string[] = [];
+  settled.forEach((outcome, i) => {
+    if (outcome === undefined) warnFxSource(legs[i].name, "USD", currency, "pending_at_selection");
+    if (outcome?.status === "fulfilled" && outcome.value !== null) {
+      quotes.push(outcome.value);
+    } else {
+      failedSources.push(legs[i].name);
+      if (outcome?.status === "fulfilled") {
+        uncoveredSources.push(legs[i].name);
+      } else {
+        erroredSources.push(legs[i].name);
+      }
+    }
   });
+
+  if (quotes.length === 0) {
+    if (uncoveredSources.length === 0) {
+      throw upstreamUnavailable(
+        "FX_SOURCES_DOWN",
+        `every rate source errored for USD/${currency} (${erroredSources.join(", ")}); refusing to invent a rate`,
+      );
+    }
+    throw unprocessable(
+      "NO_DATA",
+      `no rate source covers USD/${currency} (answered without it: ${uncoveredSources.join(", ")}` +
+        (erroredSources.length ? `; errored: ${erroredSources.join(", ")}` : "") + `)`,
+    );
+  }
+
+  let serving = quotes;
+  let degradedReasons: string[] = [];
+  let straddledUpdate = false;
+  let straddleDetail = "";
+  // Same anchor-cluster selection as /v1/fx (shared helper, 2026-11-23):
+  // the two routes can never diverge on which quote a pool serves.
+  let clusterDetail = "";
+  if (quotes.length >= 2) {
+    const sorted = [...quotes].sort((a, b) => a.rate - b.rate);
+    const lo = sorted[0].rate;
+    const hi = sorted[sorted.length - 1].rate;
+    if ((hi - lo) / lo > AGREEMENT_TOLERANCE) {
+      const byFreshness = [...quotes].sort((a, b) => rateDayKey(b.rateDate) - rateDayKey(a.rateDate));
+      const freshest = byFreshness[0];
+      const stalest = byFreshness[byFreshness.length - 1];
+      if (rateDayKey(freshest.rateDate) > rateDayKey(stalest.rateDate)) {
+        straddledUpdate = true;
+        serving = [freshest];
+        straddleDetail =
+          `sources straddled a rate update: ${freshest.source} read ${freshest.rate} dated ` +
+          `${freshest.rateDate}, ${stalest.source} read ${stalest.rate} dated ${stalest.rateDate}`;
+        degradedReasons = [
+          `sources straddle a rate update for USD/${currency}: serving the freshest ` +
+            `(${freshest.source}=${freshest.rate} dated ${freshest.rateDate}); the stale source read ` +
+            `${stalest.rate} dated ${stalest.rateDate}`,
+        ];
+      } else {
+        const selected = selectForPair(sorted, "USD", currency);
+        const anchor = selected.anchor;
+        // The helper can fall back to the full pool on tied/no clusters.
+        // That fallback must never rescue a genuinely disagreeing pool.
+        if (anchor.length < 2 || anchor.length === sorted.length ||
+            (anchor[anchor.length - 1].rate - anchor[0].rate) / anchor[0].rate > AGREEMENT_TOLERANCE) {
+          const detail = quotes.map((q) => `${q.source}=${q.rate} (${q.rateDate})`).join("; ");
+          throw upstreamUnavailable("FX_SOURCES_DISAGREE",
+            `rate sources disagree on USD/${currency} beyond 0.5% on the SAME date with no selected agreeing pair: ${detail}`);
+        }
+        serving = selected.serving;
+        clusterDetail = selected.clusterDetail;
+        degradedReasons = [
+          `same-date pool exceeds 0.5%; ${clusterDetail}; different intraday snapshots may straddle the ECB publication; publication timing is not independently verified`,
+          ...(failedSources.length ? [`sources unavailable or not covering: ${failedSources.join(", ")}`] : []),
+        ];
+      }
+    } else {
+      const selected = selectForPair(sorted, "USD", currency);
+      serving = selected.serving;
+      clusterDetail = selected.clusterDetail;
+      if (failedSources.length > 0) {
+        degradedReasons = [`sources unavailable or not covering: ${failedSources.join(", ")}`];
+      }
+    }
+  } else {
+    degradedReasons = [
+      `only ${quotes[0].source} covers USD/${currency} (${failedSources.join(", ")} did not answer)`,
+    ];
+  }
+  const winner = serving[0];
+  const rate = clusterDetail.startsWith("largest complete-span") ? serving.reduce((sum, q) => sum + q.rate, 0) / serving.length : winner.rate;
+  if (!Number.isFinite(rate) || rate < FX_NOW_RATE_MIN || rate > FX_NOW_RATE_MAX) {
+    throw upstreamUnavailable(
+      "FX_RATE_OUT_OF_RANGE",
+      `served rate ${rate} is outside the contract range [${FX_NOW_RATE_MIN}, ${FX_NOW_RATE_MAX}]; refusing to serve it`,
+    );
+  }
+  const confidence = quotes.length >= 2 && degradedReasons.length === 0 && !straddledUpdate ? 1.0 : 0.9;
+
+  const receiptEvidence = JSON.stringify({
+    from_currency: "USD",
+    to_currency: currency,
+    rate_served: rate,
+    rate_direction: `units of ${currency} per 1 USD, the contract's own direction`,
+    agreement_tolerance: AGREEMENT_TOLERANCE,
+    sources: quotes.map((q) => ({
+      source: q.source,
+      url: q.url,
+      rate: q.rate,
+      rate_date: q.rateDate,
+      raw_body: q.rawBody,
+    })),
+    failed_sources: failedSources,
+    ...(clusterDetail.startsWith("largest complete-span") ? { independent_window_selection: clusterDetail, median_inputs: serving.map(q => ({source:q.source, rate:q.rate})) } : {}),
+    ...(degradedReasons.some(reason => reason.startsWith("same-date pool")) ? {
+      selection_policy: clusterDetail.startsWith("largest complete-span") ? (serving.length === 2 ? "same-date independent-origin complete-span window median, even midpoint" : "same-date independent-origin complete-span window median, odd observed middle") : "same-date wide pool: selected agreeing anchor cluster, lower observed median",
+      cluster_detail: clusterDetail,
+      degraded_reasons: degradedReasons,
+    } : {}),
+  });
+  const receiptDoc: Receipt = makeReceipt(
+    intent,
+    clusterDetail.startsWith("largest complete-span") ? serving.map(q=>q.url).join(" + ") : winner.url,
+    receiptEvidence,
+    `${quotes.length}/${legs.length} rate sources${degradedReasons.some(reason => reason.startsWith("same-date pool")) ? "; full pool disagreed; selected anchor cluster; exclusions disclosed" : ""}`,
+  );
+  try {
+    await saveReceipt(receiptDoc, receiptEvidence);
+  } catch {
+    throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
+  }
+
+  const fields: Record<string, unknown> = {
+    rate,
+    currency,
+    rate_date: winner.rateDate,
+    sources_used: quotes.map((q) => q.source),
+  };
+
+  return withAnswerClass(envelope(intent, fields, receiptDoc, {
+    answer:
+      `1 USD buys ${rate} ${currency}` +
+      ` (${clusterDetail.startsWith("largest complete-span") ? serving.map(q => q.source).join(" + ") : winner.source}${clusterDetail.startsWith("largest complete-span") && serving.length > 1 && serving[0].rate !== serving[1].rate ? "; median midpoint, not a single-source quote" : ""}, rates dated ${winner.rateDate}` +
+      (straddledUpdate
+        ? `; ${straddleDetail} — the freshest is served; they did NOT agree within 0.5%)`
+        : quotes.length > 1
+          ? (degradedReasons.some(reason => reason.startsWith("same-date pool"))
+              ? `; full source pool did NOT agree within 0.5%; serving the selected agreeing cluster`
+              : clusterDetail.startsWith("largest complete-span") ? `; selected independent-origin window agrees within 0.5%` : `; cross-checked against ${quotes.length} sources agreeing within 0.5%`) +
+            (clusterDetail ? `; ${clusterDetail}` : "") +
+            ")"
+          : "; single covering source)") +
+      ".",
+    verdict: "verified",
+    confidence,
+    source:
+      `Keyless public rate APIs (${quotes.map((q) => q.source).join(" + ")}); ` +
+      `sources snapshot at different times of day, so a 0.5% pairwise agreement tolerance is applied ` +
+      `and a wider same-date split requires a selected agreeing cluster of at least two quotes; otherwise refused, never averaged across clusters` +
+      (clusterDetail
+        ? clusterDetail.startsWith("largest complete-span") ? `; ${clusterDetail}` : `; the served rate is the median of the tightest single-linkage agreeing cluster (5bps), not the full pool`
+        : "") +
+      (degradedReasons.length ? `; degraded: ${degradedReasons.join("; ")}` : ""),
+  }),intent,{currency:currency,source_set:quotes.map(q=>q.source),serving_rule:straddledUpdate||quotes.length===1?"freshest_alone":degradedReasons.some(reason=>reason.startsWith("same-date pool"))?"anchor_cluster":"full_median"});
 }

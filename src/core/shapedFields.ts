@@ -60,10 +60,273 @@ export const OUTPUT_MAPPING: Record<string, Record<string, OutputMapping>> = {
   VALIDATOR_PERFORMANCE_VERIFY_GENERAL: {
     effective_balance: { path: "effective_balance", unit: "gwei" },
   },
+  GAS_PRICE_GENERAL: {
+    chain: { path: "chain" },
+    gas_price_gwei: { path: "gas_price_gwei", unit: "gwei" },
+    transfer_fee_usd: { path: "transfer_fee_usd", unit: "USD" },
+    as_of: { path: "as_of" },
+  },
+  WALLET_BALANCE_CHECK_GENERAL: {
+    address: { path: "address" },
+    chain: { path: "chain" },
+    balance: { path: "balance", unit: "whole token units" },
+    token_symbol: { path: "token_symbol" },
+    as_of: { path: "as_of" },
+  },
+  TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL: {
+    total_supply: { path: "total_supply", unit: "whole tokens" },
+  },
+  MACRO_ECONOMIC_INDICATOR_GENERAL: {
+    rate_pct: { path: "rate_pct", unit: "percent" },
+  },
+  DNS_RECORD_LOOKUP_GENERAL: {
+    has_record: { path: "has_record" },
+  },
+  CURRENCY_EXCHANGE_CONVERT: {
+    converted_amount: { path: "converted_amount" },
+  },
+  SSL_VERIFICATION_CERT: {
+    certificate_valid: { path: "certificate_valid" },
+  },
+  EMAIL_SECURITY_GENERAL: {
+    lookup_ok: { path: "lookup_ok" },
+  },
+  ACADEMIC_SEARCH_GENERAL: {
+    answer: { path: "answer" },
+    paper_titles: { path: "paper_titles" },
+    dois: { path: "dois" },
+    total_matches: { path: "total_matches" },
+  },
+  ASSET_RESERVE_ATTESTATION_GENERAL: {
+    attested_reserve: { path: "attested_reserve", unit: "micro-units of the underlying asset" },
+    asset: { path: "asset" },
+    block: { path: "block" },
+    source: { path: "source" },
+  },
+  CODE_PATCH_VERIFY_GENERAL: {
+    passed: { path: "passed" },
+    commit: { path: "commit" },
+    pipeline: { path: "pipeline" },
+  },
+  CORPORATE_REGISTRY_LOOKUP_GENERAL: {
+    legal_name: { path: "legal_name" },
+    registration_id: { path: "registration_id" },
+    active: { path: "active" },
+    jurisdiction: { path: "jurisdiction" },
+    registered_address: { path: "registered_address" },
+    incorporated: { path: "incorporated" },
+  },
+  CROSS_CHAIN_STATE_VERIFY_GENERAL: {
+    address: { path: "address" },
+    status: { path: "status" },
+    chains: { path: "chains" },
+    consistent: { path: "consistent" },
+    summary: { path: "summary" },
+  },
+  CVE_LOOKUP_CVSS: {
+    cve_id: { path: "cve_id" },
+    cvss_score: { path: "cvss_score", unit: "CVSS score (0-10)" },
+    description: { path: "description" },
+    published: { path: "published" },
+    references: { path: "references" },
+  },
+  EVENT_OUTCOME_RESOLUTION_GENERAL: {
+    event: { path: "event" },
+    resolved_yes: { path: "resolved_yes" },
+    winner: { path: "winner" },
+    resolved_at: { path: "resolved_at" },
+    sources: { path: "sources" },
+  },
+  FINANCIAL_DATA_GENERAL: {
+    asset: { path: "asset" },
+    market_cap_usd: { path: "market_cap_usd", unit: "USD" },
+    volume_24h_usd: { path: "volume_24h_usd", unit: "USD" },
+    metrics: { path: "metrics" },
+    as_of: { path: "as_of" },
+  },
+  FX_NOW_CAD: {
+    rate: { path: "rate", unit: "{key} per USD" },
+  },
+  FX_NOW_EUR: {
+    rate: { path: "rate", unit: "{key} per USD" },
+  },
+  FX_NOW_SEK: {
+    rate: { path: "rate", unit: "{key} per USD" },
+  },
+  IP_GEOLOCATION_GENERAL: {
+    ip: { path: "ip" },
+    country: { path: "country" },
+    city: { path: "city" },
+    latitude: { path: "latitude", unit: "degrees" },
+    longitude: { path: "longitude", unit: "degrees" },
+    isp: { path: "isp" },
+  },
+  LIQUIDITY_DEPTH_VERIFY_GENERAL: {
+    liquidity_usd: { path: "liquidity_usd", unit: "USD" },
+  },
+  MALWARE_DETECTION_HASH: {
+    malicious: { path: "malicious" },
+  },
+  NEWS_HEADLINES_GENERAL: {
+    topic: { path: "topic" },
+    headlines: { path: "headlines" },
+    urls: { path: "urls" },
+    window: { path: "window" },
+    top_headline: { path: "top_headline" },
+  },
+  NEWS_SEARCH_GENERAL: {
+    answer: { path: "answer" },
+    result_count: { path: "result_count" },
+    sources: { path: "sources" },
+  },
+  PAYMENT_METHOD_VERIFY_GENERAL: {
+    network: { path: "network" },
+    issuing_bank: { path: "issuing_bank" },
+    issuing_country: { path: "issuing_country" },
+    valid: { path: "valid" },
+    card_type: { path: "card_type" },
+  },
+  ROUTE_ETA_GENERAL: {
+    duration: { path: "duration", unit: "seconds" },
+  },
+  SANCTIONS_SCREENING_MATCH_GENERAL: {
+    name: { path: "name" },
+    matched: { path: "matched" },
+    matches: { path: "matches" },
+    lists: { path: "lists" },
+    match_score: { path: "match_score", unit: "fraction (0-1)" },
+  },
+  SLA_COMPLIANCE_GENERAL: {
+    service: { path: "service" },
+    uptime_pct: { path: "uptime_pct", unit: "percent" },
+    sla_target_pct: { path: "sla_target_pct", unit: "percent" },
+    compliant: { path: "compliant" },
+    period: { path: "period" },
+  },
+  SPORTS_SCORE_GENERAL: {
+    home_team: { path: "home_team" },
+    away_team: { path: "away_team" },
+    home_score: { path: "home_score", unit: "points" },
+    away_score: { path: "away_score", unit: "points" },
+    status: { path: "status" },
+    date: { path: "date" },
+  },
+  STOCK_PRICE_US_EQUITY: {
+    price_usd: { path: "price_usd", unit: "US dollars" },
+  },
+  THREAT_INTELLIGENCE_INDICATOR: {
+    malicious: { path: "malicious" },
+  },
+  TOKEN_HOLDER_COUNT_GENERAL: {
+    token: { path: "token" },
+    chain: { path: "chain" },
+    holders_count: { path: "holders_count", unit: "addresses" },
+    token_symbol: { path: "token_symbol" },
+  },
+  TRANSACTION_RISK_GENERAL: {
+    risk_score: { path: "risk_score", unit: "fraction (0-1)" },
+    signals: { path: "signals" },
+    summary: { path: "summary" },
+  },
+  TRAVEL_DISRUPTION_GENERAL: {
+    route_or_flight: { path: "route_or_flight" },
+    disrupted: { path: "disrupted" },
+    status: { path: "status" },
+    delay_minutes: { path: "delay_minutes", unit: "minutes" },
+    reason: { path: "reason" },
+  },
+  URL_SAFE_GENERAL: {
+    url: { path: "url" },
+    verdict: { path: "url_check.verdict" },
+    detections: { path: "detections", unit: "detections" },
+    summary: { path: "summary" },
+  },
+  URL_SCAN_VERDICT: {
+    safe: { path: "safe" },
+  },
+  VENDOR_VERIFY_GENERAL: {
+    vendor: { path: "vendor" },
+    vat_number: { path: "vat_number" },
+    valid: { path: "valid" },
+    registered_name: { path: "registered_name" },
+    registered_address: { path: "registered_address" },
+  },
+  VULNERABILITY_TRIAGE_GENERAL: {
+    cvss_base_score: { path: "cvss_base_score", unit: "CVSS score (0-10)" },
+  },
+  WEATHER_FORECAST_GENERAL: {
+    location: { path: "location" },
+    when: { path: "when" },
+    temp_max_c: { path: "temp_max_c", unit: "degrees Celsius" },
+    temp_min_c: { path: "temp_min_c", unit: "degrees Celsius" },
+    precipitation_probability_pct: { path: "precipitation_probability_pct", unit: "percent" },
+    condition: { path: "condition" },
+  },
+  CRYPTO_PRICE_USD: {
+    price_usd: { path: "price_usd", unit: "US dollars" },
+  },
+  MINING_HASHPRICE_VERIFY_GENERAL: {
+    hashprice_sats_per_ph_day: { path: "hashprice_sats_per_ph_day", unit: "sats per PH/s per day" },
+    block_height: { path: "block_height", unit: "block height" },
+    hashrate_eh_s: { path: "hashrate_eh_s", unit: "EH/s" },
+    hashprice_usd_per_ph_day: { path: "hashprice_usd_per_ph_day", unit: "USD per PH/s per day" },
+  },
+  STORM_ALERT_GENERAL: {
+    location: { path: "location" },
+    risk_score: { path: "risk_score", unit: "fraction (0-1)" },
+    risk_level: { path: "risk_level" },
+    peak_gust_kmh: { path: "peak_gust_kmh", unit: "km/h" },
+    precipitation_mm: { path: "precipitation_mm", unit: "mm" },
+    window: { path: "window" },
+  },
+  WEATHER_CHECK_TEMPERATURE: {
+    temperature_c: { path: "temperature_c", unit: "degrees Celsius" },
+  },
+  ONCHAIN_METRIC_VERIFY_GENERAL: {
+    balance_gwei: {"path":"balance_gwei","unit":"Gwei"},
+    address: {"path":"address"},
+    block: {"path":"block"},
+    chain: {"path":"chain"},
+    tx_count: {"path":"tx_count"},
+  },
+  AIR_QUALITY_INDEX_GENERAL: {
+    aqi: {"path":"aqi"},
+    aqi_scale: {"path":"aqi_scale"},
+    acceptable: {"path":"acceptable"},
+    european_aqi: {"path":"european_aqi"},
+    pm2_5_ugm3: {"path":"pm2_5_ugm3","unit":"micrograms per cubic metre"},
+    pm10_ugm3: {"path":"pm10_ugm3","unit":"micrograms per cubic metre"},
+    nitrogen_dioxide_ugm3: {"path":"nitrogen_dioxide_ugm3","unit":"micrograms per cubic metre"},
+    ozone_ugm3: {"path":"ozone_ugm3","unit":"micrograms per cubic metre"},
+    carbon_monoxide_ugm3: {"path":"carbon_monoxide_ugm3","unit":"micrograms per cubic metre"},
+    latitude: {"path":"latitude","unit":"degrees"},
+    longitude: {"path":"longitude","unit":"degrees"},
+    upstream_hour: {"path":"upstream_hour"},
+  },
+  API_HEALTH_CHECK_GENERAL: {
+    url: {"path":"url"},
+    healthy: {"path":"healthy"},
+    reachable: {"path":"reachable"},
+    http_status: {"path":"http_status"},
+    latency_ms: {"path":"latency_ms","unit":"milliseconds"},
+  },
+  SERVER_UPTIME_MONITOR_GENERAL: {
+    host: {"path":"host"},
+    reachable_now: {"path":"reachable_now"},
+    http_status: {"path":"http_status"},
+    latency_ms: {"path":"latency_ms","unit":"milliseconds"},
+  },
+  SECURITY_REVIEW_GENERAL: {
+    verdict: {"path":"verdict"},
+    vulnerability_count: {"path":"vulnerability_count","unit":"vulnerabilities"},
+    issues: {"path":"issues"},
+    summary: {"path":"summary"},
+  },
+
 };
 
 /** Official intent response field types (GET /engine/v1/intents/{intent} → response.fields), pinned here so the fill does not depend on a live fetch. `number` fields are never filled from raw, even if a future mapping omits `unit`. */
-export type FieldFormatType = "number" | "string" | "datetime" | "list" | "enum";
+export type FieldFormatType = "number" | "string" | "datetime" | "list" | "enum" | "bool";
 
 export interface FieldFormat {
   type: FieldFormatType;
@@ -104,6 +367,269 @@ export const FIELD_FORMAT: Record<string, Record<string, FieldFormat>> = {
   VALIDATOR_PERFORMANCE_VERIFY_GENERAL: {
     effective_balance: { type: "number" },
   },
+  GAS_PRICE_GENERAL: {
+    chain: { type: "string" },
+    gas_price_gwei: { type: "number" },
+    transfer_fee_usd: { type: "number" },
+    as_of: { type: "string" },
+  },
+  WALLET_BALANCE_CHECK_GENERAL: {
+    address: { type: "string" },
+    chain: { type: "string" },
+    balance: { type: "number" },
+    token_symbol: { type: "string" },
+    as_of: { type: "string" },
+  },
+  TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL: {
+    total_supply: { type: "number" },
+  },
+  MACRO_ECONOMIC_INDICATOR_GENERAL: {
+    rate_pct: { type: "number" },
+  },
+  DNS_RECORD_LOOKUP_GENERAL: {
+    has_record: { type: "bool" },
+  },
+  CURRENCY_EXCHANGE_CONVERT: {
+    converted_amount: { type: "number" },
+  },
+  SSL_VERIFICATION_CERT: {
+    certificate_valid: { type: "bool" },
+  },
+  EMAIL_SECURITY_GENERAL: {
+    lookup_ok: { type: "bool" },
+  },
+  ACADEMIC_SEARCH_GENERAL: {
+    answer: { type: "string" },
+    paper_titles: { type: "list" },
+    dois: { type: "list" },
+    total_matches: { type: "number" },
+  },
+  ASSET_RESERVE_ATTESTATION_GENERAL: {
+    attested_reserve: { type: "number" },
+    asset: { type: "string" },
+    block: { type: "string" },
+    source: { type: "string" },
+  },
+  CODE_PATCH_VERIFY_GENERAL: {
+    passed: { type: "bool" },
+    commit: { type: "string" },
+    pipeline: { type: "string" },
+  },
+  CORPORATE_REGISTRY_LOOKUP_GENERAL: {
+    legal_name: { type: "string" },
+    registration_id: { type: "string" },
+    active: { type: "bool" },
+    jurisdiction: { type: "string" },
+    registered_address: { type: "string" },
+    incorporated: { type: "datetime" },
+  },
+  CROSS_CHAIN_STATE_VERIFY_GENERAL: {
+    address: { type: "string" },
+    status: { type: "string" },
+    chains: { type: "list" },
+    consistent: { type: "bool" },
+    summary: { type: "string" },
+  },
+  CVE_LOOKUP_CVSS: {
+    cve_id: { type: "string" },
+    cvss_score: { type: "number" },
+    description: { type: "string" },
+    published: { type: "datetime" },
+    references: { type: "list" },
+  },
+  EVENT_OUTCOME_RESOLUTION_GENERAL: {
+    event: { type: "string" },
+    resolved_yes: { type: "bool" },
+    winner: { type: "string" },
+    resolved_at: { type: "string" },
+    sources: { type: "list" },
+  },
+  FINANCIAL_DATA_GENERAL: {
+    asset: { type: "string" },
+    market_cap_usd: { type: "number" },
+    volume_24h_usd: { type: "number" },
+    metrics: { type: "string" },
+    as_of: { type: "string" },
+  },
+  FX_NOW_CAD: {
+    rate: { type: "number" },
+  },
+  FX_NOW_EUR: {
+    rate: { type: "number" },
+  },
+  FX_NOW_SEK: {
+    rate: { type: "number" },
+  },
+  IP_GEOLOCATION_GENERAL: {
+    ip: { type: "string" },
+    country: { type: "string" },
+    city: { type: "string" },
+    latitude: { type: "number" },
+    longitude: { type: "number" },
+    isp: { type: "string" },
+  },
+  LIQUIDITY_DEPTH_VERIFY_GENERAL: {
+    liquidity_usd: { type: "number" },
+  },
+  MALWARE_DETECTION_HASH: {
+    malicious: { type: "bool" },
+  },
+  NEWS_HEADLINES_GENERAL: {
+    topic: { type: "string" },
+    headlines: { type: "list" },
+    urls: { type: "list" },
+    window: { type: "string" },
+    top_headline: { type: "string" },
+  },
+  NEWS_SEARCH_GENERAL: {
+    answer: { type: "string" },
+    result_count: { type: "number" },
+    sources: { type: "list" },
+  },
+  PAYMENT_METHOD_VERIFY_GENERAL: {
+    network: { type: "string" },
+    issuing_bank: { type: "string" },
+    issuing_country: { type: "string" },
+    valid: { type: "bool" },
+    card_type: { type: "string" },
+  },
+  ROUTE_ETA_GENERAL: {
+    duration: { type: "number" },
+  },
+  SANCTIONS_SCREENING_MATCH_GENERAL: {
+    name: { type: "string" },
+    matched: { type: "bool" },
+    matches: { type: "list" },
+    lists: { type: "list" },
+    match_score: { type: "number" },
+  },
+  SLA_COMPLIANCE_GENERAL: {
+    service: { type: "string" },
+    uptime_pct: { type: "number" },
+    sla_target_pct: { type: "number" },
+    compliant: { type: "bool" },
+    period: { type: "string" },
+  },
+  SPORTS_SCORE_GENERAL: {
+    home_team: { type: "string" },
+    away_team: { type: "string" },
+    home_score: { type: "number" },
+    away_score: { type: "number" },
+    status: { type: "string" },
+    date: { type: "string" },
+  },
+  STOCK_PRICE_US_EQUITY: {
+    price_usd: { type: "number" },
+  },
+  THREAT_INTELLIGENCE_INDICATOR: {
+    malicious: { type: "bool" },
+  },
+  TOKEN_HOLDER_COUNT_GENERAL: {
+    token: { type: "string" },
+    chain: { type: "string" },
+    holders_count: { type: "number" },
+    token_symbol: { type: "string" },
+  },
+  TRANSACTION_RISK_GENERAL: {
+    risk_score: { type: "number" },
+    signals: { type: "list" },
+    summary: { type: "string" },
+  },
+  TRAVEL_DISRUPTION_GENERAL: {
+    route_or_flight: { type: "string" },
+    disrupted: { type: "bool" },
+    status: { type: "string" },
+    delay_minutes: { type: "number" },
+    reason: { type: "string" },
+  },
+  URL_SAFE_GENERAL: {
+    url: { type: "string" },
+    verdict: { type: "enum", allowed: ["Safe", "Suspicious", "Malicious", "Unknown"] },
+    detections: { type: "number" },
+    summary: { type: "string" },
+  },
+  URL_SCAN_VERDICT: {
+    safe: { type: "bool" },
+  },
+  VENDOR_VERIFY_GENERAL: {
+    vendor: { type: "string" },
+    vat_number: { type: "string" },
+    valid: { type: "bool" },
+    registered_name: { type: "string" },
+    registered_address: { type: "string" },
+  },
+  VULNERABILITY_TRIAGE_GENERAL: {
+    cvss_base_score: { type: "number" },
+  },
+  WEATHER_FORECAST_GENERAL: {
+    location: { type: "string" },
+    when: { type: "string" },
+    temp_max_c: { type: "number" },
+    temp_min_c: { type: "number" },
+    precipitation_probability_pct: { type: "number" },
+    condition: { type: "string" },
+  },
+  CRYPTO_PRICE_USD: {
+    price_usd: { type: "number" },
+  },
+  MINING_HASHPRICE_VERIFY_GENERAL: {
+    hashprice_sats_per_ph_day: { type: "number" },
+    block_height: { type: "number" },
+    hashrate_eh_s: { type: "number" },
+    hashprice_usd_per_ph_day: { type: "number" },
+  },
+  STORM_ALERT_GENERAL: {
+    location: { type: "string" },
+    risk_score: { type: "number" },
+    risk_level: { type: "enum", allowed: ["LOW", "MODERATE", "HIGH", "SEVERE"] },
+    peak_gust_kmh: { type: "number" },
+    precipitation_mm: { type: "number" },
+    window: { type: "string" },
+  },
+  WEATHER_CHECK_TEMPERATURE: {
+    temperature_c: { type: "number" },
+  },
+  ONCHAIN_METRIC_VERIFY_GENERAL: {
+    balance_gwei: { type: "number" },
+    address: { type: "string" },
+    block: { type: "string" },
+    chain: { type: "string" },
+    tx_count: { type: "number" },
+  },
+  AIR_QUALITY_INDEX_GENERAL: {
+    aqi: { type: "number" },
+    aqi_scale: { type: "string" },
+    acceptable: { type: "bool" },
+    european_aqi: { type: "number" },
+    pm2_5_ugm3: { type: "number" },
+    pm10_ugm3: { type: "number" },
+    nitrogen_dioxide_ugm3: { type: "number" },
+    ozone_ugm3: { type: "number" },
+    carbon_monoxide_ugm3: { type: "number" },
+    latitude: { type: "number" },
+    longitude: { type: "number" },
+    upstream_hour: { type: "datetime" },
+  },
+  API_HEALTH_CHECK_GENERAL: {
+    url: { type: "string" },
+    healthy: { type: "bool" },
+    reachable: { type: "bool" },
+    http_status: { type: "number" },
+    latency_ms: { type: "number" },
+  },
+  SERVER_UPTIME_MONITOR_GENERAL: {
+    host: { type: "string" },
+    reachable_now: { type: "bool" },
+    http_status: { type: "number" },
+    latency_ms: { type: "number" },
+  },
+  SECURITY_REVIEW_GENERAL: {
+    verdict: { type: "string" },
+    vulnerability_count: { type: "number" },
+    issues: { type: "list" },
+    summary: { type: "string" },
+  },
+
 };
 
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -142,6 +668,10 @@ export function valueMatchesFormat(value: unknown, fmt: FieldFormat | undefined,
     }
     case "datetime":
       return typeof value === "string" && value !== "" && !Number.isNaN(Date.parse(value));
+    case "bool":
+      // Raw answers must already carry semantic booleans. Node parser tokens
+      // (for example DNS status0/NOERROR) are not coerced here.
+      return typeof value === "boolean";
     case "list":
       if (!Array.isArray(value)) return false;
       if (field === "urls") {

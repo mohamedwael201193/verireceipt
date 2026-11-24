@@ -18,6 +18,7 @@ import {
   GRID_EVICT_INVALID,
   GRID_EVICT_REFERENCE,
   gridCacheEvictionPriority,
+  isConfiguredGridReference,
   isStoreableGridIntervalKey,
 } from "../jobs/gridFinality";
 
@@ -1717,21 +1718,33 @@ export function selectGridEvictions(
   maxRows: number,
   nowMs: number,
 ): Array<{ node_or_zone: string; interval_start: string }> {
-  rows = rows.slice();
-  rows.sort((a, b) => {
-    const pa = gridCacheEvictionPriority(a.node_or_zone, a.interval_start, a.market, nowMs);
-    const pb = gridCacheEvictionPriority(b.node_or_zone, b.interval_start, b.market, nowMs);
-    if (pa !== pb) return pa - pb;
-    if (a.interval_start < b.interval_start) return -1;
-    if (a.interval_start > b.interval_start) return 1;
-    if (a.node_or_zone < b.node_or_zone) return -1;
-    if (a.node_or_zone > b.node_or_zone) return 1;
+  // Rank once per market/interval, never inside the O(n log n) comparator.
+  // One interval is shared by many zones; finality does not depend on zone.
+  const priorities = new Map<string, number>();
+  const ranked = rows.map((row) => {
+    const key = row.market + "\u0000" + row.interval_start;
+    // Reference protection is node-specific and must not enter the shared cache.
+    if (isConfiguredGridReference(row.node_or_zone, row.interval_start)) {
+      return { row, rank: GRID_EVICT_REFERENCE };
+    }
+    let rank = priorities.get(key);
+    if (rank === undefined) {
+      rank = gridCacheEvictionPriority(row.node_or_zone, row.interval_start, row.market, nowMs);
+      priorities.set(key, rank);
+    }
+    return { row, rank };
+  });
+  ranked.sort((a, b) => {
+    if (a.rank !== b.rank) return a.rank - b.rank;
+    if (a.row.interval_start < b.row.interval_start) return -1;
+    if (a.row.interval_start > b.row.interval_start) return 1;
+    if (a.row.node_or_zone < b.row.node_or_zone) return -1;
+    if (a.row.node_or_zone > b.row.node_or_zone) return 1;
     return 0;
   });
   let remaining = total;
   const out: Array<{ node_or_zone: string; interval_start: string }> = [];
-  for (const r of rows) {
-    const rank = gridCacheEvictionPriority(r.node_or_zone, r.interval_start, r.market, nowMs);
+  for (const { row: r, rank } of ranked) {
     if (rank >= GRID_EVICT_REFERENCE) continue;
     // Invalid interval keys are always evicted, even when the table
     // is already at or under the cap — they are never legal rows.

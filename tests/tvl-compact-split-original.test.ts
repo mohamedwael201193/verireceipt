@@ -186,18 +186,21 @@ for (const [name, age] of [['exactly 24h old', 24 * HOUR], ['seven days old', 7 
     expect(__getTvlChainSplitForTests(entries[0].slug)).toBeUndefined();
   });
 }
-for (const headers of [{}, { 'content-length': '1' }] as Record<string, string>[]) it(`still cancels protocol streams over 2MiB with headers ${JSON.stringify(headers)}`, async () => {
+// Cap raised 2 MiB -> 40 MiB 2026-11-23: real /protocol/{slug} umbrella
+// payloads are 11-31 MB (aave measured 11,108,531 B), and the fill is
+// load-bearing for chain-scoped answers. The bound still bites, higher.
+for (const headers of [{}, { 'content-length': '1' }] as Record<string, string>[]) it(`still cancels protocol streams over 40MiB with headers ${JSON.stringify(headers)}`, async () => {
   let cancelled = false;
   const body = new ReadableStream<Uint8Array>({ start(controller) {
-    controller.enqueue(new Uint8Array(2 * 1024 * 1024)); controller.enqueue(new Uint8Array(1));
+    controller.enqueue(new Uint8Array(40 * 1024 * 1024)); controller.enqueue(new Uint8Array(1));
   }, cancel() { cancelled = true; } });
   const fetchImpl: typeof fetch = async () => new Response(body, { headers });
   await expect(__fetchTvlTextForTests('https://api.llama.fi/protocol/antimatter', fetchImpl, 1000))
     .rejects.toMatchObject({ code: 'DEFILLAMA_RESPONSE_TOO_LARGE' });
   expect(cancelled).toBe(true);
 });
-it('still accepts exactly 2MiB at the protocol text boundary', async () => {
-  const fetchImpl: typeof fetch = async () => new Response(' '.repeat(2 * 1024 * 1024));
+it('still accepts exactly 40MiB at the protocol text boundary', async () => {
+  const fetchImpl: typeof fetch = async () => new Response(' '.repeat(40 * 1024 * 1024));
   const text = await __fetchTvlTextForTests('https://api.llama.fi/protocol/antimatter', fetchImpl, 1000);
-  expect(Buffer.byteLength(text)).toBe(2 * 1024 * 1024);
+  expect(Buffer.byteLength(text)).toBe(40 * 1024 * 1024);
 });

@@ -40,6 +40,7 @@
 // TOKEN_CONTRACTS map (every entry verified on-chain 2026-11-22, see
 // tokenContracts.ts); an unmapped symbol is 422 UNSUPPORTED_TOKEN,
 // never a guessed contract.
+import { walletContext } from "./walletContext";
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, stableStringify, type Receipt } from "../core/receipt";
 import { CHAIN_RPCS } from "../config/chains";
@@ -358,7 +359,14 @@ export async function handleBalance(
   const asOf = new Date().toISOString();
   const votes = `${pair.count}/${total} sources agreed`;
 
+  const context = await walletContext(rpcs, address);
+  const { context_evidence, ...accountContext } = context;
   const fields: Record<string, unknown> = {
+    ...accountContext,
+    balance_wei: contract === null ? winner.balance.toString() : null,
+    balance_base_units: winner.balance.toString(),
+    funded: winner.balance > 0n,
+    funding_status: winner.balance > 0n ? "funded" : "zero_balance",
     address,
     chain,
     balance,
@@ -373,6 +381,7 @@ export async function handleBalance(
     address,
     as_of: asOf,
     balance_base_units_hex: winner.balanceHex,
+    account_context: context,
     block_tag: "finalized",
     chain,
     decimals,
@@ -393,7 +402,7 @@ export async function handleBalance(
   }
 
   return envelope(INTENT, fields, receiptDoc, {
-    answer: `${address} holds ${balance} ${symbol} on ${chain} (finalized block, ${votes}).`,
+    answer: `${address} holds ${balance} ${symbol} on ${chain} (finalized block, ${votes}). ${winner.balance > 0n ? "Funded" : "Zero balance"}; ${context.account_type}; outgoing transaction count ${context.transaction_count ?? "unavailable"}. ${context.context_scope}.`,
     verdict: "verified",
     confidence: pair.count === total ? 1.0 : 0.9,
     source: `EVM RPC quorum (${chain}, 2-of-${total}, finalized)`,

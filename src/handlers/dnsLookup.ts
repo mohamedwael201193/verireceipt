@@ -35,6 +35,7 @@
 // Every resolver erroring with none answering is 502
 // DNS_RESOLVERS_DOWN. No record is ever invented.
 
+import {withAnswerClass} from "../core/answerClass";
 import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -288,7 +289,7 @@ export async function handleDns(
     resolvers_used: verdicts.map((v) => v.resolver),
   };
 
-  return envelope(INTENT, fields, receiptDoc, {
+  return withAnswerClass(envelope(INTENT, fields, receiptDoc, {
     answer,
     verdict: hasRecord ? "verified" : "not_found",
     confidence,
@@ -297,5 +298,5 @@ export async function handleDns(
       `has_record is served only from conclusive resolver answers; any disagreement about existence ` +
       `or full resolver outage is refused (502), never guessed` +
       (degradedReasons.length ? `; degraded: ${degradedReasons.join("; ")}` : ""),
-  });
+  }), INTENT, {record_type:typeRaw,record_result:hasRecord?"found":"empty"});
 }

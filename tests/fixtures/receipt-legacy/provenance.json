@@ -1,0 +1,5 @@
+{
+  "source": "one public JSON-RPC eth_getTransactionReceipt read per URL recorded in capture",
+  "capture_sha256": "e92f37a3f4887a26f8dcc50d52f98b6d5d665c0de4e04213ed8aafec684752f3",
+  "standard": "https://eips.ethereum.org/EIPS/eip-658"
+}

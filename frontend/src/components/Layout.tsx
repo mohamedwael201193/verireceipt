@@ -325,7 +325,7 @@ export default function Layout() {
               </div>
             </div>
             <div>
-              <div className="kicker">// endpoints</div>
+              <div className="kicker">// selected endpoints · 14 declared intents</div>
               <div
                 className="mono"
                 style={{ display: "flex", flexDirection: "column", gap: 7, fontSize: 11.5, color: "var(--soft)" }}

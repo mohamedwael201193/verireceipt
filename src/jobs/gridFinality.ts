@@ -116,7 +116,7 @@
 // comment that "CAISO DAM [is] immutable once the hour has closed",
 // are withdrawn: they do not match §35.2 / §35.3.
 
-export type GridMarketKind = "CAISO" | "NYISO" | "ELERING";
+export type GridMarketKind = "CAISO" | "NYISO" | "ELERING" | "MISO" | "ERCOT";
 export type GridFinalityPhase = "provisional" | "correction" | "final";
 
 export interface Ymd {
@@ -162,6 +162,28 @@ export const GRID_REVALIDATE_PERIOD_MS = 12 * 60 * 60 * 1000;
 export const CAISO_TIME_ZONE = "America/Los_Angeles";
 export const NYISO_TIME_ZONE = "America/New_York";
 export const ELERING_TIME_ZONE = "Europe/Tallinn";
+// MISO labels its files in EST — fixed UTC-5 year-round, no DST
+// (MISO tariff uses Eastern Standard Time for market data even when
+// local time is EDT; the IANA "EST" zone is exactly that fixed
+// offset).
+export const MISO_TIME_ZONE = "EST";
+// MISO freshness-retention rule (NOT a tariff citation): the
+// day-ahead ExPost file for a delivery day is the operator's
+// post-market publication; rows are treated as settled one weekday
+// after the delivery day (a plain Mon-Fri rule — no MISO holiday
+// calendar is claimed), after which cache age alone is not a reason
+// to re-query. There is no separate correction window.
+export const MISO_DA_PROVISIONAL_BUSINESS_DAYS = 1;
+// ERCOT labels its cdr pages in CPT — Central Prevailing Time, the
+// DST-aware America/Chicago zone (CST in winter, CDT in summer).
+export const ERCOT_TIME_ZONE = "America/Chicago";
+// ERCOT freshness-retention rule (NOT a tariff citation): the dated
+// DAM SPP page for a delivery day is the operator's post-market
+// publication; rows are treated as settled one weekday after the
+// delivery day (a plain Mon-Fri rule — no ERCOT holiday calendar is
+// claimed), after which cache age alone is not a reason to re-query.
+// There is no separate correction window.
+export const ERCOT_DA_PROVISIONAL_BUSINESS_DAYS = 1;
 
 /** DAM §35.2: end of the 3rd Business Day following the Trading Day. */
 export const CAISO_DAM_PROVISIONAL_BUSINESS_DAYS = 3;
@@ -186,6 +208,8 @@ export function gridMarketKind(
   if (m === "CAISO" || m.startsWith("CAISO ")) return "CAISO";
   if (m === "NYISO") return "NYISO";
   if (m.startsWith("ELERING")) return "ELERING";
+  if (m === "MISO" || m.startsWith("MISO ")) return "MISO";
+  if (m === "ERCOT" || m.startsWith("ERCOT ")) return "ERCOT";
   if (windowMin === 60) return "CAISO";
   if (windowMin === 5) return "NYISO";
   if (windowMin === 15) return "ELERING";
@@ -380,17 +404,19 @@ export function nthFollowingBusinessDay(
   return counted === n ? cur : null;
 }
 
+// Intl construction is expensive. The fixed market zones reuse stateless formatters.
+// Bound other callers too so arbitrary zone names cannot grow retained state.
+const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
 function zonedParts(utcMs: number, timeZone: string): { ymd: Ymd; h: number; min: number; s: number } {
-  const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  });
+  let fmt = zoneFormatters.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    });
+    if (zoneFormatters.size >= 8) zoneFormatters.delete(zoneFormatters.keys().next().value!);
+    zoneFormatters.set(timeZone, fmt);
+  }
   const bag: Record<string, string> = {};
   for (const p of fmt.formatToParts(new Date(utcMs))) {
     if (p.type !== "literal") bag[p.type] = p.value;
@@ -433,18 +459,31 @@ export function endOfZonedDayUtc(ymd: Ymd, timeZone: string): number {
 function businessDayFn(kind: GridMarketKind): (ymd: Ymd) => boolean {
   if (kind === "CAISO") return isCaisoBusinessDay;
   if (kind === "NYISO") return isNyisoBusinessDay;
+  if (kind === "MISO") return isWeekdayBusinessDay;
+  // Plain Mon-Fri rule (ERCOT retention rule — no holiday calendar claimed).
+  if (kind === "ERCOT") return isWeekdayBusinessDay;
   return isEleringBusinessDay;
+}
+
+/** Plain Mon-Fri rule (MISO retention rule — no holiday calendar claimed). */
+function isWeekdayBusinessDay(ymd: Ymd): boolean {
+  const dow = new Date(Date.UTC(ymd.y, ymd.m - 1, ymd.d)).getUTCDay();
+  return dow >= 1 && dow <= 5;
 }
 
 function timeZoneOf(kind: GridMarketKind): string {
   if (kind === "CAISO") return CAISO_TIME_ZONE;
   if (kind === "NYISO") return NYISO_TIME_ZONE;
+  if (kind === "MISO") return MISO_TIME_ZONE;
+  if (kind === "ERCOT") return ERCOT_TIME_ZONE;
   return ELERING_TIME_ZONE;
 }
 
 function provisionalBusinessDays(kind: GridMarketKind): number {
   if (kind === "CAISO") return CAISO_DAM_PROVISIONAL_BUSINESS_DAYS;
   if (kind === "NYISO") return NYISO_RT_PROVISIONAL_BUSINESS_DAYS;
+  if (kind === "MISO") return MISO_DA_PROVISIONAL_BUSINESS_DAYS;
+  if (kind === "ERCOT") return ERCOT_DA_PROVISIONAL_BUSINESS_DAYS;
   return ELERING_PROVISIONAL_BUSINESS_DAYS;
 }
 
@@ -474,6 +513,12 @@ export function correctionCloseMs(kind: GridMarketKind, intervalStartMs: number)
   const trading = tradingDayYmd(intervalStartMs, tz);
   if (!trading) return null;
   if (kind === "NYISO") return provisionalCloseMs(kind, intervalStartMs);
+  // ERCOT: like MISO, no separate correction window — close equals the
+  // provisional close.
+  if (kind === "ERCOT") return provisionalCloseMs(kind, intervalStartMs);
+  // MISO: no separate correction window — close equals the
+  // provisional close (same shape as NYISO).
+  if (kind === "MISO") return provisionalCloseMs(kind, intervalStartMs);
   if (kind === "ELERING") {
     const endDay = addCalendarDays(trading, ELERING_CORRECTION_CALENDAR_DAYS);
     return endOfZonedDayUtc(endDay, tz);

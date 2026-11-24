@@ -1,0 +1,22 @@
+import {it,expect,vi,afterEach} from "vitest";
+import {mkdtempSync,readFileSync,rmSync} from "node:fs";
+import {join} from "node:path";
+const dir=mkdtempSync("/tmp/holder-failure-stale-");process.env.SQLITE_PATH=join(dir,"r.sqlite");
+import {handleTokenHolders,setTokenHoldersFetchForTests} from "../src/handlers/tokenHolders";
+import {getReceiptEvidence} from "../src/core/storage";
+import {sha256Hex} from "../src/core/receipt";
+afterEach(()=>{setTokenHoldersFetchForTests(null);vi.useRealTimers();});
+it("replays a real capture, then discloses synthetic 503 with exact evidence and timestamp",async()=>{
+ const raw=readFileSync(join(__dirname,"fixtures/holder-gecko/base-usdc.json"),"utf8");
+ const data=JSON.parse(raw).data.attributes;vi.useFakeTimers();vi.setSystemTime(new Date(Date.parse(data.holders.last_updated)+1000));
+ let fail=false,calls=0;setTokenHoldersFetchForTests(async()=>{calls++;if(fail)throw new Error("503");return raw;});
+ const first=await handleTokenHolders({chain:"base",token:"USDC"});await vi.advanceTimersByTimeAsync(300001);fail=true;
+ const stale=await handleTokenHolders({chain:"base",token:"USDC"});expect(calls).toBe(2);
+ expect(stale.stale).toBe(true);expect(stale.verdict).toBe("stale");expect(stale.confidence).toBe(0.5);expect(stale.stale_reason).toContain("request failed");
+ expect(stale.holders_count).toBe(data.holders.count);expect(stale.as_of).toBe(first.as_of);
+ expect(stale.answer).toContain("not a current count");expect(stale.answer).toContain("Upstream lookup failed");expect(stale.answer).not.toContain("HTTP 429");
+ const receipt=stale.receipt as any;expect(receipt.fetched_at).toBe((first.receipt as any).fetched_at);expect(receipt.raw_response_sha256).toBe(sha256Hex(raw));
+ const evidence=await getReceiptEvidence(receipt.receipt_id);expect(evidence.evidence!.toString()).toBe(raw);
+ await vi.advanceTimersByTimeAsync(300000);await expect(handleTokenHolders({chain:"base",token:"USDC"})).rejects.toMatchObject({code:"INDEXER_UNREACHABLE"});
+ rmSync(dir,{recursive:true,force:true});
+});

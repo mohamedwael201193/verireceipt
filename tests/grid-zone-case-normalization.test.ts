@@ -34,8 +34,12 @@ for (const hub of ["np15", "sp15", "zp26"]) {
 for (const s of ["", "caiso", "caiso system", "caiso-system", "caiso_system", "caiso system hub", "caiso day-ahead", "caiso day ahead", "caiso dam", "caiso da"]) {
   aliases.push([s, CAISO_SYSTEM_NODE]);
 }
+// "NYISO" moved from rejected to aliases by the reviewed natural-name
+// aliases commit (2026-11-23): bare "nyiso" is now answered for the N.Y.C.
+// load zone, mirroring bare "caiso" -> the NP15 hub.
+for (const [s, target] of [["NYISO", "N.Y.C."]] as Array<[string, string]>) aliases.push([s, target]);
 const rejected = [
-  "ORIGINAL_ZONE_SCOPE_CONTROL", "NYISO", "ELERING", "PJM", "ZONE_L", "CAISO:NP15", "ZONE-A",
+  "ORIGINAL_ZONE_SCOPE_CONTROL", "ELERING", "PJM", "ZONE_L", "CAISO:NP15", "ZONE-A",
   "EE_EXTRA", "TH_NP15_GEN-APND_EXTRA", "ZONE_A_EXTRA", "__proto__", "constructor", "toString",
   "f\u0131", "we\u017ft", "\u039dP15", "\uff26\uff29", "ZONE_A\u0000", "E\u200bE",
 ];

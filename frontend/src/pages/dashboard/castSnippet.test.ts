@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { DOC_SNIPPETS, REGISTRATION_CAST_SNIPPET as S } from "./docs";
 import {
+  SEPOLIA_REGISTERED_INTENTS,
   SEPOLIA_REGISTRATION_ID,
   SEPOLIA_YAML_HASH,
   SEPOLIA_YAML_PIN,
@@ -57,7 +58,7 @@ describe("registration cast snippet", () => {
   });
 
   it("approves exactly the live quoteMinerBond amount in Sepolia Test USDC", () => {
-    expect(S).toContain('"quoteMinerBond(uint256)(uint256,uint256)" 6');
+    expect(S).toContain('"quoteMinerBond(uint256)(uint256,uint256)" 45');
     expect(S).toContain('cast send "$USDC" "approve(address,uint256)" "$DIAMOND" "$BOND"');
     expect(S).not.toMatch(/MACHINA/);
   });
@@ -82,14 +83,7 @@ describe("registration cast snippet", () => {
     expect(S.match(/OLD_REGISTRATION_ID=\d+/g)).toEqual([`OLD_REGISTRATION_ID=${SEPOLIA_REGISTRATION_ID}`]);
     const intents = S.match(/INTENTS='(\[[^']*\])'/);
     expect(intents).not.toBeNull();
-    expect(JSON.parse(intents![1])).toEqual([
-      "ONCHAIN_TX_LOOKUP_GENERAL",
-      "REGULATORY_FILING_MONITOR_GENERAL",
-      "TVL_LOOKUP_GENERAL",
-      "OPTIMAL_EXECUTION_ROUTE_GENERAL",
-      "GRID_POWER_PRICE_GENERAL",
-      "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
-    ]);
+    expect(JSON.parse(intents![1])).toEqual([...SEPOLIA_REGISTERED_INTENTS]);
   });
 
   it("never embeds a private key, only the $PRIVATE_KEY placeholder", () => {

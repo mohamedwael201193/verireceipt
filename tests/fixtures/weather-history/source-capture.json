@@ -1,0 +1,29 @@
+{
+  "fetched_at": "2026-11-23T22:01:08.547Z",
+  "rows": [
+    {
+      "location": "Cairo",
+      "station": "EGE00147727",
+      "url": "https://www.ncei.noaa.gov/access/services/data/v1?dataset=daily-summaries&stations=EGE00147727&startDate=2026-11-01&endDate=2026-11-01&dataTypes=TMAX%2CTMIN%2CPRCP&format=json&units=metric&includeAttributes=true&includeStationName=true&includeStationLocation=true",
+      "status": 200,
+      "raw": "[\n]\n",
+      "elapsed_ms": 537
+    },
+    {
+      "location": "London",
+      "station": "UKM00003772",
+      "url": "https://www.ncei.noaa.gov/access/services/data/v1?dataset=daily-summaries&stations=UKM00003772&startDate=2026-11-01&endDate=2026-11-01&dataTypes=TMAX%2CTMIN%2CPRCP&format=json&units=metric&includeAttributes=true&includeStationName=true&includeStationLocation=true",
+      "status": 200,
+      "raw": "[\n]\n",
+      "elapsed_ms": 310
+    },
+    {
+      "location": "New York JFK",
+      "station": "USW00094789",
+      "url": "https://www.ncei.noaa.gov/access/services/data/v1?dataset=daily-summaries&stations=USW00094789&startDate=2026-11-01&endDate=2026-11-01&dataTypes=TMAX%2CTMIN%2CPRCP&format=json&units=metric&includeAttributes=true&includeStationName=true&includeStationLocation=true",
+      "status": 200,
+      "raw": "[\n{\"DATE\":\"2026-11-01\",\"STATION\":\"USW00094789\",\"LONGITUDE\":\"-73.7639\",\"PRCP_ATTRIBUTES\":\",,1,2400\",\"TMAX\":\"14.4\",\"ELEVATION\":\"2.7\",\"TMAX_ATTRIBUTES\":\",,1\",\"TMIN\":\"5.6\",\"PRCP\":\"0.0\",\"LATITUDE\":\"40.63915\",\"NAME\":\"JFK INTERNATIONAL AIRPORT, NY US\",\"TMIN_ATTRIBUTES\":\",,1\"}\n]\n",
+      "elapsed_ms": 181
+    }
+  ]
+}

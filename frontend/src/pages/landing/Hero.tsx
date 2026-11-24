@@ -7,6 +7,7 @@
 import { Link } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { useHealth } from "../../lib/hooks";
+import { DECLARED_INTENT_COUNT } from "../../lib/minerManifest";
 import { BOND_DISPLAY, DIAMOND_SHORT } from "../../config";
 
 const FIG_META = [
@@ -815,7 +816,7 @@ export function Hero() {
               <span className="l2">oracle.</span>
             </h1>
             <p className="hero-sub">
-              Deterministic intelligence for Telegraph Season II. Six keyless intents with raw SHA-256 receipts,
+              Deterministic intelligence for Telegraph Season II. {DECLARED_INTENT_COUNT} declared keyless intents with raw SHA-256 receipts,
               served from a Render web service, with strict fail-closed refusals. Live status below.
             </p>
             <div className="hero-cta-row">

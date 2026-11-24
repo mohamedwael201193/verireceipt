@@ -1,0 +1,114 @@
+{
+  "captured_at": "2026-11-23T22:20:11.997Z",
+  "chain": "ethereum",
+  "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  "block_tag": "finalized",
+  "legs": [
+    {
+      "url": "https://eth-mainnet.public.blastapi.io",
+      "responses": [
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                "data": "0x18160ddd"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x000000000000000000000000000000000000000000000000009d8fafad6ce7cc\"}"
+        },
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                "data": "0x313ce567"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000006\"}"
+        },
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                "data": "0x95d89b41"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000045553444300000000000000000000000000000000000000000000000000000000\"}"
+        }
+      ]
+    },
+    {
+      "url": "https://eth.drpc.org",
+      "responses": [
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                "data": "0x18160ddd"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x000000000000000000000000000000000000000000000000009d8fafad6ce7cc\"}"
+        },
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                "data": "0x313ce567"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000006\"}"
+        },
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                "data": "0x95d89b41"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000045553444300000000000000000000000000000000000000000000000000000000\"}"
+        }
+      ]
+    }
+  ]
+}

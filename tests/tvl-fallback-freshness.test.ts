@@ -123,6 +123,10 @@ for (const item of scenarios) describe(item.name, () => {
         return new Response(JSON.stringify(item.payload), { status: 200 });
       if (url === source.provenance.chain_url && item.name.startsWith('chain'))
         return new Response(JSON.stringify(item.payload), { status: 200 });
+      // Slice A part 2: the fresh /v2/chains read gets a controlled outage,
+      // so these pins exercise the degraded historical path they describe.
+      if (url === 'https://api.llama.fi/v2/chains')
+        return new Response('', { status: 503 });
       throw new Error('Unexpected source in offline freshness control');
     };
     const out = await handleTvl({ protocol: item.query }, { fetchImpl });
@@ -152,7 +156,7 @@ for (const item of scenarios) describe(item.name, () => {
     } finally { await app.close(); }
     expect(calls).toEqual(item.name.startsWith('protocol')
       ? [`https://api.llama.fi/tvl/${source.protocol_entry.slug}`, source.provenance.protocol_url]
-      : [source.provenance.chain_url]);
+      : ['https://api.llama.fi/v2/chains', source.provenance.chain_url]);
   });
 });
 it('complete captured chain history still reports its genuine zero at capture time', () => {

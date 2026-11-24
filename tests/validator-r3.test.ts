@@ -66,7 +66,9 @@ function beaconBody(
       index: String(index),
       balance: "32083979186",
       status,
-      validator: { effective_balance: effectiveBalance, slashed: false },
+      validator: { effective_balance: effectiveBalance, slashed: false,
+        pubkey: "0x" + "ab".repeat(48), activation_eligibility_epoch: "0", activation_epoch: "0",
+        exit_epoch: "18446744073709551615", withdrawable_epoch: "18446744073709551615" },
     },
     execution_optimistic: optimistic,
     finalized: true,
@@ -147,7 +149,7 @@ describe("A9 r3 honest finalized-root labelling", () => {
     >;
     expect(res.verdict).toBe("verified");
     expect(res.finalized_state_root).toBe(TEST_ROOT_A);
-    expect(String(res.answer)).toContain(`at finalized state root ${TEST_ROOT_A}`);
+    expect(String(res.answer)).toContain(`at state root ${TEST_ROOT_A}`);
     expect((res.receipt as Receipt).receipt_id).toBeTruthy();
   });
 

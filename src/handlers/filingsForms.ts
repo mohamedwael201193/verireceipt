@@ -24,7 +24,7 @@ const DASH_RE = /[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g;
 /** Slash look-alikes folded to "/" (fraction slash, division slash, fullwidth solidus). */
 const SLASH_RE = /[\u2044\u2215\uFF0F]/g;
 
-export type FormSpec = { kind: 'none' } | { kind: 'form'; form: string };
+export type FormSpec = { kind: 'none' } | { kind: 'form'; form: string } | { kind: 'forms'; forms: string[] };
 
 // ---------------------------------------------------------------------------
 // Form vocabulary — CLOSED (A1 round 8). Every accepted form is a value
@@ -267,8 +267,7 @@ export function canonicalFormOrThrow(raw: string): string {
 
 /**
  * The explicit `form_type` / `form` query value. Absent / empty / "all"
- * / "any" -> { kind: 'none' }. A list ("10-K, 10-Q") -> 422
- * MULTIPLE_FORM_TYPES. Anything else canonicalises or throws.
+ * / "any" -> { kind: 'none' }. An explicit finite list selects a union.
  */
 export function parseFormType(raw: unknown, field = 'form_type'): FormSpec {
   if (raw === undefined) return { kind: 'none' };
@@ -300,7 +299,10 @@ export function parseFormType(raw: unknown, field = 'form_type'): FormSpec {
     }
   }
   if (/[,;|&+]|\bAND\b|\bOR\b/i.test(folded)) {
-    throw unprocessable('MULTIPLE_FORM_TYPES', `Form type "${raw}" names more than one form; ask for one EDGAR form at a time`);
+    const parts = folded.split(/[,;|&+]|\bAND\b|\bOR\b/i).map(p => p.trim());
+    if (parts.length < 2 || parts.length > 10 || parts.some(p => !p)) throw unprocessable('MULTIPLE_FORM_TYPES', 'form list must contain2..10 nonempty exact EDGAR forms');
+    const forms = [...new Set(parts.map(canonicalFormOrThrow))];
+    return forms.length === 1 ? { kind: 'form', form: forms[0] } : { kind: 'forms', forms };
   }
   return { kind: 'form', form: canonicalFormOrThrow(raw) };
 }
@@ -514,18 +516,20 @@ export function formFamily(form: string): readonly string[] {
   return FAMILY_OF.get(form) ?? [form];
 }
 
-/** One form from several sources: all must agree (same form or same renamed family), else 422 CONFLICTING_FORM_TYPE. */
+/** Separate fields must name the same exact form-family set; never silently widen. */
 export function mergeFormSpecs(sources: Array<{ field: string; forms: string[] }>): FormSpec {
-  const all = sources.flatMap((s) => s.forms.map((f) => ({ field: s.field, form: f })));
-  if (all.length === 0) return { kind: 'none' };
-  const distinct = [...new Set(all.map((x) => formFamily(x.form)[0]))];
-  if (distinct.length > 1) {
-    throw unprocessable(
-      'CONFLICTING_FORM_TYPE',
-      `More than one form type was requested (${all.map((x) => `${x.field}: ${x.form}`).join(', ')}); ask for one EDGAR form at a time`,
-    );
+  const nonempty = sources.filter(s => s.forms.length);
+  if (!nonempty.length) return { kind: 'none' };
+  const families = (forms: string[]) => [...new Set(forms.map(f => formFamily(f)[0]))].sort();
+  const first = families(nonempty[0].forms);
+  if (nonempty.some(s => JSON.stringify(families(s.forms)) !== JSON.stringify(first))) {
+    throw unprocessable('CONFLICTING_FORM_TYPE', 'Form filters in separate fields name different form sets; use the same explicit set');
   }
-  return { kind: 'form', form: all[0].form };
+  if (nonempty.some(s => !['form_type', 'form'].includes(s.field) && families(s.forms).length > 1)) {
+    throw unprocessable('MULTIPLE_FORM_TYPES', 'Pass multiple forms as an explicit form_type list');
+  }
+  const forms = [...new Set(nonempty[0].forms)];
+  return forms.length === 1 ? { kind: 'form', form: forms[0] } : { kind: 'forms', forms };
 }
 
 /**
@@ -540,6 +544,6 @@ export function mergeFormSpecs(sources: Array<{ field: string; forms: string[] }
  */
 export function filterFilingsByForm<T extends { form: string }>(filings: T[], spec: FormSpec): T[] {
   if (spec.kind === 'none') return filings;
-  const fam = formFamily(spec.form);
+  const fam = spec.kind === "forms" ? spec.forms.flatMap(f => [...formFamily(f)]) : formFamily(spec.form);
   return filings.filter((f) => fam.includes(f.form));
 }

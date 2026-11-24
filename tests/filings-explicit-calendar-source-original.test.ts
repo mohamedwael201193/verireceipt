@@ -28,9 +28,23 @@ for (const label of [`${source.issuer.start}..${source.issuer.end}`, `calendar q
     expect(parsePeriod(label)).toMatchObject({ start: source.issuer.start, end: source.issuer.end });
   });
 }
-for (const label of [`Q${source.issuer.calendar_quarter} ${year}`, `calendar Q0 ${year}`, `calendar Q5 ${year}`, `calendar Q4 ${year} or calendar Q3 ${year}`]) {
+for (const label of [`calendar Q0 ${year}`, `calendar Q5 ${year}`, `calendar Q4 ${year} or calendar Q3 ${year}`]) {
   it(`does not infer an unqualified or invalid quarter: ${label}`, () => {
     expect(() => parsePeriod(label)).toThrow();
+  });
+}
+// F1: an unqualified Q<n> year is now read as the CALENDAR quarter with the
+// resolved range disclosed in the label; the fiscal boundary below is unchanged.
+{
+  const q = source.issuer.calendar_quarter as number;
+  const qStart = new Date(Date.UTC(year, (q - 1) * 3, 1)).toISOString().slice(0, 10);
+  const qEnd = new Date(Date.UTC(year, q * 3, 0)).toISOString().slice(0, 10);
+  it(`accepts an unqualified quarter as the disclosed calendar quarter: Q${q} ${year}`, () => {
+    expect(parsePeriod(`Q${q} ${year}`)).toEqual({
+      start: qStart, end: qEnd, label: `Q${q} ${year} (calendar quarter ${qStart}..${qEnd})`,
+    });
+    expect((source.filing_dates as string[]).filter(date => date >= qStart && date <= qEnd))
+      .toHaveLength(source.issuer.expected_count);
   });
 }
 for (const label of [`fiscal Q4 ${year}`, `calendar fiscal Q4 ${year}`, `FY ${year} Q4`]) {

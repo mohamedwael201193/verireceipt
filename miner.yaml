@@ -11,7 +11,13 @@ description: 'Zero-LLM deterministic provider with a SHA-256 receipt on every an
   supported CAISO/NYISO/Elering grid prices, and finalized-root Ethereum validator effective balances. Unsupported,
   ambiguous or unavailable evidence is refused rather than guessed. Additional receipt-backed endpoints provide
   named-chain gas and balances, explicit-chain ERC20 supply, World Bank unemployment, DNS record observations,
-  dated currency conversion, TLS certificate validity and DNS response status. Declared source, scope and
+  dated currency conversion, TLS certificate validity and DNS response status. Thirty-one further receipt-backed
+  endpoints provide academic search, Chainlink reserve attestations, GitHub CI patch verification, SEC corporate
+  registry lookup, cross-chain transaction-state agreement, CVE records, resolved prediction-market outcomes, market
+  data, current FX rates, IP geolocation, pool liquidity, malware and threat-intelligence blocklist reads, news
+  headlines and search, card BIN lookup, driving ETAs, sanctions screening, delivered-uptime reads, sports scores,
+  US equity quotes, token holder counts, transaction risk reads, US airport disruption status, URL safety reads, EU
+  VAT verification, CVE triage and weather forecasts. Declared source, scope and
   freshness limits apply.'
 base_url: https://verireceipt.onrender.com
 
@@ -68,6 +74,46 @@ semantics:
     - CURRENCY_EXCHANGE_CONVERT
     - SSL_VERIFICATION_CERT
     - EMAIL_SECURITY_GENERAL
+    - ACADEMIC_SEARCH_GENERAL
+    - ASSET_RESERVE_ATTESTATION_GENERAL
+    - CODE_PATCH_VERIFY_GENERAL
+    - CORPORATE_REGISTRY_LOOKUP_GENERAL
+    - CROSS_CHAIN_STATE_VERIFY_GENERAL
+    - CRYPTO_PRICE_USD
+    - CVE_LOOKUP_CVSS
+    - EVENT_OUTCOME_RESOLUTION_GENERAL
+    - FINANCIAL_DATA_GENERAL
+    - FX_NOW_CAD
+    - FX_NOW_EUR
+    - FX_NOW_SEK
+    - IP_GEOLOCATION_GENERAL
+    - LIQUIDITY_DEPTH_VERIFY_GENERAL
+    - MALWARE_DETECTION_HASH
+    - MINING_HASHPRICE_VERIFY_GENERAL
+    - NEWS_HEADLINES_GENERAL
+    - NEWS_SEARCH_GENERAL
+    - PAYMENT_METHOD_VERIFY_GENERAL
+    - ROUTE_ETA_GENERAL
+    - SANCTIONS_SCREENING_MATCH_GENERAL
+    - SLA_COMPLIANCE_GENERAL
+    - SPORTS_SCORE_GENERAL
+    - STORM_ALERT_GENERAL
+    - STOCK_PRICE_US_EQUITY
+    - THREAT_INTELLIGENCE_INDICATOR
+    - TOKEN_HOLDER_COUNT_GENERAL
+    - TRANSACTION_RISK_GENERAL
+    - TRAVEL_DISRUPTION_GENERAL
+    - URL_SAFE_GENERAL
+    - URL_SCAN_VERDICT
+    - VENDOR_VERIFY_GENERAL
+    - VULNERABILITY_TRIAGE_GENERAL
+    - WEATHER_CHECK_TEMPERATURE
+    - WEATHER_FORECAST_GENERAL
+    - ONCHAIN_METRIC_VERIFY_GENERAL
+    - AIR_QUALITY_INDEX_GENERAL
+    - API_HEALTH_CHECK_GENERAL
+    - SERVER_UPTIME_MONITOR_GENERAL
+    - SECURITY_REVIEW_GENERAL
   signal_mapping:
     confidence_field: confidence
     label_field: answer
@@ -122,8 +168,9 @@ endpoints:
           type: string
           intents:
           - REGULATORY_FILING_MONITOR_GENERAL
-          description: 'An inclusive filing-date period: last N months, a calendar year, an explicit calendar
-            Q1/Q2/Q3/Q4 with year, a valid quarter ending YYYY-MM-DD (March 31, June 30, September 30 or December
+          description: 'An inclusive filing-date period: last N months, a calendar year, year to date
+            (YTD, January 1 of the current calendar year through today), an explicit calendar
+            Q1/Q2/Q3/Q4 with year (e.g. "Q3 2026"), a valid quarter ending YYYY-MM-DD (March 31, June 30, September 30 or December
             31), YYYY-MM-DD..YYYY-MM-DD, or a supported year/date range using to or through. Bare Q1-Q4 without
             calendar qualification and company fiscal-year or fiscal-quarter requests are rejected.'
         optional:
@@ -180,11 +227,10 @@ endpoints:
             mainnet. Separately implemented native API extension pairs are not accepted values for this typed
             contract.'
           accepted_fields:
-          - value: ETH/USDC
-            intents:
-            - OPTIMAL_EXECUTION_ROUTE_GENERAL
-            description: Sell exactly 1 ETH for USDC on Ethereum mainnet; amount_out is USDC base units (6 decimals).
-
+            ETH/USDC:
+              intents:
+              - OPTIMAL_EXECUTION_ROUTE_GENERAL
+              description: Sell exactly 1 ETH for USDC on Ethereum mainnet; amount_out is USDC base units (6 decimals).
   - path: /v1/grid-price
     external_path: /v1/grid-price
     method: GET
@@ -317,10 +363,10 @@ endpoints:
           description: Copy the requested indicator without inventing or silently defaulting identity or
             scope.
           accepted_fields:
-          - value: unemployment rate
-            intents:
-            - MACRO_ECONOMIC_INDICATOR_GENERAL
-            description: Supported canonical value.
+            unemployment rate:
+              intents:
+              - MACRO_ECONOMIC_INDICATOR_GENERAL
+              description: Supported canonical value.
         - name: country
           type: string
           intents:
@@ -356,46 +402,46 @@ endpoints:
           description: Copy the requested record_type without inventing or silently defaulting identity
             or scope.
           accepted_fields:
-          - value: A
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: AAAA
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: CNAME
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: MX
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: NS
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: TXT
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: SOA
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: CAA
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: SRV
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
-          - value: PTR
-            intents:
-            - DNS_RECORD_LOOKUP_GENERAL
-            description: Supported canonical value.
+            A:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            AAAA:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            CNAME:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            MX:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            NS:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            TXT:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            SOA:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            CAA:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            SRV:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
+            PTR:
+              intents:
+              - DNS_RECORD_LOOKUP_GENERAL
+              description: Supported canonical value.
   - path: /v1/fx
     external_path: /v1/fx
     method: GET
@@ -461,6 +507,697 @@ endpoints:
           - EMAIL_SECURITY_GENERAL
           description: Copy the requested record_type without inventing or silently defaulting identity
             or scope.
+
+  - path: /v1/academic-search
+    external_path: /v1/academic-search
+    method: GET
+    description: Searches the Crossref scholarly index for works matching a topic and returns the top
+      titles with their DOIs, with a SHA-256 receipt over the exact upstream body.
+    intents:
+    - ACADEMIC_SEARCH_GENERAL
+    params:
+      query:
+        required:
+        - name: query
+          type: string
+          intents:
+          - ACADEMIC_SEARCH_GENERAL
+          description: Topic or question to search scholarly papers for
+
+  - path: /v1/reserve-attestation
+    external_path: /v1/reserve-attestation
+    method: GET
+    description: The latest Chainlink Proof-of-Reserve attestation for a supported asset, read on
+      ethereum mainnet through the RPC quorum, with a SHA-256 receipt.
+    intents:
+    - ASSET_RESERVE_ATTESTATION_GENERAL
+    params:
+      query:
+        required:
+        - name: asset
+          type: string
+          intents:
+          - ASSET_RESERVE_ATTESTATION_GENERAL
+          description: "The tokenized asset: its symbol or contract address"
+
+  - path: /v1/code-patch
+    external_path: /v1/code-patch
+    method: GET
+    description: "Verifies a GitHub patch by reading its real CI results from the GitHub API: check runs plus the combined commit status for the exact ref. GitHub patches only."
+    intents:
+    - CODE_PATCH_VERIFY_GENERAL
+    params:
+      query:
+        required:
+        - name: patch
+          type: string
+          intents:
+          - CODE_PATCH_VERIFY_GENERAL
+          description: Repository and commit, pull request or CI run to check
+
+  - path: /v1/corporate-registry
+    external_path: /v1/corporate-registry
+    method: GET
+    description: Looks up a US public company in the SEC's EDGAR registry, the only jurisdiction this
+      endpoint covers. Active means a filing within the last 400 days.
+    intents:
+    - CORPORATE_REGISTRY_LOOKUP_GENERAL
+    params:
+      query:
+        required:
+        - name: company
+          type: string
+          intents:
+          - CORPORATE_REGISTRY_LOOKUP_GENERAL
+          description: Company name or registry identifier
+        - name: jurisdiction
+          type: string
+          intents:
+          - CORPORATE_REGISTRY_LOOKUP_GENERAL
+          description: Country or jurisdiction of registration
+
+  - path: /v1/cross-chain-state
+    external_path: /v1/cross-chain-state
+    method: GET
+    description: Resolves one transaction hash independently on each listed chain through the 2-of-N
+      RPC quorum and reports per-chain agreement; disagreement is reported, never averaged.
+    intents:
+    - CROSS_CHAIN_STATE_VERIFY_GENERAL
+    params:
+      query:
+        required:
+        - name: reference
+          type: string
+          intents:
+          - CROSS_CHAIN_STATE_VERIFY_GENERAL
+          description: Address, transfer or transaction to check
+        - name: chains
+          type: string
+          intents:
+          - CROSS_CHAIN_STATE_VERIFY_GENERAL
+          description: Source and destination chains
+
+  - path: /v1/cve
+    external_path: /v1/cve
+    method: GET
+    description: The published CVSS v3.1 assessment for a CVE from the CVE record, with assessor,
+      version and vector disclosed. NVD is opt-in only and off by default.
+    intents:
+    - CVE_LOOKUP_CVSS
+    params:
+      query:
+        required:
+        - name: cve_id
+          type: string
+          intents:
+          - CVE_LOOKUP_CVSS
+          description: CVE identifier, e.g. CVE-2024-3094
+
+  - path: /v1/event-outcome
+    external_path: /v1/event-outcome
+    method: GET
+    description: "The resolved outcome of a prediction-market event from the Polymarket gamma API: closed and UMA-resolved binary Yes/No markets with a clean 1/0 price pair only. One venue's resolution record, not an independent determination of the underlying event."
+    intents:
+    - EVENT_OUTCOME_RESOLUTION_GENERAL
+    params:
+      query:
+        required:
+        - name: event
+          type: string
+          intents:
+          - EVENT_OUTCOME_RESOLUTION_GENERAL
+          description: The event or question to resolve
+
+  - path: /v1/financial-data
+    external_path: /v1/financial-data
+    method: GET
+    description: Market capitalisation and trading volume for a supported asset from named, keyless,
+      measured sources, with a SHA-256 receipt over the exact upstream bodies.
+    intents:
+    - FINANCIAL_DATA_GENERAL
+    params:
+      query:
+        required:
+        - name: asset
+          type: string
+          intents:
+          - FINANCIAL_DATA_GENERAL
+          description: Company, token or market
+
+  - path: /v1/fx-now
+    external_path: /v1/fx-now
+    method: GET
+    description: The current CAD, EUR and SEK rates vs the US dollar from named keyless sources
+      with quoted observation times, with a SHA-256 receipt.
+    intents:
+    - FX_NOW_CAD
+    - FX_NOW_EUR
+    - FX_NOW_SEK
+    params:
+      query:
+        required:
+        - name: currency
+          type: string
+          intents:
+          - FX_NOW_CAD
+          - FX_NOW_EUR
+          - FX_NOW_SEK
+          description: Currency code priced against the US dollar, one of CAD, EUR, SEK
+
+
+  - path: /v1/ip-geolocation
+    external_path: /v1/ip-geolocation
+    method: GET
+    description: Resolves an IP address to its approximate location from two keyless public
+      geolocation services. Approximate network geography, not a physical address.
+    intents:
+    - IP_GEOLOCATION_GENERAL
+    params:
+      query:
+        required:
+        - name: ip
+          type: string
+          intents:
+          - IP_GEOLOCATION_GENERAL
+          description: IP address
+
+  - path: /v1/liquidity
+    external_path: /v1/liquidity
+    method: GET
+    description: Total reserve liquidity in USD for a named pool and chain from the pinned-block
+      indexed observation, not executable depth at a slippage threshold.
+    intents:
+    - LIQUIDITY_DEPTH_VERIFY_GENERAL
+    params:
+      query:
+        required:
+        - name: pool
+          type: string
+          intents:
+          - LIQUIDITY_DEPTH_VERIFY_GENERAL
+          description: DEX pool address or name
+        - name: chain
+          type: string
+          intents:
+          - LIQUIDITY_DEPTH_VERIFY_GENERAL
+          description: Chain of the pool
+
+  - path: /v1/malware-hash
+    external_path: /v1/malware-hash
+    method: GET
+    description: Whether a file hash, domain or IP is flagged as malicious by the named keyless
+      threat-intelligence sources. Absence from a blocklist is not clearance, and an unknown hash is
+      not a clean verdict.
+    intents:
+    - MALWARE_DETECTION_HASH
+    params:
+      query:
+        required:
+        - name: indicator
+          type: string
+          intents:
+          - MALWARE_DETECTION_HASH
+          description: Domain, IP address or file hash
+
+  - path: /v1/news-headlines
+    external_path: /v1/news-headlines
+    method: GET
+    description: The top headline for a topic from the two named indexes (Hacker News via Algolia,
+      current BBC News World RSS) inside the requested window; no matching item is an honest refusal.
+    intents:
+    - NEWS_HEADLINES_GENERAL
+    params:
+      query:
+        required:
+        - name: topic
+          type: string
+          intents:
+          - NEWS_HEADLINES_GENERAL
+          description: Topic or region
+
+  - path: /v1/news-search
+    external_path: /v1/news-search
+    method: GET
+    description: A deterministic digest of what the two named news indexes carry for a query, with a
+      SHA-256 receipt over the exact upstream bodies.
+    intents:
+    - NEWS_SEARCH_GENERAL
+    params:
+      query:
+        required:
+        - name: query
+          type: string
+          intents:
+          - NEWS_SEARCH_GENERAL
+          description: Topic, entity or event
+
+  - path: /v1/payment-method
+    external_path: /v1/payment-method
+    method: GET
+    description: Verifies a card BIN (bank identification number, the first 6-8 digits of a card
+      number) against a public BIN database. A recognized BIN is not a card validity or funds check.
+    intents:
+    - PAYMENT_METHOD_VERIFY_GENERAL
+    params:
+      query:
+        required:
+        - name: bin
+          type: integer
+          intents:
+          - PAYMENT_METHOD_VERIFY_GENERAL
+          description: Card number prefix (BIN, the first 6 to 8 digits); a job's params are public,
+            so never a full card number
+
+  - path: /v1/route-eta
+    external_path: /v1/route-eta
+    method: GET
+    description: Driving ETA between two coordinates from the public OSRM demo server, with a SHA-256
+      receipt over the exact upstream response body.
+    intents:
+    - ROUTE_ETA_GENERAL
+    params:
+      query:
+        required:
+        - name: origin
+          type: string
+          intents:
+          - ROUTE_ETA_GENERAL
+          description: Start point
+        - name: destination
+          type: string
+          intents:
+          - ROUTE_ETA_GENERAL
+          description: End point
+
+  - path: /v1/sanctions-screen
+    external_path: /v1/sanctions-screen
+    method: GET
+    description: Screens a person or entity name against two keyless public sanctions lists, the OFAC
+      SDN list with its published aliases and a second named list. A non-match is not clearance.
+    intents:
+    - SANCTIONS_SCREENING_MATCH_GENERAL
+    params:
+      query:
+        required:
+        - name: name
+          type: string
+          intents:
+          - SANCTIONS_SCREENING_MATCH_GENERAL
+          description: Person or entity name
+
+  - path: /v1/sla-compliance
+    external_path: /v1/sla-compliance
+    method: GET
+    description: The delivered uptime for a named service over a period from its public status
+      history. Where no machine-readable SLA target is published, sla_target_pct and compliant are
+      null rather than guessed.
+    intents:
+    - SLA_COMPLIANCE_GENERAL
+    params:
+      query:
+        required:
+        - name: service
+          type: string
+          intents:
+          - SLA_COMPLIANCE_GENERAL
+          description: The service
+        - name: period
+          type: string
+          intents:
+          - SLA_COMPLIANCE_GENERAL
+          description: Period to measure, e.g. last 30 days
+
+  - path: /v1/sports-score
+    external_path: /v1/sports-score
+    method: GET
+    description: The score of a game from the official league scoreboards for the dates searched (NHL
+      and MLB). A game not found on those scoreboards is refused, not approximated.
+    intents:
+    - SPORTS_SCORE_GENERAL
+    params:
+      query:
+        required:
+        - name: game
+          type: string
+          intents:
+          - SPORTS_SCORE_GENERAL
+          description: Teams or fixture
+
+  - path: /v1/stock-price
+    external_path: /v1/stock-price
+    method: GET
+    description: The latest quote for a US-listed equity from the Yahoo Finance chart API, with a
+      SHA-256 receipt over the exact upstream body.
+    intents:
+    - STOCK_PRICE_US_EQUITY
+    params:
+      query:
+        required:
+        - name: ticker
+          type: string
+          intents:
+          - STOCK_PRICE_US_EQUITY
+          description: Stock ticker, e.g. AAPL
+
+  - path: /v1/threat-indicator
+    external_path: /v1/threat-indicator
+    method: GET
+    description: Whether an IP, domain, URL or file hash appears on the named keyless public
+      threat-intelligence blocklists. Absence from those lists is not clearance.
+    intents:
+    - THREAT_INTELLIGENCE_INDICATOR
+    params:
+      query:
+        required:
+        - name: indicator
+          type: string
+          intents:
+          - THREAT_INTELLIGENCE_INDICATOR
+          description: IP address, domain, hash, CVE or actor
+
+  - path: /v1/token-holders
+    external_path: /v1/token-holders
+    method: GET
+    description: The number of distinct addresses holding an ERC-20 token from a keyless public block
+      indexer, with a SHA-256 receipt over the exact upstream body.
+    intents:
+    - TOKEN_HOLDER_COUNT_GENERAL
+    params:
+      query:
+        required:
+        - name: token
+          type: string
+          intents:
+          - TOKEN_HOLDER_COUNT_GENERAL
+          description: Token contract address or name
+        - name: chain
+          type: string
+          intents:
+          - TOKEN_HOLDER_COUNT_GENERAL
+          description: Chain of the token
+
+  - path: /v1/transaction-risk
+    external_path: /v1/transaction-risk
+    method: GET
+    description: A deterministic, fully-disclosed risk read of an ethereum mainnet transaction from
+      named in-repo-verified sources. A low score is not a safety guarantee.
+    intents:
+    - TRANSACTION_RISK_GENERAL
+    params:
+      query:
+        required:
+        - name: transaction
+          type: string
+          intents:
+          - TRANSACTION_RISK_GENERAL
+          description: Transaction hash or details
+
+  - path: /v1/travel-disruption
+    external_path: /v1/travel-disruption
+    method: GET
+    description: US airport-level disruption status from the FAA NAS status feed, with a SHA-256
+      receipt over the exact upstream body.
+    intents:
+    - TRAVEL_DISRUPTION_GENERAL
+    params:
+      query:
+        required:
+        - name: route_or_flight
+          type: string
+          intents:
+          - TRAVEL_DISRUPTION_GENERAL
+          description: Flight, route or station
+
+  - path: /v1/url-safe
+    external_path: /v1/url-safe
+    method: GET
+    description: Safety verdict for a URL from the named keyless public threat-intelligence
+      blocklists. Absence from those lists is not clearance.
+    intents:
+    - URL_SAFE_GENERAL
+    params:
+      query:
+        required:
+        - name: url
+          type: string
+          intents:
+          - URL_SAFE_GENERAL
+          description: The URL
+
+  - path: /v1/url-scan
+    external_path: /v1/url-scan
+    method: GET
+    description: Whether a URL is safe to visit, with no phishing or malware, per the named keyless
+      blocklists screening the exact URL and its host. Absence from those lists is not clearance.
+    intents:
+    - URL_SCAN_VERDICT
+    params:
+      query:
+        required:
+        - name: url
+          type: string
+          intents:
+          - URL_SCAN_VERDICT
+          description: The URL
+
+  - path: /v1/vendor-verify
+    external_path: /v1/vendor-verify
+    method: GET
+    description: Verifies an EU VAT registration number against the European Commission's VIES
+      service. A valid VAT number is not proof of the vendor's identity.
+    intents:
+    - VENDOR_VERIFY_GENERAL
+    params:
+      query:
+        required:
+        - name: vendor
+          type: string
+          intents:
+          - VENDOR_VERIFY_GENERAL
+          description: Vendor or company
+        - name: vat_number
+          type: string
+          intents:
+          - VENDOR_VERIFY_GENERAL
+          description: VAT or tax identifier
+
+  - path: /v1/vulnerability-triage
+    external_path: /v1/vulnerability-triage
+    method: GET
+    description: "A deterministic triage read for a CVE from the published record: severity, vector and references, with a SHA-256 receipt."
+    intents:
+    - VULNERABILITY_TRIAGE_GENERAL
+    params:
+      query:
+        required:
+        - name: cve_id
+          type: string
+          intents:
+          - VULNERABILITY_TRIAGE_GENERAL
+          description: CVE identifier
+
+  - path: /v1/weather-forecast
+    external_path: /v1/weather-forecast
+    method: GET
+    description: Forecast high and low temperature, peak precipitation probability and dominant
+      condition for a place over a forward window from the Open-Meteo API, with a SHA-256 receipt.
+    intents:
+    - WEATHER_FORECAST_GENERAL
+    params:
+      query:
+        required:
+        - name: location
+          type: string
+          intents:
+          - WEATHER_FORECAST_GENERAL
+          description: City or place name
+        optional:
+        - name: window_hours
+          type: integer
+          intents:
+          - WEATHER_FORECAST_GENERAL
+          description: Forecast window
+
+  - path: /v1/crypto-price
+    external_path: /v1/crypto-price
+    method: GET
+    description: Current USD spot price for one crypto symbol from the Coinbase public spot API,
+      with a SHA-256 receipt. One named exchange's last spot quote, not an index or VWAP; symbols
+      the source does not list are refused, never guessed.
+    intents:
+    - CRYPTO_PRICE_USD
+    params:
+      query:
+        required:
+        - name: symbol
+          type: string
+          intents:
+          - CRYPTO_PRICE_USD
+          description: Asset symbol, e.g. BTC
+
+  - path: /v1/mining-hashprice
+    external_path: /v1/mining-hashprice
+    method: GET
+    description: Bitcoin hashprice at the current tip computed from measured inputs (mempool.space
+      1-week hashrate and per-block fee series, deterministic subsidy, Coinbase spot), with a SHA-256
+      receipt. A spot value from current measured series, never a forecast; a block_height other
+      than the current tip is an honest refusal, not an interpolated answer.
+    intents:
+    - MINING_HASHPRICE_VERIFY_GENERAL
+    params:
+      query:
+        optional:
+        - name: block_height
+          type: integer
+          intents:
+          - MINING_HASHPRICE_VERIFY_GENERAL
+          description: Bitcoin block height; only the current tip is served
+
+  - path: /v1/storm-alert
+    external_path: /v1/storm-alert
+    method: GET
+    description: Storm risk for a US point over a forward window from issued NWS alert products only,
+      with a SHA-256 receipt. The score is the worst severity among active issued products expiring
+      inside the window; no forecast model output is scored, and peak gust and precipitation numerics
+      are not carried by issued products. US coverage only.
+    intents:
+    - STORM_ALERT_GENERAL
+    params:
+      query:
+        required:
+        - name: location
+          type: string
+          intents:
+          - STORM_ALERT_GENERAL
+          description: Point as latitude,longitude (US coverage)
+        optional:
+        - name: window_hours
+          type: integer
+          intents:
+          - STORM_ALERT_GENERAL
+          description: Assessment window in hours, 1-240, default 24
+
+  - path: /v1/weather-check
+    external_path: /v1/weather-check
+    method: GET
+    description: Measured air temperature for a place from the nearest NOAA aviationweather.gov METAR
+      station, at most 90 minutes old, with a SHA-256 receipt. A measured station observation, not a
+      forecast, reanalysis or city-wide value; the station binding is explicit in the evidence.
+    intents:
+    - WEATHER_CHECK_TEMPERATURE
+    params:
+      query:
+        required:
+        - name: location
+          type: string
+          intents:
+          - WEATHER_CHECK_TEMPERATURE
+          description: City or place name, or latitude,longitude
+
+  - path: /v1/onchain-metric
+    external_path: /v1/onchain-metric
+    method: GET
+    description: 'Reads native balance and nonce for one EVM address at an explicit finalized block on ethereum,
+      polygon or arbitrum. At least two configured public RPC sources must agree on chain identity, block hash,
+      balance and nonce; the block hash is checked before and after reads. balance_gwei is Gwei (not ETH or POL),
+      balance_wei is exact base units and tx_count is sent-transaction nonce, not received transfers. No pending,
+      latest or unfinalized snapshot is served. Missing quorum is an honest refusal.'
+    intents:
+    - ONCHAIN_METRIC_VERIFY_GENERAL
+    params:
+      query:
+        required:
+        - name: address
+          type: string
+          intents:
+          - ONCHAIN_METRIC_VERIFY_GENERAL
+          description: Explicit 0x-prefixed 20-byte EVM wallet address.
+        - name: block
+          type: integer
+          intents:
+          - ONCHAIN_METRIC_VERIFY_GENERAL
+          description: Finalized block number from 0 to 1000000000000; no latest or pending tag.
+        optional:
+        - name: chain
+          type: string
+          intents:
+          - ONCHAIN_METRIC_VERIFY_GENERAL
+          description: 'ethereum (default), polygon or arbitrum.'
+        - name: metric
+          type: string
+          intents:
+          - ONCHAIN_METRIC_VERIFY_GENERAL
+          description: 'balance (default) or tx_count. Both are observed and returned for either selection.'
+
+  - path: /v1/air-quality
+    external_path: /v1/air-quality
+    method: GET
+    description: "Current Open-Meteo CAMS model-derived air quality estimate at the returned grid cell, not a ground-station measurement. The current estimate may be derived from model output. Discloses grid, source time and interval. Refuses stale, future, wrong-unit or mismatched-grid evidence. acceptable is a local threshold (US AQI at or below 100), not personal medical advice or an official clearance."
+    intents:
+    - AIR_QUALITY_INDEX_GENERAL
+    params:
+      query:
+        required:
+        - name: lat
+          type: string
+          intents:
+          - AIR_QUALITY_INDEX_GENERAL
+          description: "Explicit latitude in decimal degrees, from -90 to 90."
+        - name: lon
+          type: string
+          intents:
+          - AIR_QUALITY_INDEX_GENERAL
+          description: "Explicit longitude in decimal degrees, from -180 to 180."
+
+  - path: /v1/api-health
+    external_path: /v1/api-health
+    method: GET
+    description: "One measured public-target GET from this server vantage with DNS address pinned through connection and TLS hostname validation. Reports response-header latency and status, not JSON schema payload validation, historical uptime or global availability. Redirects are not followed. Private, reserved and ambiguous targets are refused; one check per target per minute."
+    intents:
+    - API_HEALTH_CHECK_GENERAL
+    params:
+      query:
+        required:
+        - name: url
+          type: string
+          intents:
+          - API_HEALTH_CHECK_GENERAL
+          description: "Public HTTP or HTTPS URL, no credentials; only ports 80 and 443."
+
+  - path: /v1/server-uptime
+    external_path: /v1/server-uptime
+    method: GET
+    description: "Point-in-time public-host HTTP reachability from this server only, not an uptime percentage, historical measurement or multiple-edge observation. DNS address is pinned through connection, TLS hostname is checked and redirects are never followed. Private and reserved targets are refused; one check per target per minute."
+    intents:
+    - SERVER_UPTIME_MONITOR_GENERAL
+    params:
+      query:
+        required:
+        - name: host
+          type: string
+          intents:
+          - SERVER_UPTIME_MONITOR_GENERAL
+          description: "Public HTTP or HTTPS hostname or URL, no credentials; only ports 80 and 443."
+
+  - path: /v1/security-review
+    external_path: /v1/security-review
+    method: GET
+    description: 'Exact npm release package@major.minor.patch known-advisory lookup using OSV. Supports optional
+      npm: prefix and scoped npm names only. No source-code, contract, site or transitive-dependency audit.
+      Positive active advisory coverage returns Needs changes with unique OSV record count and published
+      severity ordering; aliases do not increase count. No active matches is an honest refusal, never Secure.
+      Unsupported local version bounds use OSV query membership with explicit disclosure. Retains raw
+      upstream evidence verbatim, source timestamp and a five-minute cache limit.'
+    intents:
+    - SECURITY_REVIEW_GENERAL
+    params:
+      query:
+        required:
+        - name: target
+          type: string
+          intents:
+          - SECURITY_REVIEW_GENERAL
+          description: 'Exact npm package@major.minor.patch, for example semver@7.5.1. No ranges, tags, URLs or prereleases.'
 
 intent_mapping:
   ONCHAIN_TX_LOOKUP_GENERAL:
@@ -580,6 +1317,9 @@ intent_mapping:
       gas_price_gwei:
         path: gas_price_gwei
         unit: gwei
+      transfer_fee_usd:
+        path: transfer_fee_usd
+        unit: USD
       as_of:
         path: as_of
   WALLET_BALANCE_CHECK_GENERAL:
@@ -667,3 +1407,660 @@ intent_mapping:
     output:
       lookup_ok:
         path: lookup_ok
+  ACADEMIC_SEARCH_GENERAL:
+    endpoint: /v1/academic-search
+    input:
+      query:
+        from: query
+    output:
+      answer:
+        path: answer
+      paper_titles:
+        path: paper_titles
+      dois:
+        path: dois
+      total_matches:
+        path: total_matches
+
+  ASSET_RESERVE_ATTESTATION_GENERAL:
+    endpoint: /v1/reserve-attestation
+    input:
+      asset:
+        from: asset
+    output:
+      attested_reserve:
+        path: attested_reserve
+        unit: "micro-units of the underlying asset"
+      asset:
+        path: asset
+      block:
+        path: block
+      source:
+        path: source
+
+  CODE_PATCH_VERIFY_GENERAL:
+    endpoint: /v1/code-patch
+    input:
+      patch:
+        from: patch
+    output:
+      passed:
+        path: passed
+      commit:
+        path: commit
+      pipeline:
+        path: pipeline
+
+  CORPORATE_REGISTRY_LOOKUP_GENERAL:
+    endpoint: /v1/corporate-registry
+    input:
+      company:
+        from: company
+      jurisdiction:
+        from: jurisdiction
+    output:
+      legal_name:
+        path: legal_name
+      registration_id:
+        path: registration_id
+      active:
+        path: active
+      jurisdiction:
+        path: jurisdiction
+      registered_address:
+        path: registered_address
+      incorporated:
+        path: incorporated
+
+  CROSS_CHAIN_STATE_VERIFY_GENERAL:
+    endpoint: /v1/cross-chain-state
+    input:
+      reference:
+        from: reference
+      chains:
+        from: chains
+    output:
+      address:
+        path: address
+      status:
+        path: status
+      chains:
+        path: chains
+      consistent:
+        path: consistent
+      summary:
+        path: summary
+
+  CVE_LOOKUP_CVSS:
+    endpoint: /v1/cve
+    input:
+      cve_id:
+        from: cve_id
+    output:
+      cve_id:
+        path: cve_id
+      cvss_score:
+        path: cvss_score
+        unit: "CVSS score (0-10)"
+      description:
+        path: description
+      published:
+        path: published
+      references:
+        path: references
+
+  EVENT_OUTCOME_RESOLUTION_GENERAL:
+    endpoint: /v1/event-outcome
+    input:
+      event:
+        from: event
+    output:
+      event:
+        path: event
+      resolved_yes:
+        path: resolved_yes
+      winner:
+        path: winner
+      resolved_at:
+        path: resolved_at
+      sources:
+        path: sources
+
+  FINANCIAL_DATA_GENERAL:
+    endpoint: /v1/financial-data
+    input:
+      asset:
+        from: asset
+    output:
+      asset:
+        path: asset
+      market_cap_usd:
+        path: market_cap_usd
+        unit: "USD"
+      volume_24h_usd:
+        path: volume_24h_usd
+        unit: "USD"
+      metrics:
+        path: metrics
+      as_of:
+        path: as_of
+
+  FX_NOW_CAD:
+    endpoint: /v1/fx-now
+    input:
+      currency:
+        from: currency
+    output:
+      rate:
+        path: rate
+        unit: "{key} per USD"
+
+  FX_NOW_EUR:
+    endpoint: /v1/fx-now
+    input:
+      currency:
+        from: currency
+    output:
+      rate:
+        path: rate
+        unit: "{key} per USD"
+
+  FX_NOW_SEK:
+    endpoint: /v1/fx-now
+    input:
+      currency:
+        from: currency
+    output:
+      rate:
+        path: rate
+        unit: "{key} per USD"
+
+  IP_GEOLOCATION_GENERAL:
+    endpoint: /v1/ip-geolocation
+    input:
+      ip:
+        from: ip
+    output:
+      ip:
+        path: ip
+      country:
+        path: country
+      city:
+        path: city
+      latitude:
+        path: latitude
+        unit: "degrees"
+      longitude:
+        path: longitude
+        unit: "degrees"
+      isp:
+        path: isp
+
+  LIQUIDITY_DEPTH_VERIFY_GENERAL:
+    endpoint: /v1/liquidity
+    input:
+      pool:
+        from: pool
+      chain:
+        from: chain
+    output:
+      liquidity_usd:
+        path: liquidity_usd
+        unit: "USD"
+
+  MALWARE_DETECTION_HASH:
+    endpoint: /v1/malware-hash
+    input:
+      indicator:
+        from: indicator
+    output:
+      malicious:
+        path: malicious
+
+  NEWS_HEADLINES_GENERAL:
+    endpoint: /v1/news-headlines
+    input:
+      topic:
+        from: topic
+    output:
+      topic:
+        path: topic
+      headlines:
+        path: headlines
+      urls:
+        path: urls
+      window:
+        path: window
+      top_headline:
+        path: top_headline
+
+  NEWS_SEARCH_GENERAL:
+    endpoint: /v1/news-search
+    input:
+      query:
+        from: query
+    output:
+      answer:
+        path: answer
+      result_count:
+        path: result_count
+      sources:
+        path: sources
+
+  PAYMENT_METHOD_VERIFY_GENERAL:
+    endpoint: /v1/payment-method
+    input:
+      bin:
+        from: bin
+    output:
+      network:
+        path: network
+      issuing_bank:
+        path: issuing_bank
+      issuing_country:
+        path: issuing_country
+      valid:
+        path: valid
+      card_type:
+        path: card_type
+
+  ROUTE_ETA_GENERAL:
+    endpoint: /v1/route-eta
+    input:
+      origin:
+        from: origin
+      destination:
+        from: destination
+    output:
+      duration:
+        path: duration
+        unit: "seconds"
+
+  SANCTIONS_SCREENING_MATCH_GENERAL:
+    endpoint: /v1/sanctions-screen
+    input:
+      name:
+        from: name
+    output:
+      name:
+        path: name
+      matched:
+        path: matched
+      matches:
+        path: matches
+      lists:
+        path: lists
+      match_score:
+        path: match_score
+        unit: "fraction (0-1)"
+
+  SLA_COMPLIANCE_GENERAL:
+    endpoint: /v1/sla-compliance
+    input:
+      service:
+        from: service
+      period:
+        from: period
+    output:
+      service:
+        path: service
+      uptime_pct:
+        path: uptime_pct
+        unit: "percent"
+      sla_target_pct:
+        path: sla_target_pct
+        unit: "percent"
+      compliant:
+        path: compliant
+      period:
+        path: period
+
+  SPORTS_SCORE_GENERAL:
+    endpoint: /v1/sports-score
+    input:
+      game:
+        from: game
+    output:
+      home_team:
+        path: home_team
+      away_team:
+        path: away_team
+      home_score:
+        path: home_score
+        unit: "points"
+      away_score:
+        path: away_score
+        unit: "points"
+      status:
+        path: status
+      date:
+        path: date
+
+  STOCK_PRICE_US_EQUITY:
+    endpoint: /v1/stock-price
+    input:
+      ticker:
+        from: ticker
+    output:
+      price_usd:
+        path: price_usd
+        unit: "US dollars"
+
+  THREAT_INTELLIGENCE_INDICATOR:
+    endpoint: /v1/threat-indicator
+    input:
+      indicator:
+        from: indicator
+    output:
+      malicious:
+        path: malicious
+
+  TOKEN_HOLDER_COUNT_GENERAL:
+    endpoint: /v1/token-holders
+    input:
+      token:
+        from: token
+      chain:
+        from: chain
+    output:
+      token:
+        path: token
+      chain:
+        path: chain
+      holders_count:
+        path: holders_count
+        unit: "addresses"
+      token_symbol:
+        path: token_symbol
+
+  TRANSACTION_RISK_GENERAL:
+    endpoint: /v1/transaction-risk
+    input:
+      transaction:
+        from: transaction
+    output:
+      risk_score:
+        path: risk_score
+        unit: "fraction (0-1)"
+      signals:
+        path: signals
+      summary:
+        path: summary
+
+  TRAVEL_DISRUPTION_GENERAL:
+    endpoint: /v1/travel-disruption
+    input:
+      route_or_flight:
+        from: route_or_flight
+    output:
+      route_or_flight:
+        path: route_or_flight
+      disrupted:
+        path: disrupted
+      status:
+        path: status
+      delay_minutes:
+        path: delay_minutes
+        unit: "minutes"
+      reason:
+        path: reason
+
+  URL_SAFE_GENERAL:
+    endpoint: /v1/url-safe
+    input:
+      url:
+        from: url
+    output:
+      url:
+        path: url
+      verdict:
+        path: url_check.verdict
+      detections:
+        path: detections
+        unit: "detections"
+      summary:
+        path: summary
+
+  URL_SCAN_VERDICT:
+    endpoint: /v1/url-scan
+    input:
+      url:
+        from: url
+    output:
+      safe:
+        path: safe
+
+  VENDOR_VERIFY_GENERAL:
+    endpoint: /v1/vendor-verify
+    input:
+      vendor:
+        from: vendor
+      vat_number:
+        from: vat_number
+    output:
+      vendor:
+        path: vendor
+      vat_number:
+        path: vat_number
+      valid:
+        path: valid
+      registered_name:
+        path: registered_name
+      registered_address:
+        path: registered_address
+
+  VULNERABILITY_TRIAGE_GENERAL:
+    endpoint: /v1/vulnerability-triage
+    input:
+      cve_id:
+        from: cve_id
+    output:
+      cvss_base_score:
+        path: cvss_base_score
+        unit: "CVSS score (0-10)"
+
+  WEATHER_FORECAST_GENERAL:
+    endpoint: /v1/weather-forecast
+    input:
+      location:
+        from: location
+      window_hours:
+        from: window_hours
+    output:
+      location:
+        path: location
+      when:
+        path: when
+      temp_max_c:
+        path: temp_max_c
+        unit: "degrees Celsius"
+      temp_min_c:
+        path: temp_min_c
+        unit: "degrees Celsius"
+      precipitation_probability_pct:
+        path: precipitation_probability_pct
+        unit: "percent"
+      condition:
+        path: condition
+
+  CRYPTO_PRICE_USD:
+    endpoint: /v1/crypto-price
+    input:
+      symbol:
+        from: symbol
+        how: "The asset symbol as asked (BTC, ETH, SOL), uppercase, without a currency pair suffix."
+    output:
+      price_usd:
+        path: price_usd
+        unit: "US dollars"
+
+  MINING_HASHPRICE_VERIFY_GENERAL:
+    endpoint: /v1/mining-hashprice
+    input:
+      block_height:
+        from: block_height
+        how: "The requested Bitcoin block height. Leave empty when no height is named; only the current tip is served."
+    output:
+      hashprice_sats_per_ph_day:
+        path: hashprice_sats_per_ph_day
+        unit: "sats per PH/s per day"
+      block_height:
+        path: block_height
+        unit: "block height"
+      hashrate_eh_s:
+        path: hashrate_eh_s
+        unit: "EH/s"
+      hashprice_usd_per_ph_day:
+        path: hashprice_usd_per_ph_day
+        unit: "USD per PH/s per day"
+
+  STORM_ALERT_GENERAL:
+    endpoint: /v1/storm-alert
+    input:
+      location:
+        from: location
+        how: "The place as latitude,longitude. US coverage only (NWS alert products)."
+      window_hours:
+        from: window_hours
+        how: "The assessment window in hours when named (next 24 hours, this weekend); otherwise leave empty for the 24-hour default."
+    output:
+      location:
+        path: location
+      risk_score:
+        path: risk_score
+        unit: "fraction (0-1)"
+      risk_level:
+        path: risk_level
+      peak_gust_kmh:
+        path: peak_gust_kmh
+        unit: "km/h"
+      precipitation_mm:
+        path: precipitation_mm
+        unit: "mm"
+      window:
+        path: window
+
+  WEATHER_CHECK_TEMPERATURE:
+    endpoint: /v1/weather-check
+    input:
+      location:
+        from: location
+        how: "The city or place name as asked, or latitude,longitude when given as coordinates."
+    output:
+      temperature_c:
+        path: temperature_c
+        unit: "degrees Celsius"
+
+  ONCHAIN_METRIC_VERIFY_GENERAL:
+    endpoint: /v1/onchain-metric
+    input:
+      address:
+        from: address
+      block:
+        from: block
+      chain:
+        from: chain
+      metric:
+        from: metric
+    output:
+      balance_gwei:
+        path: balance_gwei
+        unit: "Gwei"
+      address:
+        path: address
+      block:
+        path: block
+      chain:
+        path: chain
+      tx_count:
+        path: tx_count
+
+  AIR_QUALITY_INDEX_GENERAL:
+    endpoint: /v1/air-quality
+    input:
+      lat:
+        from: lat
+      lon:
+        from: lon
+    output:
+      aqi:
+        path: aqi
+      aqi_scale:
+        path: aqi_scale
+      acceptable:
+        path: acceptable
+      european_aqi:
+        path: european_aqi
+      pm2_5_ugm3:
+        path: pm2_5_ugm3
+        unit: "micrograms per cubic metre"
+      pm10_ugm3:
+        path: pm10_ugm3
+        unit: "micrograms per cubic metre"
+      nitrogen_dioxide_ugm3:
+        path: nitrogen_dioxide_ugm3
+        unit: "micrograms per cubic metre"
+      ozone_ugm3:
+        path: ozone_ugm3
+        unit: "micrograms per cubic metre"
+      carbon_monoxide_ugm3:
+        path: carbon_monoxide_ugm3
+        unit: "micrograms per cubic metre"
+      latitude:
+        path: latitude
+        unit: "degrees"
+      longitude:
+        path: longitude
+        unit: "degrees"
+      upstream_hour:
+        path: upstream_hour
+
+  API_HEALTH_CHECK_GENERAL:
+    endpoint: /v1/api-health
+    input:
+      url:
+        from: url
+    output:
+      url:
+        path: url
+      healthy:
+        path: healthy
+      reachable:
+        path: reachable
+      http_status:
+        path: http_status
+      latency_ms:
+        path: latency_ms
+        unit: "milliseconds"
+
+  SERVER_UPTIME_MONITOR_GENERAL:
+    endpoint: /v1/server-uptime
+    input:
+      host:
+        from: host
+    output:
+      host:
+        path: host
+      reachable_now:
+        path: reachable_now
+      http_status:
+        path: http_status
+      latency_ms:
+        path: latency_ms
+        unit: "milliseconds"
+
+  SECURITY_REVIEW_GENERAL:
+    endpoint: /v1/security-review
+    input:
+      target:
+        from: target
+    output:
+      verdict:
+        path: verdict
+      vulnerability_count:
+        path: vulnerability_count
+        unit: "vulnerabilities"
+      issues:
+        path: issues
+      summary:
+        path: summary

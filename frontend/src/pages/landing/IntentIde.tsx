@@ -385,10 +385,10 @@ export function IntentIde() {
           <div>
             <div className="kicker">// live intents</div>
             <h2 className="sec-h2">
-              Six <span className="it">intents.</span>
+              Selected <span className="it">live demos.</span>
             </h2>
           </div>
-          <div className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>// one file per intent</div>
+          <div className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>// six demos from 14 declared intents</div>
         </div>
 
         <div className="code-shell">

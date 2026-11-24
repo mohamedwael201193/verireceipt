@@ -69,6 +69,16 @@ export interface Filing {
   accession: string;
   filing_date: string;
   url: string;
+  /** EDGAR acceptance timestamp (acceptanceDateTime), when EDGAR supplies
+   *  it. The moment the filing was accepted onto EDGAR — distinct from the
+   *  filing date, and the answer to "when was it accepted". */
+  accepted?: string;
+  /** EDGAR primaryDocDescription: the filing's own one-line description of
+   *  what the primary document is (e.g. "FORM 8-K", "CURRENT REPORT"). */
+  description?: string;
+  /** EDGAR items column: the 8-K item numbers the filing reports under
+   *  (e.g. "2.02 Results of Operations"), when present. */
+  items?: string;
 }
 
 /** Official REGULATORY_FILING_MONITOR_GENERAL field `filings` is
@@ -145,7 +155,7 @@ interface TickerEntry {
   title: string;
 }
 
-type TickersMap = Record<string, TickerEntry>;
+export type TickersMap = Record<string, TickerEntry>;
 
 // ---------------------------------------------------------------------------
 // Period parsing
@@ -186,8 +196,29 @@ function formatUtcDate(dt: Date): string {
  * wrong count as verified. Anything else is returned unchanged for the
  * strict grammar below.
  */
+/** Normalize only complete, bounded relative/calendar phrases, never ISO dates. */
+export function normalizeCompactPeriod(raw: string): string {
+  if (/\s-\d/.test(raw)) throw badRequest("INVALID_PERIOD", "negative relative periods are not supported");
+  const text = raw.trim().toLowerCase();
+  const compact = text.replace(/[\s_-]+/g, "");
+  if (["ytd", "yeartodate"].includes(compact)) return "ytd";
+  const relative = /^(?:(?:last|past|trailing)[ _-]*)?(\d+)[ _-]*(months?|years?)$/.exec(text);
+  if (relative) {
+    const n = Number(relative[1]);
+    const months = relative[2].startsWith("year") ? n * 12 : n;
+    if (!Number.isSafeInteger(months) || months < 1 || months > 1200) throw badRequest("INVALID_PERIOD", "relative period is outside 1..1200 months");
+    return `last ${months} months`;
+  }
+  const quarter = /^(?:calendar[ _-]*)?q([1-4])[ _-]*(\d{4})$/.exec(text);
+  if (quarter) return `${compact.startsWith("calendar") ? "calendar " : ""}Q${quarter[1]} ${quarter[2]}`;
+  if (compact === "lastquarter") return "last quarter";
+  const year = /^(?:calendar(?:[ _-]*year)?|cy)[ _-]*(\d{4})$/.exec(text);
+  if (year) return `calendar year ${year[1]}`;
+  return raw;
+}
+
 function foldPeriodPhrase(period: string): string {
-  const p = period.replace(/\s+/g, ' ').trim();
+  const p = normalizeCompactPeriod(period).replace(/\s+/g, ' ').trim();
   if (/\b(fiscal|fy)\b|^fy\s?\d{2,4}$|^fy\d{2,4}$/i.test(p)) {
     throw badRequest(
       'FISCAL_PERIOD_UNSUPPORTED',
@@ -286,6 +317,43 @@ export function parsePeriod(periodRaw: string): Period {
     return { start, end, label };
   }
 
+
+  // Calendar quarters in the forms requests actually use ("Q3 2026",
+  // "third quarter of 2026"). These are always read as CALENDAR quarters
+  // and the resolved range is disclosed in the label, never silently.
+  const quarterWord: Record<string, number> = {
+    first: 1, second: 2, third: 3, fourth: 4, '1st': 1, '2nd': 2, '3rd': 3, '4th': 4,
+  };
+  const qNumeric = /^(?:(?:in|during|for|over)\s+)?(?:the\s+)?q([1-4])(?:\s+of)?\s+(\d{4})$/i.exec(period);
+  const qWord = /^(?:(?:in|during|for|over)\s+)?(?:the\s+)?(first|second|third|fourth|1st|2nd|3rd|4th)\s+quarter(?:\s+of)?\s+(\d{4})$/i.exec(period);
+  if (qNumeric || qWord) {
+    const year = Number((qNumeric ?? qWord)![2]);
+    const number = qNumeric ? Number(qNumeric[1]) : quarterWord[qWord![1].toLowerCase()];
+    if (!yearInRange(year)) throw badRequest('INVALID_PERIOD', `Unparseable period: "${periodRaw}"`);
+    const start = new Date(Date.UTC(year, (number - 1) * 3, 1)).toISOString().slice(0, 10);
+    const end = new Date(Date.UTC(year, number * 3, 0)).toISOString().slice(0, 10);
+    return { start, end, label: `${label} (calendar quarter ${start}..${end})` };
+  }
+
+  // "last quarter": the most recent COMPLETED calendar quarter.
+  if (/^(?:the\s+)?last\s+quarter$/i.test(period)) {
+    const now = new Date();
+    const currentQ = Math.floor(now.getUTCMonth() / 3);
+    const year = currentQ === 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear();
+    const number = currentQ === 0 ? 4 : currentQ;
+    const start = new Date(Date.UTC(year, (number - 1) * 3, 1)).toISOString().slice(0, 10);
+    const end = new Date(Date.UTC(year, number * 3, 0)).toISOString().slice(0, 10);
+    return { start, end, label: `${label} (calendar quarter ${start}..${end})` };
+  }
+
+  // "year to date" / "YTD": January 1 of the current calendar year to today (UTC).
+  if (/^(?:the\s+)?(?:year[\s-]*to[\s-]*date|ytd)$/i.test(period)) {
+    const now = new Date();
+    const start = `${now.getUTCFullYear()}-01-01`;
+    const end = formatUtcDate(now);
+    return { start, end, label: `${label} (${start}..${end})` };
+  }
+
   // "2023 to 2023", "2021 through 2023", "2023-01-01 to 2023-03-31".
   const toRange = /^(\d{4}(?:-\d{2}-\d{2})?)\s+(?:to|through|thru|until)\s+(\d{4}(?:-\d{2}-\d{2})?)$/i.exec(period);
   if (toRange) {
@@ -304,7 +372,10 @@ export function parsePeriod(periodRaw: string): Period {
     return { start: a, end: b, label };
   }
 
-  const lastMonths = /^last\s+(\d+)\s+months?$/i.exec(period);
+  // "the past year" / "the last year": the trailing twelve months, same
+  // semantics as "last 12 months".
+  const pastYear = /^(?:the\s+)?(?:past|last)\s+year$/i.exec(period);
+  const lastMonths = pastYear ? ['', '12'] : /^(?:the\s+)?(?:past|last)\s+(\d+)\s+months?$/i.exec(period);
   if (lastMonths) {
     const n = Number(lastMonths[1]);
     if (!Number.isInteger(n) || n < 1 || n > 1200) {
@@ -931,6 +1002,28 @@ export function resolveCikFromTickers(entity: string, tickers: TickersMap): CikM
     if (cik === null) return null;
     return { cik, cik10: padCik(cik), matchKind: 'name' };
   }
+  // F2 — dominance inside the prefix round (exact ticker > exact name >
+  // prefix): a candidate whose title equals the query once its legal
+  // suffix is stripped ("apple" vs "Apple Inc") is a name-level match,
+  // strictly stronger than the bare prefix matches around it ("Apple
+  // Hospitality REIT Inc"). When EXACTLY ONE candidate matches at that
+  // level it is the clearly dominant resolution and resolves; when zero
+  // or several do, the matches are genuinely comparable and the request
+  // still refuses with AMBIGUOUS_ENTITY.
+  const stemMatches: TickerEntry[] = [];
+  for (const e of candidates.values()) {
+    const title = normalizeCompanyName(e.title as string);
+    const tokens = title.split(' ');
+    // Strip at most ONE trailing legal suffix: "apple inc" -> "apple",
+    // but "acme holdings inc" -> "acme holdings" (never "acme"), so a
+    // Holdings/Industries pair around one stem stays genuinely comparable.
+    if (tokens.length > 1 && COMPANY_SUFFIX_TOKENS.has(tokens[tokens.length - 1])) tokens.pop();
+    if (tokens.join(' ') === normQuery) stemMatches.push(e);
+  }
+  if (stemMatches.length === 1) {
+    const cik = tickerEntryCik(stemMatches[0]);
+    if (cik !== null) return { cik, cik10: padCik(cik), matchKind: 'name' };
+  }
   throw unprocessable(
     'AMBIGUOUS_ENTITY',
     `Entity "${entity}" matches ${candidates.size} companies; use a ticker, CIK, or fuller company name`,
@@ -1273,6 +1366,9 @@ interface EdgarSubmissions {
       filingDate?: string[];
       form?: string[];
       primaryDocument?: string[];
+      acceptanceDateTime?: string[];
+      primaryDocDescription?: string[];
+      items?: string[];
     };
     files?: unknown;
   };
@@ -1557,6 +1653,19 @@ export function buildFilingsFromSubmissions(payload: EdgarSubmissions): Filing[]
     form.length,
     primaryDocument.length,
   );
+  // Optional EDGAR columns: acceptanceDateTime, primaryDocDescription,
+  // items. They carry the accepted date and a one-line disclosure for
+  // filings_detail. Each is read only when it is an array aligned with
+  // accessionNumber; a missing or misaligned column, or a malformed
+  // element, simply leaves the field unset — it is never load-bearing for
+  // count, identity, or URL construction.
+  const optionalColumn = (key: string): unknown[] | undefined => {
+    const v = (recent as Record<string, unknown>)[key];
+    return Array.isArray(v) && v.length === accessionNumber.length ? (v as unknown[]) : undefined;
+  };
+  const acceptanceDateTime = optionalColumn('acceptanceDateTime');
+  const primaryDocDescription = optionalColumn('primaryDocDescription');
+  const itemsColumn = optionalColumn('items');
   const out: Filing[] = [];
   for (let i = 0; i < n; i++) {
     const accession = accessionNumber[i];
@@ -1612,11 +1721,19 @@ export function buildFilingsFromSubmissions(payload: EdgarSubmissions): Filing[]
           .map((seg) => encodeURIComponent(seg))
           .join('/')}`
       : `https://www.sec.gov/Archives/edgar/data/${cikNum}/${accNoDash}/${accession}-index.htm`;
+    const acceptedRaw = acceptanceDateTime?.[i];
+    const descRaw = primaryDocDescription?.[i];
+    const itemsRaw = itemsColumn?.[i];
     out.push({
       form: formStr,
       accession,
       filing_date: filingDateStr,
       url,
+      ...(typeof acceptedRaw === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(acceptedRaw)
+        ? { accepted: acceptedRaw }
+        : {}),
+      ...(typeof descRaw === 'string' && descRaw.trim() !== '' ? { description: descRaw } : {}),
+      ...(typeof itemsRaw === 'string' && itemsRaw.trim() !== '' ? { items: itemsRaw } : {}),
     });
   }
   return out;
@@ -2035,7 +2152,7 @@ export async function handleFilings(
     }
     const spec = parseFormType(v, key);
     if (spec.kind === 'none' && typeof v === 'string' && stripInvisible(foldBasic(v)).trim() !== '') explicitAll.push(key);
-    formParams.push({ field: key, forms: spec.kind === 'form' ? [spec.form] : [] });
+    formParams.push({ field: key, forms: spec.kind === 'form' ? [spec.form] : spec.kind === 'forms' ? spec.forms : [] });
   }
   if (query.cik !== undefined) {
     const c: unknown = query.cik;
@@ -2245,14 +2362,14 @@ export async function handleFilings(
     { field: 'entity', forms: entityForms },
     { field: 'period', forms: per.forms },
   ]);
-  if (formSpec.kind === 'form' && formParams.some((p) => p.forms.length > 0)) phraseForm = false;
-  if (explicitAll.length > 0 && (entityForms.length > 0 || per.forms.length > 0)) {
+  if (formSpec.kind !== 'none' && formParams.some((p) => p.forms.length > 0)) phraseForm = false;
+  if (explicitAll.length > 0 && (entityForms.length > 0 || per.forms.length > 0 || formParams.some(p => p.forms.length > 0))) {
     // Round 9 (J2-r8 m5): form_type=all contradicts a form named in the
     // entity / period ("Tesla 10-K" + all) -> 422, never one silently wins.
     throw unprocessable(
       'CONFLICTING_FORM_TYPE',
-      `"${explicitAll[0]}" asks for all forms but ${entityForms.length > 0 ? 'the entity' : 'the period'} names Form ${
-        [...entityForms, ...per.forms][0]
+      `"${explicitAll[0]}" asks for all forms but ${entityForms.length > 0 ? 'the entity' : per.forms.length > 0 ? 'the period' : 'another explicit form field'} names Form ${
+        [...entityForms, ...per.forms, ...formParams.flatMap(p => p.forms)][0]
       }; send one of them`,
     );
   }
@@ -2282,7 +2399,9 @@ export async function handleFilings(
   if (!cikMatch) {
     throw unprocessable('ENTITY_NOT_FOUND', `No SEC EDGAR entry found for entity "${entityNfc}"`);
   }
-  const formLabel = formSpec.kind === 'form' ? formSpec.form : null;
+  const selectedForms = formSpec.kind === 'form' ? [formSpec.form] : formSpec.kind === 'forms' ? formSpec.forms : [];
+  const multiForm = formSpec.kind === 'forms';
+  const formLabel = selectedForms.length ? selectedForms.join(', ') : null;
 
   // --- SEC EDGAR Submissions API (the only source). Fail CLOSED. ---
   const upstreamUrl = EDGAR_SUBMISSIONS_URL(cikMatch.cik10);
@@ -2313,7 +2432,7 @@ export async function handleFilings(
   }
   const inPeriod = filterFilingsByPeriod(all, period);
   const filings = filterFilingsByForm(inPeriod, formSpec);
-  if (phraseForm && formLabel !== null) assertPhraseFormUnambiguous(formLabel, all, inPeriod, entity);
+  if (phraseForm && !multiForm && formLabel !== null) assertPhraseFormUnambiguous(formLabel, all, inPeriod, entity);
   const confidence = cikMatch.matchKind === 'name' ? 0.9 : 1.0;
   const receipt = makeReceipt(INTENT, upstreamUrl, rawBody, '1/1 primary source');
   // Persist like the other intents (txLookup / grid / route): the stored
@@ -2335,13 +2454,17 @@ export async function handleFilings(
     );
     throw new ApiError(500, 'RECEIPT_STORE_FAILED', 'The receipt could not be stored, so no verified answer is served');
   }
-  const family = formLabel ? formFamily(formLabel) : [];
+  const family = [...new Set(selectedForms.flatMap(f => [...formFamily(f)]))];
   const what = formLabel ? `Form ${formLabel} filing` : 'filing';
   const listed = filings.slice(0, MAX_LISTED_FILINGS);
+  const reason = filingReason(filings, entity, period.label);
   const fields: Record<string, unknown> = {
     entity,
     form_type: formLabel,
+    ...(multiForm ? { requested_forms: selectedForms, form_filter_mode: "union of unique accessions; amendments separate" } : {}),
     filing_count: filings.length,
+    by_type: reason.by_type,
+    latest_filing: reason.latest,
     filings: listed.map(filingTitle),
     filings_detail: listed,
     urls: listed.map((f) => f.url),
@@ -2351,7 +2474,7 @@ export async function handleFilings(
     // the per-spelling count, so a renamed family is never hidden.
     fields.forms_counted = [...family];
     fields.form_counts = Object.fromEntries(family.map((f) => [f, filings.filter((x) => x.form === f).length]));
-    if (family.length > 1) fields.form_alias_source = FORM_FAMILY_SOURCE;
+    if (selectedForms.some(f => formFamily(f).length > 1)) fields.form_alias_source = FORM_FAMILY_SOURCE;
   }
   if (listed.length < filings.length) {
     fields.filings_listed = listed.length;
@@ -2365,9 +2488,9 @@ export async function handleFilings(
     );
   }
   return envelope(INTENT, fields, receipt, {
-    answer: `Found ${filings.length} ${what}${filings.length === 1 ? '' : 's'} for ${entity} in ${period.label}${
+    answer: reason.sentence + ` Found ${filings.length} ${what}${filings.length === 1 ? '' : 's'} for ${entity} in ${period.label}${
       family.length > 1
-        ? ` (counting ${family.map((f) => `${f} ${fields.form_counts ? (fields.form_counts as Record<string, number>)[f] : 0}`).join(' + ')}: EDGAR renamed this form in Release 24.4)`
+        ? ` (${multiForm ? 'union; amendments separate; counting' : 'counting'} ${family.map((f) => `${f} ${fields.form_counts ? (fields.form_counts as Record<string, number>)[f] : 0}`).join(' + ')}${multiForm ? '' : ': EDGAR renamed this form in Release 24.4'})`
         : ''
     }.`,
     verdict: 'verified',
@@ -2403,4 +2526,12 @@ function assertPhraseFormUnambiguous(form: string, all: Filing[], inPeriod: Fili
       }; pass the EDGAR form as form_type`,
     );
   }
+}
+
+/** Presentation-only summary derived from the exact counted filing rows. */
+export function filingReason(filings: readonly Filing[], entity: string, window: string): {by_type: Record<string,number>;latest: Filing|null;sentence:string} {
+ const by_type:Record<string,number>={};for(const f of filings)by_type[f.form]=(by_type[f.form]??0)+1;
+ const latest=[...filings].sort((a,b)=>b.filing_date.localeCompare(a.filing_date)||b.accession.localeCompare(a.accession))[0]??null;
+ const counts=Object.entries(by_type).sort(([a],[b])=>a.localeCompare(b)).map(([f,n])=>`${f}: ${n}`).join(', ')||'none';
+ return{by_type,latest,sentence:`In ${window}, ${entity} has ${filings.length} matching SEC EDGAR filings (by type: ${counts}); ${latest?`latest is Form ${latest.form} filed ${latest.filing_date}`:'no latest matching filing'}.`};
 }

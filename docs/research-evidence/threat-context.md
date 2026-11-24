@@ -1,0 +1,7 @@
+# Supplemental IPv4 context
+
+Primary terms checked2026-11-23. Feodo Tracker blocklist terms explicitly CC0 commercial/noncommercial; source https://feodotracker.abuse.ch/blocklist/?download=ipblocklist . CINS homepage https://www.cinsscore.com/ allows parsing/using its list in any way; redistribution not explicit. Exact Tor bulk-list licence not confirmed in primary source; a public Nov18 clarification request is still only a question. CINS/Tor use retains the owner's separately recorded terms-risk acceptance, never claimed as an explicit commercial licence. All three public endpoints returned200; no workaround.
+
+Current Tor exits and CINS IPv4 membership are supplemental context, not inputs to the existing malicious verdict. Tor use alone is not malicious. listed_by includes supplemental memberships and core blocklist matches, but context_scope explicitly preserves original verdict logic. Domain/URL and unavailable-feed membership is null, never a false clean result. Plain lists provide no first-seen history, so first_seen is null. Cache1hour with original fetch time, bounded1MB and2.5s each. Mandatory receipt captures exact matching entry, counts and original fetch time, not an additional full-list stored copy.
+
+Feodo's actual official feed header says last updated2026-03-04. It is therefore treated unavailable/stale, not passed off as current; parser requires its timestamp within24h. Actual unmodified Tor/CINS/Feodo responses are fixtures, including Feodo's stale header.

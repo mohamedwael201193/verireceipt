@@ -1,0 +1,69 @@
+{
+ "dates": [
+  {
+   "date": "2026-06-15",
+   "games": [
+    {
+     "gamePk": 823452,
+     "gameDate": "2026-06-15T22:40:00Z",
+     "officialDate": "2026-06-15",
+     "status": {
+      "detailedState": "Final"
+     },
+     "teams": {
+      "home": {
+       "team": {
+        "name": "Philadelphia Phillies"
+       }
+      },
+      "away": {
+       "team": {
+        "name": "Miami Marlins"
+       }
+      }
+     },
+     "linescore": {
+      "teams": {
+       "home": {
+        "runs": 7
+       },
+       "away": {
+        "runs": 0
+       }
+      }
+     }
+    },
+    {
+     "gamePk": 822724,
+     "gameDate": "2026-06-15T22:45:00Z",
+     "officialDate": "2026-06-15",
+     "status": {
+      "detailedState": "Final"
+     },
+     "teams": {
+      "home": {
+       "team": {
+        "name": "Washington Nationals"
+       }
+      },
+      "away": {
+       "team": {
+        "name": "Kansas City Royals"
+       }
+      }
+     },
+     "linescore": {
+      "teams": {
+       "home": {
+        "runs": 7
+       },
+       "away": {
+        "runs": 3
+       }
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

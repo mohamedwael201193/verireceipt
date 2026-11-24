@@ -84,7 +84,9 @@ function beaconBody(index: number, effectiveBalance: string, status: string, opt
       index: String(index),
       balance: "32083979186",
       status,
-      validator: { effective_balance: effectiveBalance, slashed: false },
+      validator: { effective_balance: effectiveBalance, slashed: false,
+        pubkey: "0x" + "ab".repeat(48), activation_eligibility_epoch: "0", activation_epoch: "0",
+        exit_epoch: "18446744073709551615", withdrawable_epoch: "18446744073709551615" },
     },
     execution_optimistic: optimistic,
     finalized: true,
@@ -122,6 +124,15 @@ function scripted(script: Array<Step[] | undefined>): {
             finalized: true,
           }),
       } as unknown as Response;
+    }
+    // Performance-enrichment probes (headers/finalized, validator_balances)
+    // are best-effort calls made AFTER the verdict; like /root probes they
+    // do not consume scripted validator steps and are not recorded in
+    // count(), so 429/retry call-count tests keep their meaning. Here they
+    // behave as an unsupported endpoint (network error), so the section is
+    // simply omitted.
+    if (/\/eth\/v1\/beacon\/headers\/finalized/.test(u) || /\/validator_balances/.test(u)) {
+      throw new Error("stub: performance endpoints unsupported on this fixture source");
     }
     calls.push({ src, at: Date.now() });
     const steps = script[src];
@@ -612,7 +623,7 @@ describe("V-M1: order-independent verdicts (wait while the third can still answe
   });
 
   it("evidence is the first-arrived body of the agreeing group", async () => {
-    const Xa = beaconBody(1, "32000000000", "active_ongoing").replace('"32083979186"', '"32083979187"'); // same eb/status, different balance bytes
+    const Xa = JSON.stringify(JSON.parse(beaconBody(1, "32000000000", "active_ongoing")), null, 2); // identical record, distinct raw whitespace
     const res = (await handleValidator(
       { validator_index: "1" },
       { fetchImpl: scripted([at(X, 80), at(Xa, 20), at(X, 50)]).fetchImpl },

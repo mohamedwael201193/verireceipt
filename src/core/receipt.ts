@@ -8,6 +8,8 @@ export interface Receipt {
   quorum_votes: string;
   fetched_at: string;
   audit_url: string;
+  /** G4 (gas price): receipted gas-token USD spot behind transfer_fee_usd. */
+  gas_token_spot?: { source: string; token_usd: number | null; formula: string; sha256: string };
 }
 
 const RECEIPT_ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";

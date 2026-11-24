@@ -3,8 +3,9 @@
 // mainnet RPCs and REAL quoter contracts (no mocks anywhere in handler code).
 // The stubbed-RPC tests below run local HTTP JSON-RPC servers and exercise
 // the handler through handleRouteWithRpcs with injectable RPC URLs.
-import { countReceipts, storedReceiptRow } from "./helpers/storeView";
-import { describe, expect, it } from "vitest";
+import { countReceipts, storedReceiptRow, storedReceiptEvidence } from "./helpers/storeView";
+import { getReceiptEvidence } from "../src/core/storage";
+import { describe, expect, it, vi } from "vitest";
 import { createServer } from "http";
 import { mkdtempSync, readFileSync } from "fs";
 import { tmpdir } from "os";
@@ -76,7 +77,15 @@ import {
   TIMESTAMP_CONSISTENCY_DRIFT_RATE,
   TIMESTAMP_CONSISTENCY_MAX_LAG_SEC,
   TIMESTAMP_CONSISTENCY_SLACK_SEC,
+  buildGetStEthByWstEthCalldata,
   decodeCurveGetDyReturn,
+  buildDecimalsCalldata,
+  decodeDecimalsReturn,
+  buildSymbolCalldata,
+  decodeSymbolReturn,
+  parseGenericPairSides,
+  GENERIC_TOKENS,
+  buildGenericSpec,
   type QuorumBlock,
   type VenueQuote,
   venueCallTimeoutMsForDeadline,
@@ -193,6 +202,10 @@ describe("pair input normalization (2026-11-22 owner requirement: every reasonab
     "DAI/USDC", "dai-usdc", "DAI->USDC", " dai / usdc ",
     "USDT/USDC", "usdt-usdc", "DAI/USDT", "dai->usdt", "ETH/USDT", "eth-usdt",
     "WBTC/USDC", "wbtc/usdc",
+    "wstETH/ETH", "WSTETH/ETH", "wsteth-eth", "wstETH->ETH", "wstETH/WETH",
+    "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0/eth",
+
   ];
   it.each(accepted)('"%s" resolves to a registered pair and reaches the RPC stage', async (pair) => {
     await expect(handleRouteWithRpcs({ pair }, ["http://127.0.0.1:9"])).rejects.toMatchObject({
@@ -210,7 +223,6 @@ describe("pair input normalization (2026-11-22 owner requirement: every reasonab
   });
   const noRoute = [
     "BTC/USDC", // unknown token
-    "USDC/ETH", "DAI/ETH", "USDT/ETH", "WBTC/ETH", // ETH-out directions: not honest in the published amount_out shape
     "WBNB/SafeMoon", // epoch-34 grader question: no verifiable liquidity through verified venues
     "0x0000000000000000000000000000000000000000/USDC", // unknown token address
     "DAI/0x0000000000000000000000000000000000000000",
@@ -218,7 +230,20 @@ describe("pair input normalization (2026-11-22 owner requirement: every reasonab
   it.each(noRoute)('"%s" -> 400 unavailable envelope (no verifiable liquidity)', async (pair) => {
     await expectUnavailable(handleRoute({ pair }), "NO_ROUTE");
   });
-  it.each(noRoute)('"%s" -> legacy 422 INVALID_PAIR when ROUTE_NO_ROUTE_ENVELOPE=0', async (pair) => {
+  // Generic resolution (2026-11-22): registry tokens in unregistered
+  // directions — including ETH-out, previously refused for the published
+  // amount_out shape — now resolve generically and reach the quote path
+  // (wei-scale outputs are served in exact base units with an honesty
+  // note, the precedent set by the wstETH/ETH increment). A dead RPC
+  // proves the pair passed validation and resolution.
+  const genericResolved = ["USDC/ETH", "DAI/ETH", "USDT/ETH", "WBTC/ETH", "USDC/DAI"];
+  it.each(genericResolved)('"%s" resolves generically and reaches the quote path', async (pair) => {
+    await expect(handleRouteWithRpcs({ pair }, ["http://127.0.0.1:9"])).rejects.toMatchObject({
+      status: 502,
+      code: "RPC_CONFIG",
+    });
+  });
+  it.each([...noRoute, ...genericResolved])('"%s" -> legacy 422 INVALID_PAIR when ROUTE_NO_ROUTE_ENVELOPE=0', async (pair) => {
     process.env.ROUTE_NO_ROUTE_ENVELOPE = "0";
     try {
       await expect(handleRoute({ pair })).rejects.toMatchObject({ status: 422, code: "INVALID_PAIR" });
@@ -237,7 +262,20 @@ describe("pair input normalization (2026-11-22 owner requirement: every reasonab
       expect(spec.plausibleMaxOut).toBeGreaterThan(spec.plausibleMinOut);
       expect(spec.amountIn).toBeGreaterThan(0n);
       expect(spec.v3Fees.length).toBeGreaterThan(0);
-      expect(spec.v2Routers.length).toBeGreaterThan(0);
+      // Every entry registers at least one corroborating venue beyond V3.
+      // V2 routers are the usual corroborators; wstETH/ETH replaces them
+      // with the composed Curve stETH venue because its V2 liquidity is
+      // dust (measured live 2026-11-22, block 26471676: Uni V2 quoted
+      // 0.109 WETH, Sushi 0.003 WETH for 1 wstETH) and would be dropped
+      // by the plausibility band on every run.
+      const corroborators =
+        spec.v2Routers.length +
+        (spec.curve3pool === undefined ? 0 : 1) +
+        (spec.curveStEthPool === undefined ? 0 : 1);
+      expect(corroborators).toBeGreaterThan(0);
+      if (spec.v2Routers.length === 0) {
+        expect(spec.curveStEthPool).not.toBeUndefined();
+      }
     }
   });
 });
@@ -361,6 +399,567 @@ describe("stable pairs: DAI/USDC end-to-end (stubbed RPCs)", () => {
   });
 });
 
+describe("wstETH/ETH ABI (composed Curve venue)", () => {
+  it("encodes getStETHByWstETH selector 0xbb2952fc + uint256 wstEthAmount", () => {
+    const data = buildGetStEthByWstEthCalldata(1000000000000000000n);
+    expect(data.startsWith("0xbb2952fc")).toBe(true);
+    expect(data.length).toBe(2 + 8 + 64);
+    expect(data.endsWith("0de0b6b3a7640000")).toBe(true); // 1e18
+  });
+});
+
+describe("wstETH/ETH end-to-end (stubbed RPCs)", () => {
+  const blockHash = "0x" + "ab".repeat(32);
+  const STETH_POOL = "0xdc24316b9ae028f1497c275eb9192a3ea0f67022";
+  const WSTETH_ADDR = "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0";
+  const ONE_WSTETH = 1_000_000_000_000_000_000n;
+  // Live-shaped values from blocks 26471676/26471742 (2026-11-22): the
+  // wstETH contract unwraps 1 wstETH to 1.249887559605929876 stETH. The
+  // stub's stETH pool answers get_dy by ECHOING the decoded dx (a 1:1
+  // stETH/ETH model), so the composed Curve quote IS the unwrap rate and
+  // a handler that feeds the swap the raw wstETH amount instead of the
+  // unwrap result gets a different quote (R126 mutant goes RED).
+  const STETH_RATE = 1_249_887_559_605_929_876n;
+  const V3_QUOTE = 1_249_392_000_000_000_000n;
+  const mk = (over: Partial<Parameters<typeof startStubRpc>[0]> = {}) =>
+    startStubRpc({
+      blockNumber: FRESH_BLOCK,
+      blockHash,
+      failCalls: false,
+      v3AmountOut: V3_QUOTE,
+      // Required by StubRpcOptions but unused: wstETH/ETH registers no V2
+      // routers (dust liquidity, see the registry comment).
+      v2AmountOut: 1_249_000_000_000_000_000n,
+      stEthRate: STETH_RATE,
+      ...over,
+    });
+
+  it("both venues plausible -> Curve wins, exact base units, above-range honesty note; swap input bound to the unwrap result at one pinned block; evidence retains both calls", async () => {
+    const aCalls: Array<{ to: string; data: string; blockRef: unknown }> = [];
+    const bCalls: Array<{ to: string; data: string; blockRef: unknown }> = [];
+    const a = await mk({ capturedCalls: aCalls });
+    const b = await mk({ capturedCalls: bCalls });
+    try {
+      const result = await handleRouteWithRpcs({ pair: "wstETH/ETH" }, [a.url, b.url]);
+      // R126 fix 2: amount_out is the approximate JSON-number rendering;
+      // amount_out_base_units carries the exact integer as a string.
+      expect(result.amount_out).toBe(Number(STETH_RATE));
+      expect(result.amount_out_base_units).toBe(STETH_RATE.toString());
+      expect(BigInt(result.amount_out_base_units as string)).toBe(STETH_RATE);
+      expect(result.winning_venue).toBe("Curve stETH pool");
+      expect(result.confidence).toBe(1.0);
+      const answer = result.answer as string;
+      expect(answer).toContain("1 wstETH");
+      expect(answer).toContain("Curve stETH pool 1.249887559605929876 ETH");
+      expect(answer).toContain("Uniswap V3 (fee 100) 1.249392000000000000 ETH");
+      expect(answer).toContain("18 decimals");
+      expect(answer).toContain("above the published amount_out range");
+      expect(result.source).toContain("all 2 venues this pair registers produced plausible quotes");
+      expect(result.source).toContain("amount_out is the JSON-number rendering (approximate");
+      // R126 fix 1 (request-level binding): the unwrap call and the Curve
+      // swap call must hit BOTH exact contract targets with exact
+      // selectors/args - unwrap of exactly 1e18 wstETH; get_dy(1, 0, dx)
+      // with dx equal to the RETURNED stETH amount - and every eth_call
+      // must share the same canonical blockHash/requireCanonical pin.
+      // Mutating dx to the raw 1e18 wstETH amount makes the swap-call
+      // assertion fail (and changes the echo quote), so this goes RED.
+      const allCalls = [...aCalls, ...bCalls];
+      expect(allCalls.length).toBeGreaterThan(0);
+      const expectedBlockRef = JSON.stringify({ blockHash, requireCanonical: true });
+      for (const c of allCalls) expect(JSON.stringify(c.blockRef)).toBe(expectedBlockRef);
+      const unwrapCalls = allCalls.filter((c) => c.to === WSTETH_ADDR);
+      expect(unwrapCalls.length).toBeGreaterThan(0);
+      for (const c of unwrapCalls) expect(c.data).toBe(buildGetStEthByWstEthCalldata(ONE_WSTETH));
+      const swapCalls = allCalls.filter((c) => c.to === STETH_POOL);
+      expect(swapCalls.length).toBeGreaterThan(0);
+      for (const c of swapCalls) expect(c.data).toBe(buildCurveGetDyCalldata(1n, 0n, STETH_RATE));
+      // R126 fix 1 (evidence): the persisted receipt evidence retains
+      // both composed calls and the pinned block hash.
+      const receipt = result.receipt as Record<string, unknown>;
+      expect(receipt.intent).toBe("OPTIMAL_EXECUTION_ROUTE_GENERAL");
+      const evidence = await storedReceiptEvidence(receipt.receipt_id as string);
+      expect(evidence).toBeDefined();
+      expect(evidence).toContain(buildGetStEthByWstEthCalldata(ONE_WSTETH));
+      expect(evidence).toContain(buildCurveGetDyCalldata(1n, 0n, STETH_RATE));
+      expect(evidence).toContain(blockHash);
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("Curve stETH leg failing leaves V3 alone -> answers at 0.9, absence named", async () => {
+    const a = await mk({ failCurve: true });
+    const b = await mk({ failCurve: true });
+    try {
+      const result = await handleRouteWithRpcs({ pair: "wstETH/ETH" }, [a.url, b.url]);
+      expect(result.amount_out).toBe(Number(V3_QUOTE));
+      expect(result.amount_out_base_units).toBe(V3_QUOTE.toString());
+      expect(result.winning_venue).toBe("Uniswap V3 (fee 100)");
+      expect(result.confidence).toBe(0.9);
+      expect(result.source).toContain("fewer than 2 venues produced plausible quotes (1 of 2)");
+      expect(result.source).toContain("Curve stETH pool produced no plausible quote");
+      expect(result.answer).toContain("Curve stETH pool produced no plausible quote");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("unwrap-rate call failing takes the Curve venue out -> V3 alone at 0.9", async () => {
+    const a = await mk({ failStEthRate: true });
+    const b = await mk({ failStEthRate: true });
+    try {
+      const result = await handleRouteWithRpcs({ pair: "wstETH/ETH" }, [a.url, b.url]);
+      expect(result.winning_venue).toBe("Uniswap V3 (fee 100)");
+      expect(result.confidence).toBe(0.9);
+      expect(result.source).toContain("Curve stETH pool produced no plausible quote");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("every venue outside the wstETH band -> 502 ALL_QUOTERS_FAILED (fail-closed)", async () => {
+    const far = 5_000_000_000_000_000_000n; // 5 ETH per wstETH: absurd
+    // With the echo model the composed Curve quote follows the unwrap
+    // rate, so an absurd rate puts that venue outside the band too.
+    const a = await mk({ v3AmountOut: far, stEthRate: far });
+    const b = await mk({ v3AmountOut: far, stEthRate: far });
+    try {
+      await expect(handleRouteWithRpcs({ pair: "wstETH/ETH" }, [a.url, b.url])).rejects.toMatchObject({
+        status: 502,
+        code: "ALL_QUOTERS_FAILED",
+      });
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("a depeg-magnitude V3 quote below the band is dropped; the Curve survivor answers at 0.9", async () => {
+    const a = await mk({ v3AmountOut: 100_000_000_000_000_000n }); // 0.1 ETH: below the 0.9 floor
+    const b = await mk({ v3AmountOut: 100_000_000_000_000_000n });
+    try {
+      const result = await handleRouteWithRpcs({ pair: "wstETH/ETH" }, [a.url, b.url]);
+      expect(result.amount_out).toBe(Number(STETH_RATE));
+      expect(result.amount_out_base_units).toBe(STETH_RATE.toString());
+      expect(result.winning_venue).toBe("Curve stETH pool");
+      expect(result.confidence).toBe(0.9);
+      expect(result.source).toContain("degraded");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+});
+
+describe("generic ERC-20 pair resolution (2026-11-22)", () => {
+  it("generic bounds do not underflow for high sell decimals and remain uint256-bounded", () => {
+    const address = "0x1111111111111111111111111111111111111111";
+    const meta = (decimals: number) => ({ address, decimals, symbol: "UNIT" });
+    for (const sellDecimals of [0, 6, 18, 30, 77]) {
+      for (const buyDecimals of [0, 6, 18, 77, 255]) {
+        const spec = buildGenericSpec(meta(sellDecimals), meta(buyDecimals));
+        const cap = 10n ** BigInt(18 + buyDecimals);
+        const max = (1n << 256n) - 1n;
+        expect(spec.amountIn).toBe(10n ** BigInt(sellDecimals));
+        expect(spec.plausibleMaxOut).toBe(cap < max ? cap : max);
+      }
+    }
+    expect(() => buildGenericSpec(meta(78), meta(6))).toThrow("uint256");
+    expect(() => buildGenericSpec(meta(255), meta(6))).toThrow("uint256");
+  });
+
+  it("decimals()/symbol() calldata and decoders, including the bytes32 (MKR) shape", () => {
+    expect(buildDecimalsCalldata()).toBe("0x313ce567");
+    expect(buildSymbolCalldata()).toBe("0x95d89b41");
+    expect(decodeDecimalsReturn("0x" + "00".repeat(31) + "06")).toBe(6);
+    expect(decodeDecimalsReturn("0x" + "00".repeat(31) + "12")).toBe(18);
+    // 256+ is not a real decimals field; wrong lengths are malformed.
+    expect(decodeDecimalsReturn("0x" + "00".repeat(30) + "0100")).toBe(null);
+    expect(decodeDecimalsReturn("0x1234")).toBe(null);
+    // Dynamic string: offset 0x20, length 4, "USDC".
+    expect(
+      decodeSymbolReturn(
+        "0x" + "00".repeat(31) + "20" + "00".repeat(31) + "04" + "55534443".padEnd(64, "0"),
+      ),
+    ).toBe("USDC");
+    // bytes32, left-aligned, zero-padded: "MKR".
+    expect(decodeSymbolReturn("0x" + "4d4b52" + "00".repeat(29))).toBe("MKR");
+    expect(decodeSymbolReturn("0x")).toBe(null);
+    // Non-printable content is rejected.
+    expect(decodeSymbolReturn("0x" + "01".repeat(32))).toBe(null);
+  });
+
+  it("combines wstETH registry metadata with generic pair-side resolution", () => {
+    const sides = parseGenericPairSides("wstETH/USDC");
+    expect(sides?.sell.address.toLowerCase()).toBe("0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0");
+    expect(sides?.sell.decimals).toBe(18);
+    expect(sides?.buy.symbol).toBe("USDC");
+  });
+
+  it("parseGenericPairSides: directory symbols, registry symbols, bare 0x addresses; rejects unknown/malformed/self pairs", () => {
+    const shib = GENERIC_TOKENS.find((t) => t.symbol === "SHIB")!;
+    const resolved = parseGenericPairSides("SHIB/USDC");
+    expect(resolved).not.toBe(null);
+    expect(resolved!.sell.address.toLowerCase()).toBe(shib.address.toLowerCase());
+    expect(resolved!.sell.decimals).toBe(18);
+    expect(resolved!.buy.symbol).toBe("USDC");
+    expect(resolved!.buy.decimals).toBe(6);
+    // Separators and casing follow the registry parser's rules.
+    expect(parseGenericPairSides("shib -> usdc")).not.toBe(null);
+    expect(parseGenericPairSides("SHIB-USDC")).not.toBe(null);
+    // A bare 0x address defers metadata to the on-chain calls.
+    const bare = parseGenericPairSides(`0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE/USDC`);
+    expect(bare!.sell.symbol).toBe("SHIB"); // known address hits the directory
+    const unknown = parseGenericPairSides(`0x1111111111111111111111111111111111111111/USDC`);
+    expect(unknown!.sell.symbol).toBe(null);
+    expect(unknown!.sell.decimals).toBe(null);
+    // Unknown symbols, malformed shapes and self-pairs stay on the refusal path.
+    expect(parseGenericPairSides("BTC/USDC")).toBe(null);
+    expect(parseGenericPairSides("WBNB/SafeMoon")).toBe(null);
+    expect(parseGenericPairSides("ETH")).toBe(null);
+    expect(parseGenericPairSides("USDC/USDC")).toBe(null);
+    expect(parseGenericPairSides("SHIB/SHIB")).toBe(null);
+  });
+
+  it("SHIB/USDC (directory pair): real quote shape, exact base units, no-band disclosure, receipt persisted", async () => {
+    // 1 SHIB ~= 0.00001 USDC: tiny positive outputs, venues agreeing
+    // exactly (at dust scale a 1-base-unit spread exceeds the ±5% band).
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        v3AmountOut: 10n, v2AmountOut: 10n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "SHIB/USDC" }, [a.url, b.url]);
+      expect(result.amount_out).toBe(10);
+      expect(result.block_number).toBe(FRESH_BLOCK);
+      const answer = result.answer as string;
+      expect(answer).toContain("1 SHIB");
+      expect(answer).toContain("0.000010 USDC");
+      expect(answer).toContain("No fair-value band is published for this pair");
+      expect(answer).toContain("below the published");
+      expect(answer).not.toContain("stable-pair quote");
+      expect(result.source).toContain("scale-only backstops");
+      const receipt = result.receipt as Record<string, unknown>;
+      expect(receipt.intent).toBe("OPTIMAL_EXECUTION_ROUTE_GENERAL");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("bare 0x address side: metadata read on-chain at the pin, then quoted", async () => {
+    // An address absent from every directory: capture metadata requests
+    // so replacing the canonical block reference with latest goes RED.
+    const calls: Array<{ to: string; data: string; blockRef: unknown }> = [];
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        tokenDecimals: 8, tokenSymbol: "FAKE8", capturedCalls: calls,
+        v3AmountOut: 1_500_000_000n, v2AmountOut: 1_490_000_000n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs(
+        { pair: "0x1111111111111111111111111111111111111111/USDC" },
+        [a.url, b.url],
+      );
+      const answer = result.answer as string;
+      expect(answer).toContain("1 FAKE8");
+      expect(answer).toContain("USDC");
+      expect(result.amount_out).toBe(1_500_000_000);
+      const metadata = calls.filter(c => ["0x313ce567", "0x95d89b41"].includes(c.data));
+      expect(metadata.map(c => c.data).sort()).toEqual(["0x313ce567", "0x95d89b41"]);
+      for (const call of metadata) {
+        expect(call.to).toBe("0x1111111111111111111111111111111111111111");
+        expect(call.blockRef).toEqual({ blockHash: HASH, requireCanonical: true });
+      }
+      const quoteCall = calls.find(c => c.data.startsWith("0xd06ca61f"));
+      expect(quoteCall?.data).toBe(buildV2AmountsOutCalldata(100_000_000n, ["0x1111111111111111111111111111111111111111", USDC]));
+      expect(quoteCall?.blockRef).toEqual({ blockHash: HASH, requireCanonical: true });
+      const receipt = result.receipt as { receipt_id: string };
+      const stored = await getReceiptEvidence(receipt.receipt_id);
+      const evidence = JSON.parse(stored.evidence!.toString("utf8"));
+      const metadataEvidence = evidence.generic_resolution.sell_token.metadataEvidence;
+      expect(metadataEvidence).toHaveLength(2);
+      for (const item of metadataEvidence) {
+        expect(item.request.params[1]).toEqual({ blockHash: HASH, requireCanonical: true });
+        expect(item.response.result).toMatch(/^0x/);
+      }
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("no direct pool but WETH-hop liquidity -> 200 via the named hop route, honest 0.9 (2 of 5 venues)", async () => {
+    // SHIB/LINK has no direct pool: V3 and both direct V2 calls revert,
+    // but both routers quote the SHIB -> WETH -> LINK hop.
+    const calls: Array<{ to: string; data: string; blockRef: unknown }> = [];
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        failV3: true, failUni: true, failSushi: true,
+        v3AmountOut: 0n, v2AmountOut: 0n, capturedCalls: calls,
+        uniHopAmountOut: 25n, sushiHopAmountOut: 24n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "SHIB/LINK" }, [a.url, b.url]);
+      expect(result.amount_out).toBe(25);
+      expect(result.winning_venue).toBe("Uniswap V2 via WETH");
+      expect(result.confidence).toBe(0.9);
+      const answer = result.answer as string;
+      expect(answer).toContain("Uniswap V2 via WETH");
+      expect(answer).toContain("SushiSwap V2 via WETH");
+      expect(result.source).toContain("fewer than 5 venues produced plausible quotes (2 of 5)");
+      const sell = GENERIC_TOKENS.find(t => t.symbol === "SHIB")!.address;
+      const buy = GENERIC_TOKENS.find(t => t.symbol === "LINK")!.address;
+      const expected = buildV2AmountsOutCalldata(10n ** 18n, [sell, WETH, buy]);
+      const hops = calls.filter(c => c.data.startsWith("0xd06ca61f") && BigInt("0x" + c.data.slice(138, 202)) === 3n);
+      expect(hops.length).toBeGreaterThanOrEqual(2);
+      expect(new Set(hops.map(c => c.to))).toEqual(new Set([
+        "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+        "0xd9e1ce17f2641f24ae83637ab66a2cca9c378b9f",
+      ]));
+      for (const hop of hops) {
+        expect(hop.data).toBe(expected);
+        expect(hop.blockRef).toEqual({ blockHash: HASH, requireCanonical: true });
+      }
+      const receipt = result.receipt as { receipt_id: string; raw_response_sha256: string };
+      const stored = await getReceiptEvidence(receipt.receipt_id);
+      expect(stored.found).toBe(true);
+      expect(stored.sha256).toBe(receipt.raw_response_sha256);
+      const evidence = JSON.parse(stored.evidence!.toString("utf8"));
+      expect(evidence.request.params).toEqual([
+        { to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D", data: expected },
+        { blockHash: HASH, requireCanonical: true },
+      ]);
+      expect(decodeV2AmountsOut(evidence.response.result, 3, 10n ** 18n)).toBe(25n);
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("pinned block 26472336: dust WETH hops cannot displace the better direct wstETH/USDC quote", async () => {
+    const pinned = JSON.parse(readFileSync(resolve(process.cwd(), "tests/fixtures/route-wsteth-usdc-dust-hop-block26472336.json"), "utf8"));
+    const directOut = BigInt(pinned.directCandidates[0].amountOut);
+    const uniHopOut = BigInt(pinned.combinedCandidates.find((q: {venue:string}) => q.venue === "Uniswap V2 via WETH").amountOut);
+    const sushiHopOut = BigInt(pinned.combinedCandidates.find((q: {venue:string}) => q.venue === "SushiSwap V2 via WETH").amountOut);
+    expect(directOut).toBe(1_705_865_475n);
+    expect(uniHopOut).toBe(186_892_531n);
+    expect(sushiHopOut).toBe(4_976_362n);
+    const calls: Array<{ to: string; data: string; blockRef: unknown }> = [];
+    // This pinned-historical-block test freezes wall time just after the
+    // block's implied timestamp: a fixed historical number paired with a
+    // wall-clock-now timestamp is refused as a stale/forged pin (round-8
+    // number-vs-timestamp consistency), and its implied timestamp is
+    // refused as stale (max age 1800s) once real time has advanced. The
+    // pinned-block assertions (calldata, blockRef, venue choice) are
+    // time-independent; only the freshness window needs freezing.
+    const frozenNowSec = impliedBlockTimestamp(pinned.block_number) + 60;
+    vi.useFakeTimers({ now: frozenNowSec * 1000 });
+    const mk = () => startStubRpc({
+      blockNumber: pinned.block_number, blockHash: pinned.blockRef.blockHash,
+      blockTimestampSec: frozenNowSec,
+      failCalls: false, failUni: true, failSushi: true,
+      v3AmountOut: directOut, v2AmountOut: 0n,
+      uniHopAmountOut: uniHopOut, sushiHopAmountOut: sushiHopOut, capturedCalls: calls,
+    });
+    const a = await mk(); const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "wstETH/USDC" }, [a.url, b.url]);
+      expect(result.amount_out_base_units).toBe(directOut.toString());
+      expect(result.winning_venue).toMatch(/^Uniswap V3/);
+      expect(result.confidence).toBe(0.9);
+      expect(result.answer).toContain("direct-only baseline");
+      for (const call of calls) expect(call.blockRef).toEqual(pinned.blockRef);
+      const receipt = result.receipt as {receipt_id:string};
+      const stored = await getReceiptEvidence(receipt.receipt_id);
+      const evidence = JSON.parse(stored.evidence!.toString("utf8"));
+      expect(evidence.direct_hop_safety).toMatchObject({ policy: "non-degrading direct-only baseline", combined_winner_base_units: sushiHopOut.toString(), direct_winner_base_units: directOut.toString() });
+      expect(evidence.direct_hop_safety.rejected_hop_quotes).toHaveLength(2);
+    } finally { vi.useRealTimers(); await a.close(); await b.close(); }
+  });
+
+  it("a hop quote that beats every direct quote wins and is named as the route", async () => {
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        v3AmountOut: 100n, v2AmountOut: 100n,
+        uniHopAmountOut: 103n, sushiHopAmountOut: 103n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "SHIB/USDC" }, [a.url, b.url]);
+      expect(result.amount_out).toBe(103);
+      expect(result.winning_venue).toBe("Uniswap V2 via WETH");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("no direct pool and no hop liquidity -> 400 NO_ROUTE (every call answered, nothing quoted)", async () => {
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        failV3: true, failUni: true, failSushi: true, failHop: true,
+        v3AmountOut: 0n, v2AmountOut: 0n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const body = await expectUnavailable(
+        handleRouteWithRpcs({ pair: "SHIB/LINK" }, [a.url, b.url]),
+        "NO_ROUTE",
+      );
+      expect(String(body.summary)).toContain("not proof that the tokens lack");
+      expect(String(body.summary)).toContain("tested direct routes and routes via WETH");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it.each([{ hopReturnLength: 2 }, { hopWrongInput: true }])("rejects a hop response that does not bind to its request: %j", async (overrides) => {
+    const mk = () => startStubRpc({
+      blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+      v3AmountOut: 0n, v2AmountOut: 0n,
+      failV3: true, failUni: true, failSushi: true,
+      uniHopAmountOut: 25n, sushiHopAmountOut: 24n, ...overrides,
+    });
+    const a = await mk(); const b = await mk();
+    try {
+      await expect(handleRouteWithRpcs({ pair: "SHIB/LINK" }, [a.url, b.url])).rejects.toMatchObject({ status: 502, code: "ALL_QUOTERS_FAILED" });
+    } finally { await a.close(); await b.close(); }
+  });
+
+  it.each(["SHIB/WETH", "WETH/SHIB"])("%s refusal reports only direct routes when there is no distinct connector", async (pair) => {
+    const calls: Array<{ to: string; data: string; blockRef: unknown }> = [];
+    const mk = () => startStubRpc({
+      blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+      v3AmountOut: 0n, v2AmountOut: 0n, capturedCalls: calls,
+      uniHopAmountOut: 25n, sushiHopAmountOut: 24n,
+    });
+    const a = await mk(); const b = await mk();
+    try {
+      const body = await expectUnavailable(handleRouteWithRpcs({ pair }, [a.url, b.url]), "NO_ROUTE");
+      expect(String(body.summary)).toContain("positive output through the tested direct routes.");
+      expect(String(body.summary)).not.toContain("WETH-hop");
+      expect(String(body.summary)).not.toContain("routes via WETH");
+      const v2Calls = calls.filter(call => call.data.startsWith("0xd06ca61f"));
+      expect(v2Calls.length).toBeGreaterThan(0);
+      for (const call of v2Calls) expect(BigInt("0x" + call.data.slice(138, 202))).toBe(2n);
+    } finally { await a.close(); await b.close(); }
+  });
+
+  it("a WETH-side pair registers NO hop venues (the hop would be the direct pair)", async () => {
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        v3AmountOut: 570_000_000_000_000n, v2AmountOut: 569_000_000_000_000n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "USDC/ETH" }, [a.url, b.url]);
+      const answer = result.answer as string;
+      expect(answer).not.toContain("via WETH");
+      // 3 venues (V3 tiers + 2 direct routers), never 5.
+      expect(result.source).not.toContain("of 5");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("every venue reverting (no pool) -> 400 NO_ROUTE unavailable envelope with a receipt, not a 502", async () => {
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false, v3AmountOut: 0n, v2AmountOut: 0n,
+        failV3: true, failV2: true,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const body = await expectUnavailable(
+        handleRouteWithRpcs({ pair: "SHIB/USDC" }, [a.url, b.url]),
+        "NO_ROUTE",
+      );
+      expect(String(body.summary)).toContain("not proof that the tokens lack");
+      expect(String(body.summary)).toContain("does not invent quotes");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("venue calls failing at transport level -> 502 ALL_QUOTERS_FAILED (no false no-liquidity claim)", async () => {
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: true, v3AmountOut: 0n, v2AmountOut: 0n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      await expect(handleRouteWithRpcs({ pair: "SHIB/USDC" }, [a.url, b.url])).rejects.toMatchObject({
+        status: 502,
+        code: "ALL_QUOTERS_FAILED",
+      });
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it.each(["metadata-transport", "metadata-malformed", "malformed-v2", "revert-substring"])("infrastructure diagnostic does not become a no-route finding: %s", async (kind) => {
+    const mk = () => startStubRpc({
+      blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+      v3AmountOut: 0n, v2AmountOut: 0n, failV3: true,
+      metaTransportError: kind === "metadata-transport",
+      malformedV2: kind === "malformed-v2",
+      metaMalformed: kind === "metadata-malformed",
+      infrastructureMentionsRevert: kind === "revert-substring",
+    });
+    const a = await mk(); const b = await mk();
+    try {
+      const pair = kind.startsWith("metadata-") ? "0x1111111111111111111111111111111111111111/USDC" : "SHIB/USDC";
+      await expect(handleRouteWithRpcs({ pair }, [a.url, b.url])).rejects.toMatchObject({
+        status: 502, code: kind.startsWith("metadata-") ? "METADATA_RPC_FAILED" : "ALL_QUOTERS_FAILED",
+      });
+    } finally { await a.close(); await b.close(); }
+  });
+
+  it("unreadable metadata on every agreeing RPC -> 400 NO_ROUTE (not a verifiable ERC-20)", async () => {
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false, failMeta: true, v3AmountOut: 0n, v2AmountOut: 0n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const body = await expectUnavailable(
+        handleRouteWithRpcs({ pair: "0x1111111111111111111111111111111111111111/USDC" }, [a.url, b.url]),
+        "NO_ROUTE",
+      );
+      expect(String(body.summary)).toContain("metadata");
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+});
+
 describe("grader question replay (regression: every real question seen e32-e35)", () => {
   it("epoch 34: WBNB/SafeMoon -> 400 unavailable envelope (no verifiable liquidity; owner decision 2026-11-22)", async () => {
     const body = await expectUnavailable(handleRoute({ pair: "WBNB/SafeMoon" }), "NO_ROUTE");
@@ -376,6 +975,12 @@ describe("grader question replay (regression: every real question seen e32-e35)"
 
   it("epoch 32/33: ETH/USDC passes validation and reaches the quote path", async () => {
     await expect(handleRouteWithRpcs({ pair: "ETH/USDC" }, ["http://127.0.0.1:9"])).rejects.toMatchObject({
+      status: 502,
+      code: "RPC_CONFIG",
+    });
+  });
+  it("epoch 37: wstETH/ETH passes validation and reaches the quote path", async () => {
+    await expect(handleRouteWithRpcs({ pair: "wstETH/ETH" }, ["http://127.0.0.1:9"])).rejects.toMatchObject({
       status: 502,
       code: "RPC_CONFIG",
     });
@@ -424,6 +1029,8 @@ describe("live: pair registry on real mainnet venues (no mocks)", () => {
       ["DAI", "0x6B175474E89094C44Da98b954EedeAC495271d0F"],
       ["USDT", "0xdAC17F958D2ee523a2206206994597C13D831ec7"],
       ["WBTC", "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"],
+      ["wstETH", "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0"],
+      ["Curve stETH pool", "0xDC24316b9AE028F1497c275EB9192a3Ea0f67022"],
       ["Curve 3pool", "0xbEbc44782C7dB0a1A60Cb6fe97d0b483032FF1C7"],
       ["QuoterV2", "0x61fFE014bA17989E743c5F6cB21bF9697530B21e"],
       ["Uniswap V2 Router", "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"],
@@ -481,6 +1088,22 @@ describe("live: pair registry on real mainnet venues (no mocks)", () => {
     expect(result.amount_out as number).toBeGreaterThan(1000000000); // > $1,000
     expect(result.amount_out as number).toBeLessThan(1000000000000); // < $1,000,000
     console.log(`LIVE route WBTC/USDC: amount_out=${result.amount_out} venue=${result.winning_venue}`);
+  });
+  it('pair "wstETH/ETH" returns a wstETH-band amount_out with a receipt', { timeout: 60000 }, async () => {
+    const result = await handleRoute({ pair: "wstETH/ETH" });
+    // Band in wei: 0.9-1.5 ETH per wstETH. number precision at 1.25e18
+    // is ~256 wei, irrelevant against a 0.6e18-wide band.
+    expect(result.amount_out as number).toBeGreaterThanOrEqual(Number(900_000_000_000_000_000n));
+    expect(result.amount_out as number).toBeLessThanOrEqual(Number(1_500_000_000_000_000_000n));
+    expect(result.verdict).toBe("verified");
+    expect(result.answer as string).toContain("1 wstETH");
+    expect(result.answer as string).toContain("above the published amount_out range");
+    const receipt = result.receipt as Record<string, unknown>;
+    expect(receipt.intent).toBe("OPTIMAL_EXECUTION_ROUTE_GENERAL");
+    console.log(
+      `LIVE route wstETH/ETH: amount_out=${result.amount_out} block=${result.block_number} ` +
+        `venue=${result.winning_venue} confidence=${result.confidence}`,
+    );
   });
 });
 
@@ -599,6 +1222,27 @@ interface StubRpcOptions {
   /** Curve 3pool get_dy leg (stable pairs only): amount or failure. */
   curveAmountOut?: bigint;
   failCurve?: boolean;
+  /** wstETH getStETHByWstETH leg (wstETH/ETH only): stETH base units
+   * returned for 1 wstETH, or failure. */
+  stEthRate?: bigint;
+  failStEthRate?: boolean;
+  /** Generic-pair metadata legs: decimals() returns this value, symbol()
+   * returns this string (ABI dynamic string). failMeta makes both revert. */
+  tokenDecimals?: number;
+  tokenSymbol?: string;
+  failMeta?: boolean;
+  metaTransportError?: boolean;
+  metaMalformed?: boolean;
+  infrastructureMentionsRevert?: boolean;
+  malformedV2?: boolean;
+  capturedCalls?: Array<{ to: string; data: string; blockRef: unknown }>;
+  /** 2-hop getAmountsOut (3-token path) outputs per router; default is
+   * the same as the direct v2AmountOut. */
+  uniHopAmountOut?: bigint;
+  sushiHopAmountOut?: bigint;
+  failHop?: boolean;
+  hopReturnLength?: number;
+  hopWrongInput?: boolean;
   /** When true, eth_call never responds (hangs until the client's CALL_TIMEOUT_MS). */
   hangCalls?: boolean;
   /** When true, eth_blockNumber never responds (hangs until the quorum timeout). */
@@ -637,6 +1281,7 @@ const DEFAULT_BLOCK_TIMESTAMP_SEC = Math.floor(Date.now() / 1000);
 // the height-anchor tests below use expectedBlockHeight() explicitly.
 // (The forged-pin tests keep their fixed 26,000,000 — that is the point.)
 const FRESH_BLOCK = expectedBlockHeight(Math.floor(Date.now() / 1000));
+const HASH = "0x" + "ab".repeat(32);
 
 function startStubRpc(options: StubRpcOptions): Promise<{
   url: string;
@@ -656,11 +1301,11 @@ function startStubRpc(options: StubRpcOptions): Promise<{
         // Fall through to the unknown-method error below.
       }
       const reply = (result: unknown) => {
-        res.writeHead(200, { "Content-Type": "application/json" });
+        res.writeHead(res.statusCode, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id ?? 1, result }));
       };
       const replyError = (code: number, message: string) => {
-        res.writeHead(200, { "Content-Type": "application/json" });
+        res.writeHead(res.statusCode, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({ jsonrpc: "2.0", id: body.id ?? 1, error: { code, message } }),
         );
@@ -706,23 +1351,40 @@ function startStubRpc(options: StubRpcOptions): Promise<{
       if (body.method === "eth_call") {
         const answerCall = () => {
           if (options.hangCalls) return; // Never reply: hangs until CALL_TIMEOUT_MS.
+          if (options.infrastructureMentionsRevert) return replyError(-32000, "backend revert index unavailable");
           if (options.failCalls) return replyError(-32000, "stub RPC refuses eth_call");
           const params = (body.params ?? []) as Array<{ to?: string; data?: string }>;
           const to = (params[0]?.to ?? "").toLowerCase();
           const data = params[0]?.data ?? "";
+          options.capturedCalls?.push({ to, data, blockRef: (body.params ?? [])[1] });
           if (data.startsWith("0xc6a5026a")) {
-            if (options.failV3) return replyError(-32000, "stub RPC: V3 quoter reverts");
+            if (options.failV3) return replyError(-32000, "execution reverted: stub RPC V3 quoter");
             // QuoterV2: exactly 4 words, amountOut first.
             return reply("0x" + word(options.v3AmountOut) + "00".repeat(96));
           }
           if (data.startsWith("0xd06ca61f")) {
-            if (options.failV2) return replyError(-32000, "stub RPC: V2 router reverts");
+            if (options.malformedV2) return reply("0xdeadbeef");
+            if (options.failV2) return replyError(-32000, "execution reverted: stub RPC V2 router");
             const isSushi =
               to === "0xd9e1ce17f2641f24ae83637ab66a2cca9c378b9f";
+            // getAmountsOut(uint,address[]): the path length word sits at
+            // chars [138, 202); 2 = direct pair, 3 = one-hop route.
+            const pathLen = Number(BigInt("0x" + data.slice(138, 202)));
+            const requestedAmountIn = BigInt("0x" + data.slice(10, 74));
+            if (pathLen === 3) {
+              if (options.failHop) return replyError(-32000, "execution reverted: stub RPC: no hop pair");
+              const hopOut = isSushi
+                ? (options.sushiHopAmountOut ?? options.v2AmountOut)
+                : (options.uniHopAmountOut ?? options.v2AmountOut);
+              const len = options.hopReturnLength ?? 3;
+              const input = options.hopWrongInput ? requestedAmountIn + 1n : requestedAmountIn;
+              const amounts = [input, ...(len === 3 ? [1_000_000n] : []), hopOut];
+              return reply("0x" + word(0x20n) + word(BigInt(len)) + amounts.map(word).join(""));
+            }
             if (isSushi && options.failSushi)
-              return replyError(-32000, "stub RPC: Sushi router reverts");
+              return replyError(-32000, "execution reverted: stub RPC Sushi router");
             if (!isSushi && options.failUni)
-              return replyError(-32000, "stub RPC: Uni V2 router reverts");
+              return replyError(-32000, "execution reverted: stub RPC Uni V2 router");
             const amountOut = isSushi
               ? (options.sushiAmountOut ?? options.v2AmountOut)
               : (options.uniAmountOut ?? options.v2AmountOut);
@@ -731,14 +1393,45 @@ function startStubRpc(options: StubRpcOptions): Promise<{
               "0x" +
                 word(0x20n) +
                 word(2n) +
-                word(1000000000000000000n) +
+                word(requestedAmountIn) +
                 word(amountOut),
             );
           }
           if (data.startsWith("0x5e0d443f")) {
             if (options.failCurve) return replyError(-32000, "stub RPC: Curve 3pool reverts");
+            // R126: the stETH/ETH pool leg must CONSUME the unwrap result.
+            // Answer get_dy by echoing the decoded dx (a 1:1 stETH/ETH
+            // model), so a handler mutated to pass the raw wstETH amount
+            // instead of the unwrapped stETH amount changes the composed
+            // quote and fails the request-level binding assertions.
+            if (to === "0xdc24316b9ae028f1497c275eb9192a3ea0f67022") {
+              const dx = BigInt("0x" + data.slice(2 + 8 + 128, 2 + 8 + 192));
+              return reply("0x" + word(dx));
+            }
             // get_dy: exactly one word.
             return reply("0x" + word(options.curveAmountOut ?? 1_000_000n));
+          }
+          if (data.startsWith("0xbb2952fc")) {
+            if (options.failStEthRate) return replyError(-32000, "stub RPC: wstETH reverts");
+            // getStETHByWstETH: exactly one word (stETH base units).
+            return reply("0x" + word(options.stEthRate ?? 1_250_000_000_000_000_000n));
+          }
+          if (data.startsWith("0x313ce567")) {
+            if (options.metaTransportError) { res.statusCode = 503; return reply("0x"); }
+            if (options.metaMalformed) return reply("0x1234");
+            // ERC-20 decimals(): exactly one word.
+            if (options.failMeta) return replyError(-32000, "execution reverted: stub RPC: token metadata reverts");
+            return reply("0x" + word(BigInt(options.tokenDecimals ?? 18)));
+          }
+          if (data.startsWith("0x95d89b41")) {
+            if (options.metaTransportError) { res.statusCode = 503; return reply("0x"); }
+            if (options.metaMalformed) return reply("0x1234");
+            // ERC-20 symbol(): ABI dynamic string (offset, length, data).
+            if (options.failMeta) return replyError(-32000, "execution reverted: stub RPC: token metadata reverts");
+            const sym = options.tokenSymbol ?? "TEST";
+            const bytes = Buffer.from(sym, "utf8");
+            const padded = bytes.toString("hex").padEnd(64, "0");
+            return reply("0x" + word(0x20n) + word(BigInt(bytes.length)) + padded);
           }
           return replyError(-32602, "stub RPC: unknown eth_call data");
         };
@@ -1729,7 +2422,7 @@ describe("round 5: any dropped quote caps confidence at 0.9 (J1 B1 + J2 B1)", ()
   );
 
   it(
-    "miner.yaml /v1/route description names no Curve venue (round 5, J1 B2): the handler quotes only Uniswap V2/V3 + SushiSwap V2, so the registration file must not advertise Curve pools",
+    "miner.yaml keeps the typed canonical pair and measured venue scope explicit",
     () => {
       const yaml = readFileSync(resolve(process.cwd(), "miner.yaml"), "utf8");
       const routeStart = yaml.indexOf("- path: /v1/route");
@@ -1737,8 +2430,10 @@ describe("round 5: any dropped quote caps confidence at 0.9 (J1 B1 + J2 B1)", ()
       expect(routeStart).toBeGreaterThan(-1);
       expect(gridStart).toBeGreaterThan(routeStart);
       const routeSection = yaml.slice(routeStart, gridStart);
-      expect(routeSection).toContain("Uniswap V2/V3, SushiSwap V2");
-      expect(routeSection).not.toContain("Curve");
+      expect(routeSection).toContain("Uniswap V2/V3");
+      expect(routeSection).toContain("SushiSwap V2");
+      expect(routeSection).toContain("ETH/USDC");
+      expect(routeSection).toContain("Quotes are gross, not gas-adjusted");
     },
   );
 });
@@ -2123,14 +2818,49 @@ describe("refusal matrix + adversarial pairs (round 4)", () => {
     await expectUnavailable(handleRoute({ pair: "ETH／USDC" }), "INVALID_PAIR");
   });
 
-  it('pair "USDC/ETH" (reversed) -> 400 unavailable envelope (ETH-out direction, wei-precision explanation)', async () => {
-    const body = await expectUnavailable(handleRoute({ pair: "USDC/ETH" }), "NO_ROUTE");
-    expect(String(body.summary)).toContain("published amount_out range");
+  it('pair "USDC/ETH" (reversed): generic resolution serves a wei-scale quote with the above-range honesty note (stubbed RPCs)', async () => {
+    const weiOut = 570_000_000_000_000n; // ~0.00057 ETH per USDC
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        v3AmountOut: weiOut, v2AmountOut: weiOut - 1_000_000_000_000n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "USDC/ETH" }, [a.url, b.url]);
+      expect(result.amount_out).toBe(Number(weiOut));
+      expect(result.block_number).toBe(FRESH_BLOCK);
+      const answer = result.answer as string;
+      expect(answer).toContain("1 USDC");
+      expect(answer).toContain("18 decimals");
+      expect(answer).toContain("above the published amount_out range [1e8, 1e11]");
+      expect(answer).toContain("No fair-value band is published for this pair");
+      expect(result.source).toContain("scale-only backstops");
+    } finally {
+      await a.close();
+      await b.close();
+    }
   });
 
-  it('pair "USDC/DAI" (known tokens, unregistered non-ETH direction) -> 400 unavailable envelope', async () => {
-    const body = await expectUnavailable(handleRoute({ pair: "USDC/DAI" }), "NO_ROUTE");
-    expect(String(body.summary)).toContain("not in the verified pair registry");
+  it('pair "USDC/DAI" (known tokens, unregistered direction): generic resolution quotes it like any other pair', async () => {
+    const mk = () =>
+      startStubRpc({
+        blockNumber: FRESH_BLOCK, blockHash: HASH, failCalls: false,
+        v3AmountOut: 999_000_000_000_000_001n, v2AmountOut: 998_500_000_000_000_000n,
+      });
+    const a = await mk();
+    const b = await mk();
+    try {
+      const result = await handleRouteWithRpcs({ pair: "USDC/DAI" }, [a.url, b.url]);
+      expect(result.amount_out).toBe(Number(999_000_000_000_000_001n));
+      expect(result.amount_out_base_units).toBe("999000000000000001");
+      expect(result.source).toContain("amount_out is the JSON-number rendering (approximate");
+      expect(result.winning_venue).toBe("Uniswap V3 (fee 100)");
+    } finally {
+      await a.close();
+      await b.close();
+    }
   });
 
   it('oversized pair (10k chars, injection-shaped) -> 400 unavailable envelope, INVALID_PAIR, summary capped', async () => {

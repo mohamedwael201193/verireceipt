@@ -1,0 +1,9 @@
+# Metric provider failure diagnostics
+
+Logging-only addition: answer_class now includes full_leg_count, an integer0..3 counting complete validated provider legs, not partial RPC calls or quorum votes. When a provider failed, provider_failure is its most common failure class: not_finalized, rate_limited, timeout, wrong_chain or other. Ties use that fixed order, independent of timing. A successful two-provider answer with no failed provider omits provider_failure. Refusal with completed but disagreeing legs still retains the existing separate refusal_reason.
+
+not_finalized names the existing finalized-head guard. rate_limited is an observed HTTP429, not an inference from arbitrary JSON-RPC error text. timeout is the existing explicit local deadline error. wrong_chain is a returned chain ID that differs from the configured chain. Remaining failures, including source-capacity refusal and malformed upstream evidence, are other. Provider URLs, raw errors, hashes, chain IDs, addresses, block heights, balances and nonces are never added to logs. Metadata remains outside responses and receipts. No query, transport, budget, cache, source or quorum decision changes.
+
+Current intent schema4 accepts block integer0..1e12 and describes reading at that block. It does not require finality. Existing finalized-only handler doctrine is stricter and unchanged, as is the exact two-provider block hash+balance+nonce agreement. A future finality change needs a separate decision and review.
+
+Source: https://devnode.telegraphprotocol.com/engine/v1/intents/ONCHAIN_METRIC_VERIFY_GENERAL . Synthetic failure controls test categories, frequency, tie order and counts. Real stored finalized evidence remains the unchanged numeric/receipt replay; no claim is made that any particular production refusal had one of these causes before diagnostics existed.

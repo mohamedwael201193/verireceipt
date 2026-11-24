@@ -28,6 +28,13 @@ import { buildServer } from "../src/server";
 const fixture = JSON.parse(readFileSync(join(__dirname, "fixtures/deferred-persistence-real-sources.json"), "utf8"));
 interface RecordedResponse { url: string; method: string; body: unknown; status: number; raw_text: string; sha256: string }
 interface CapturedCase { query: Record<string, string>; expected_fields: Record<string, unknown>; expected_raw_text: string; expected_raw_sha256: string; clock: string }
+// The source captures stay unchanged; supply receipts now add an explicit chain-scope label.
+const supplyScope = "chain-specific ERC-20 totalSupply, decimals applied; not a global asset or circulating supply";
+fixture.scenarios.supply.expected_fields.total_supply_scope = supplyScope;
+const supplyEvidence = JSON.parse(fixture.scenarios.supply.expected_raw_text);
+supplyEvidence.total_supply_scope = supplyScope;
+fixture.scenarios.supply.expected_raw_text = JSON.stringify(supplyEvidence, Object.keys(supplyEvidence).sort());
+fixture.scenarios.supply.expected_raw_sha256 = sha256Hex(fixture.scenarios.supply.expected_raw_text);
 const responses = fixture.responses as RecordedResponse[];
 const key = (url: string, method: string, body: unknown) => JSON.stringify([url, method, body]);
 const responseMap = new Map<string, RecordedResponse[]>();
@@ -142,9 +149,14 @@ for (const item of cases) describe(item.name, () => {
     const result = await outcome; expect(result.error).toMatchObject(expected); expect(result.value).toBeUndefined();
   });
 });
-it("keeps the publisher's actual empty Aruba series as NO_DATA before any save", async () => {
+it("persists the publisher's empty Aruba bytes as disclosed no-data, never a numeric answer", async () => {
   vi.setSystemTime(new Date(fixture.scenarios.macro_latest.clock));
   const id = fixture.provenance.selection.macro_skipped_no_data[0].id;
-  await expect(handleMacro({ indicator: "unemployment rate", country: id })).rejects.toMatchObject({ status: 422, code: "NO_DATA" });
-  expect(saveReceipt).not.toHaveBeenCalled();
+  const out = await handleMacro({ indicator: "unemployment rate", country: id });
+  expect(out).toMatchObject({ rate_pct: null, verdict: "no_data", confidence: 0 });
+  expect(out.answer).toContain("no data"); expect(saveReceipt).toHaveBeenCalledTimes(1);
+  const [receipt, evidence] = vi.mocked(saveReceipt).mock.calls[0];
+  expect(sha256Hex(evidence!)).toBe(receipt.raw_response_sha256);
+  vi.mocked(saveReceipt).mockRejectedValueOnce(new Error("private-no-data-storage-error"));
+  await expect(handleMacro({ indicator: "unemployment rate", country: id })).rejects.toMatchObject(expected);
 });

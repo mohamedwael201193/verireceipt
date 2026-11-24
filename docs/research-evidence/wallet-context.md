@@ -1,0 +1,7 @@
+# Wallet account context
+
+Native/optional-token balance quorum and finalized-tag core fields are unchanged. New base-unit string is exact. balance_wei is only populated for native assets, never mislabeled ERC20 base units. funded/funding_status describe the requested asset's positive balance, not risk or identity.
+
+Optional account context uses the same configured RPC legs. Each independently obtains finalized block number and hash, then nonce/code at that explicit height. At least two legs must agree on block hash, number, nonce and exact code. Missing/split context produces null/unknown enrichment without replacing the separately agreed balance. The context block is disclosed as separately pinned, not misrepresented as the existing balance's exact block. Nonce counts outgoing transactions, not all activity. Code presence includes delegated accounts; an EIP7702 code prefix is labeled delegated_account, not assumed to be a conventional deployed contract. An empty-code account is externally_owned_or_empty, not proof a person owns it.
+
+Real Ethereum captures from Blast and dRPC agree on finalized block0x1940dd6 and account nonce0x1753 for the known public reference address. Code begins0xef0100 (delegation marker), so a blanket EOA/contract claim would mislead. Complete JSON-RPC response bytes are fixtures and context evidence. No keys or account writes. Existing persistence fixtures were replayed from original captured upstream bytes, with optional unavailable context remaining null; no new measurements were invented.
