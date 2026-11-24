@@ -35,3 +35,26 @@ describe('effective balance first, no data changes', () => {
   expect(result.effective_balance).toBe(Number(value));
  });
 });
+
+it('keeps per-call closed state/outcome and effective balance only in process-local metadata',async()=>{
+ const {answerDiagnostics,sanitizeAnswerClass}=await import('../src/core/answerClass');
+ const a=await handleValidator({validator_index:'0'},{fetchImpl:transport(raw)});
+ expect(answerDiagnostics('VALIDATOR_PERFORMANCE_VERIFY_GENERAL',a).answerClass).toEqual({validator_outcome:'verified',validator_state:'finalized',effective_balance:34000000000});
+ expect(JSON.stringify(a)).not.toContain('validator_outcome');
+ const b=await handleValidator({validator_index:'0'},{fetchImpl:transport(raw)});
+ expect(answerDiagnostics('VALIDATOR_PERFORMANCE_VERIFY_GENERAL',a).answerClass?.validator_outcome).toBe('verified');
+ expect(answerDiagnostics('VALIDATOR_PERFORMANCE_VERIFY_GENERAL',b).answerClass).toEqual({validator_outcome:'cache_hit',validator_state:'finalized',effective_balance:34000000000});
+ const e=await handleValidator({validator_index:'bad'}).catch(e=>e);
+ expect(answerDiagnostics('VALIDATOR_PERFORMANCE_VERIFY_GENERAL',e).answerClass).toEqual({validator_outcome:'refused'});
+ expect(sanitizeAnswerClass('VALIDATOR_PERFORMANCE_VERIFY_GENERAL',{validator_outcome:'PRIVATE',validator_state:'PRIVATE',effective_balance:-1})).toBeUndefined();
+ expect(sanitizeAnswerClass('VALIDATOR_PERFORMANCE_VERIFY_GENERAL',Object.defineProperty({},'effective_balance',{get(){throw Error('PRIVATE');}}))).toBeUndefined();
+});
+
+it('completion logging includes latency plus safe validator class, not the index or pubkey',async()=>{
+ const {answerDiagnostics}=await import('../src/core/answerClass');const {recordRequestCompletion}=await import('../src/core/requestMetrics');
+ const result=await handleValidator({validator_index:'0'},{fetchImpl:transport(raw)});
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{});
+ try{recordRequestCompletion('/v1/validator',200,2345.67,{query:{validator_index:'PRIVATE'},...answerDiagnostics('VALIDATOR_PERFORMANCE_VERIFY_GENERAL',result)});
+ const row=JSON.parse(String(log.mock.calls[0][0]));expect(row.latency_ms).toBe(2345.7);expect(row.answer_class).toEqual({validator_outcome:'verified',validator_state:'finalized',effective_balance:34000000000});expect(JSON.stringify(row)).not.toContain('PRIVATE');}
+ finally{log.mockRestore();}
+});

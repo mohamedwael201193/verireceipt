@@ -1,3 +1,4 @@
+import {withAnswerClass} from "../core/answerClass";
 // GET /v1/validator, finalized validator data with canonical effective_balance in gwei.
 //
 // Zero-LLM. Calls the standard beacon API on FOUR configured
@@ -1187,7 +1188,7 @@ async function fetchEpochBalanceDelta(
   };
 }
 
-export async function handleValidator(
+async function handleValidatorObserved(
   query: Record<string, string | undefined>,
   deps: ValidatorDeps = {},
 ): Promise<Record<string, unknown>> {
@@ -1252,7 +1253,7 @@ export async function handleValidator(
   }
   const hit = takeVerified(index, agreedRoot);
   if (hit !== undefined) {
-    return hit.envelope;
+    return withAnswerClass({...hit.envelope},INTENT,{validator_outcome:"cache_hit",validator_state:"finalized",effective_balance:hit.envelope.effective_balance});
   }
   const n = BEACON_SOURCES.length;
   // Per-source outcome, filled in as each leg settles.
@@ -1550,5 +1551,11 @@ export async function handleValidator(
     root: agreedRoot,
     index: leg.index,
   });
-  return result;
+  return withAnswerClass(result,INTENT,{validator_outcome:"verified",validator_state:"finalized",effective_balance:leg.effectiveBalance});
+}
+
+/** Log-only metadata. Public response and evidence are unchanged. */
+export async function handleValidator(query:Record<string,string|undefined>,deps:ValidatorDeps={}):Promise<Record<string,unknown>> {
+ try{return await handleValidatorObserved(query,deps);}
+ catch(error){try{if(error&&typeof error==='object')withAnswerClass(error,INTENT,{validator_outcome:'refused'});}catch{}throw error;}
 }
