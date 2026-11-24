@@ -13,15 +13,10 @@ import {withAnswerClass} from "../core/answerClass";
 // Polymarket markets only — this is one venue's resolution record,
 // not an independent determination of the underlying real-world event.
 //
-// FAIL CLOSED (maintainer ruling 2026-11-23): exactly one market must
-// match the question (normalized exact match, or a unique normalized
-// containment); zero enables a narrowly supported Wikipedia fallback,
-// otherwise a 422; several is a 422 with the candidates
-// named. A matched market that is not closed AND uma-resolved with a
-// clean 1/0 price pair is a 422 — never inferred from prices, never
-// served as "unresolved" despite the contract allowing it. A matched
-// market whose outcomes are not Yes/No is a 422 because the contract's
-// enum cannot carry its winner.
+// Match exactly or by unique normalized containment. A genuine no-match
+// enables the narrow Wikipedia fallback; ambiguous and nonbinary matches refuse.
+// A found explicitly open binary market is disclosed as unresolved, never priced
+// into an outcome. Closed markets still require UMA resolved and a clean1/0 pair.
 import { ApiError, badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -34,7 +29,7 @@ const UA = "VeriReceipt/2.0 event-resolution observer (+https://verireceipt.verc
 export const INTENT = "EVENT_OUTCOME_RESOLUTION_GENERAL";
 
 export interface PmMarket {
-  question: string; closed: boolean; umaStatus: string;
+  question: string; closed: boolean; closedKnown?: boolean; umaStatus: string;
   outcomes: string[]; prices: string[]; endDate: string; resolutionSource: string; slug: string;
 }
 
@@ -49,7 +44,7 @@ export function parseSearch(raw: string): PmMarket[] {
         return [];
       };
       out.push({
-        question: String(m.question ?? ""), closed: m.closed === true,
+        question: String(m.question ?? ""), closed: m.closed === true, closedKnown: typeof m.closed === "boolean",
         umaStatus: String(m.umaResolutionStatus ?? ""), outcomes: parseArr(m.outcomes),
         prices: parseArr(m.outcomePrices), endDate: String(m.endDate ?? ""),
         resolutionSource: String(m.resolutionSource ?? ""), slug: String(m.slug ?? ""),
@@ -74,9 +69,17 @@ export function matchMarket(markets: PmMarket[], event: string): PmMarket {
   throw unprocessable("AMBIGUOUS_EVENT", `${contained.length} markets match "${event}": ${contained.slice(0, 5).map((m) => m.question).join("; ")}${contained.length > 5 ? "; …" : ""} — ask the exact market question`);
 }
 
-export interface Resolution { outcome: "yes" | "no"; resolved_yes: boolean; winner: string }
+export type Resolution = { outcome: "yes" | "no"; resolved_yes: boolean; winner: string } | {outcome:"unresolved";resolved_yes:false};
 
 export function resolveMarket(m: PmMarket): Resolution {
+  if (m.outcomes.length!==2 || new Set(m.outcomes.map(x=>x.toLowerCase())).size!==2 || !m.outcomes.every(x=>/^(yes|no)$/i.test(x))) {
+    throw unprocessable("NON_BINARY_MARKET", "matched market must have exactly Yes and No outcomes; yes/no enum only");
+  }
+  if(m.closedKnown===false)throw unprocessable("EVENT_NOT_RESOLVED", "market closed status is missing; no outcome asserted");
+  if(!m.closed){
+    if(m.prices.length!==2||!m.prices.every(x=>x.trim()!==''&&Number.isFinite(Number(x))&&Number(x)>=0&&Number(x)<=1))throw unprocessable("NON_BINARY_MARKET", "open market has malformed binary prices; no outcome asserted");
+    return {outcome:"unresolved",resolved_yes:false};
+  }
   if (!m.closed || m.umaStatus !== "resolved") {
     throw unprocessable("EVENT_NOT_RESOLVED", `"${m.question}" is not resolved (closed=${m.closed}, uma=${m.umaStatus || "n/a"}); unresolved outcomes are refused, never inferred`);
   }
@@ -119,12 +122,20 @@ export async function handleEventOutcome(query: Record<string, string | undefine
   let market: PmMarket;
   try { market = matchMarket(markets, event); }
   catch (error) {
-    // Only a genuine no-match enables fallback; ambiguity and unresolved matches stay refused.
+    // Only a genuine no-match enables fallback; matched markets never use it.
     if (error instanceof ApiError && error.code === 'EVENT_NOT_FOUND') return wikipediaEventOutcome(event, body, url);
     throw error;
   }
   const r = resolveMarket(market);
   const asOf = new Date().toISOString();
+  if(r.outcome==='unresolved'){
+    if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(market.slug))throw unprocessable('EVENT_NOT_RESOLVED','open market has no usable source slug; no outcome asserted');
+    const sourceUrl=`https://polymarket.com/event/${market.slug}`;
+    const evidence=JSON.stringify({event,as_of:asOf,matched_market:market,candidates_seen:markets.length,source_policy:'Found explicitly open binary market only; unresolved is not a negative outcome or price probability',raw_bodies:{search:body},fetched_at:fetchedAt});
+    const receipt=makeReceipt(INTENT,url,evidence,'Polymarket gamma single source; explicitly open binary market, no outcome asserted');receipt.fetched_at=fetchedAt;
+    try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
+    return withAnswerClass(envelope(INTENT,{outcome:'unresolved',resolved_yes:false,event:market.question,sources:[sourceUrl]},receipt,{answer:`Polymarket market '${market.question}' is not resolved as of ${fetchedAt}; no outcome is asserted. resolved_yes=false does not assert NO when outcome is unresolved.`,verdict:'unresolved',confidence:0.9,source:`${url}; explicitly open market status only; fetched ${fetchedAt}`}),INTENT,{outcome:'unresolved',source:'polymarket'});
+  }
   const evidence = JSON.stringify({ event, as_of: asOf,
     matched_market: market, candidates_seen: markets.length,
     source_policy: "Polymarket gamma public-search; closed + UMA-resolved + clean 1/0 pair only; one venue's resolution record, not an independent determination",
