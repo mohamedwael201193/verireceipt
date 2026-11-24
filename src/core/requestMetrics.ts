@@ -3,7 +3,6 @@ import {sanitizeAnswerClass} from "./answerClass";
 // Never retain free text, URL/query strings, bodies, headers, IPs or user ids.
 import { EDGAR_FORM_TYPES } from "../handlers/edgarFormTypes";
 const ROUTE_INTENTS: Record<string, string> = {
-  "/v1/contract-obligation-audit": "CONTRACT_OBLIGATION_AUDIT_GENERAL",
   "/v1/tx": "ONCHAIN_TX_LOOKUP_GENERAL", "/v1/tvl": "TVL_LOOKUP_GENERAL",
   "/v1/grid-price": "GRID_POWER_PRICE_GENERAL", "/v1/filings": "REGULATORY_FILING_MONITOR_GENERAL",
   "/v1/route": "OPTIMAL_EXECUTION_ROUTE_GENERAL", "/v1/validator": "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
@@ -42,7 +41,7 @@ const ROUTE_INTENTS: Record<string, string> = {
 // or unknown names: callers can put a credential into an arbitrary query key.
 const KNOWN_QUERY_KEYS = [
   "address", "amount", "base", "block", "block_height", "chain", "country", "cve", "domain",
-  "contract", "company", "entity", "event", "form_type", "form", "cik", "patch", "from", "game", "jurisdiction", "destination", "host", "indicator", "lat", "location", "lon", "window_hours", "ip", "interval_start", "node_or_zone",
+  "company", "entity", "event", "form_type", "form", "cik", "patch", "from", "game", "jurisdiction", "destination", "host", "indicator", "lat", "location", "lon", "window_hours", "ip", "interval_start", "node_or_zone",
   "origin", "pair", "period", "symbol", "protocol", "query", "question", "quote", "record_type", "route_or_flight",
   "ticker", "to", "token", "topic", "url", "transaction", "tx_hash", "validator_index", "year",
 ] as const;

@@ -1,5 +1,4 @@
 import {answerDiagnostics} from "./core/answerClass";
-import { handleContractObligationAudit } from "./handlers/contractObligationAudit";
 import { refreshSourceReachability, sourceReachabilitySnapshot } from "./core/sourceReachability";
 import { handleFraudDetection } from './handlers/fraudDetection';
 // VeriReceipt — Fastify server entrypoint.
@@ -276,7 +275,6 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/vulnerability-triage", async (request) => trackIntent("vulnerability-triage", () => handleVulnTriage(asQuery(request.query))));
   app.get("/v1/academic-search", async (request) => trackIntent("academic-search", () => handleAcademicSearch(asQuery(request.query))));
   app.get("/v1/code-patch", async (request) => trackIntent("code-patch", () => handleCodePatchVerify(asQuery(request.query))));
-  app.get("/v1/contract-obligation-audit", async (request) => trackIntent("contract-obligation-audit", () => handleContractObligationAudit(exactQuery(request.raw.url ?? "", ["contract"]))));
   app.get("/v1/stock-price", async (request) => trackIntent("stock-price", () => handleStockPrice(asQuery(request.query))));
   app.get("/v1/sanctions-screen", async (request) => trackIntent("sanctions-screen", () => handleSanctionsScreen(asQuery(request.query))));
   app.get("/v1/ip-geolocation", async (request) => trackIntent("ip-geolocation", () => handleIpGeolocation(asQuery(request.query))));
