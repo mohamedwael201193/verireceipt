@@ -274,11 +274,18 @@ export async function handleThreatIndicator(query: Record<string, string | undef
   } catch {
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
-  const checkedDesc = `${states.length} feeds (${feedMeta.map((f) => `${f.feed}: ${f.entries} entries`).join(", ")})`;
+  // Wording only: keep all loaded feeds/evidence and matching unchanged, but
+  // name only the feed kinds relevant to this indicator's host and URL scope.
+  const screeningHost = type === "url" ? canonicalScreeningHost(indicator) : indicator.toLowerCase().replace(/\.$/, '');
+  const ipHost = isIP(screeningHost) === 4;
+  const applicable = states.filter(s => ipHost
+    ? s.feed.kind === "ip" || s.feed.kind === "cidr" || (type === "url" && s.feed.kind === "url")
+    : s.feed.kind === "domain" || s.feed.kind === "wildcard-domain" || (type === "url" && s.feed.kind === "url"));
+  const checkedDesc = `${applicable.length} applicable feeds (${applicable.map(s => s.feed.name).join(", ")})`;
   const coreAnswer = malicious
     ? `${indicator} IS reported as malicious: listed by ${matches.map((m) => `${m.feed} ("${m.raw}")`).join("; ")}. ` +
       `Checked against ${checkedDesc}.`
-    : `${indicator} is NOT listed in any of the ${states.length} blocklists checked (${checkedDesc}) as of ${asOf}. ` +
+    : `${indicator} is NOT listed in the ${checkedDesc} as of ${asOf}. ` +
       `That is NOT a clearance: blocklists are not safelists, and these feeds cover only what they have seen.`;
   const answer = coreAnswer + ` Supplemental listed_by: ${listedBy.join(", ") || "none"}. ${context.tor_context ?? ""} ${context.context_scope}.`;
   return envelope(INTENT, {
