@@ -6,6 +6,7 @@ import {decimal,factHash,type FactSpec,type SourceEvidence} from './researchDesk
 import {verifyFilingSource} from './filingSource.js';
 import {CHAIN_RPCS} from '../../src/config/chains.js';
 import {TOKEN_CONTRACTS} from '../../src/handlers/tokenContracts.js';
+import {matchScore,normalizeName,parseAlt,parseSdn,parseUn} from '../../src/handlers/sanctionsMatch.js';
 export interface PrimaryResult { ok:boolean; source:SourceEvidence|null; as_of:string|null; reasons:string[] }
 interface Read {url:string;raw_text:string;observed_at:string;json:any;method?:string;body?:string}
 const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
@@ -85,6 +86,58 @@ export async function verifyResearchPrimary(fact:FactSpec,value:string,options:{
     if(result.status!=='verified')fail(result.checks.filter(c=>!c.ok).map(c=>c.detail).join('; '));
     for(const s of result.sources)reads.push({url:s.url,raw_text:s.raw_text,observed_at:s.retrieved_at,json:null});
     as_of=reads.at(-1)!.observed_at;parser='sec-independent-full-history-form-recount-v1';break;
+   }
+   case 'SANCTIONS_SCREENING_MATCH_GENERAL':{
+    const name=fact.params.name;if(typeof name!=='string'||!name.trim()||name.length>200)fail('sanctions primary requires a name of at most 200 characters');
+    if(!normalizeName(name))fail('sanctions name carries no letters or digits to screen');
+    // Fixed OFAC/UN origins, the same constants the miner handler publishes.
+    // Both publishers serve the bytes from their own pinned publication
+    // infrastructure behind a 302: OFAC redirects to its GovCloud S3 bucket,
+    // the UN to its Azure blob. Only those literal hosts may be followed -
+    // any other redirect target, HTTP refusal or rate limit fails closed:
+    // no mirrors, no retries, no workaround. The recorded read keeps the
+    // fixed origin URL, so byte replay reparses the same stored bytes.
+    const REDIRECT_HOSTS:Record<string,string[]>
+     ={'https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV':['wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com'],
+       'https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ALT.CSV':['wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com'],
+       'https://scsanctions.un.org/resources/xml/en/consolidated.xml':['unsolprodfiles.blob.core.windows.net']};
+    const UA='VeriReceipt/2.0 sanctions-screening observer (+https://verireceipt.vercel.app)';
+    const getList=async(origin:string):Promise<void>=>{
+     let url=origin;
+     for(let hop=0;;hop++){
+      const res=await f(url,{redirect:'manual',signal:AbortSignal.timeout(20000),headers:{'user-agent':UA}});
+      if(res.status>=300&&res.status<400){
+       if(hop>=2)throw new Error('sanctions list redirect chain too long');
+       const loc=res.headers.get('location');if(!loc)throw new Error('sanctions list redirect without location');
+       const target=new URL(loc,url);
+       if(target.protocol!=='https:'||target.username||target.password||!REDIRECT_HOSTS[origin].includes(target.host))throw new Error('sanctions list redirect to unpinned host');
+       url=target.href;continue;
+      }
+      if(!res.ok)throw new Error(`primary HTTP ${res.status}`);
+      const raw_text=await res.text();
+      if(Buffer.byteLength(raw_text)>8000000||reads.reduce((n,r)=>n+Buffer.byteLength(r.raw_text),0)+Buffer.byteLength(raw_text)>16000000)throw new Error('primary byte limit');
+      reads.push({url:origin,raw_text,observed_at:now().toISOString(),json:null});return;
+     }
+    };
+    await getList('https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV');
+    await getList('https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ALT.CSV');
+    await getList('https://scsanctions.un.org/resources/xml/en/consolidated.xml');
+    const sdn=parseSdn(reads[0].raw_text),alt=parseAlt(reads[1].raw_text),un=parseUn(reads[2].raw_text);
+    // The handler's truncation floors: never screen against a partial list.
+    if(sdn.entries.size<1000)fail('OFAC SDN parsed to a truncated list; refusing to screen');
+    if(un.length<100)fail('UN consolidated list parsed to a truncated list; refusing to screen');
+    // The handler's exact candidate set and fuzzy match (shared module):
+    // SDN primaries, SDN aliases whose parent exists, UN primaries+aliases,
+    // best score among candidates at or above the 0.50 floor, else 0.
+    let best=0;const consider=(candidate:string)=>{const s=matchScore(name,candidate);if(s>=0.5&&s>best)best=s;};
+    for(const n of sdn.entries.values())consider(n);
+    for(const a of alt){if(sdn.entries.has(a.altNum))consider(a.name);}
+    for(const u of un)consider(u.name);
+    // The score is deterministic given the same published lists, so the
+    // comparison is exact. A list republication between the paid and
+    // independent reads changes the score and fails closed, by design.
+    if(!equal(value,String(best)))fail('sanctions best match_score differs from the independent full-list recompute');
+    as_of=reads.at(-1)!.observed_at;parser='ofac-sdn-alt-un-full-list-recompute-v1';break;
    }
    case 'TOKEN_HOLDER_COUNT_GENERAL':{
     const chain=(fact.params.chain??'').toLowerCase();if(chain!=='ethereum')fail('holder-count primary is ethereum only; other chains have no parser');

@@ -981,6 +981,85 @@
       "our_registered_supply": true,
       "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/TOKEN_HOLDER_COUNT_GENERAL",
       "source_sha256": "f89c211b7795da0d92639f767d8c6a1d721bc9b631a55247dc55d8f79d0b0d58"
+    },
+    {
+      "intent_name": "SANCTIONS_SCREENING_MATCH_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "name",
+            "type": "string",
+            "required": true,
+            "description": "Person or entity name"
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "SANCTIONS_SCREENING_MATCH"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "name",
+            "description": "The person or entity screened",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "matched",
+            "description": "Whether the name matched a sanctions-list entry",
+            "type": "bool",
+            "true_when": [
+              "true",
+              "yes",
+              "match",
+              "matched",
+              "1"
+            ],
+            "false_when": [
+              "false",
+              "no",
+              "0",
+              "no match",
+              "not matched",
+              "clear"
+            ],
+            "scored": true
+          },
+          {
+            "name": "matches",
+            "description": "Matching sanctions-list entries",
+            "type": "list",
+            "off_chain": true
+          },
+          {
+            "name": "lists",
+            "description": "Sanctions lists checked or matched (e.g. OFAC SDN)",
+            "type": "list",
+            "off_chain": true
+          },
+          {
+            "name": "match_score",
+            "description": "Best fuzzy-match score, 0 to 1",
+            "type": "number",
+            "unit": "fraction (0-1)",
+            "range": [
+              0,
+              1
+            ],
+            "decimals": 6,
+            "off_chain": true
+          }
+        ],
+        "format_version": 3,
+        "served_by": "SANCTIONS_SCREENING_MATCH"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": true,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/SANCTIONS_SCREENING_MATCH_GENERAL",
+      "source_sha256": "8a2e65b92fc25647b152189839a424380f97f290392fe6ead87105207f540faf"
     }
   ],
   "limits": [

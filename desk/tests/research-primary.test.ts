@@ -37,6 +37,32 @@ describe('source-byte replay, injected unit transports',()=>{
  it('will not fetch a source URL chosen by a packet',async()=>{const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(macro,'4.123457',{f:transport([{},[macroRow]]),now});const reads=JSON.parse(r.source!.raw_text);reads[0].url='https://example.invalid/attacker';r.source!.raw_text=JSON.stringify(reads);const {createHash}=await import('node:crypto');r.source!.content_sha256=createHash('sha256').update(r.source!.raw_text).digest('hex');expect(await replayPrimaryBytes(macro,{source:r.source,value:'4.123457',as_of:r.as_of} as any,now().toISOString())).toBe(false);});
 });
 
+describe('sanctions full-list recompute primary, unit transport only',()=>{
+ const fact:FactSpec={id:'sanctions',intent:'SANCTIONS_SCREENING_MATCH_GENERAL',params:{name:'Ares Capital Corporation'},field:'match_score',unit:'score',max_age_seconds:86400};
+ const SDN='https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV';
+ const ALT='https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ALT.CSV';
+ const UN='https://scsanctions.un.org/resources/xml/en/consolidated.xml';
+ const sdnBody=(extra='')=>Array.from({length:1000},(_,i)=>`${i+1},"GENERIC ENTRY ${i+1}",-0- `).join('\n')+(extra?'\n'+extra:'');
+ const altBody='999999,1,"aka","ARES CAPITAL CORP"';
+ const unBody='<CONSOLIDATED_LIST dateGenerated="2026-11-24T00:00:00.000Z">'+Array.from({length:100},(_,i)=>`<INDIVIDUAL><FIRST_NAME>Person${i}</FIRST_NAME></INDIVIDUAL>`).join('')+'</CONSOLIDATED_LIST>';
+ const OFAC_HOST='wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com';
+ const lists=(sdn:string,alt=altBody,un=unBody,mutant?:'other-redirect'|'pinned-redirect')=>{const calls:Record<string,number>={};const f:typeof fetch=async(input)=>{const url=String(input);calls[url]=(calls[url]??0)+1;
+   if(url===SDN&&mutant==='other-redirect')return new Response(null,{status:302,headers:{location:'https://lists.invalid/SDN.CSV'}});
+   if(url===SDN&&mutant==='pinned-redirect'&&calls[url]===1)return new Response(null,{status:302,headers:{location:`https://${OFAC_HOST}/Published/x/SDN.CSV?sig=unit`}});
+   if(url.startsWith(`https://${OFAC_HOST}/`))return new Response(sdn,{status:200});
+   return new Response(url===SDN?sdn:url===ALT?alt:un,{status:200});
+  };return {f,calls};};
+ it('recomputes the exact best score from full list bytes',async()=>{const {f}=lists(sdnBody('999999,"ARES CAPITAL CORPORATION",-0- '));const r=await verifyResearchPrimary(fact,'1',{f,now});expect(r.ok).toBe(true);expect(r.source!.parser).toBe('ofac-sdn-alt-un-full-list-recompute-v1');expect(r.source!.raw_text).toContain('ARES CAPITAL CORPORATION');});
+ it('rejects a claimed score that differs from the recompute',async()=>{const {f}=lists(sdnBody('999999,"ARES CAPITAL CORPORATION",-0- '));expect((await verifyResearchPrimary(fact,'0.666667',{f,now})).ok).toBe(false);});
+ it('accepts a zero score when no candidate reaches the floor',async()=>{const {f}=lists(sdnBody());const r=await verifyResearchPrimary({...fact,params:{name:'Zqwx Vbnm'}},'0',{f,now});expect(r.ok).toBe(true);});
+ it('screens SDN aliases whose parent exists',async()=>{const {f}=lists(sdnBody('999999,"ARES CAPITAL CORPORATION",-0- '));const r=await verifyResearchPrimary({...fact,params:{name:'Ares Capital Corp'}},'1',{f,now});expect(r.ok).toBe(true);});
+ it('fails closed on a truncated SDN list',async()=>{const {f}=lists(Array.from({length:999},(_,i)=>`${i+1},"GENERIC ENTRY ${i+1}",-0- `).join('\n'));expect((await verifyResearchPrimary(fact,'0',{f,now})).ok).toBe(false);});
+ it('fails closed on HTTP refusal, no retry',async()=>{let calls=0;const f:typeof fetch=async()=>{calls++;return new Response('',{status:429});};expect((await verifyResearchPrimary(fact,'0',{f,now})).ok).toBe(false);expect(calls).toBe(1);});
+ it('rejects a redirect to any unpinned host',async()=>{const {f,calls}=lists(sdnBody(),undefined,undefined,'other-redirect');expect((await verifyResearchPrimary(fact,'0',{f,now})).ok).toBe(false);expect(calls[SDN]).toBe(1);});
+ it('follows the pinned publication-host redirect',async()=>{const {f,calls}=lists(sdnBody('999999,"ARES CAPITAL CORPORATION",-0- '),undefined,undefined,'pinned-redirect');expect((await verifyResearchPrimary(fact,'1',{f,now})).ok).toBe(true);expect(calls[SDN]).toBe(1);});
+ it('stored list bytes replay exactly',async()=>{const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const {f}=lists(sdnBody('999999,"ARES CAPITAL CORPORATION",-0- '));const r=await verifyResearchPrimary(fact,'1',{f,now});expect(await replayPrimaryBytes(fact,{source:r.source,value:'1',as_of:r.as_of} as any,now().toISOString())).toBe(true);});
+});
+
 describe('blockscout token holders primary, unit transport only',()=>{
  const UNI='0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984';
  const holders:FactSpec={id:'holders',intent:'TOKEN_HOLDER_COUNT_GENERAL',params:{token:'UNI',chain:'ethereum'},field:'holders_count',unit:'addresses',max_age_seconds:86400};
