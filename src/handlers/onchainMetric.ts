@@ -1,4 +1,4 @@
-import {withAnswerClass} from "../core/answerClass";
+import {answerDiagnostics,withAnswerClass} from "../core/answerClass";
 import { badRequest, upstreamUnavailable } from '../core/errors';
 import { envelope, makeReceipt } from '../core/receipt';
 import { saveReceipt } from '../core/storage';
@@ -93,6 +93,9 @@ async function call(url: string, method: string, params: unknown[], deadline: nu
 }
 const qty = (x: unknown): bigint => { if (typeof x !== 'string' || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(x))
     throw new Error('invalid hex quantity'); return BigInt(x); };
+// Diagnostics only: track questions without joining, blocking or changing their work.
+interface OverlapGroup { active: number; sawOverlap: boolean }
+const metricOverlaps = new Map<string,OverlapGroup>();
 export async function handleOnchainMetric(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
     const address = query.address?.trim();
     if (!address || !ADDRESS_RE.test(address))
@@ -108,6 +111,29 @@ export async function handleOnchainMetric(query: Record<string, string | undefin
     const metric = query.metric ?? 'balance';
     if (!['balance', 'tx_count'].includes(metric))
         throw badRequest('INVALID_METRIC', 'metric must be balance or tx_count');
+    const key=JSON.stringify([address.toLowerCase(),block.toString(),chain,metric]);
+    const group=metricOverlaps.get(key)??{active:0,sawOverlap:false};
+    if(group.active>0)group.sawOverlap=true;
+    group.active++;
+    metricOverlaps.set(key,group);
+    try {
+        const result=await runMetricWorkflow(address,block,tag,chain,metric);
+        return withAnswerClass(result,'ONCHAIN_METRIC_VERIFY_GENERAL',{
+            ...answerDiagnostics('ONCHAIN_METRIC_VERIFY_GENERAL',result).answerClass,
+            concurrent_identical_in_flight:group.sawOverlap?'some':'none',
+        });
+    } catch(err) {
+        if(err && typeof err==='object')withAnswerClass(err,'ONCHAIN_METRIC_VERIFY_GENERAL',{
+            ...answerDiagnostics('ONCHAIN_METRIC_VERIFY_GENERAL',err).answerClass,
+            concurrent_identical_in_flight:group.sawOverlap?'some':'none',
+        });
+        throw err;
+    } finally {
+        group.active--;
+        if(group.active===0 && metricOverlaps.get(key)===group)metricOverlaps.delete(key);
+    }
+}
+async function runMetricWorkflow(address:string,block:bigint,tag:string,chain:string,metric:string):Promise<Record<string,unknown>> {
     const deadline = Date.now() + 9000;
     const legs: Leg[] = [];
     const errors: string[] = [];
