@@ -35,14 +35,14 @@ interface BinlistReply {
   bank?: { name?: string };
 }
 
-interface CacheEntry { at: number; found: boolean; body: string }
+interface CacheEntry { at: number; found: boolean; body: string; fetchedAt:string }
 const cache = new Map<string, CacheEntry>();
 export function resetBinCacheForTests(): void { cache.clear(); openCache.clear(); }
 
 async function lookupBin(bin: string): Promise<{ found: boolean; body: string; cached: boolean; fetchedAt: string }> {
   const hit = cache.get(bin);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
-    return { found: hit.found, body: hit.body, cached: true, fetchedAt: new Date(hit.at).toISOString() };
+    return { found: hit.found, body: hit.body, cached: true, fetchedAt: hit.fetchedAt };
   }
   const url = `https://lookup.binlist.net/${bin}`;
   const fetchedAt = new Date().toISOString();
@@ -59,7 +59,7 @@ async function lookupBin(bin: string): Promise<{ found: boolean; body: string; c
     clearTimeout(timer);
   }
   if (res.status === 404) {
-    cache.set(bin, { at: Date.now(), found: false, body });
+    cache.set(bin, { at: Date.now(), found: false, body, fetchedAt });
     return { found: false, body, cached: false, fetchedAt };
   }
   if (!res.ok) {
@@ -69,7 +69,7 @@ async function lookupBin(bin: string): Promise<{ found: boolean; body: string; c
   try { parsed = JSON.parse(body); } catch { throw upstreamUnavailable("BINLIST_MALFORMED", "BIN database returned invalid JSON"); }
   const present = (value: unknown): boolean => typeof value === "string" && value.trim().length > 0;
   const found = parsed !== null && typeof parsed === "object" && (present(parsed.scheme) || present(parsed.country?.name) || present(parsed.country?.alpha2));
-  cache.set(bin, { at: Date.now(), found, body });
+  cache.set(bin, { at: Date.now(), found, body, fetchedAt });
   return { found, body, cached: false, fetchedAt };
 }
 

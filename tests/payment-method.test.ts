@@ -189,3 +189,18 @@ it('does not accept7digit parent or arbitrary shorter prefixes as8digit coverage
   await expect(handlePaymentMethod({bin:'41111100'})).rejects.toMatchObject({code:'BIN_SOURCES_UNAVAILABLE'});
  }
 });
+
+it.each([200,404])('cache preserves source acquisition time after a delayed HTTP%s read',async status=>{
+ vi.useFakeTimers();const start=new Date('2026-11-24T17:00:00.000Z');vi.setSystemTime(start);
+ let calls=0;vi.stubGlobal('fetch',async(u:unknown)=>{
+  calls++;if(String(u).includes('api.dharun.dev'))throw Error('unavailable');
+  await new Promise(r=>setTimeout(r,1200));return new Response(status===200?BIN_424242:'{}',{status});
+ });
+ try{
+  const first=handlePaymentMethod({bin:'424242'});const firstResult=first.catch(e=>e);await vi.advanceTimersByTimeAsync(1200);const a=await firstResult;
+  vi.setSystemTime(new Date(start.getTime()+60000));const b=await handlePaymentMethod({bin:'424242'}).catch(e=>e);
+  if(status===200){expect((a.receipt as any).fetched_at).toBe(start.toISOString());expect((b.receipt as any).fetched_at).toBe(start.toISOString());}
+  else{expect(a.code).toBe('BIN_COVERAGE_INCOMPLETE');expect(b.code).toBe('BIN_COVERAGE_INCOMPLETE');}
+  expect(calls).toBe(3); // first pair plus second unavailable open source; primary stays cached.
+ }finally{vi.useRealTimers();}
+});
