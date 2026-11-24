@@ -60,7 +60,7 @@ describe("CROSS_CHAIN_STATE_VERIFY_GENERAL", () => {
     expect(ans).toContain("NOT consistent");
     expect(ans).toContain("reverted");
   });
-  it("a pre-Byzantium root-only receipt follows the effectiveStatus doctrine, never a default success", async () => {
+  it("a post-Byzantium root-only receipt is unreadable, never a default success", async () => {
     const preByzantium = { ...receiptResult } as Record<string, unknown>;
     delete preByzantium.status;
     preByzantium.root = "0x" + "ab".repeat(32);
@@ -72,13 +72,13 @@ describe("CROSS_CHAIN_STATE_VERIFY_GENERAL", () => {
       return new Response(rpcBody(isPolygon ? broken : preByzantium), { status: 200 });
     });
     const result = await handleCrossChainState({ reference: TX_HASH, chains: "ethereum,polygon" });
-    // root-only means success; neither field means failure, so these differ.
+    // Neither missing modern status nor a post-fork root-only shape is accepted.
     expect(result.consistent).toBe(false);
     const stored = await getReceiptEvidence(String((result.receipt as { receipt_id: string }).receipt_id));
     if (!stored.evidence) throw new Error("missing evidence");
     const perChain = (JSON.parse(String(stored.evidence)).per_chain ?? []) as { chain: string; status: number }[];
-    expect(perChain.find((c) => c.chain === "ethereum")?.status).toBe(1);
-    expect(perChain.find((c) => c.chain === "polygon")?.status).toBe(0);
+    expect(perChain.find((c) => c.chain === "ethereum")?.status).toBeNull();
+    expect(perChain.find((c) => c.chain === "polygon")?.status).toBeNull();
   });
   it("present with the same status on both chains is consistent", async () => {
     stub({ polygon: "found" });

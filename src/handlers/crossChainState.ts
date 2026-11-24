@@ -51,7 +51,7 @@ export interface ChainState { chain: string; found: boolean | null; status: numb
 
 /** Terminal state of a tx hash on one chain via 2-of-N receipt quorum. */
 export async function chainState(chain: string, rpcs: string[], txHash: string): Promise<ChainState> {
-  const best=await receiptQuorum(rpcs,txHash,url=>rpcCall(url,"eth_getTransactionReceipt",[txHash],4000));
+  const best=await receiptQuorum(rpcs,txHash,url=>rpcCall(url,"eth_getTransactionReceipt",[txHash],4000),chain==='ethereum'?{legacyRootBeforeBlock:4370000n}:{});
   if(best.result===null)return {chain,found:false,status:null,bodies:Object.fromEntries(Object.entries(best.bodies).map(([k,v])=>[chain+":"+k,v]))};
   // txLookup's effectiveStatus doctrine: a pre-Byzantium receipt carries
   // `root` instead of `status` and means success; neither field means

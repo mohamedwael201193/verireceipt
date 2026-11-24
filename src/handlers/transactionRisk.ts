@@ -173,7 +173,7 @@ export async function handleTransactionRisk(query: Record<string, string | undef
     throw upstreamUnavailable("SANCTIONS_UNAVAILABLE", "the OFAC SDN list could not be fetched; a risk grade without sanctions screening is never served");
   }
   const tx = await quorumRpc(rpcs, "eth_getTransactionByHash", [txHash]);
-  const receipt = await receiptQuorum(rpcs,txHash,url=>rpcCall(url,"eth_getTransactionReceipt",[txHash],4000));
+  const receipt = await receiptQuorum(rpcs,txHash,url=>rpcCall(url,"eth_getTransactionReceipt",[txHash],4000),{legacyRootBeforeBlock:4370000n});
   if(!receipt.result)throw unprocessable("TX_NOT_FOUND","receipt not found by two-source agreement");
   const from = String(tx.result.from ?? "").toLowerCase();
   const to = tx.result.to === null || tx.result.to === undefined ? null : String(tx.result.to).toLowerCase();

@@ -111,8 +111,8 @@ describe("transaction-risk follow-ups (reviewer)", () => {
     expect(result.risk_score).toBe(0.4);
     expect(result.risk_level).toBe("MEDIUM");
   });
-  it("pre-Byzantium receipts follow txLookup doctrine: root means success, no status and no root means failure", async () => {
-    const byzantine = { ...receiptResult };
+  it("legacy root before fork means effective success; missing status and root refuses", async () => {
+    const byzantine = { ...receiptResult, blockNumber: "0xb443" };
     delete (byzantine as Record<string, unknown>).status;
     (byzantine as Record<string, unknown>).root = "0x" + "ab".repeat(32);
     vi.stubGlobal("fetch", async (url: unknown, init?: { body?: string }) => {
@@ -132,8 +132,7 @@ describe("transaction-risk follow-ups (reviewer)", () => {
       const method = JSON.parse(String(init?.body ?? "{}")).method;
       return new Response(rpcBody(method === "eth_getTransactionReceipt" ? noRoot : txResult), { status: 200 });
     });
-    const bad = await handleTransactionRisk({ transaction: TX_HASH });
-    expect((bad.signals as string[]).join(" ")).toContain("TX_REVERTED");
+    await expect(handleTransactionRisk({ transaction: TX_HASH })).rejects.toMatchObject({ code: "RPC_QUORUM_DISAGREEMENT" });
   });
 });
 
