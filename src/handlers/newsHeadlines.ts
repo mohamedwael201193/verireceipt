@@ -117,8 +117,12 @@ export async function handleNewsHeadlines(query: Record<string, string | undefin
     }, receipt, { answer, verdict: "verified", confidence: 0.5,
       source: `${searched.join(" + ") || "no source reachable"}; named sources only; fetched ${fetchedAt}` });
   }
+  // The contract defines top_headline as the first headline listed. Keep
+  // each title paired with its URL when the cross-source top is not in the
+  // first source group, including when a per-source cap omitted it.
+  const orderedHeadlines = [top, ...headlines.filter(h => h !== top)];
   const seen = new Set<string>();
-  const leadItems = [top, ...headlines].filter(h => {
+  const leadItems = orderedHeadlines.filter(h => {
     const key=h.url || h.title.toLowerCase();
     if(seen.has(key))return false;seen.add(key);return true;
   }).slice(0,5);
@@ -128,9 +132,9 @@ export async function handleNewsHeadlines(query: Record<string, string | undefin
     `Coverage: ${INDEXES.join('; ')}; named sources, never comprehensive news coverage${degraded}.`;
   return envelope(INTENT, {
     topic, top_headline: top.title,
-    headlines: headlines.map((h) => h.title),
+    headlines: orderedHeadlines.map((h) => h.title),
     headline_details: leadItems.map(h=>({title:h.title,outlet:h.outlet??h.index,published:h.published,url:h.url})),
-    urls: headlines.map((h) => h.url),
+    urls: orderedHeadlines.map((h) => h.url),
     window: `${windowHours}h`,
   }, receipt, { answer, verdict: "verified", confidence: 0.8,
     source: `${hnUrl} + ${gnewsUrl} + ${gdeltUrl} + ${BBC_URL}; named sources only; fetched ${fetchedAt}` });

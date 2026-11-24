@@ -83,6 +83,8 @@ describe("NEWS_HEADLINES_GENERAL", () => {
     stub();
     const result = await handleNewsHeadlines({ topic: "openai", window_hours: "168" });
     expect(result.top_headline).toBe("Advancing chip design with OpenAI models");
+    expect((result.headlines as string[])[0]).toBe(result.top_headline);
+    expect((result.urls as string[])[0]).toBe(parseHn(hn).find(h=>h.title===result.top_headline)!.url);
     const ans = String(result.answer);
     expect(ans).toContain("Hacker News");
     expect(ans).toContain("named sources");
@@ -115,6 +117,8 @@ describe("NEWS_HEADLINES_GENERAL", () => {
     stub({ hn: hnEmpty, gnews: gnewsOne, gdelt: gdeltTwo, bbc: bbcEmpty });
     const result = await handleNewsHeadlines({ topic: "acme robotics", window_hours: "72" });
     expect(result.top_headline).toBe("Acme Robotics raises a large round");
+    expect((result.headlines as string[])[0]).toBe(result.top_headline);
+    expect((result.urls as string[])[0]).toBe(JSON.parse(gdeltTwo).articles[0].url);
     const headlines = result.headlines as string[];
     expect(headlines).toContain("Acme Robotics unveils warehouse arm - Example News");
     expect(headlines).toContain("Acme Robotics expands to Cairo");
@@ -138,6 +142,8 @@ describe("NEWS_HEADLINES_GENERAL", () => {
     stub({ gdelt: "Please limit requests to one every 5 seconds" });
     const result = await handleNewsHeadlines({ topic: "openai", window_hours: "168" });
     expect(result.top_headline).toBe("Advancing chip design with OpenAI models");
+    expect((result.headlines as string[])[0]).toBe(result.top_headline);
+    expect((result.urls as string[])[0]).toBe(parseHn(hn).find(h=>h.title===result.top_headline)!.url);
     expect(String(result.answer)).toContain("Degraded");
     expect(String(result.answer)).toContain(GDELT_INDEX);
   });
@@ -146,6 +152,8 @@ describe("NEWS_HEADLINES_GENERAL", () => {
     stub({ bbc: "ERR" });
     const result = await handleNewsHeadlines({ topic: "openai", window_hours: "168" });
     expect(result.top_headline).toBe("Advancing chip design with OpenAI models");
+    expect((result.headlines as string[])[0]).toBe(result.top_headline);
+    expect((result.urls as string[])[0]).toBe(parseHn(hn).find(h=>h.title===result.top_headline)!.url);
     expect(String(result.answer)).toContain("Degraded");
     vi.unstubAllGlobals();
     stub({ hn: "ERR", gnews: "ERR", gdelt: "ERR", bbc: "ERR" });
