@@ -3,7 +3,7 @@ export interface ReceiptRead {body:string;result:unknown}
 export interface ReceiptQuorum {result:Record<string,unknown>|null;bodies:Record<string,string>;legs:number;policy:string}
 const retryStarts=new Map<string,number[]>();
 export function resetReceiptRetryForTests():void{retryStarts.clear();}
-function admitRetry(url:string):boolean{const now=Date.now(),starts=(retryStarts.get(url)??[]).filter(t=>t>now-60000);if(starts.length>=30||starts.some(t=>t>now-1100))return false;retryStarts.set(url,[...starts,now]);return true;}
+export function admitRetry(url:string):boolean{const now=Date.now(),starts=(retryStarts.get(url)??[]).filter(t=>t>now-60000);if(starts.length>=30||starts.some(t=>t>now-1100))return false;retryStarts.set(url,[...starts,now]);return true;}
 const POLICY='Receipt quorum: at least two distinct providers; null/found split re-read once after 1100ms; present receipts must agree on transaction/block identity, effective execution status and log count; Ethereum pre-Byzantium root-only and synthesized success agree only before block4370000 with matching gasUsed/cumulativeGasUsed; all explicit roots across attempts must agree; no present-content conflict accepted; null minority disclosed, not turned into absence.';
 export interface ReceiptQuorumOptions { legacyRootBeforeBlock?: bigint }
 function projection(result:unknown,hash:string,options:ReceiptQuorumOptions):{key:string;root:string|null} {

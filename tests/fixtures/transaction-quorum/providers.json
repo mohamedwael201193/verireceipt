@@ -1,0 +1,24 @@
+{
+ "captured_at": "2026-11-24T02:17:27.997Z",
+ "tx": "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060",
+ "providers": [
+  {
+   "url": "https://eth-mainnet.public.blastapi.io",
+   "http": 200,
+   "err": null,
+   "body": "{\"id\":1,\"result\":{\"type\":\"0x0\",\"nonce\":\"0x0\",\"gasPrice\":\"0x2d79883d2000\",\"gas\":\"0x5208\",\"to\":\"0x5df9b87991262f6ba471f09758cde1c0fc1de734\",\"value\":\"0x7a69\",\"input\":\"0x\",\"r\":\"0x88ff6cf0fefd94db46111149ae4bfc179e9b94721fffd821d38d16464b3f71d0\",\"s\":\"0x45e0aff800961cfce805daef7016b9b675c137a6a41a548f7b60a3484c06a33a\",\"v\":\"0x1c\",\"hash\":\"0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060\",\"blockHash\":\"0x4e3a3754410177e6937ef1f84bba68ea139e8d1a2258c5f85db9f1cd715a1bdd\",\"blockNumber\":\"0xb443\",\"transactionIndex\":\"0x0\",\"from\":\"0xa1e4380a3b1f749673e270229993ee55f35663b4\",\"blockTimestamp\":\"0x55c42659\"},\"jsonrpc\":\"2.0\"}\n"
+  },
+  {
+   "url": "https://eth.drpc.org",
+   "http": 200,
+   "err": null,
+   "body": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"type\":\"0x0\",\"nonce\":\"0x0\",\"gasPrice\":\"0x2d79883d2000\",\"gas\":\"0x5208\",\"to\":\"0x5df9b87991262f6ba471f09758cde1c0fc1de734\",\"value\":\"0x7a69\",\"input\":\"0x\",\"r\":\"0x88ff6cf0fefd94db46111149ae4bfc179e9b94721fffd821d38d16464b3f71d0\",\"s\":\"0x45e0aff800961cfce805daef7016b9b675c137a6a41a548f7b60a3484c06a33a\",\"v\":\"0x1c\",\"hash\":\"0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060\",\"blockHash\":\"0x4e3a3754410177e6937ef1f84bba68ea139e8d1a2258c5f85db9f1cd715a1bdd\",\"blockNumber\":\"0xb443\",\"transactionIndex\":\"0x0\",\"from\":\"0xa1e4380a3b1f749673e270229993ee55f35663b4\",\"blockTimestamp\":\"0x55c42659\"}}"
+  },
+  {
+   "url": "https://rpc.mevblocker.io",
+   "http": 200,
+   "err": null,
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"blockHash\":\"0x4e3a3754410177e6937ef1f84bba68ea139e8d1a2258c5f85db9f1cd715a1bdd\",\"blockNumber\":\"0xb443\",\"blockTimestamp\":\"0x55c42659\",\"from\":\"0xa1e4380a3b1f749673e270229993ee55f35663b4\",\"gas\":\"0x5208\",\"gasPrice\":\"0x2d79883d2000\",\"hash\":\"0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060\",\"input\":\"0x\",\"nonce\":\"0x0\",\"to\":\"0x5df9b87991262f6ba471f09758cde1c0fc1de734\",\"transactionIndex\":\"0x0\",\"value\":\"0x7a69\",\"type\":\"0x0\",\"v\":\"0x1c\",\"r\":\"0x88ff6cf0fefd94db46111149ae4bfc179e9b94721fffd821d38d16464b3f71d0\",\"s\":\"0x45e0aff800961cfce805daef7016b9b675c137a6a41a548f7b60a3484c06a33a\"}}"
+  }
+ ]
+}

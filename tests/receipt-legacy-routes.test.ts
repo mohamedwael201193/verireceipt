@@ -19,7 +19,7 @@ function transport(reverse=false):void {
   }
   // Synthetic transaction wrapper uses captured receipt identities; value is a
   // synthetic zero control, not a claim about the historical transaction value.
-  return new Response(JSON.stringify({jsonrpc:'2.0',id:1,result:{hash:capture.tx,from:first.from,to:first.to,value:'0x0',blockNumber:first.blockNumber}}));
+  return new Response(JSON.stringify({jsonrpc:'2.0',id:1,result:{hash:capture.tx,from:first.from,to:first.to,value:'0x0',nonce:'0x0',input:'0x',blockHash:first.blockHash,blockNumber:first.blockNumber}}));
  });
 }
 afterEach(()=>{vi.unstubAllGlobals();vi.clearAllMocks();});

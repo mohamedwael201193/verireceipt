@@ -35,6 +35,7 @@
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+import { transactionQuorum } from "../core/transactionQuorum";
 import { receiptQuorum } from "../core/receiptQuorum";
 import { CHAIN_RPCS } from "../config/chains";
 
@@ -66,33 +67,6 @@ async function rpcCall(url: string, method: string, params: unknown[], timeoutMs
   } finally {
     clearTimeout(timer);
   }
-}
-
-/** 2-of-N quorum returning the agreed parsed result plus every leg's raw body (copied txLookup doctrine). */
-async function quorumRpc(rpcs: string[], method: string, params: unknown[]):
-  Promise<{ result: Record<string, unknown>; bodies: Record<string, string>; legs: number }> {
-  const settled = await Promise.allSettled(rpcs.map((url) => rpcCall(url, method, params)));
-  const ok = settled.filter((s): s is PromiseFulfilledResult<{ body: string; result: unknown }> => s.status === "fulfilled").map((s) => s.value);
-  if (ok.length < 2) {
-    throw upstreamUnavailable("RPC_QUORUM_UNREACHABLE", `fewer than two ethereum RPC legs answered ${method} (${ok.length}/${rpcs.length})`);
-  }
-  // Agree on the normalized JSON of the result; null results agree too.
-  const groups = new Map<string, { result: unknown; bodies: Record<string, string>; n: number }>();
-  ok.forEach((r, i) => {
-    const key = JSON.stringify(r.result);
-    const g = groups.get(key) ?? { result: r.result, bodies: {}, n: 0 };
-    g.bodies[`leg${i}`] = r.body;
-    g.n += 1;
-    groups.set(key, g);
-  });
-  const best = [...groups.values()].sort((a, b) => b.n - a.n)[0];
-  if (best.n < 2) {
-    throw upstreamUnavailable("RPC_QUORUM_DISAGREEMENT", `the ethereum RPC legs returned different ${method} results; no value is guessed`);
-  }
-  if (best.result === null) {
-    throw unprocessable("TX_NOT_FOUND", "no ethereum mainnet transaction with that hash (2-of-N quorum agreement); this slice covers ethereum mainnet only");
-  }
-  return { result: best.result as Record<string, unknown>, bodies: best.bodies, legs: ok.length };
 }
 
 /** Exact 0x addresses listed as OFAC SDN Digital Currency Address features. */
@@ -172,7 +146,7 @@ export async function handleTransactionRisk(query: Record<string, string | undef
     // A risk grade without the sanctions leg is incomplete; fail closed.
     throw upstreamUnavailable("SANCTIONS_UNAVAILABLE", "the OFAC SDN list could not be fetched; a risk grade without sanctions screening is never served");
   }
-  const tx = await quorumRpc(rpcs, "eth_getTransactionByHash", [txHash]);
+  const tx = await transactionQuorum(rpcs, txHash, url => rpcCall(url, "eth_getTransactionByHash", [txHash], 4000));
   const receipt = await receiptQuorum(rpcs,txHash,url=>rpcCall(url,"eth_getTransactionReceipt",[txHash],4000),{legacyRootBeforeBlock:4370000n});
   if(!receipt.result)throw unprocessable("TX_NOT_FOUND","receipt not found by two-source agreement");
   const from = String(tx.result.from ?? "").toLowerCase();
