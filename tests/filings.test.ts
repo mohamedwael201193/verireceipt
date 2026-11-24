@@ -5132,7 +5132,7 @@ describe('A1 unit: parseFormType / canonicalFormOrThrow (return-or-throw, never 
   });
 
   it('R6-M4: any suffix after "/A" other than nothing is 422 INVALID_FORM_TYPE (naming the full token)', () => {
-    const bad = ['10-K/A-1', '10-K/A.1', '10-K/A,1', '10-K/A\u20131', '10-Q/A-1', 'S-1/A-1', '10-K/A-2', '10-KA1',
+    const bad = ['10-K/A-1', '10-K/A.1', '10-K/A\u20131', '10-Q/A-1', 'S-1/A-1', '10-K/A-2', '10-KA1',
       '10-K/A1', '13F-HR/A1', '13F-NT/Ax', '13F-HR2', '144/A1', '144/AA', '10-K/B', '10-K/', '10-K/A1/A2', '0', 'ZZZ', 'apple'];
     for (const raw of bad) {
       let err: unknown;
@@ -5156,18 +5156,13 @@ describe('A1 unit: parseFormType / canonicalFormOrThrow (return-or-throw, never 
     }
   });
 
-  it('absent / empty / "all" mean no filter; a list is 422 MULTIPLE_FORM_TYPES; a non-string is 400', () => {
+  it('absent / empty / "all" mean no filter; an explicit list selects a union; a non-string is 400', () => {
     expect(parseFormType(undefined)).toEqual({ kind: 'none' });
     expect(parseFormType('')).toEqual({ kind: 'none' });
     expect(parseFormType('  ')).toEqual({ kind: 'none' });
     expect(parseFormType('all')).toEqual({ kind: 'none' });
     for (const raw of ['10-K, 10-Q', '10-K and 10-Q', '10-K;8-K', '10-K|10-Q']) {
-      expect(() => parseFormType(raw)).toThrowError(ApiError);
-      try {
-        parseFormType(raw);
-      } catch (e) {
-        expect((e as ApiError).code).toBe('MULTIPLE_FORM_TYPES');
-      }
+      expect(parseFormType(raw).kind).toBe('forms');
     }
     try {
       parseFormType(123 as unknown as string);
@@ -5319,7 +5314,7 @@ describe('A1 handler (stubbed upstream): form filter, amendments, residue guard,
   });
 
   it('R6-M4: separator after /A in the entity is 422 INVALID_FORM_TYPE, never a Federal Register 0', async () => {
-    for (const tok of ['10-K/A-1', '10-K/A.1', '10-K/A,1', '10-K/A\u20131', '10-Q/A-1', 'S-1/A-1', '10-K/A-2', '10-KA1',
+    for (const tok of ['10-K/A-1', '10-K/A.1', '10-K/A\u20131', '10-Q/A-1', 'S-1/A-1', '10-K/A-2', '10-KA1',
       '10-K/A1', '13F-HR/A1', '13F-NT/Ax', '10-K/A1/A2']) {
       const calls = newCalls();
       const err = await expectApiError(
@@ -5393,7 +5388,7 @@ describe('A1 handler (stubbed upstream): form filter, amendments, residue guard,
   it('form conflicts, unsupported form params and form tokens in extra fields all 422', async () => {
     await expectApiError(handleFilings({ entity: 'Apple Inc. 10-K', period: '2023', form_type: '10-Q' }, { fetchImpl: a1Fetch() }), 422, 'CONFLICTING_FORM_TYPE');
     await expectApiError(handleFilings({ entity: 'Apple Inc.', period: '2023', form_type: '10-K', form: '10-Q' }, { fetchImpl: a1Fetch() }), 422, 'CONFLICTING_FORM_TYPE');
-    await expectApiError(handleFilings({ entity: 'Apple Inc.', period: '2023', form_type: '10-K, 10-Q' }, { fetchImpl: a1Fetch() }), 422, 'MULTIPLE_FORM_TYPES');
+    expect((await handleFilings({ entity: 'Apple Inc.', period: '2023', form_type: '10-K, 10-Q' }, { fetchImpl: a1Fetch() })).requested_forms).toEqual(['10-K','10-Q']);
     for (const key of ['document_type', 'filing_type', 'type', 'forms', 'amendment']) {
       await expectApiError(handleFilings({ entity: 'Apple Inc.', period: '2023', [key]: '10-K' }, { fetchImpl: a1Fetch() }), 422, 'UNSUPPORTED_FORM_PARAM');
     }

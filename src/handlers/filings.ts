@@ -2152,7 +2152,7 @@ export async function handleFilings(
     }
     const spec = parseFormType(v, key);
     if (spec.kind === 'none' && typeof v === 'string' && stripInvisible(foldBasic(v)).trim() !== '') explicitAll.push(key);
-    formParams.push({ field: key, forms: spec.kind === 'form' ? [spec.form] : [] });
+    formParams.push({ field: key, forms: spec.kind === 'form' ? [spec.form] : spec.kind === 'forms' ? spec.forms : [] });
   }
   if (query.cik !== undefined) {
     const c: unknown = query.cik;
@@ -2362,14 +2362,14 @@ export async function handleFilings(
     { field: 'entity', forms: entityForms },
     { field: 'period', forms: per.forms },
   ]);
-  if (formSpec.kind === 'form' && formParams.some((p) => p.forms.length > 0)) phraseForm = false;
-  if (explicitAll.length > 0 && (entityForms.length > 0 || per.forms.length > 0)) {
+  if (formSpec.kind !== 'none' && formParams.some((p) => p.forms.length > 0)) phraseForm = false;
+  if (explicitAll.length > 0 && (entityForms.length > 0 || per.forms.length > 0 || formParams.some(p => p.forms.length > 0))) {
     // Round 9 (J2-r8 m5): form_type=all contradicts a form named in the
     // entity / period ("Tesla 10-K" + all) -> 422, never one silently wins.
     throw unprocessable(
       'CONFLICTING_FORM_TYPE',
-      `"${explicitAll[0]}" asks for all forms but ${entityForms.length > 0 ? 'the entity' : 'the period'} names Form ${
-        [...entityForms, ...per.forms][0]
+      `"${explicitAll[0]}" asks for all forms but ${entityForms.length > 0 ? 'the entity' : per.forms.length > 0 ? 'the period' : 'another explicit form field'} names Form ${
+        [...entityForms, ...per.forms, ...formParams.flatMap(p => p.forms)][0]
       }; send one of them`,
     );
   }
@@ -2399,7 +2399,9 @@ export async function handleFilings(
   if (!cikMatch) {
     throw unprocessable('ENTITY_NOT_FOUND', `No SEC EDGAR entry found for entity "${entityNfc}"`);
   }
-  const formLabel = formSpec.kind === 'form' ? formSpec.form : null;
+  const selectedForms = formSpec.kind === 'form' ? [formSpec.form] : formSpec.kind === 'forms' ? formSpec.forms : [];
+  const multiForm = formSpec.kind === 'forms';
+  const formLabel = selectedForms.length ? selectedForms.join(', ') : null;
 
   // --- SEC EDGAR Submissions API (the only source). Fail CLOSED. ---
   const upstreamUrl = EDGAR_SUBMISSIONS_URL(cikMatch.cik10);
@@ -2430,7 +2432,7 @@ export async function handleFilings(
   }
   const inPeriod = filterFilingsByPeriod(all, period);
   const filings = filterFilingsByForm(inPeriod, formSpec);
-  if (phraseForm && formLabel !== null) assertPhraseFormUnambiguous(formLabel, all, inPeriod, entity);
+  if (phraseForm && !multiForm && formLabel !== null) assertPhraseFormUnambiguous(formLabel, all, inPeriod, entity);
   const confidence = cikMatch.matchKind === 'name' ? 0.9 : 1.0;
   const receipt = makeReceipt(INTENT, upstreamUrl, rawBody, '1/1 primary source');
   // Persist like the other intents (txLookup / grid / route): the stored
@@ -2452,13 +2454,14 @@ export async function handleFilings(
     );
     throw new ApiError(500, 'RECEIPT_STORE_FAILED', 'The receipt could not be stored, so no verified answer is served');
   }
-  const family = formLabel ? formFamily(formLabel) : [];
+  const family = [...new Set(selectedForms.flatMap(f => [...formFamily(f)]))];
   const what = formLabel ? `Form ${formLabel} filing` : 'filing';
   const listed = filings.slice(0, MAX_LISTED_FILINGS);
   const reason = filingReason(filings, entity, period.label);
   const fields: Record<string, unknown> = {
     entity,
     form_type: formLabel,
+    ...(multiForm ? { requested_forms: selectedForms, form_filter_mode: "union of unique accessions; amendments separate" } : {}),
     filing_count: filings.length,
     by_type: reason.by_type,
     latest_filing: reason.latest,
@@ -2471,7 +2474,7 @@ export async function handleFilings(
     // the per-spelling count, so a renamed family is never hidden.
     fields.forms_counted = [...family];
     fields.form_counts = Object.fromEntries(family.map((f) => [f, filings.filter((x) => x.form === f).length]));
-    if (family.length > 1) fields.form_alias_source = FORM_FAMILY_SOURCE;
+    if (selectedForms.some(f => formFamily(f).length > 1)) fields.form_alias_source = FORM_FAMILY_SOURCE;
   }
   if (listed.length < filings.length) {
     fields.filings_listed = listed.length;
@@ -2487,7 +2490,7 @@ export async function handleFilings(
   return envelope(INTENT, fields, receipt, {
     answer: reason.sentence + ` Found ${filings.length} ${what}${filings.length === 1 ? '' : 's'} for ${entity} in ${period.label}${
       family.length > 1
-        ? ` (counting ${family.map((f) => `${f} ${fields.form_counts ? (fields.form_counts as Record<string, number>)[f] : 0}`).join(' + ')}: EDGAR renamed this form in Release 24.4)`
+        ? ` (${multiForm ? 'union; amendments separate; counting' : 'counting'} ${family.map((f) => `${f} ${fields.form_counts ? (fields.form_counts as Record<string, number>)[f] : 0}`).join(' + ')}${multiForm ? '' : ': EDGAR renamed this form in Release 24.4'})`
         : ''
     }.`,
     verdict: 'verified',
