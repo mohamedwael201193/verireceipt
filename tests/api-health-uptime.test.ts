@@ -180,3 +180,34 @@ it('header probe retains only allowed raw headers, validates TLS and destroys th
  const out=await measureHeaders({url:'https://example.com/',hostname:'example.com',port:443,addresses:['93.184.216.34']},1000,'test');
  expect(out.tls_verified).toBe(true);expect(out.location).toBe('https://next.example/');expect(out.raw_headers).toEqual(['Date','Mon, 23 Nov 2026 22:00:00 GMT','Location','https://next.example/']);expect(destroy).toHaveBeenCalledTimes(1);
 });
+
+it('API health records failed DNS as a real negative observation, never an invented HTTP result',async()=>{
+ fakeDns({});vi.mocked(httpsRequest).mockClear();vi.mocked(httpRequest).mockClear();
+ const result=await handleApiHealth({url:'https://api.example.com/status'});
+ expect(result.healthy).toBe(false);expect(result.reachable).toBe(false);expect(result.http_status).toBeNull();expect(result.latency_ms).toBeNull();
+ expect(result.dns_status).toBe('resolution_failed');expect(result.http_attempted).toBe(false);expect(result.answer).toContain('No HTTP connection was attempted');
+ expect(httpsRequest).not.toHaveBeenCalled();expect(httpRequest).not.toHaveBeenCalled();
+ const receipt=result.receipt as any;const stored=await getReceiptEvidence(receipt.receipt_id);expect(stored.evidence).toBeTruthy();
+ expect(sha256Hex(stored.evidence!)).toBe(receipt.raw_response_sha256);const raw=JSON.parse(stored.evidence!.toString());
+ expect(raw.dns_observation).toMatchObject({kind:'resolution_failed',http_attempted:false});expect(raw.resolved_addresses).toEqual([]);expect(raw.measured.http_status).toBeNull();
+ await expect(handleApiHealth({url:'https://api.example.com/status'})).rejects.toMatchObject({code:'RATE_LIMITED'});
+});
+it('DNS empty result is not connection refused and server uptime still refuses',async()=>{
+ fakeDns({'empty.example.com':[]});
+ expect((await handleApiHealth({url:'empty.example.com'})).dns_status).toBe('no_addresses');
+ __clearRateLimitsForTests();await expect(handleServerUptime({host:'missing.example.com'})).rejects.toMatchObject({code:'DNS_UNRESOLVABLE'});
+});
+it('DNS deadline emits a timeout observation at2s with no HTTP attempt',async()=>{
+ vi.useFakeTimers();__setLookupForTests((async()=>new Promise(()=>{}))as any);vi.mocked(httpsRequest).mockClear();
+ try{const pending=handleApiHealth({url:'slow.example.com'});await vi.advanceTimersByTimeAsync(2000);const result=await pending;expect(result.dns_status).toBe('resolution_timeout');expect(result.dns_latency_ms).toBe(2000);expect(httpsRequest).not.toHaveBeenCalled();}
+ finally{vi.useRealTimers();}
+});
+it('private and mixed DNS answers are still refusals, never negative health answers',async()=>{
+ fakeDns({'private.example.com':['10.0.0.1'],'mixed.example.com':['93.184.216.34','127.0.0.1']});
+ for(const url of ['private.example.com','mixed.example.com','localhost','https://user:pw@example.com'])await expect(handleApiHealth({url})).rejects.toMatchObject({status:expect.any(Number)});
+});
+it('arbitrary guard errors have no DNS metadata',async()=>{
+ const {dnsProbeFailure}=await import('../src/handlers/ssrfGuard');let read=false;
+ const e=Object.defineProperty({},'status',{get(){read=true;throw Error();}});expect(dnsProbeFailure(e)).toBeUndefined();expect(read).toBe(false);
+ const proxy=new Proxy({},{get(){read=true;throw Error();}});expect(dnsProbeFailure(proxy)).toBeUndefined();expect(read).toBe(false);
+});

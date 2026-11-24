@@ -28,8 +28,26 @@ export function __setLookupForTests(fn: typeof lookup | null): void {
 export function __clearRateLimitsForTests(): void { lastCheck.clear(); }
 
 export interface GuardedTarget { url: string; hostname: string; port: number; addresses: string[] }
+export interface DnsProbeFailure {url:string;hostname:string;port:number;latency_ms:number;kind:'resolution_failed'|'resolution_timeout'|'no_addresses'}
+// Only locally created DNS refusal errors carry this metadata. Never inspect
+// arbitrary resolver errors or turn private/mixed address refusals into results.
+const dnsProbeFailures=new WeakMap<object,DnsProbeFailure>();
+export function dnsProbeFailure(error:unknown):DnsProbeFailure|undefined {
+ try{return error&&typeof error==='object'?dnsProbeFailures.get(error):undefined;}catch{return undefined;}
+}
 
-export async function guardPublicHttpUrl(raw: string | undefined, param: string): Promise<GuardedTarget> {
+function reserveProbeSlot(hostname:string,port:number):void {
+  const key = `${hostname}:${port}`;
+  const last = lastCheck.get(key);
+  if (last !== undefined && Date.now() - last < RATE_LIMIT_MS) {
+    throw unprocessable("RATE_LIMITED", `${key} was checked less than ${RATE_LIMIT_MS / 1000}s ago; one check per target per minute`);
+  }
+  for (const [k, at] of lastCheck) if (Date.now() - at >= RATE_LIMIT_MS) lastCheck.delete(k);
+  if (lastCheck.size >= 1024) throw unprocessable("RATE_LIMITED", "probe capacity reached; retry later");
+  lastCheck.set(key, Date.now());
+}
+
+export async function guardPublicHttpUrl(raw: string | undefined, param: string, recordDnsObservation = false): Promise<GuardedTarget> {
   if (!raw) throw badRequest("MISSING_PARAM", `${param} is required`);
   if (raw.length > 300) throw badRequest("URL_TOO_LONG", `${param} must be at most 300 characters`);
   let u: URL;
@@ -58,20 +76,27 @@ export async function guardPublicHttpUrl(raw: string | undefined, param: string)
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) || hostname.includes(":")) {
     addresses = [hostname];
   } else {
-    let records: { address: string }[];
+    let records: { address: string }[] = [];
+    const dnsStarted=Date.now();let dnsTimedOut=false;
+    const refuseDns=(kind:DnsProbeFailure['kind'],message:string):never=>{
+      if(recordDnsObservation)reserveProbeSlot(hostname,port);
+      const error=unprocessable('DNS_UNRESOLVABLE',message);
+      if(recordDnsObservation)dnsProbeFailures.set(error,{url:u.toString(),hostname,port,latency_ms:Date.now()-dnsStarted,kind});
+      throw error;
+    };
     try {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         records = await Promise.race([
           lookupFn(hostname, { all: true, verbatim: true }),
-          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("DNS deadline")), 2000); }),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => {dnsTimedOut=true;reject(new Error("DNS deadline"));}, 2000); }),
         ]);
       } finally { if (timer) clearTimeout(timer); }
     } catch {
-      throw unprocessable("DNS_UNRESOLVABLE", `${hostname} does not resolve; nothing is guessed`);
+      refuseDns(dnsTimedOut?'resolution_timeout':'resolution_failed', `${hostname} does not resolve; nothing is guessed`);
     }
     addresses = records.map((r) => r.address);
-    if (!addresses.length) throw unprocessable("DNS_UNRESOLVABLE", `${hostname} resolved to no addresses`);
+    if (!addresses.length) refuseDns('no_addresses', `${hostname} resolved to no addresses`);
   }
   const blocked: string[] = [];
   for (const a of addresses) {
@@ -85,14 +110,7 @@ export async function guardPublicHttpUrl(raw: string | undefined, param: string)
     throw unprocessable("PRIVATE_HOST",
       `${hostname} resolves to a private, reserved or special-use address; internal targets are never checked`);
   }
-  const key = `${hostname}:${port}`;
-  const last = lastCheck.get(key);
-  if (last !== undefined && Date.now() - last < RATE_LIMIT_MS) {
-    throw unprocessable("RATE_LIMITED", `${key} was checked less than ${RATE_LIMIT_MS / 1000}s ago; one check per target per minute`);
-  }
-  for (const [k, at] of lastCheck) if (Date.now() - at >= RATE_LIMIT_MS) lastCheck.delete(k);
-  if (lastCheck.size >= 1024) throw unprocessable("RATE_LIMITED", "probe capacity reached; retry later");
-  lastCheck.set(key, Date.now());
+  reserveProbeSlot(hostname,port);
   return { url: u.toString(), hostname, port, addresses };
 }
 
