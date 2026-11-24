@@ -26,8 +26,8 @@ export async function fetchYahooBody(url:string,allowed:()=>void,rateLimited:(re
    return Buffer.concat(parts).toString('utf8');
   })().finally(()=>{settled=true;});
   try{
-   const body=await Promise.race([io,new Promise<never>((_,reject)=>{timer=setTimeout(()=>{timedOut=true;controller.abort();reject(Error('Yahoo source deadline exceeded'));},Math.min(5000,remaining));})]);
-   if(timedOut||Date.now()>=deadline)throw Error('Yahoo source deadline exceeded');return body;
+   const body=await Promise.race([io,new Promise<never>((_,reject)=>{timer=setTimeout(()=>{timedOut=true;controller.abort();reject(Object.assign(Error('Yahoo source deadline exceeded'),{timeout:true}));},Math.min(5000,remaining));})]);
+   if(timedOut||Date.now()>=deadline)throw Object.assign(Error('Yahoo source deadline exceeded'),{timeout:true});return body;
   }catch(err){if(!settled){draining=true;releaseHere=false;void io.then(()=>{draining=false;release();},()=>{draining=false;release();});}throw err;}
   finally{clearTimeout(timer!);}
  }finally{if(releaseHere)release();}

@@ -26,9 +26,9 @@ async function cachedYahooBody(ticker:string,load:()=>Promise<string>,validate:(
   try{assertYahooAllowed();body=await load();}
   catch(e){
    const status=(e as {status?:number})?.status;
-   if(prior&&!(e as any)?.localCapacity&&(status===429||status!==undefined&&status>=500&&status<=599)){
+   if(prior&&!(e as any)?.localCapacity&&((e as any)?.timeout||status===429||status!==undefined&&status>=500&&status<=599)){
     validate(prior.body);const nowAge=Date.now()-Date.parse(prior.fetchedAt);
-    if(nowAge>=0&&nowAge<MAX_AGE_MS)return{...prior,staleReason:status===429?'Yahoo HTTP429 or active cooldown':'Yahoo server failure'};
+    if(nowAge>=0&&nowAge<MAX_AGE_MS)return{...prior,staleReason:(e as any)?.timeout?'Yahoo source timeout':status===429?'Yahoo HTTP429 or active cooldown':'Yahoo server failure'};
    }
    throw e;
   }
