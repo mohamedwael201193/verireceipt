@@ -1,7 +1,7 @@
 // Templates contain selectors and declared analyst thresholds, never numeric
 // observations. Freeze the resolved timestamp before the first purchase.
 import type {ThesisSpec,Claim} from './researchDesk.js';
-export function researchTemplate(id:'A'|'B'|'C',frozen_at:string):{spec:ThesisSpec;claims:Claim[]}{
+export function researchTemplate(id:'A'|'B'|'C'|'D',frozen_at:string):{spec:ThesisSpec;claims:Claim[]}{
  const base={version:'research-desk-v1' as const,network:'eip155:11155111' as const,frozen_at,budget_uusdc:'60000',max_call_uusdc:'10000' as const,max_escalations:1 as const};
  if(id==='A')return {
   spec:{...base,template:'onchain-valuation',question:'Is UNI Ethereum-contract implied valuation below the declared analyst ceiling, with protocol TVL context?',facts:[
@@ -12,14 +12,23 @@ export function researchTemplate(id:'A'|'B'|'C',frozen_at:string):{spec:ThesisSp
   claims:[{id:'fdv_below_ceiling',fact_refs:['price','supply'],assumption_refs:['fdv_ceiling'],calculation_ref:'implied_fdv',predicate:{left:'implied_fdv',op:'<',right:'fdv_ceiling'}},{id:'valuation_to_tvl_context',fact_refs:['price','supply','tvl'],assumption_refs:[],calculation_ref:'fdv_to_tvl'}],
  };
  if(id==='C')return {
-  spec:{...base,template:'private-mark',question:'Does Ares Capital Corp (ARCC, CIK 1287750) meet the declared disclosure-cadence floor for calendar 2026, with share-price and latest-available US unemployment context?',facts:[
+  spec:{...base,template:'private-mark',question:'Does Ares Capital Corp (ARCC, CIK 1287750) meet the declared disclosure-cadence floor for calendar 2026, with share-price and 2025 US unemployment context?',facts:[
    {id:'stock',intent:'STOCK_PRICE_US_EQUITY',params:{ticker:'ARCC'},field:'price_usd',unit:'USD/share',max_age_seconds:4*86400},
    {id:'filings',intent:'REGULATORY_FILING_MONITOR_GENERAL',params:{entity:'Form 10-Q filings by Ares Capital Corp (CIK 1287750)',period:'2026'},field:'filing_count',unit:'filings',max_age_seconds:86400},
-   // No fixed year: the miner answers with its latest available
-   // annual figure, so the context never silently goes stale.
-   {id:'unemployment',intent:'MACRO_ECONOMIC_INDICATOR_GENERAL',params:{indicator:'unemployment rate',country:'US'},field:'rate_pct',unit:'percent',max_age_seconds:86400},
+   // 2025 is the latest World Bank publication year (verified live
+   // 2026-11-24, year_resolution latest_published_nonempty). An explicit
+   // year is required: the desk's primary verification re-reads the
+   // World Bank API for an exact year and refuses without one.
+   {id:'unemployment',intent:'MACRO_ECONOMIC_INDICATOR_GENERAL',params:{indicator:'unemployment rate',country:'US',year:'2025'},field:'rate_pct',unit:'percent',max_age_seconds:86400},
   ],assumptions:[{id:'disclosure_floor',value:'3',unit:'filings',rationale:'Declared analyst disclosure-cadence floor for a calendar year of quarterly reporting; not a forecast, valuation or investment recommendation.'}],calculations:[]},
   claims:[{id:'disclosure_floor_met',fact_refs:['filings'],assumption_refs:['disclosure_floor'],predicate:{left:'filings',op:'>=',right:'disclosure_floor'}},{id:'share_price_context',fact_refs:['stock'],assumption_refs:[]},{id:'unemployment_context',fact_refs:['unemployment'],assumption_refs:[]}],
+ };
+ if(id==='D')return {
+  spec:{...base,template:'diligence-pack',question:'Does Ares Capital Corporation pass the declared overnight counterparty-diligence rule: sanctions best-score below the declared screening threshold and at least the declared number of Form 10-Qs in calendar 2026?',facts:[
+   {id:'sanctions',intent:'SANCTIONS_SCREENING_MATCH_GENERAL',params:{name:'Ares Capital Corporation'},field:'match_score',unit:'score',max_age_seconds:86400},
+   {id:'filings',intent:'REGULATORY_FILING_MONITOR_GENERAL',params:{entity:'Form 10-Q filings by Ares Capital Corp (CIK 1287750)',period:'2026'},field:'filing_count',unit:'filings',max_age_seconds:86400},
+  ],assumptions:[{id:'sanctions_threshold',value:'0.85',unit:'score',rationale:'Declared screening threshold equal to the miner\'s own published match threshold; a fuzzy name match is not identity confirmation and a non-match is not legal clearance.'},{id:'filing_floor',value:'1',unit:'filings',rationale:'Declared analyst minimum of one current-year quarterly filing for an overnight diligence pass; not a legal or compliance opinion.'}],calculations:[]},
+  claims:[{id:'sanctions_below_threshold',fact_refs:['sanctions'],assumption_refs:['sanctions_threshold'],predicate:{left:'sanctions',op:'<',right:'sanctions_threshold'}},{id:'filings_present',fact_refs:['filings'],assumption_refs:['filing_floor'],predicate:{left:'filings',op:'>=',right:'filing_floor'}}],
  };
  return {
   spec:{...base,template:'issuer-macro',question:'Did Tesla file at least the declared number of Form 10-Qs in calendar 2024, with share-price and US unemployment context?',facts:[

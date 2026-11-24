@@ -33,7 +33,7 @@ describe('live adapter through existing paid gate, injected unit transport only'
  it('fails closed before signing an unsupported second-provider retry',async()=>{const {adapter,payer}=setup();await expect(adapter.buy(fact,{spec_hash:'a'.repeat(64),remaining_uusdc:'20000',escalation:true})).rejects.toThrow('escalation');expect(payer.signMessage).not.toHaveBeenCalled();});
 });
 
-it('all committed templates validate before any live purchase',async()=>{const {researchTemplate}=await import('../src/researchTemplates.js');const {validateSpec,buildPacket}=await import('../src/researchDesk.js');for(const id of ['A','B','C'] as const){const {spec,claims}=researchTemplate(id,new Date().toISOString());expect(()=>validateSpec(spec)).not.toThrow();expect(buildPacket(spec,[],[],claims,spec.frozen_at).outcome).toBe('HOLD');}});
+it('all committed templates validate before any live purchase',async()=>{const {researchTemplate}=await import('../src/researchTemplates.js');const {validateSpec,buildPacket}=await import('../src/researchDesk.js');for(const id of ['A','B','C','D'] as const){const {spec,claims}=researchTemplate(id,new Date().toISOString());expect(()=>validateSpec(spec)).not.toThrow();expect(buildPacket(spec,[],[],claims,spec.frozen_at).outcome).toBe('HOLD');}});
 
 
 describe('crash-durable spend ordering',()=>{

@@ -14,7 +14,7 @@ export interface FactSpec {
 export interface Assumption { id: string; value: string; unit: string; rationale: string }
 export interface Calculation { id: string; op: 'multiply' | 'divide' | 'subtract'; left: string; right: string; unit: string }
 export interface ThesisSpec {
-  version: typeof VERSION; network: typeof NETWORK; template: 'onchain-valuation' | 'issuer-macro' | 'private-mark';
+  version: typeof VERSION; network: typeof NETWORK; template: 'onchain-valuation' | 'issuer-macro' | 'private-mark' | 'diligence-pack';
   question: string; frozen_at: string; facts: FactSpec[]; assumptions: Assumption[]; calculations: Calculation[];
   budget_uusdc: string; max_call_uusdc: '10000'; max_escalations: 1;
 }
@@ -27,6 +27,14 @@ const CONTRACTS: Record<string, { field: string; unit: string; required: string[
   STOCK_PRICE_US_EQUITY: {field:'price_usd',unit:'USD/share',required:['ticker']},
   REGULATORY_FILING_MONITOR_GENERAL: {field:'filing_count',unit:'filings',required:['entity','period']},
   MACRO_ECONOMIC_INDICATOR_GENERAL: {field:'rate_pct',unit:'percent',required:['indicator','country'],optional:['year']},
+  SANCTIONS_SCREENING_MATCH_GENERAL: {field:'match_score',unit:'score',required:['name']},
+};
+// Required observations per template. A template with no entry is rejected.
+const REQUIRED: Record<string, string[]> = {
+  'onchain-valuation':['CRYPTO_PRICE_USD','TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL'],
+  'issuer-macro':['STOCK_PRICE_US_EQUITY','REGULATORY_FILING_MONITOR_GENERAL','MACRO_ECONOMIC_INDICATOR_GENERAL'],
+  'private-mark':['STOCK_PRICE_US_EQUITY','REGULATORY_FILING_MONITOR_GENERAL','MACRO_ECONOMIC_INDICATOR_GENERAL'],
+  'diligence-pack':['SANCTIONS_SCREENING_MATCH_GENERAL','REGULATORY_FILING_MONITOR_GENERAL'],
 };
 function invariant(ok: unknown, message: string): asserts ok { if (!ok) throw new Error(message); }
 const uint = (s: unknown): s is string => typeof s === 'string' && /^(0|[1-9]\d*)$/.test(s);
@@ -44,7 +52,7 @@ export function decimal(s: string): Rational {
 const encoded = (r: Rational) => ({ numerator:r.n.toString(), denominator:r.d.toString() });
 export function validateSpec(spec: ThesisSpec): void {
   invariant(spec.version===VERSION && spec.network===NETWORK,'version/network mismatch: testnet only');
-  invariant(['onchain-valuation','issuer-macro','private-mark'].includes(spec.template),'unknown template');
+  invariant(Object.hasOwn(REQUIRED,spec.template),'unknown template');
   invariant(typeof spec.question==='string' && spec.question.trim() && timestamp(spec.frozen_at),'missing question/frozen timestamp');
   invariant(uint(spec.budget_uusdc) && BigInt(spec.budget_uusdc)>0n,'invalid budget');
   invariant(spec.max_call_uusdc==='10000' && spec.max_escalations===1,'fixed call/escalation policy');
@@ -65,7 +73,7 @@ export function validateSpec(spec: ThesisSpec): void {
     add(f.id,f.unit);
   }
   const intents=spec.facts.map(f=>f.intent);
-  const required=spec.template==='onchain-valuation'?['CRYPTO_PRICE_USD','TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL']:['STOCK_PRICE_US_EQUITY','REGULATORY_FILING_MONITOR_GENERAL','MACRO_ECONOMIC_INDICATOR_GENERAL']; // private-mark shares the issuer-macro observation set
+  const required=REQUIRED[spec.template];
   invariant(required.every(i=>intents.includes(i)),'template missing required observations');
   for(const a of spec.assumptions){decimal(a.value);invariant(typeof a.rationale==='string'&&a.rationale.trim(),'assumption rationale required');add(a.id,a.unit);}
   for(const c of spec.calculations){
