@@ -188,8 +188,10 @@ async function quoteVatcomply(from: string, to: string): Promise<SourceQuote | n
 async function quoteFloatrates(from: string, to: string): Promise<SourceQuote | null> {
   const url = `https://www.floatrates.com/daily/${from.toLowerCase()}.json`;
   const rawBody = await fetchText(url, SOURCE_TIMEOUT_MS);
-  const parsed = JSON.parse(rawBody) as Record<string, { rate?: unknown; date?: unknown } | undefined>;
+  const parsed = JSON.parse(rawBody) as Record<string, { code?: unknown; alphaCode?: unknown; rate?: unknown; date?: unknown } | undefined>;
   const entry = parsed[to.toLowerCase()];
+  if (entry === undefined) return null;
+  if (entry?.code !== to || (entry.alphaCode !== undefined && entry.alphaCode !== to)) throw new Error("FX target identity mismatch");
   const rate = typeof entry?.rate === "string" ? Number(entry.rate) : NaN;
   if (!Number.isFinite(rate) || rate <= 0) return null;
   return { source: "floatrates", url, rawBody, rate, rateDate: String(entry?.date ?? "unknown") };

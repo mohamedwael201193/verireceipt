@@ -109,7 +109,7 @@ describe("handleFxNow answers (stubbed sources)", () => {
     b.openEr = JSON.stringify({ result: "success", base_code: "USD", time_last_update_utc: "Sat, 21 Nov 2026 00:02:32 +0000", rates: { EUR: 0.85 } });
     b.vatcomply = JSON.stringify({base:"USD",date:"2026-11-21",rates:{EUR:0.83}});
     b.fawaz = JSON.stringify({date:"2026-11-21",usd:{eur:0.81}});
-    b.floatrates = JSON.stringify({eur:{rate:"0.79",date:"Sat, 21 Nov 2026 23:59:00 GMT"}});
+    b.floatrates = JSON.stringify({eur:{code:"EUR",rate:"0.79",date:"Sat, 21 Nov 2026 23:59:00 GMT"}});
     stubFxSources(b);
     await expectApiError(handleFxNow({ currency: "EUR" }), 502, "FX_SOURCES_DISAGREE");
   });

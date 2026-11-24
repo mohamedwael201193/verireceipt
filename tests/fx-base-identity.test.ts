@@ -36,3 +36,16 @@ describe('Frankfurter per-unit boundary',()=>{
   const j=JSON.parse(originals.frankfurter);j.amount=amount;stub('frankfurter',JSON.stringify(j));await expect(handleFx({from_currency:'USD',to_currency:'EUR'})).rejects.toMatchObject({status:502,code:'FX_SOURCES_DOWN'});await expect(handleFxNow({currency:'EUR'})).rejects.toMatchObject({status:502,code:'FX_SOURCES_DOWN'});
  });
 });
+
+describe('Floatrates target identity',()=>{
+ it('accepted actual target entry retains exact body and receipt hash',async()=>{
+  stub('floatrates',originals.floatrates);const out=await handleFx({from_currency:'USD',to_currency:'EUR'});expect(out.rate).toBe(JSON.parse(originals.floatrates).eur.rate*1);const r=out.receipt as any,stored=await getReceiptEvidence(r.receipt_id);expect(sha256Hex(stored.evidence!)).toBe(r.raw_response_sha256);expect(JSON.parse(stored.evidence!.toString()).sources[0].raw_body).toBe(originals.floatrates);
+ });
+ it.each(['GBP',null,undefined,1,'eur'])('refuses wrong/missing entry code %s on both routes',async code=>{
+  const j=JSON.parse(originals.floatrates);j.eur.code=code;stub('floatrates',JSON.stringify(j));await expect(handleFx({from_currency:'USD',to_currency:'EUR'})).rejects.toMatchObject({code:'FX_SOURCES_DOWN'});await expect(handleFxNow({currency:'EUR'})).rejects.toMatchObject({code:'FX_SOURCES_DOWN'});
+ });
+ it.each(['GBP',null,1])('refuses conflicting/malformed declared alphaCode %s',async alpha=>{
+  const j=JSON.parse(originals.floatrates);j.eur.alphaCode=alpha;stub('floatrates',JSON.stringify(j));await expect(handleFx({from_currency:'USD',to_currency:'EUR'})).rejects.toMatchObject({code:'FX_SOURCES_DOWN'});
+ });
+ it('absent optional alphaCode does not discard a matching explicit code',async()=>{const j=JSON.parse(originals.floatrates);delete j.eur.alphaCode;stub('floatrates',JSON.stringify(j));expect((await handleFx({from_currency:'USD',to_currency:'EUR'})).rate).toBe(Number(j.eur.rate));});
+});
