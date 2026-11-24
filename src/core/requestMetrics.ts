@@ -40,7 +40,7 @@ const KNOWN_QUERY_KEYS = [
   "address", "amount", "base", "block", "block_height", "chain", "country", "cve", "domain",
   "company", "entity", "event", "form_type", "from", "game", "jurisdiction", "destination", "host", "indicator", "lat", "location", "lon", "window_hours", "ip", "interval_start", "node_or_zone",
   "origin", "pair", "period", "symbol", "protocol", "query", "question", "quote", "record_type", "route_or_flight",
-  "ticker", "to", "token", "topic", "url", "tx_hash", "validator_index", "year",
+  "ticker", "to", "token", "topic", "url", "transaction", "tx_hash", "validator_index", "year",
 ] as const;
 // Fixed internal categories only. A regex alone could admit a secret-looking code.
 const DIAGNOSTIC_ERROR_CODES = new Set([
@@ -135,7 +135,19 @@ export function recordRequestCompletion(route: string | undefined, status: numbe
     if (intent !== "other") {
       const query = details.query;
       const param_keys = query !== null && typeof query === "object" ? KNOWN_QUERY_KEYS.filter(key => Object.hasOwn(query, key)) : [];
+      const transaction = route === "/v1/transaction-risk" && status === 400 && details.errorCode === "INVALID_TX_HASH"
+        && query !== null && typeof query === "object" ? (query as Record<string, unknown>).transaction : undefined;
+      const input = typeof transaction === "string" ? transaction.trim() : undefined;
+      const prefix = input?.startsWith("0x") ? "0x" : input?.startsWith("0X") ? "0X" : "none";
+      const tail = input === undefined ? "" : prefix === "none" ? input : input.slice(2);
+      const input_shape = input === undefined ? undefined : {
+        length: input.length, prefix,
+        charset: /^[0-9a-f]+$/i.test(tail) ? (/[a-f]/.test(tail) && /[A-F]/.test(tail) ? "hex_mixed_case" : "hex") : "other",
+        hex_digits: (tail.match(/[0-9a-f]/gi) ?? []).length,
+        has_whitespace_inside: /\s/.test(input),
+      };
       console.info(JSON.stringify({ event: "request_complete", intent, path: route, param_keys,
+        ...(input_shape ? { input_shape } : {}),
         error_code: details.errorCode == null ? null : diagnosticErrorCode(details.errorCode), status: code, latency_ms: latency }));
     }
   } catch { /* never log an exception or request content */ }

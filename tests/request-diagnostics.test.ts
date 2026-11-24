@@ -52,3 +52,20 @@ it("wires an actual non-ApiError to INTERNAL without logging its message", async
     expect(JSON.stringify(log.mock.calls)).not.toContain("PRIVATE");
   } finally { await app.close(); }
 });
+it('wires malformed risk hash to shape-only diagnostics without its value',async()=>{
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{});const app=buildServer();
+ try {const response=await app.inject({method:'GET',url:'/v1/transaction-risk?transaction=0Xprivate-canary'});expect(response.statusCode).toBe(400);
+ const row=JSON.parse(log.mock.calls.at(-1)![0]);expect(row).toMatchObject({error_code:'INVALID_TX_HASH',input_shape:{length:16,prefix:'0X',charset:'other',hex_digits:5,has_whitespace_inside:false}});
+ expect(JSON.stringify(log.mock.calls)).not.toContain('private-canary');} finally {await app.close();}
+});
+it.each([
+ ['0x'+'a'.repeat(63),65,'0x','hex',63],['0X'+'A'.repeat(66),68,'0X','hex',66],
+ ['f'.repeat(65),65,'none','hex',65],['0x'+'a1'.repeat(31)+'Zz',66,'0x','other',62],
+ ['0x'+'aA'.repeat(31)+'b',65,'0x','hex_mixed_case',63],
+])('logs specified shape without any 8-character value fragment',async(input,length,prefix,charset,hex_digits)=>{
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{}),app=buildServer();
+ try {const response=await app.inject({method:'GET',url:'/v1/transaction-risk?transaction='+encodeURIComponent(input)});expect(response.statusCode).toBe(400);
+ const text=String(log.mock.calls.at(-1)![0]),row=JSON.parse(text);expect(row).toMatchObject({param_keys:['transaction'],error_code:'INVALID_TX_HASH',input_shape:{length,prefix,charset,hex_digits,has_whitespace_inside:false}});
+ for(let i=0;i<=input.length-8;i++)expect(text).not.toContain(input.slice(i,i+8));
+ }finally{await app.close();}
+});
