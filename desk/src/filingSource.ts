@@ -3,13 +3,14 @@
 import { extractForms, mergeFormSpecs, parseFormType, stripInvisible } from '../../src/handlers/filingsForms.js';
 import { finishSource, isoDate, object, readPrimaryJson, sourceCheck, sourceResult, type SourceOptions, type SourceVerification } from './sourceTypes.js';
 
-interface Filing { accession: string; date: string; form: string; document?: string }
+interface Filing { accession: string; date: string; form: string; document?: string; reportDate?: string }
 function parseRows(raw: unknown): Filing[] {
   const j = object(raw);
   const arrays = [j.accessionNumber, j.filingDate, j.form];
   if (arrays.some(x => !Array.isArray(x)) || arrays.some(x => x.length !== arrays[0].length) || arrays[0].length > 500000) {
     throw new Error('incomplete SEC filing arrays');
   }
+  if(j.reportDate!==undefined&&(!Array.isArray(j.reportDate)||j.reportDate.length!==arrays[0].length||!j.reportDate.every((d:unknown)=>typeof d==='string'&&(d===''||isoDate(d)))))throw new Error('malformed reportDate coverage');
   return j.accessionNumber.map((accession: unknown, i: number) => {
     const date = j.filingDate[i], form = j.form[i];
     if (typeof accession !== 'string' || !/^\d{10}-\d{2}-\d{6}$/.test(accession) || !isoDate(date) || typeof form !== 'string' || !form.trim()) {
@@ -22,7 +23,12 @@ function parseRows(raw: unknown): Filing[] {
       if (cleanDoc && (cleanDoc.split('/').length > 2 || !cleanDoc.split('/').every((part:string) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(part)))) throw new Error('unsafe primaryDocument path');
       document = cleanDoc || undefined;
     }
-    return { accession, date, form, document };
+    let reportDate: string | undefined;
+    if (j.reportDate !== undefined) {
+      if (!Array.isArray(j.reportDate) || j.reportDate.length !== arrays[0].length || typeof j.reportDate[i] !== 'string' || (j.reportDate[i] !== '' && !isoDate(j.reportDate[i]))) throw new Error('malformed reportDate coverage');
+      reportDate = j.reportDate[i] || undefined;
+    }
+    return { accession, date, form, document, reportDate };
   });
 }
 function periodBounds(period: string, now: Date): {start: string; end: string} {
@@ -38,12 +44,19 @@ function periodBounds(period: string, now: Date): {start: string; end: string} {
   }
   return {start:range[1],end:range[2]};
 }
-function nameKey(name: string): string { return name.toLowerCase().replace(/[^a-z0-9]/g,''); }
+// Case-fold ASCII and remove only explicitly permitted business-name punctuation.
+// Other scripts/symbols remain significant rather than silently disappearing.
+function nameKey(name: string): string { return name.toLowerCase().replace(/[ .,\-'&()]/g,''); }
 
 /** Bind optional paid assertions to the actual primary-matched rows. */
 function returnedAssertions(result:Record<string,unknown>, matching:Filing[], cik:number, issuer:string, form:string, queryEntity:string):boolean {
   const byAccession=new Map(matching.map(row=>[row.accession,row]));
-  const issuerMatches=(value:unknown)=>typeof value==='string'&&(nameKey(value)===nameKey(issuer)||value===String(cik));
+  const issuerMatches=(value:unknown):boolean=>{
+    if(typeof value!=='string'||stripInvisible(value)!==value)return false;
+    const claim=/^(.*?)\s*\(CIK\s+(\d{1,10})\)$/.exec(value);
+    if(claim)return Number(claim[2])===cik&&nameKey(claim[1])===nameKey(issuer);
+    return nameKey(value)===nameKey(issuer)||value===String(cik);
+  };
   if(result.form_type!==undefined&&result.form_type!==form)return false;
   if(result.entity!==undefined&&result.entity!==queryEntity&&!issuerMatches(result.entity))return false;
   if(result.cik!==undefined&&String(result.cik)!==String(cik))return false;
@@ -61,29 +74,43 @@ function returnedAssertions(result:Record<string,unknown>, matching:Filing[], ci
   };
   for(const key of ['urls','filings','filings_detail'] as const)if(result[key]!==undefined&&!Array.isArray(result[key]))return false;
   if(Array.isArray(result.urls)&&!result.urls.every(url=>linkMatches(url)))return false;
-  if(Array.isArray(result.filings))for(const raw of result.filings){
-    if(typeof raw!=='string')return false;
-    // Only understood, anchored title grammars are accepted. Searching only
-    // the first date/form would miss contradictory assertions later in a title.
-    const dates=[...raw.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)];
-    if(dates.length!==1)return false;
+  const titleMatches=(raw:unknown, expected?:Filing):boolean=>{
+    if(typeof raw!=='string'||stripInvisible(raw)!==raw)return false;
+    const period=/^(.+?) (10-[QK](?:\/A)?) for the period ending (\d{4}-\d{2}-\d{2})$/.exec(raw);
+    if(period){
+      if(!issuerMatches(period[1])||period[2]!==form||!isoDate(period[3]))return false;
+      const candidates=matching.filter(row=>row.form===form&&row.reportDate===period[3]);
+      return candidates.length===1&&(!expected||candidates[0].accession===expected.accession);
+    }
+    const dates=[...raw.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)];if(dates.length!==1)return false;
     const title=/^(?:SEC\s+)?Form\s+(.+?)\s+(?:filed\s+(\d{4}-\d{2}-\d{2})|\((\d{4}-\d{2}-\d{2})\))(?:\s+-\s+(.+))?$/.exec(raw.trim());
-    if(!title||title[1].toUpperCase()!==form)return false;
-    const date=title[2]??title[3];
-    if(!matching.some(row=>row.form===form&&row.date===date))return false;
-    if(title[4]){
-      let name=title[4];
-      const claim=/^(.*?)\s*\(CIK\s+(\d{1,10})\)$/.exec(name);
-      if(claim){if(Number(claim[2])!==cik)return false;name=claim[1].trim();}
-      if(!issuerMatches(name))return false;
+    if(!title||title[1].toUpperCase()!==form||title[4]&&!issuerMatches(title[4]))return false;
+    const candidates=matching.filter(row=>row.form===form&&row.date===(title[2]??title[3]));
+    return expected?candidates.some(row=>row.accession===expected.accession):candidates.length>0;
+  };
+  if(Array.isArray(result.filings)&&!result.filings.every(raw=>titleMatches(raw)))return false;
+  if(result.recent!==undefined){
+    if(!Array.isArray(result.recent))return false;
+    for(const raw of result.recent){
+      let item:Record<string,unknown>;try{item=object(raw);}catch{return false;}
+      if(Object.keys(item).some(k=>!['agency','publication_date','title','type','url','accession','accession_number','cik','entity','report_date'].includes(k)))return false;
+      if(item.agency!==undefined&&item.agency!=='SEC')return false;
+      if(item.type!==form||!isoDate(item.publication_date)||!linkMatches(item.url))return false;
+      const candidates=matching.filter(row=>row.date===item.publication_date&&linkMatches(item.url,row.accession));
+      if(candidates.length!==1||!titleMatches(item.title,candidates[0]))return false;
+      const row=candidates[0];
+      if(item.accession!==undefined&&item.accession!==row.accession||item.accession_number!==undefined&&item.accession_number!==row.accession||item.cik!==undefined&&String(item.cik)!==String(cik)||item.entity!==undefined&&!issuerMatches(item.entity)||item.report_date!==undefined&&item.report_date!==row.reportDate)return false;
     }
   }
   if(Array.isArray(result.filings_detail))for(const raw of result.filings_detail){
     let detail:Record<string,any>;try{detail=object(raw);}catch{return false;}
+    if(Object.keys(detail).some(k=>!['accession','accession_number','form','filing_date','cik','entity','url','report_date','title'].includes(k)))return false;
     const accession=detail.accession??detail.accession_number;
     if(typeof accession!=='string'||!byAccession.has(accession))return false;
     const row=byAccession.get(accession)!;
     if((detail.accession!==undefined&&detail.accession!==accession)||(detail.accession_number!==undefined&&detail.accession_number!==accession)||detail.form!==row.form||detail.filing_date!==row.date)return false;
+    if(detail.report_date!==undefined&&detail.report_date!==row.reportDate)return false;
+    if(detail.title!==undefined&&!titleMatches(detail.title,row))return false;
     if(detail.cik!==undefined&&String(detail.cik)!==String(cik))return false;
     if(detail.entity!==undefined&&!issuerMatches(detail.entity))return false;
     if(detail.url!==undefined&&!linkMatches(detail.url,accession))return false;
@@ -92,7 +119,7 @@ function returnedAssertions(result:Record<string,unknown>, matching:Filing[], ci
 }
 
 export async function verifyFilingSource(
-  input: { params: Record<string, string>; result: Record<string, unknown> },
+  input: { params: Record<string, string>; result: Record<string, unknown>; providerResult?: Record<string, unknown> },
   options: SourceOptions = {},
 ): Promise<SourceVerification> {
   const r = sourceResult();
@@ -156,14 +183,14 @@ export async function verifyFilingSource(
     const unique = new Map<string,Filing>();
     for (const row of all) {
       const previous = unique.get(row.accession);
-      if (previous && (previous.date !== row.date || previous.form !== row.form || previous.document !== row.document)) throw new Error('conflicting SEC duplicate accession');
+      if (previous && (previous.date !== row.date || previous.form !== row.form || previous.document !== row.document || previous.reportDate !== row.reportDate)) throw new Error('conflicting SEC duplicate accession');
       unique.set(row.accession,row);
     }
     const matching = [...unique.values()].filter(x => x.form === spec.form && x.date >= bounds.start && x.date <= bounds.end);
     r.details = {cik,form:spec.form,start:bounds.start,end:bounds.end,primary_count:matching.length,history_pages:names.size,unique_source_rows:unique.size};
     sourceCheck(r,'filing completeness',true,`read main document and all ${names.size} history pages, deduplicated by accession`);
     sourceCheck(r,'filing count',Number.isSafeInteger(input.result.filing_count) && input.result.filing_count === matching.length,`provider count ${String(input.result.filing_count)}; primary recount ${matching.length}`);
-    const assertionsOk = returnedAssertions(input.result,matching,cik,main.name,spec.form,input.params.entity);
+    const assertionsOk = returnedAssertions(input.result,matching,cik,main.name,spec.form,input.params.entity) && (!input.providerResult || returnedAssertions(input.providerResult,matching,cik,main.name,spec.form,input.params.entity));
     sourceCheck(r,'returned filing assertions',assertionsOk,'returned issuer, accession, URL, title, form and date assertions must bind to primary-matched rows');
   } catch (error) {
     sourceCheck(r,'filing evidence available',false,error instanceof Error?error.message:'source verification failed');

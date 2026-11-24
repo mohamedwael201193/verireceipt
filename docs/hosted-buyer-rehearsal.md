@@ -21,7 +21,10 @@ The real runtime and authority retain an uncertain HOLD, rather than treating th
 failure as a refund or permission to retry. Browser refresh, manual result check
 and owner-bound evidence retrieval must not start another execution.
 
-Assertions cover Secure/HttpOnly/SameSite=Strict owner cookie flags, exactly one
+The joined rehearsal now exchanges an explicit synthetic test token for the
+operator cookie and arms the single preview through its local-only test bridge.
+No token is generated or supplied by an external source. Production has no HTTP
+arming route. Assertions cover Secure/HttpOnly/SameSite=Strict owner cookie flags, exactly one
 buy POST, one runtime execution, one committed durable checkpoint, one invocation
 of the throw-only test signer, zero signatures and zero paid transport calls.
 The report also reads the real local SQLite row and checks reserved/checkpoint

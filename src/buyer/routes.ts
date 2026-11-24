@@ -18,25 +18,37 @@ function databasePath():string {
  return file;
 }
 function fail(reply:FastifyReply,error:unknown){
- const code=error instanceof BuyerStoreError?error.code:'BUYER_UNAVAILABLE',status=code==='NOT_FOUND'?404:code==='EXPIRED'?410:code==='TERMS_MISMATCH'||code==='STATE_CHANGED'?409:code==='BUYER_UNAVAILABLE'?503:429;
+ const code=error instanceof BuyerStoreError?error.code:'BUYER_UNAVAILABLE',status=code==='OPERATOR_REQUIRED'?403:code==='ONE_SHOT_REQUIRED'?409:code==='NOT_FOUND'?404:code==='EXPIRED'?410:code==='TERMS_MISMATCH'||code==='STATE_CHANGED'?409:code==='BUYER_UNAVAILABLE'?503:429;
  return reply.status(status).send({status:'HOLD',code,paid_retry:false});
 }
-export function registerBuyer(app:FastifyInstance,options:{enabled?:boolean;runtime?:BuyerRuntime;store?:BuyerStore}={}):void {
+export function registerBuyer(app:FastifyInstance,options:{enabled?:boolean;runtime?:BuyerRuntime;store?:BuyerStore;readOnly?:boolean;operatorAccess?:{hash:string;expiresAt:number}}={}):void {
  if(!(options.enabled??process.env.BUYER_ENABLED==='1'))return;
- const runtime=options.runtime??loadRuntime(),config=runtime.assertConfiguration(),store=options.store??new BuyerStore(databasePath(),config.payer);
+ const readOnly=options.readOnly??process.env.BUYER_READ_ONLY==='1';
+ const runtime=options.runtime??loadRuntime(),config=readOnly?{payer:process.env.BUYER_PAYER_ADDRESS??options.store?.payer??'',scratchRoot:''}:runtime.assertConfiguration(),store=options.store??new BuyerStore(databasePath(),config.payer);
+ const access=options.operatorAccess??{hash:process.env.BUYER_OPERATOR_ACCESS_HASH??'',expiresAt:Date.parse(process.env.BUYER_OPERATOR_ACCESS_EXPIRES_AT??'')};
+ store.requireOneShot(access.hash,access.expiresAt);
  if(store.payer!==config.payer)throw new Error('Runtime and durable payer mismatch');
- store.purge();runtime.cleanup(config.scratchRoot);
+ if(readOnly)store.closePurchases();
+ store.purge();if(config.scratchRoot)runtime.cleanup(config.scratchRoot);
  const active=new Set<Promise<void>>(),controllers=new Set<AbortController>();let stopping=false;
- const cleanup=setInterval(()=>{try{store.purge();runtime.cleanup(config.scratchRoot);}catch{app.log.error('Buyer cleanup failed; operator review required');}},3600000);cleanup.unref();
+ const cleanup=setInterval(()=>{try{store.purge();if(config.scratchRoot)runtime.cleanup(config.scratchRoot);}catch{app.log.error('Buyer cleanup failed; operator review required');}},3600000);cleanup.unref();
  app.addHook('onClose',async()=>{stopping=true;clearInterval(cleanup);for(const c of controllers)c.abort();await Promise.allSettled([...active]);store.close();});
  const session=(r:FastifyRequest,reply:FastifyReply,mutation=false):string|null=>{
   reply.header('Cache-Control','no-store');
   if(mutation&&(r.headers.origin!==ORIGIN||(r.headers['sec-fetch-site']&&r.headers['sec-fetch-site']!=='same-origin'))){reply.status(403).send({status:'HOLD',code:'ORIGIN_REQUIRED'});return null;}
-  const value=token(r);if(!value){reply.status(428).send({status:'HOLD',code:'SESSION_REQUIRED'});return null;}return digest(value);
+  const value=token(r);if(!value){reply.status(428).send({status:'HOLD',code:'SESSION_REQUIRED'});return null;}const owner=digest(value);if(!store.isOperator(owner)){reply.status(403).send({status:'HOLD',code:'OPERATOR_REQUIRED'});return null;}return owner;
  };
  app.get('/v1/buyer/session',async(request,reply)=>{
-  reply.header('Cache-Control','no-store');if(!token(request))reply.header('Set-Cookie',`__Host-vr_buyer=${randomBytes(32).toString('hex')}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400`);
-  return {enabled:true,network:BUYER.network,call_uusdc:BUYER.callUusdc,daily_cap_uusdc:BUYER.dailyUusdc,sponsored:true,retention_hours:24,routing:'ranked-auto'};
+  if(!session(request,reply))return;
+  return {enabled:true,network:BUYER.network,call_uusdc:BUYER.callUusdc,daily_cap_uusdc:BUYER.dailyUusdc,sponsored:true,retention_hours:24,routing:'ranked-auto',one_shot:store.oneShotStatus()};
+ });
+ app.post('/v1/buyer/session',{bodyLimit:1024},async(request,reply)=>{
+  reply.header('Cache-Control','no-store');if(request.headers.origin!==ORIGIN||(request.headers['sec-fetch-site']&&request.headers['sec-fetch-site']!=='same-origin'))return reply.status(403).send({status:'HOLD',code:'ORIGIN_REQUIRED'});
+  const body=request.body as {access?:unknown};if(!body||Object.keys(body).join(',')!=='access'||typeof body.access!=='string')return reply.status(403).send({status:'HOLD',code:'OPERATOR_REQUIRED'});
+  const value=token(request)??randomBytes(32).toString('hex');
+  try{store.authorizeOperator(digest(value),body.access);}catch(error){return fail(reply,error);}
+  reply.header('Set-Cookie',`__Host-vr_buyer=${value}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400`);
+  return {authorized:true,one_shot:store.oneShotStatus()};
  });
  app.post('/v1/buyer/plans',{bodyLimit:2048},async(request,reply)=>{
   const owner=session(request,reply,true);if(!owner)return;if(stopping)return fail(reply,new Error());

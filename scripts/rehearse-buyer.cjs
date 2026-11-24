@@ -21,6 +21,7 @@ const transport = async (input, init) => {
   if (method === 'POST' && url === 'https://devnode.telegraphprotocol.com/engine/v1/ask') { counters.syntheticChallenges++; return new Response(challenge, { status: 402 }); }
   throw new Error('Unrecognized offline destination');
 };
+const credential='d'.repeat(64);
 const runtime = {
   assertConfiguration: () => ({ payer, scratchRoot: root }),
   cleanup: compiled.cleanBuyerScratch,
@@ -34,13 +35,14 @@ const runtime = {
   followup: async () => { throw new Error('No receipt exists in this no-sign rehearsal'); }
 };
 const app = Fastify();
-registerBuyer(app, { enabled: true, runtime, store });
+registerBuyer(app, { enabled: true, runtime, store,operatorAccess:{hash:require('node:crypto').createHash('sha256').update(credential).digest('hex'),expiresAt:Date.now()+3600000} });
 const server = http.createServer(async (request, response) => {
   try {
     if (request.method === 'GET' && request.url === '/state') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ ...counters, durableJobs: store.db.prepare('SELECT id,state,reserved_at IS NOT NULL AS reserved,signed_at IS NOT NULL AS checkpoint FROM buyer_jobs').all() })); return; }
     if (request.method !== 'POST' || request.url !== '/bridge') { response.writeHead(404).end(); return; }
     let data = ''; for await (const chunk of request) { data += chunk; if (data.length > 100000) throw new Error('Oversized bridge request'); }
     const incoming = JSON.parse(data);
+    if(incoming.command==='arm'){const rows=store.db.prepare("SELECT id,plan_hash,expires_at FROM buyer_jobs WHERE state='planned'").all();if(rows.length!==1)throw new Error('Expected one rehearsal plan');store.armOneShot(rows[0].id,rows[0].plan_hash,rows[0].expires_at,'10000');response.setHeader('Content-Type','application/json');response.end(JSON.stringify({armed:true}));return;}
     if (!incoming.url.startsWith('/v1/buyer/')) throw new Error('Not a buyer route');
     counters.api.push({ method: incoming.method, url: incoming.url });
     const result = await app.inject({ method: incoming.method, url: incoming.url, headers: incoming.headers, ...(incoming.payload === undefined ? {} : { payload: incoming.payload }) });

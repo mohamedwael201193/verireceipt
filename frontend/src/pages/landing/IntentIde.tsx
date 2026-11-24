@@ -18,6 +18,7 @@ import type {
 } from "../../lib/types";
 import { ReceiptCard } from "../../components/ReceiptCard";
 import { INTENTS, PRESETS, TRAP_PRESETS, type IntentKey } from "./data";
+import { DECLARED_INTENT_COUNT } from "../../lib/minerManifest";
 import { callLive, type AnyResponse } from "./calls";
 import { errorMessage, formatLmp, formatUsdcBaseUnits, hlJSON, shortHash } from "./utils";
 import { VerifyBadge } from "./VerifyBadge";
@@ -388,7 +389,7 @@ export function IntentIde() {
               Selected <span className="it">live demos.</span>
             </h2>
           </div>
-          <div className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>// six demos from 14 declared intents</div>
+          <div className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>// six demos from {DECLARED_INTENT_COUNT} declared intents</div>
         </div>
 
         <div className="code-shell">

@@ -10,6 +10,7 @@
 // the desk/gate/benchmark ledgers share one daily cap, and any attempt that
 // reached a signature records worst-case spend when the outcome is unknown.
 import { appendFileSync, closeSync, existsSync, openSync, readFileSync, rmSync } from "node:fs";
+import {exactNumericEqual} from './exactNumeric.js';
 import { createHash } from "node:crypto";
 import { DESK_DAILY_CAP_UUSDC, ENGINE_URL, MAX_WINDOW_SECONDS, VERIRECEIPT_ONCHAIN_MINER_IDS } from "./constants.js";
 import { escrowAskAuto, type Fetch, type Payer, type RawResponse, type SignNotice } from "./client.js";
@@ -147,6 +148,8 @@ export interface SettlementSnapshot {
 }
 
 export interface SpendLedger {
+  /** Optional crash-durable journal writer, required by the local Research Desk. */
+  writeReservation?: (reservation: SpendReservation) => void;
   reservationsFile: string;
   lockFile: string;
   readSettlementSnapshot: () => SettlementSnapshot;
@@ -219,7 +222,8 @@ export function reserveSpend(
       );
     }
     const r: SpendReservation = { kind, nonce, amount_uusdc: amountUusdc.toString(), reserved_at: now.toISOString() };
-    appendFileSync(spend.reservationsFile, JSON.stringify(r) + "\n");
+    if(spend.writeReservation)spend.writeReservation(r);
+    else appendFileSync(spend.reservationsFile, JSON.stringify(r) + "\n");
   });
 }
 
@@ -339,7 +343,7 @@ function gateDeliveryOk(d: DeliveryProof, receipt: { receipt_hash: string; amoun
  * recorded answer, the delivery is included with exact identity and proof
  * shape — or legitimately pending — and the receipt time belongs to its epoch.
  */
-async function verifyNodeLevel(
+export async function verifyNodeLevel(
   input: {
     payer: string;
     signalHash: string;
@@ -349,6 +353,7 @@ async function verifyNodeLevel(
     engineResult: Record<string, unknown>;
     /** Node field_status from the paid reply; the decision field must be shaped "ok". */
     fieldStatus?: Record<string, string>;
+    exactNumericTransport?: boolean;
     receipt: { receipt_hash: string; amount_uusdc: string; epoch_id: number; timestamp: number; miner: string };
     runStartedMs: number;
     verifiedAtMs: number;
@@ -403,7 +408,7 @@ async function verifyNodeLevel(
   const response = sig.payload?.response ?? {};
   value = response[input.valueField];
   const engineValue = input.engineResult[input.valueField];
-  add("engine value equals provider answer", engineValue !== undefined && engineValue !== null && engineValue === value,
+  add("engine value equals provider answer", engineValue !== undefined && engineValue !== null && (input.exactNumericTransport ? exactNumericEqual(engineValue,value) : engineValue === value),
     `${input.valueField}: engine=${JSON.stringify(engineValue)} provider=${JSON.stringify(value)}`);
   // A numeric answer whose field the node marked unavailable/missing/rejected
   // is not evidence (a placeholder 0 must never satisfy a <= rule).
@@ -433,7 +438,7 @@ async function verifyNodeLevel(
     d.status === "included" ? "included" : `${d.status}: ${d.detail} (previous epoch ${prev ? `${prev.status}${prevWindowOk ? " with recorded window" : ", window missing or inconsistent"}` : "none"})`);
   add("receipt time belongs to recorded epoch", epoch.ok, epoch.failures.join("; ") || "epoch window agrees");
 
-  return { ok: checks.every((c) => c.ok), checks, value, minerSlug, delivery: d.status, providerResponse: response };
+  return { ok: checks.every((c) => c.ok), checks, value:input.exactNumericTransport?engineValue:value, minerSlug, delivery: d.status, providerResponse: response };
 }
 
 interface VerifiedCore {
@@ -445,6 +450,7 @@ interface VerifiedCore {
   miner_chain: "passed" | "failed" | "not_applicable";
   miner_checks: Check[];
   source_verification?: SourceVerification;
+  provider_response?: Record<string, unknown>;
   /** Verification failures (purchase refusals included); empty when the evidence stands. */
   reasons: string[];
   evidenceOk: boolean;
@@ -455,10 +461,10 @@ interface VerifiedCore {
  * throws: a refused or unverifiable purchase is returned as failed evidence
  * with worst-case spend recorded for anything that reached a signature.
  */
-async function executeVerifiedPurchase(
+export async function executeVerifiedPurchase(
   input: { intent: string; params: Record<string, string>; valueField: string; kind: string },
   payer: Payer,
-  opts: { spend: SpendLedger; now?: () => Date; f?: Fetch; onRawResponse?: (raw: RawResponse) => void | Promise<void>; secUserAgent?: string; durableBeforeSign?: (notice: SignNotice) => Promise<void> },
+  opts: { exactNumericTransport?: boolean; spend: SpendLedger; now?: () => Date; f?: Fetch; onRawResponse?: (raw: RawResponse) => void | Promise<void>; secUserAgent?: string; durableBeforeSign?: (notice: SignNotice) => Promise<void> },
 ): Promise<VerifiedCore> {
   const nowDate = (opts.now ?? (() => new Date()))();
   const f = opts.f ?? fetch;
@@ -531,6 +537,7 @@ async function executeVerifiedPurchase(
           signalHash: validHash,
           intent: input.intent,
           askedParams: input.params,
+          exactNumericTransport: opts.exactNumericTransport,
           valueField: input.valueField,
           engineResult: body.result ?? {},
           fieldStatus: body.field_status as Record<string, string> | undefined,
@@ -577,7 +584,7 @@ async function executeVerifiedPurchase(
     const primaryAnswer = reconciled?.result ?? body.result ?? {};
     let sourceVerification: SourceVerification | undefined;
     if (node.ok && input.intent === "REGULATORY_FILING_MONITOR_GENERAL") {
-      sourceVerification = await verifyFilingSource({ params: input.params, result: primaryAnswer }, { f, now: nowDate, secUserAgent: opts.secUserAgent });
+      sourceVerification = await verifyFilingSource({ params: input.params, result: primaryAnswer, providerResult: node.providerResponse }, { f, now: nowDate, secUserAgent: opts.secUserAgent });
       if (input.valueField !== "filing_count") {
         sourceVerification.status = "failed";
         sourceVerification.checks.push({name:"primary source supported filing field",ok:false,detail:"only independently recounted filing_count is supported"});
@@ -615,6 +622,7 @@ async function executeVerifiedPurchase(
       miner_checks: minerChecks,
       reasons,
       source_verification: sourceVerification,
+      provider_response: node.providerResponse,
       evidenceOk: node.ok && minerChain !== "failed" && (!sourceVerification || sourceVerification.status === "verified"),
     };
   } catch (e) {

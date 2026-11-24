@@ -1,15 +1,20 @@
 /**
- * Current Sepolia registration 6177: confirmed updateMiner of 6176, block 12194171.
- * Node activation stays live-read and requires the exact id, status and YAML hash.
+ * Current Sepolia registration 6188: confirmed updateMiner of 6181, tx
+ * 0x115e0e23…cb56, block 12197330 (2026-11-23). 6181 was the updateMiner of
+ * 6177 (tx 0x40067d8c…3385, block 12195447); 6177 was the updateMiner of 6176
+ * (tx 0xc6ba683b…ba74, block 12194171). Node activation stays live-read and
+ * requires the exact id, status and YAML hash; pending ingestion is not active.
  * Historical serving IDs are retained for old paid receipts, never rewritten.
  */
 import { useLiveQuery, type LiveQueryResult } from "./hooks";
 
-export const SEPOLIA_REGISTRATION_ID = 6177;
+export const SEPOLIA_REGISTRATION_ID = 6188;
 
-/** The intents registration 6177 declares on chain (the 45 landed by the
- * updateMiner tx below, 2026-11-23). miner.yaml's DECLARED_INTENTS is ahead
- * (49) until the next updateMiner. */
+/** The intents registration 6188 declares on chain (the 54 landed by the
+ * updateMiner tx below, 2026-11-23), in the supported_intents order of
+ * miner.yaml at pin 680fbdbf. Registered and declared sets match at this
+ * snapshot; they are kept as separate lists because a future declaration
+ * can land before its registration update. */
 export const SEPOLIA_REGISTERED_INTENTS = [
   "ONCHAIN_TX_LOOKUP_GENERAL",
   "REGULATORY_FILING_MONITOR_GENERAL",
@@ -30,6 +35,7 @@ export const SEPOLIA_REGISTERED_INTENTS = [
   "CODE_PATCH_VERIFY_GENERAL",
   "CORPORATE_REGISTRY_LOOKUP_GENERAL",
   "CROSS_CHAIN_STATE_VERIFY_GENERAL",
+  "CRYPTO_PRICE_USD",
   "CVE_LOOKUP_CVSS",
   "EVENT_OUTCOME_RESOLUTION_GENERAL",
   "FINANCIAL_DATA_GENERAL",
@@ -39,6 +45,7 @@ export const SEPOLIA_REGISTERED_INTENTS = [
   "IP_GEOLOCATION_GENERAL",
   "LIQUIDITY_DEPTH_VERIFY_GENERAL",
   "MALWARE_DETECTION_HASH",
+  "MINING_HASHPRICE_VERIFY_GENERAL",
   "NEWS_HEADLINES_GENERAL",
   "NEWS_SEARCH_GENERAL",
   "PAYMENT_METHOD_VERIFY_GENERAL",
@@ -46,6 +53,7 @@ export const SEPOLIA_REGISTERED_INTENTS = [
   "SANCTIONS_SCREENING_MATCH_GENERAL",
   "SLA_COMPLIANCE_GENERAL",
   "SPORTS_SCORE_GENERAL",
+  "STORM_ALERT_GENERAL",
   "STOCK_PRICE_US_EQUITY",
   "THREAT_INTELLIGENCE_INDICATOR",
   "TOKEN_HOLDER_COUNT_GENERAL",
@@ -55,16 +63,22 @@ export const SEPOLIA_REGISTERED_INTENTS = [
   "URL_SCAN_VERDICT",
   "VENDOR_VERIFY_GENERAL",
   "VULNERABILITY_TRIAGE_GENERAL",
+  "WEATHER_CHECK_TEMPERATURE",
   "WEATHER_FORECAST_GENERAL",
+  "ONCHAIN_METRIC_VERIFY_GENERAL",
+  "AIR_QUALITY_INDEX_GENERAL",
+  "API_HEALTH_CHECK_GENERAL",
+  "SERVER_UPTIME_MONITOR_GENERAL",
+  "SECURITY_REVIEW_GENERAL"
 ] as const;
 
-export const SEPOLIA_PREVIOUS_REGISTRATION_ID = 6176;
+export const SEPOLIA_PREVIOUS_REGISTRATION_ID = 6181;
 export const SEPOLIA_REGISTER_TX =
-  "0xc6ba683b68ca2e5fec185620085cf76c8e6f31467a62e62f03db82b8b4d1ba74";
-export const SEPOLIA_REGISTER_BLOCK = 12194171;
+  "0x115e0e237ad66992ed52b8c2cf571806dedf9bff6e2338bd8bbe280853c9cb56";
+export const SEPOLIA_REGISTER_BLOCK = 12197330;
 export const SEPOLIA_YAML_HASH =
-  "0xabaee05348e6d4374dd7fbf0c9da6a14794dfc372bffdb37b8958d1107b44d7a";
-export const SEPOLIA_YAML_PIN = "d604c5433276e70af9e2d359ce9d096f951f85fa";
+  "0x30195e677e413b623445d82593b22e05402bf0176dea3912e053725ac7ca08f1";
+export const SEPOLIA_YAML_PIN = "680fbdbf8b77b640ba0d62c088dc9c154ab9acf7";
 /**
  * Every registration id that has answered paid calls for slug "verireceipt".
  * Telegraph receipts name the registration that served the call, so committed
@@ -72,7 +86,7 @@ export const SEPOLIA_YAML_PIN = "d604c5433276e70af9e2d359ce9d096f951f85fa";
  * rewritten. The current registration is always included.
  */
 export const SEPOLIA_SERVING_REGISTRATION_IDS: readonly number[] = Array.from(
-  new Set([6152, 6160, 6174, 6176, SEPOLIA_REGISTRATION_ID]), // pin:keep (historical ids)
+  new Set([6152, 6160, 6174, 6176, 6177, SEPOLIA_REGISTRATION_ID]), // pin:keep (historical ids)
 );
 export const SEPOLIA_EXPLORER_TX = `https://sepolia.etherscan.io/tx/${SEPOLIA_REGISTER_TX}`;
 export const TELEGRAPH_NODE_BASE = "https://devnode.telegraphprotocol.com";
@@ -98,11 +112,11 @@ export interface MinerRegistrationStatus {
   yamlHash: string;
   yamlPin: string;
   explorerTx: string;
-  /** Live Telegraph node read for /api/miners/6177. */
+  /** Live Telegraph node read for /api/miners/6188. */
   nodeByRegistrationId: NodeListing;
   /**
-   * True only when the live node body for 6177 says activation_status
-   * "active" AND carries registration_id 6177 AND the pinned yaml_hash
+   * True only when the live node body for 6188 says activation_status
+   * "active" AND carries registration_id 6188 AND the pinned yaml_hash
    * (all three required; no boolean fallbacks). Pending ingestion (404)
    * is not active.
    */
@@ -137,7 +151,7 @@ interface ActiveRead {
  *   - activation_status is the string "active" (no boolean `active` /
  *     `is_active` fallback — the node's documented field is the string);
  *   - registration_id is present and equals the id that was asked for;
- *   - for 6177, yaml_hash is present and equals the pinned miner.yaml
+ *   - for 6188, yaml_hash is present and equals the pinned miner.yaml
  *     hash (a missing hash is NOT a pass).
  * Anything else is reported as listed-but-not-active with the reason.
  */

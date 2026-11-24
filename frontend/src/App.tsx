@@ -1,4 +1,4 @@
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import ScrollToHash from "./components/ScrollToHash";
 import Benchmarks from "./pages/Benchmarks";
@@ -10,6 +10,7 @@ import Receipts from "./pages/Receipts";
 import Status from "./pages/Status";
 import Buyer from "./pages/Buyer";
 import Research from "./pages/Research";
+import ResearchDesk from "./pages/ResearchDesk";
 
 /** App shell routes.
  *
@@ -60,6 +61,8 @@ export default function App() {
           <Route path="status" element={<Status />} />
           <Route path="docs" element={<Docs />} />
           <Route path="research" element={<Research />} />
+          <Route path="research/desk" element={<ResearchDesk />} />
+          <Route path="research-desk" element={<Navigate to="/research/desk" replace />} />
           <Route path="buyer" element={<Buyer />} />
           <Route path="*" element={<NotFound />} />
         </Route>

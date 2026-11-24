@@ -1,0 +1,926 @@
+{
+  "captured_at": "2026-11-23T01:31:13.130406+00:00",
+  "catalog_url": "https://devnode.telegraphprotocol.com/engine/v1/intents",
+  "own_catalogue_id": "774921",
+  "own_activation_status": "active",
+  "own_registered_intents": [
+    "ONCHAIN_TX_LOOKUP_GENERAL",
+    "REGULATORY_FILING_MONITOR_GENERAL",
+    "TVL_LOOKUP_GENERAL",
+    "OPTIMAL_EXECUTION_ROUTE_GENERAL",
+    "GRID_POWER_PRICE_GENERAL",
+    "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
+    "GAS_PRICE_GENERAL",
+    "WALLET_BALANCE_CHECK_GENERAL",
+    "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL",
+    "MACRO_ECONOMIC_INDICATOR_GENERAL",
+    "DNS_RECORD_LOOKUP_GENERAL",
+    "CURRENCY_EXCHANGE_CONVERT",
+    "SSL_VERIFICATION_CERT",
+    "EMAIL_SECURITY_GENERAL"
+  ],
+  "schemas": [
+    {
+      "intent_name": "ASSET_RESERVE_ATTESTATION_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "asset",
+            "type": "string",
+            "required": true,
+            "description": "The tokenized asset: its symbol or contract address"
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "ASSET_RESERVE_ATTESTATION"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "attested_reserve",
+            "description": "Attested reserve of {key} at its pinned block, in micro-units of the underlying asset (1 whole unit = 1000000)",
+            "type": "number",
+            "unit": "micro-units of the underlying asset",
+            "unit_aliases": {
+              "whole units of the underlying asset": 1000000
+            },
+            "range": [
+              1,
+              1000000000000000000
+            ],
+            "user_description": "Attested reserve that answers this request, in micro-units of the underlying asset (1 whole unit = 1000000): {query}",
+            "scored": true,
+            "decimals": 0
+          },
+          {
+            "name": "asset",
+            "description": "The tokenized asset the reserve backs",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "block",
+            "description": "The block or round the attestation is for",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "source",
+            "description": "The attestation source (proof-of-reserve feed or auditor)",
+            "type": "string",
+            "off_chain": true
+          }
+        ],
+        "format_version": 3,
+        "served_by": "ASSET_RESERVE_ATTESTATION"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": false,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/ASSET_RESERVE_ATTESTATION_GENERAL",
+      "source_sha256": "1742c1dacc7a09458a82907d33de25091537c948739f7273e9a66c584c9e07dc"
+    },
+    {
+      "intent_name": "CORPORATE_REGISTRY_LOOKUP_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "company",
+            "type": "string",
+            "required": true,
+            "description": "Company name or registry identifier"
+          },
+          {
+            "name": "jurisdiction",
+            "type": "string",
+            "required": true,
+            "description": "Country or jurisdiction of registration"
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "CORPORATE_REGISTRY_LOOKUP"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "legal_name",
+            "description": "Registered legal name",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "registration_id",
+            "description": "Registry identifier (LEI, company number, org number)",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "active",
+            "description": "Whether the company is active / in good standing",
+            "type": "bool",
+            "true_when": [
+              "true",
+              "yes",
+              "active",
+              "1"
+            ],
+            "false_when": [
+              "false",
+              "no",
+              "0",
+              "inactive",
+              "dissolved",
+              "struck off",
+              "closed"
+            ],
+            "scored": true,
+            "aliases": [
+              "registered",
+              "registration status"
+            ]
+          },
+          {
+            "name": "jurisdiction",
+            "description": "Jurisdiction of registration",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "registered_address",
+            "description": "Registered address",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "incorporated",
+            "description": "Date of incorporation or registration",
+            "type": "date",
+            "off_chain": true
+          }
+        ],
+        "format_version": 3,
+        "served_by": "CORPORATE_REGISTRY_LOOKUP"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": false,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/CORPORATE_REGISTRY_LOOKUP_GENERAL",
+      "source_sha256": "64c506b3527387493f2a7592feb6bd2186751b7110676c1a28f03cf7682e91bf"
+    },
+    {
+      "intent_name": "CRYPTO_PRICE_USD",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "symbol",
+            "type": "string",
+            "required": true,
+            "description": "Asset symbol, e.g. BTC"
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "CRYPTO_PRICE"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "price_usd",
+            "description": "Current price of {key}, in US dollars",
+            "type": "number",
+            "unit": "US dollars",
+            "range": [
+              1e-06,
+              10000000
+            ],
+            "scored": true
+          }
+        ],
+        "format_version": 1,
+        "served_by": "CRYPTO_PRICE_USD"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": false,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/CRYPTO_PRICE_USD",
+      "source_sha256": "15123e18451ceab0699586e600962b12285f86f7640568e8681e5745f376348d"
+    },
+    {
+      "intent_name": "CRYPTO_YIELD_RATE_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "project",
+            "type": "string",
+            "required": true,
+            "description": "Lending protocol, e.g. aave-v3"
+          },
+          {
+            "name": "symbol",
+            "type": "string",
+            "required": true,
+            "description": "Asset of the pool, e.g. USDC"
+          },
+          {
+            "name": "chain",
+            "type": "string",
+            "required": true,
+            "description": "Chain of the pool, e.g. Ethereum"
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "CRYPTO_YIELD_RATE"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "supply_apy",
+            "description": "Current supply APY of the {project} {symbol} pool on {chain}, in basis points (1% = 100 bps)",
+            "type": "number",
+            "unit": "basis points",
+            "unit_aliases": {
+              "percent (1% = 100 bps; multiply by 100 for basis points)": 100
+            },
+            "range": [
+              0,
+              100000
+            ],
+            "scored": true,
+            "decimals": 6
+          }
+        ],
+        "format_version": 3,
+        "served_by": "CRYPTO_YIELD_RATE"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": false,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/CRYPTO_YIELD_RATE_GENERAL",
+      "source_sha256": "b7dea5be10af2c55b1f1b63a6a8d5e4e231a54b30699a25e22f8816d21b20c8d"
+    },
+    {
+      "intent_name": "FACT_CHECK_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "claim",
+            "type": "string",
+            "required": true,
+            "description": "The claim to check"
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "FACT_CHECK"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "claim",
+            "description": "The claim that was checked",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "verdict",
+            "description": "Fact-check verdict",
+            "type": "enum",
+            "allowed": [
+              "True",
+              "Mostly True",
+              "Mixed",
+              "Misleading",
+              "Mostly False",
+              "False",
+              "Unverified"
+            ],
+            "processed": true
+          },
+          {
+            "name": "reasoning",
+            "description": "The reasoning behind the verdict",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "sources",
+            "description": "URLs or names of the sources the answer cites",
+            "type": "list",
+            "off_chain": true
+          }
+        ],
+        "format_version": 3,
+        "served_by": "FACT_CHECK"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": false,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/FACT_CHECK_GENERAL",
+      "source_sha256": "ba71ee65ba5da8ef2ab040d2627f60527c39c6120343e60ab683d85bb33569ae"
+    },
+    {
+      "intent_name": "FINANCIAL_DATA_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "asset",
+            "type": "string",
+            "required": true,
+            "description": "Company, token or market"
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "FINANCIAL_DATA"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "asset",
+            "description": "The company, token or market the figures are for",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "market_cap_usd",
+            "description": "Market capitalisation in US dollars",
+            "type": "number",
+            "unit": "USD",
+            "range": [
+              0,
+              1000000000000000
+            ],
+            "scored": true,
+            "decimals": 6,
+            "aliases": [
+              "marketcap",
+              "market capitalization",
+              "mcap"
+            ]
+          },
+          {
+            "name": "volume_24h_usd",
+            "description": "Trading volume over the last 24 hours in US dollars",
+            "type": "number",
+            "unit": "USD",
+            "range": [
+              0,
+              1000000000000000
+            ],
+            "decimals": 6,
+            "off_chain": true,
+            "aliases": [
+              "volume",
+              "trading volume",
+              "24 hour volume"
+            ]
+          },
+          {
+            "name": "metrics",
+            "description": "The other financial figures the answer reports (ratios, revenue, growth), as written",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "as_of",
+            "description": "Timestamp or date the figures are for",
+            "type": "string",
+            "off_chain": true
+          }
+        ],
+        "format_version": 3,
+        "served_by": "FINANCIAL_DATA"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": false,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/FINANCIAL_DATA_GENERAL",
+      "source_sha256": "fe7a0cbf0b76476ab9250f88b7118e2c9fbb0e6461f12cae8a7006acd9064427"
+    },
+    {
+      "intent_name": "LIQUIDITY_DEPTH_VERIFY_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "pool",
+            "type": "string",
+            "required": true,
+            "description": "DEX pool address or name"
+          },
+          {
+            "name": "chain",
+            "type": "string",
+            "required": true,
+            "description": "Chain of the pool"
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "LIQUIDITY_DEPTH_VERIFY"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "liquidity_usd",
+            "description": "Total liquidity (reserve) in US dollars of the DEX pool {pool_name} on {chain}, pool address {address}",
+            "type": "number",
+            "unit": "USD",
+            "range": [
+              1,
+              1000000000000
+            ],
+            "scored": true,
+            "decimals": 6
+          }
+        ],
+        "format_version": 3,
+        "served_by": "LIQUIDITY_DEPTH_VERIFY"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": false,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/LIQUIDITY_DEPTH_VERIFY_GENERAL",
+      "source_sha256": "57b7737e1563f76c0dc1209fb82c447f7936579154bde85bcbb399767b969d90"
+    },
+    {
+      "intent_name": "MACRO_ECONOMIC_INDICATOR_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "indicator",
+            "type": "enum",
+            "required": true,
+            "description": "The indicator: unemployment rate, % of the total labour force (World Bank SL.UEM.TOTL.ZS)",
+            "allowed": [
+              "unemployment rate"
+            ]
+          },
+          {
+            "name": "country",
+            "type": "string",
+            "required": true,
+            "description": "Country"
+          },
+          {
+            "name": "year",
+            "type": "integer",
+            "description": "Year; absent for the latest",
+            "min": 1960,
+            "max": 2100
+          }
+        ],
+        "schema_version": 5,
+        "served_by": "MACRO_ECONOMIC_INDICATOR"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "rate_pct",
+            "description": "Unemployment rate (% of total labour force, World Bank indicator {indicator}) for {country_name} ({country}) in {year}, in percent",
+            "type": "number",
+            "unit": "percent",
+            "range": [
+              0,
+              100
+            ],
+            "scored": true,
+            "decimals": 6,
+            "aliases": [
+              "inflation",
+              "cpi"
+            ]
+          }
+        ],
+        "format_version": 5,
+        "served_by": "MACRO_ECONOMIC_INDICATOR"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": true,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/MACRO_ECONOMIC_INDICATOR_GENERAL",
+      "source_sha256": "70278b51e3a8d6e2661a3bdda3ee1439c673006e6fba098463910cd9566d17f9"
+    },
+    {
+      "intent_name": "ONCHAIN_METRIC_VERIFY_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "address",
+            "type": "string",
+            "required": true,
+            "description": "Wallet address"
+          },
+          {
+            "name": "block",
+            "type": "integer",
+            "required": true,
+            "description": "Block number to read the balance at",
+            "min": 0,
+            "max": 1000000000000
+          },
+          {
+            "name": "chain",
+            "type": "enum",
+            "description": "Chain to read: ethereum (mainnet), polygon (PoS) or arbitrum (One)",
+            "allowed": [
+              "ethereum",
+              "polygon",
+              "arbitrum"
+            ],
+            "default": "ethereum"
+          },
+          {
+            "name": "metric",
+            "type": "enum",
+            "description": "What to read for the address at the block: balance (native-coin balance, in Gwei) or tx_count (its nonce)",
+            "allowed": [
+              "balance",
+              "tx_count"
+            ],
+            "default": "balance"
+          }
+        ],
+        "schema_version": 4,
+        "served_by": "ONCHAIN_METRIC_VERIFY"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "balance_gwei",
+            "description": "Native-coin balance of {key}, in Gwei (1 ETH or 1 POL = 1000000000 Gwei)",
+            "type": "number",
+            "unit": "Gwei",
+            "unit_aliases": {
+              "ETH": 1000000000,
+              "MATIC": 1000000000,
+              "POL": 1000000000,
+              "wei": 1e-09
+            },
+            "range": [
+              0,
+              100000000000000000000
+            ],
+            "user_description": "Native-coin balance that answers this request, in Gwei: {query}",
+            "scored": true,
+            "decimals": 6
+          },
+          {
+            "name": "address",
+            "description": "The address whose balance is reported",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "block",
+            "description": "The block the balance was read at",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "chain",
+            "description": "The chain the balance is on",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "tx_count",
+            "description": "Transactions the address has sent up to that block (its nonce)",
+            "type": "integer",
+            "range": [
+              0,
+              1000000000000
+            ],
+            "user_description": "Transactions sent by the address (its nonce) that answers this request: {query}",
+            "off_chain": true
+          }
+        ],
+        "format_version": 4,
+        "served_by": "ONCHAIN_METRIC_VERIFY"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": false,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/ONCHAIN_METRIC_VERIFY_GENERAL",
+      "source_sha256": "4409ae77c3db4534692f144509b92a8952b93194efbf5a9ccc943827621b9149"
+    },
+    {
+      "intent_name": "REGULATORY_FILING_MONITOR_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "entity",
+            "type": "string",
+            "required": true,
+            "description": "Company, product or concern"
+          },
+          {
+            "name": "period",
+            "type": "string",
+            "required": true,
+            "description": "Period to search, e.g. last 12 months"
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "REGULATORY_FILING_MONITOR"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "entity",
+            "description": "The company, product or concern searched",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "filing_count",
+            "description": "Number of matching filings found",
+            "type": "number",
+            "unit": "filings",
+            "range": [
+              0,
+              100000000
+            ],
+            "scored": true,
+            "decimals": 0
+          },
+          {
+            "name": "filings",
+            "description": "Titles of the matching filings, newest first",
+            "type": "list",
+            "off_chain": true
+          },
+          {
+            "name": "urls",
+            "description": "URLs of the matching filings, in the same order",
+            "type": "list",
+            "off_chain": true
+          }
+        ],
+        "format_version": 3,
+        "served_by": "REGULATORY_FILING_MONITOR"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": true,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/REGULATORY_FILING_MONITOR_GENERAL",
+      "source_sha256": "111499ab58a9261dc71e7e108cebeb8ae2d8f9766fdfc1501da685ffbfff70a0"
+    },
+    {
+      "intent_name": "STOCK_PRICE_US_EQUITY",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "ticker",
+            "type": "string",
+            "required": true,
+            "description": "Stock ticker, e.g. AAPL"
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "STOCK_PRICE"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "price_usd",
+            "description": "Current share price of {key}, in US dollars",
+            "type": "number",
+            "unit": "US dollars",
+            "range": [
+              0.01,
+              1000000
+            ],
+            "scored": true
+          }
+        ],
+        "format_version": 1,
+        "served_by": "STOCK_PRICE_US_EQUITY"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": false,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/STOCK_PRICE_US_EQUITY",
+      "source_sha256": "6b8013144cb0dd7b740dd9a484e0f14e31fb48f04c8f82a4f4f14f71f0c4a9e3"
+    },
+    {
+      "intent_name": "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "token",
+            "type": "string",
+            "required": true,
+            "description": "Token symbol or contract address, and its chain"
+          }
+        ],
+        "schema_version": 1,
+        "served_by": "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "total_supply",
+            "description": "Current total supply of the token, in whole tokens (decimals applied)",
+            "type": "number",
+            "unit": "whole tokens",
+            "range": [
+              0,
+              1000000000000000
+            ],
+            "scored": true
+          }
+        ],
+        "format_version": 1,
+        "served_by": "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL"
+      },
+      "onchain_ready": false,
+      "onchain_reason": "number field \"total_supply\" has no decimals",
+      "our_registered_supply": true,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL",
+      "source_sha256": "c8c1d2df52106d7eae533f830a963c9622f60900e153e0b9927cc03f30f4b2a7"
+    },
+    {
+      "intent_name": "TVL_LOOKUP_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "protocol",
+            "type": "string",
+            "required": true,
+            "description": "DeFi protocol, pool or chain"
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "TVL_LOOKUP"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "protocol_or_chain",
+            "description": "The DeFi protocol, pool or chain the value locked is for",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "tvl_usd",
+            "description": "Total value locked in US dollars",
+            "type": "number",
+            "unit": "USD",
+            "range": [
+              0,
+              10000000000000
+            ],
+            "scored": true,
+            "decimals": 6,
+            "aliases": [
+              "total value locked",
+              "value locked"
+            ]
+          },
+          {
+            "name": "chain_tvl_usd",
+            "description": "The protocol's value locked on the named chain only, in US dollars, when the answer gives it",
+            "type": "number",
+            "unit": "USD",
+            "range": [
+              0,
+              10000000000000
+            ],
+            "decimals": 6,
+            "off_chain": true
+          },
+          {
+            "name": "as_of",
+            "description": "Timestamp of the reading",
+            "type": "string",
+            "off_chain": true
+          }
+        ],
+        "format_version": 3,
+        "served_by": "TVL_LOOKUP"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": true,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/TVL_LOOKUP_GENERAL",
+      "source_sha256": "ac295867d41c490bf703696c2d73f354a9a5cbd7bf82bfcfb71218a63797ac1c"
+    },
+    {
+      "intent_name": "VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "validator_index",
+            "type": "integer",
+            "required": true,
+            "description": "Ethereum beacon-chain validator index",
+            "min": 0,
+            "max": 1000000000
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "VALIDATOR_PERFORMANCE_VERIFY"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "effective_balance",
+            "description": "Effective balance of Ethereum beacon-chain validator index {index}, in gwei (32 ETH = 32000000000 gwei)",
+            "type": "number",
+            "unit": "gwei",
+            "unit_aliases": {
+              "ETH": 1000000000
+            },
+            "range": [
+              0,
+              2100000000000
+            ],
+            "scored": true,
+            "decimals": 6
+          }
+        ],
+        "format_version": 3,
+        "served_by": "VALIDATOR_PERFORMANCE_VERIFY"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": true,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/VALIDATOR_PERFORMANCE_VERIFY_GENERAL",
+      "source_sha256": "fb4f79ee897fd3a14cd8eecd1b59bfd9f1e8c10e526b29eb3ac6453c97e70e3f"
+    },
+    {
+      "intent_name": "WEB_SEARCH_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "query",
+            "type": "string",
+            "required": true,
+            "description": "What to search for"
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "WEB_SEARCH"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "answer",
+            "description": "The written answer drawn from the web search",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "sources",
+            "description": "URLs or names of the sources the answer cites",
+            "type": "list",
+            "off_chain": true
+          },
+          {
+            "name": "brief",
+            "description": "The answer to the request in one plain sentence of at most 80 characters",
+            "type": "string",
+            "processed": true
+          }
+        ],
+        "format_version": 3,
+        "served_by": "WEB_SEARCH"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": false,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/WEB_SEARCH_GENERAL",
+      "source_sha256": "af10acee4d2e27f156c99e22133d37a2a364cb7f2efa595edd541797caa02fb1"
+    }
+  ],
+  "limits": [
+    "Metadata snapshot only, not successful purchase evidence. Recheck current schema/lifecycle before every live run.",
+    "Provider names and other provider catalogues intentionally not included."
+  ]
+}
