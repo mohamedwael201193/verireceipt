@@ -21,6 +21,7 @@
 // matches is 422 GAME_NOT_FOUND, several is 422 AMBIGUOUS_GAME with the
 // candidates named. Team-name matching is name matching, not identity
 // resolution — the answer always names the exact teams ESPN carried.
+import {withAnswerClass} from "../core/answerClass";
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -34,13 +35,27 @@ const LEAGUES = [
   ["NHL", "hockey/nhl"],
 ] as const;
 
+type GameSourceFailure = 'http_403'|'http_429'|'http_4xx'|'http_5xx'|'http_other'|'timeout'|'transport'|'body_read'|'unknown';
+const sourceFailures = new WeakMap<object,GameSourceFailure>();
+function failureClass(error:unknown):GameSourceFailure {
+  try {return error && typeof error==='object' ? sourceFailures.get(error) ?? 'unknown' : 'unknown';} catch {return 'unknown';}
+}
 async function fetchText(url: string): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
+  let stage:GameSourceFailure = 'transport';
   try {
     const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      const status=res.status;
+      stage=status===403?'http_403':status===429?'http_429':status>=400&&status<500?'http_4xx':status>=500&&status<600?'http_5xx':'http_other';
+      throw new Error(`HTTP ${status}`);
+    }
+    stage='body_read';
     return await res.text();
+  } catch(error) {
+    try {if(error && typeof error==='object')sourceFailures.set(error,controller.signal.aborted?'timeout':stage);} catch {}
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -130,7 +145,13 @@ export async function handleGameResult(query: Record<string, string | undefined>
     else failed.push(urls[i].label);
   });
   if (bodies.size === 0) {
-    throw upstreamUnavailable("ESPN_UNREACHABLE", `ESPN scoreboards failed for every covered league (${failed.join(", ")})`);
+    const error=upstreamUnavailable("ESPN_UNREACHABLE", `ESPN scoreboards failed for every covered league (${failed.join(", ")})`);
+    try {
+      const diagnostic:Record<string,unknown>={};
+      settled.forEach((row,i)=>{if(row.status==='rejected')diagnostic['espn_'+urls[i].label.toLowerCase()+'_failure']=failureClass(row.reason);});
+      withAnswerClass(error,INTENT,diagnostic);
+    } catch {}
+    throw error;
   }
   const candidates: Candidate[] = [];
   for (const [label, body] of bodies) candidates.push(...parseScoreboard(body, label));

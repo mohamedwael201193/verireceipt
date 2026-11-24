@@ -126,3 +126,16 @@ describe("GAME_RESULT_GENERAL", () => {
   });
 
 });
+
+it('actual HTTP completion log carries only closed league failures and public refusal remains unchanged',async()=>{
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{});
+ vi.stubGlobal('fetch',async()=>new Response('PRIVATE_BODY',{status:403}));const app=buildServer();
+ try{
+  const response=await app.inject({method:'GET',url:'/v1/game-result?game=Chargers%20vs%20Ravens%202026-11-16'});
+  expect(response.statusCode).toBe(502);expect(response.json().code).toBe('ESPN_UNREACHABLE');
+  const row=log.mock.calls.map(call=>JSON.parse(String(call[0]))).find(row=>row.event==='request_complete');
+  expect(row.answer_class).toEqual(Object.fromEntries(['nfl','nba','mlb','nhl'].map(l=>['espn_'+l+'_failure','http_403'])));
+  expect(JSON.stringify(log.mock.calls)).not.toMatch(/PRIVATE_BODY|Chargers|Ravens/);
+  expect(response.body).not.toContain('espn_nfl_failure');
+ }finally{await app.close();log.mockRestore();}
+});
