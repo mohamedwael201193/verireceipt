@@ -34,11 +34,13 @@ import {
   SELECTOR_SYMBOL,
   SELECTOR_TOTAL_SUPPLY,
   TOKEN_CONTRACTS,
+  canonicalHomeChain,
   isNativeSymbol,
   labeledTokenContract,
   toWholeUnits,
   tokenContractFor,
 } from "./tokenContracts";
+
 
 export const INTENT = "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL";
 
@@ -168,11 +170,24 @@ export async function handleTokenSupply(
       chainRaw = onChainMatch[2].trim();
     }
   }
-  const chain = normalizeChain(chainRaw);
+  let chain = normalizeChain(chainRaw);
+  // A bare symbol with no chain resolves to its canonical home chain
+  // from the registry (single-chain symbols to their only chain;
+  // multi-chain symbols to the first canonical-order chain listing
+  // them). The resolution is disclosed in the answer and receipt,
+  // never silent. A raw 0x address still needs an explicit chain.
+  let homeChain: string | null = null;
+  if (tokenRaw && !chain && !ADDRESS_RE.test(tokenRaw)) {
+    const home = canonicalHomeChain(tokenRaw);
+    if (home) {
+      chain = home.chain;
+      homeChain = home.chain;
+    }
+  }
   if (!tokenRaw || !chain) {
     throw badRequest(
       "MISSING_PARAM",
-      "token (symbol or 0x contract, e.g. 'USDC on ethereum') is a required query parameter",
+      "token (symbol or 0x contract, e.g. 'USDC on ethereum') is a required query parameter; a bare symbol must be one of the listed tokens, and a raw contract address needs its chain",
     );
   }
   const rpcs = CHAIN_RPCS[chain];
@@ -238,6 +253,7 @@ export async function handleTokenSupply(
 
   const fields: Record<string, unknown> = {
     total_supply: totalSupply,
+    total_supply_scope: "chain-specific ERC-20 totalSupply, decimals applied; not a global asset or circulating supply",
     token_symbol: symbol,
     chain,
     as_of: asOf,
@@ -247,6 +263,10 @@ export async function handleTokenSupply(
     as_of: asOf,
     block_tag: "finalized",
     chain,
+    chain_resolution: homeChain
+      ? { input: query.token?.trim(), resolved_chain: homeChain, note: "no chain given; resolved to the symbol's canonical home chain in the registry, disclosed, never a silent pick" }
+      : "not used (chain given)",
+    total_supply_scope: "chain-specific ERC-20 totalSupply, decimals applied; not a global asset or circulating supply",
     decimals: winner.decimals,
     method: "eth_call totalSupply+decimals+symbol",
     rpc_url: winner.rpcUrl,
@@ -265,7 +285,7 @@ export async function handleTokenSupply(
   }
 
   return envelope(INTENT, fields, receiptDoc, {
-    answer: `${symbol} total supply on ${chain}: ${totalSupply} (finalized block, ${votes}).`,
+    answer: `${homeChain ? `No chain was given; ${symbol} resolved to its canonical home chain ${homeChain} (disclosed, not a silent pick). ` : ""}${symbol} total supply on ${chain}: ${totalSupply} (finalized block, ${votes}).`,
     verdict: "verified",
     confidence: pair.count === total ? 1.0 : 0.9,
     source: `EVM RPC quorum (${chain}, 2-of-${total}, finalized)`,

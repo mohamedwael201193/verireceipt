@@ -41,8 +41,12 @@ export async function rpcCall(
   url: string,
   method: string,
   params: unknown[],
+  parentSignal?: AbortSignal,
 ): Promise<{ result: unknown; rawText: string }> {
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  parentSignal?.addEventListener('abort', abort, { once: true });
+  if (parentSignal?.aborted) controller.abort();
   const timer = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
   try {
     const res = await fetch(url, {
@@ -67,5 +71,6 @@ export async function rpcCall(
     return { result: parsed.result, rawText };
   } finally {
     clearTimeout(timer);
+    parentSignal?.removeEventListener('abort', abort);
   }
 }

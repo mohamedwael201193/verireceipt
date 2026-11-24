@@ -1,9 +1,9 @@
-// GET /v1/validator — effective_balance (gwei) of an Ethereum validator.
+// GET /v1/validator, finalized validator data with canonical effective_balance in gwei.
 //
-// Zero-LLM. Calls the standard beacon API on FOUR independently operated
-// keyless public beacon sources (A9 r2: was three) and answers only
-// when at least TWO agree on effective_balance AND status (2-of-N,
-// N = BEACON_SOURCES.length). A single-source answer is NEVER served
+// Zero-LLM. Calls the standard beacon API on FOUR configured
+// keyless public beacon sources and answers only when at least TWO agree
+// on every returned validator field at the same finalized state root.
+// The quorum size is 2-of-N, where N = BEACON_SOURCES.length. A single-source answer is NEVER served
 // as verified: fewer than two agreeing sources fails closed with 502
 // QUORUM_UNREACHABLE (no answer, no receipt), and any source that
 // answered with a DIFFERENT value than the agreeing pair — or returned
@@ -91,12 +91,11 @@
 // serves it as a JSON string ("32000000000"); the handler parses it to
 // a safe integer and refuses a leg whose value is not a digit string.
 //
-// Only effective_balance + status are compared across legs. The beacon
-// `balance` field is deliberately NOT compared: two nodes at different
-// head slots legitimately report different current balances, while
-// effective_balance only moves on activation/exit (32 ETH cap) and is
-// stable across heads. Comparing `balance` would 502 on ordinary
-// head-slot drift.
+// All returned validator fields are compared at the same finalized root.
+// Balance and epochs retain the beacon API's exact uint64 decimal strings.
+// The canonical effective_balance field remains a number in gwei.
+// BLS-pubkey lookup is a native-API extension, not a change to the canonical
+// integer-index intent declaration.
 //
 // Receipt: the receipt hashes the EXACT raw body bytes of the winning
 // leg (the first-arrived leg of the agreeing group) and stores
@@ -110,6 +109,21 @@ import { saveReceipt } from "../core/storage";
 import { TIMEOUT_MS } from "../config/limits";
 
 export const INTENT = "VALIDATOR_PERFORMANCE_VERIFY_GENERAL";
+
+/** Exact gwei-to-ETH text: integer whole part plus the 9-digit
+ * fractional part, trailing zeros trimmed (no float rounding). */
+function gweiToEth(gwei: string | number): string {
+  const v = BigInt(gwei);
+  const whole = v / 1_000_000_000n;
+  const frac = (v % 1_000_000_000n).toString().padStart(9, "0").replace(/0+$/, "");
+  return frac === "" ? `${whole}` : `${whole}.${frac}`;
+}
+
+/** Pubkey, shortened for the answer text: 0x plus four hex chars on
+ * each side. The full pubkey stays in the envelope field. */
+function shortenPubkey(pubkey: string): string {
+  return /^0x[0-9a-fA-F]{10,}$/.test(pubkey) ? `${pubkey.slice(0, 6)}...${pubkey.slice(-4)}` : pubkey;
+}
 
 /**
  * Per-source capabilities for the four keyless mainnet beacon REST bases
@@ -313,6 +327,18 @@ export interface ValidatorDeps {
 // integer literal in the intent's JSON schema, `validator_index:
 // integer`; J1/J2 round 2). "0" itself is valid.
 const VALIDATOR_INDEX_RE = /^(0|[1-9][0-9]*)$/;
+export const VALIDATOR_PUBKEY_RE = /^0x[0-9a-fA-F]{96}$/;
+const UINT64_MAX = (1n << 64n) - 1n;
+type ValidatorIdentifier = number | string;
+
+function exactUint64(value: unknown, field: string): string {
+  if (typeof value !== "string" || !/^\d{1,20}$/.test(value)) {
+    throw new Error(`malformed beacon response: ${field} is not a uint64 decimal string`);
+  }
+  const parsed = BigInt(value);
+  if (parsed > UINT64_MAX) throw new Error(`malformed beacon response: ${field} exceeds uint64`);
+  return parsed.toString();
+}
 
 // ---------------------------------------------------------------------------
 // A9 r2: verified-result cache, finalized-root cache, per-host pacing.
@@ -347,7 +373,7 @@ let chainsafeBucket: TokenBucket = {
 /** Per-host 429 cooldown (all sources). */
 const hostCooldownUntilMs = new Map<string, number>();
 
-function verifiedCacheKey(index: number, root: string): string {
+function verifiedCacheKey(index: ValidatorIdentifier, root: string): string {
   return `${index}:${root.toLowerCase()}`;
 }
 
@@ -362,7 +388,7 @@ function rememberVerified(key: string, entry: VerifiedCacheEntry): void {
   }
 }
 
-function takeVerified(index: number, root: string): VerifiedCacheEntry | undefined {
+function takeVerified(index: ValidatorIdentifier, root: string): VerifiedCacheEntry | undefined {
   const key = verifiedCacheKey(index, root);
   const hit = verifiedCache.get(key);
   if (hit === undefined) return undefined;
@@ -513,6 +539,14 @@ export function parseStateRootResponse(rawBody: string, sourceUrl: string): {
 }
 
 interface ValidatorLeg {
+  index: number;
+  pubkey: string;
+  balance: string;
+  slashed: boolean;
+  activationEligibilityEpoch: string;
+  activationEpoch: string;
+  exitEpoch: string;
+  withdrawableEpoch: string;
   /** Effective balance in gwei, as a number (0 is a real 0). */
   effectiveBalance: number;
   /** Beacon status string, e.g. "active_ongoing", "withdrawal_done". */
@@ -554,7 +588,7 @@ export interface ParseValidatorOptions {
 export function parseValidatorResponse(
   rawBody: string,
   sourceUrl: string,
-  expectedIndex: number,
+  expectedIndex: ValidatorIdentifier,
   opts: ParseValidatorOptions = {},
 ): ValidatorLeg {
   let parsed: unknown;
@@ -609,7 +643,11 @@ export function parseValidatorResponse(
   }
   const dataObj = data as Record<string, unknown>;
   // F1: bind the evidence to the validator that was asked for.
-  if (dataObj.index !== String(expectedIndex)) {
+  if (typeof dataObj.index !== "string" || !VALIDATOR_INDEX_RE.test(dataObj.index) ||
+      !Number.isSafeInteger(Number(dataObj.index))) {
+    throw new Error(`malformed beacon response from ${sourceUrl}: data.index does not match requested validator (missing or unsafe canonical index)`);
+  }
+  if (typeof expectedIndex === "number" && dataObj.index !== String(expectedIndex)) {
     throw new Error(
       `malformed beacon response from ${sourceUrl}: data.index ${JSON.stringify(dataObj.index)} does not match requested validator ${expectedIndex}`,
     );
@@ -640,7 +678,27 @@ export function parseValidatorResponse(
       `malformed beacon response from ${sourceUrl}: effective_balance is not a safe non-negative integer`,
     );
   }
-  return { effectiveBalance, status, rawBody, sourceUrl };
+  const validatorObj = validator as Record<string, unknown>;
+  const pubkey = validatorObj.pubkey;
+  if (typeof pubkey !== "string" || !VALIDATOR_PUBKEY_RE.test(pubkey)) {
+    throw new Error(`malformed beacon response from ${sourceUrl}: pubkey is not a bytes48 hex key`);
+  }
+  if (typeof expectedIndex === "string" && pubkey.toLowerCase() !== expectedIndex.toLowerCase()) {
+    throw new Error(`malformed beacon response from ${sourceUrl}: pubkey does not match requested validator`);
+  }
+  if (typeof validatorObj.slashed !== "boolean") {
+    throw new Error(`malformed beacon response from ${sourceUrl}: slashed is not a boolean`);
+  }
+  const balance = exactUint64(dataObj.balance, "balance");
+  return {
+    index: Number(dataObj.index), pubkey: pubkey.toLowerCase(), balance,
+    slashed: validatorObj.slashed,
+    activationEligibilityEpoch: exactUint64(validatorObj.activation_eligibility_epoch, "activation_eligibility_epoch"),
+    activationEpoch: exactUint64(validatorObj.activation_epoch, "activation_epoch"),
+    exitEpoch: exactUint64(validatorObj.exit_epoch, "exit_epoch"),
+    withdrawableEpoch: exactUint64(validatorObj.withdrawable_epoch, "withdrawable_epoch"),
+    effectiveBalance, status, rawBody, sourceUrl,
+  };
 }
 
 /** Read the HTTP status a fetch leg failed with, if it failed on a non-200. */
@@ -830,7 +888,7 @@ interface FetchSourceOpts {
  */
 async function fetchValidatorFromSource(
   base: string,
-  index: number,
+  index: ValidatorIdentifier,
   fetchImpl: typeof fetch,
   timeoutMs: number,
   deadlineAt: number,
@@ -967,6 +1025,168 @@ async function fetchValidatorFromSource(
   }
 }
 
+interface EpochBalanceDelta {
+  slotOld: string;
+  slotNew: string;
+  balanceOld: string;
+  balanceNew: string;
+  /** The four sample URLs (2 sources x 2 slots), space-separated. */
+  sourceUrls: string;
+  /**
+   * Canonical evidence document: every sample's source, URL, slot and raw
+   * body, so a judge can recompute the delta and the cross-source
+   * agreement from the stored receipt evidence alone.
+   */
+  evidence: string;
+  sources: string[];
+}
+
+/**
+ * Sample the validator's balance at two finalized slots exactly one epoch
+ * (32 slots) apart, on two independent state-capable sources. Both sources
+ * must return identical balances at both slots; any failure, pruning,
+ * non-finalized flag or disagreement yields undefined (section omitted).
+ * Probes share the sources' rate budgets with the verified legs (review,
+ * 2026-11-23): a source in 429 cooldown or with an empty token bucket is
+ * not probed, and a probe 429 puts the host in the same cooldown a leg
+ * would, so best-effort enrichment can never burn the verified path's
+ * budget.
+ */
+const activePerformanceSources = new Set<string>();
+export function resetValidatorPerformanceReadsForTests() { activePerformanceSources.clear(); }
+/** Optional reads share one 900ms budget. Ownership outlives a caller timeout. */
+async function readPerformanceBody(url: string, fetchImpl: typeof fetch, deadline: number, nowMs: () => number): Promise<string | undefined> {
+  const host = new URL(url).origin;
+  if (Date.now() >= deadline || activePerformanceSources.has(host)) return undefined;
+  activePerformanceSources.add(host);
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const io = (async () => {
+    try {
+      const res = await fetchImpl(url, {headers:{accept:"application/json"},redirect:"error",signal:controller.signal});
+      if (!res.ok) {
+        if (res.status === 429) noteSource429(host, parseRetryAfterMs(retryAfterHeader(res)), nowMs());
+        return undefined;
+      }
+      let body: string;
+      if (res.body?.getReader) {
+        const reader = res.body.getReader();
+        const parts: Uint8Array[] = []; let size = 0;
+        while (true) {
+          const part = await reader.read(); if (part.done) break;
+          size += part.value.byteLength;
+          if (size > 65536) { void reader.cancel().catch(() => {}); return undefined; }
+          parts.push(part.value);
+        }
+        body = Buffer.concat(parts).toString("utf8");
+      } else {
+        // Dependency-injected response doubles may expose only text().
+        body = await res.text();
+        if (Buffer.byteLength(body) > 65536) return undefined;
+      }
+      return Date.now() >= deadline ? undefined : body;
+    } catch { return undefined; }
+    finally { activePerformanceSources.delete(host); }
+  })();
+  try {
+    return await Promise.race([io, new Promise<undefined>(resolve => {
+      timer = setTimeout(() => {controller.abort();resolve(undefined);}, Math.max(0, deadline-Date.now()));
+    })]);
+  } finally {clearTimeout(timer);}
+}
+
+async function fetchEpochBalanceDelta(
+  index: string,
+  bases: string[],
+  fetchImpl: typeof fetch,
+  nowMs: () => number = Date.now,
+): Promise<EpochBalanceDelta | undefined> {
+  const eligible = bases.filter((base) => {
+    const cap = BEACON_SOURCE_CAPS.find((c) => c.base === base);
+    if (cap === undefined || !canStartSource(cap, nowMs())) return false;
+    if (cap.paced && !chainsafeTakeToken(nowMs())) return false;
+    return true;
+  });
+  if (eligible.length < 2) return undefined;
+  const probeBases = eligible.slice(0, 2);
+  const deadline = Date.now() + 900;
+  const getJson = async (url: string): Promise<Record<string, unknown> | undefined> => {
+    try {
+      const raw = await readPerformanceBody(url, fetchImpl, deadline, nowMs);
+      return raw === undefined ? undefined : JSON.parse(raw);
+    } catch { return undefined; }
+  };
+  const head = await getJson(`${probeBases[0]}/eth/v1/beacon/headers/finalized`);
+  const finalizedSlotRaw =
+    (head?.data as Record<string, unknown> | undefined)?.header as Record<string, unknown> | undefined;
+  const slotStr = (finalizedSlotRaw?.message as Record<string, unknown> | undefined)?.slot;
+  if (head?.execution_optimistic !== false || head?.finalized !== true || typeof slotStr !== "string" || !/^\d+$/.test(slotStr)) {
+    return undefined;
+  }
+  const slotNew = Number(slotStr);
+  if (!Number.isSafeInteger(slotNew) || slotNew < 32) return undefined;
+  const slotOld = slotNew - 32;
+
+  const sampleAt = async (base: string, slot: number): Promise<{ url: string; body: string; balance: string } | undefined> => {
+    const url = `${base}/eth/v1/beacon/states/${slot}/validator_balances?id=${index}`;
+    try {
+      const body = await readPerformanceBody(url, fetchImpl, deadline, nowMs);
+      if (body === undefined) return undefined;
+      const parsed = JSON.parse(body) as Record<string, unknown>;
+      if (parsed.execution_optimistic !== false || parsed.finalized !== true) return undefined;
+      const rows = parsed.data;
+      if (!Array.isArray(rows) || rows.length !== 1) return undefined;
+      const row = rows[0] as Record<string, unknown>;
+      if (row.index !== String(index) || typeof row.balance !== "string" || !/^\d+$/.test(row.balance)) {
+        return undefined;
+      }
+      return { url, body, balance: exactUint64(row.balance, "performance balance") };
+    } catch {
+      return undefined;
+    }
+  };
+
+  const samples = await Promise.all(
+    probeBases.map(async (base) => ({
+      base,
+      oldSample: await sampleAt(base, slotOld),
+      newSample: await sampleAt(base, slotNew),
+    })),
+  );
+  if (samples.some((s) => s.oldSample === undefined || s.newSample === undefined)) return undefined;
+  const done = samples as Array<{
+    base: string;
+    oldSample: { url: string; body: string; balance: string };
+    newSample: { url: string; body: string; balance: string };
+  }>;
+  const balanceOld = done[0].oldSample.balance;
+  const balanceNew = done[0].newSample.balance;
+  if (
+    done.some((s) => s.oldSample.balance !== balanceOld || s.newSample.balance !== balanceNew)
+  ) {
+    return undefined; // sources disagree on a deterministic slot sample
+  }
+  const sampleDocs = done.flatMap((s) => [
+    { source: s.base, url: s.oldSample.url, slot: String(slotOld), raw_body: s.oldSample.body },
+    { source: s.base, url: s.newSample.url, slot: String(slotNew), raw_body: s.newSample.body },
+  ]);
+  return {
+    slotOld: String(slotOld),
+    slotNew: String(slotNew),
+    balanceOld,
+    balanceNew,
+    sourceUrls: sampleDocs.map((s) => s.url).join(" "),
+    evidence: JSON.stringify({
+      kind: "validator_epoch_balance_delta",
+      validator_index: String(index),
+      slot_old: String(slotOld),
+      slot_new: String(slotNew),
+      samples: sampleDocs,
+    }),
+    sources: done.map((s) => s.base),
+  };
+}
+
 export async function handleValidator(
   query: Record<string, string | undefined>,
   deps: ValidatorDeps = {},
@@ -975,7 +1195,7 @@ export async function handleValidator(
   // devnode schema 2026-11-21: param min 0, max 1000000000).
   // miner.yaml declares this as MAX_PARAM_VALUE (machine-enforced).
   const VALIDATOR_INDEX_MAX = 1_000_000_000;
-  const VALIDATOR_QUERY_KEYS = new Set(["validator_index"]);
+  const VALIDATOR_QUERY_KEYS = new Set(["validator_index", "validator_pubkey"]);
   // `index` is not a declared param (YAML and the official intent both
   // name only validator_index). An undeclared key is 400 UNKNOWN_PARAM,
   // never served as an alias.
@@ -983,29 +1203,33 @@ export async function handleValidator(
     if (!VALIDATOR_QUERY_KEYS.has(key)) {
       throw badRequest(
         "UNKNOWN_PARAM",
-        `Query parameter "${key}" is not supported; /v1/validator takes validator_index`,
+        `Query parameter "${key}" is not supported; /v1/validator takes validator_index or native validator_pubkey`,
       );
     }
   }
   const rawIndex = query.validator_index;
-  if (rawIndex === undefined || !VALIDATOR_INDEX_RE.test(rawIndex)) {
-    throw badRequest(
-      "INVALID_VALIDATOR_INDEX",
-      "validator_index is required and must be a non-negative integer (e.g. 1)",
-    );
+  const rawPubkey = query.validator_pubkey;
+  if (rawIndex !== undefined && rawPubkey !== undefined) {
+    throw badRequest("AMBIGUOUS_VALIDATOR_ID", "Supply either validator_index or validator_pubkey, not both");
   }
-  const index = Number(rawIndex);
-  if (!Number.isSafeInteger(index)) {
-    throw badRequest(
-      "INVALID_VALIDATOR_INDEX",
-      "validator_index must be a non-negative integer (e.g. 1)",
-    );
-  }
-  if (index > VALIDATOR_INDEX_MAX) {
-    throw badRequest(
-      "MAX_PARAM_VALUE",
-      "validator_index must be at most 1000000000",
-    );
+  const pubkeyInput = rawPubkey ?? (rawIndex !== undefined && VALIDATOR_PUBKEY_RE.test(rawIndex) ? rawIndex : undefined);
+  let index: ValidatorIdentifier;
+  if (pubkeyInput !== undefined) {
+    if (!VALIDATOR_PUBKEY_RE.test(pubkeyInput)) {
+      throw badRequest("INVALID_VALIDATOR_PUBKEY", "validator_pubkey must be a 0x-prefixed 48-byte BLS public key");
+    }
+    index = pubkeyInput.toLowerCase();
+  } else {
+    if (rawIndex === undefined || !VALIDATOR_INDEX_RE.test(rawIndex)) {
+      throw badRequest("INVALID_VALIDATOR_INDEX", "validator_index is required and must be a non-negative integer (e.g. 1)");
+    }
+    index = Number(rawIndex);
+    if (!Number.isSafeInteger(index)) {
+      throw badRequest("INVALID_VALIDATOR_INDEX", "validator_index must be a non-negative integer (e.g. 1)");
+    }
+    if (index > VALIDATOR_INDEX_MAX) {
+      throw badRequest("MAX_PARAM_VALUE", "validator_index must be at most 1000000000");
+    }
   }
 
   const fetchImpl = deps.fetchImpl ?? fetch;
@@ -1044,6 +1268,10 @@ export async function handleValidator(
   let requestSettled = false;
   const requestDone = (): boolean => requestSettled;
   const same = (a: ValidatorLeg, b: ValidatorLeg): boolean =>
+    a.index === b.index && a.pubkey === b.pubkey && a.balance === b.balance &&
+    a.slashed === b.slashed && a.activationEligibilityEpoch === b.activationEligibilityEpoch &&
+    a.activationEpoch === b.activationEpoch && a.exitEpoch === b.exitEpoch &&
+    a.withdrawableEpoch === b.withdrawableEpoch &&
     a.effectiveBalance === b.effectiveBalance && a.status === b.status;
 
   /** Largest group of answers that agree, in arrival order (empty if none). */
@@ -1210,16 +1438,109 @@ export async function handleValidator(
       "receipt evidence could not be stored; answer unavailable",
     );
   }
+  // Attestation-performance proxy (best-effort enrichment): the net
+  // balance change between two finalized states exactly 32 slots (one
+  // epoch) apart. Beacon REST attestation-rewards endpoints need pruned
+  // historical states that no keyless source serves (verified live
+  // 2026-11-23), and beaconcha.in performance APIs need an API key, so
+  // the verifiable keyless signal is the on-ledger balance delta itself:
+  // for an active validator it is dominated by attestation rewards and
+  // turns negative under inactivity penalties. Both samples must agree
+  // across two independent state-capable sources or the section is
+  // omitted; it never blocks or degrades the verified balance answer.
+  let perfFields: Record<string, unknown> = {};
+  let perfSentence = "";
+  try {
+    const stateSources = agreeingSources.filter(
+      (base) => !base.includes("blockreq"), // blockreq: 501 on states/{root}/*
+    );
+    if (stateSources.length >= 2) {
+      const perf = await fetchEpochBalanceDelta(
+        String(leg.index),
+        stateSources,
+        fetchImpl,
+        nowFn,
+      );
+      if (perf !== undefined) {
+        const perfReceipt = makeReceipt(
+          INTENT,
+          perf.sourceUrls,
+          perf.evidence,
+          `${perf.sources.length}/${perf.sources.length} sources agreed on both balance samples`,
+        );
+        try {
+          await saveReceipt(perfReceipt, perf.evidence);
+        } catch {
+          throw new Error("performance receipt could not be stored");
+        }
+        const delta = BigInt(perf.balanceNew) - BigInt(perf.balanceOld);
+        const annualizedBps =
+          BigInt(perf.balanceNew) === 0n
+            ? 0n
+            : (delta * 82125n * 10000n) / BigInt(perf.balanceNew);
+        const aprPct = (Number(annualizedBps) / 100).toFixed(2);
+        const direction = delta > 0n ? "gained" : delta < 0n ? "lost" : "did not change";
+        perfFields = {
+          recent_epoch_balance_delta: {
+            from_slot: perf.slotOld,
+            to_slot: perf.slotNew,
+            balance_from_gwei: perf.balanceOld,
+            balance_to_gwei: perf.balanceNew,
+            net_change_gwei: delta.toString(),
+            annualized_rate_estimate_pct: aprPct,
+            basis:
+              "net balance change between two finalized states 32 slots (one epoch) apart; " +
+              "dominated by attestation rewards, may include proposal or sync-committee rewards; " +
+              "annualized from this single-epoch sample only",
+          },
+          performance_receipt: perfReceipt,
+        };
+        perfSentence =
+          ` Between finalized slots ${perf.slotOld} and ${perf.slotNew} (one epoch apart) its balance ` +
+          `${direction}${delta === 0n ? "" : ` ${delta < 0n ? -delta : delta} gwei`} ` +
+          `(from ${perf.balanceOld} to ${perf.balanceNew}), an annualized rate of about ${aprPct}% ` +
+          `from this single-epoch sample; the change is dominated by attestation rewards and may ` +
+          `include proposal or sync-committee rewards.`;
+      }
+    }
+  } catch {
+    perfFields = {};
+    perfSentence = "";
+  }
+  const hasFarFutureEpoch = [
+    leg.activationEligibilityEpoch,
+    leg.activationEpoch,
+    leg.exitEpoch,
+    leg.withdrawableEpoch,
+  ].includes("18446744073709551615");
+  const sentinelNote = hasFarFutureEpoch
+    ? "Epoch 18446744073709551615 is the beacon far-future sentinel, not a scheduled date. "
+    : "";
   const answer =
-    `Validator ${index} has an effective balance of ${leg.effectiveBalance} gwei ` +
-    `(status ${leg.status}), verified by ${votes} at finalized state root ${agreedRoot}.`;
+    `Validator ${leg.index} effective balance is ${leg.effectiveBalance} gwei (${gweiToEth(leg.effectiveBalance)} ETH). ` +
+    `Validator ${leg.index} is ${leg.status} and ${leg.slashed ? "HAS been slashed" : "has not been slashed"}; ` +
+    `balance ${gweiToEth(leg.balance)} ETH, ` +
+    `active since epoch ${leg.activationEpoch} (eligible from epoch ${leg.activationEligibilityEpoch}), ` +
+    `${leg.exitEpoch === "18446744073709551615" ? "no exit scheduled" : `exit scheduled at epoch ${leg.exitEpoch}, withdrawable epoch ${leg.withdrawableEpoch}`}. ` +
+    sentinelNote +
+    `Finalized beacon state verified by ${votes} at state root ${agreedRoot}; pubkey ${shortenPubkey(leg.pubkey)}.` +
+    perfSentence;
   const result = envelope(
     INTENT,
     {
-      validator_index: index,
+      validator_index: leg.index,
+      validator_pubkey: leg.pubkey,
+      balance: leg.balance,
+      balance_unit: "gwei",
+      slashed: leg.slashed,
+      activation_eligibility_epoch: leg.activationEligibilityEpoch,
+      activation_epoch: leg.activationEpoch,
+      exit_epoch: leg.exitEpoch,
+      withdrawable_epoch: leg.withdrawableEpoch,
       effective_balance: leg.effectiveBalance,
       status: leg.status,
       finalized_state_root: agreedRoot,
+      ...perfFields,
     },
     receipt,
     { answer, verdict: "verified", confidence: 1.0, source: agreeingSources.join(" + ") },
@@ -1227,7 +1548,7 @@ export async function handleValidator(
   rememberVerified(verifiedCacheKey(index, agreedRoot), {
     envelope: result,
     root: agreedRoot,
-    index,
+    index: leg.index,
   });
   return result;
 }

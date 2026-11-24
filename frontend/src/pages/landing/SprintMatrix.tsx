@@ -64,7 +64,7 @@ export function SprintMatrix() {
             <span className="it">Ranked in days.</span>
           </h2>
           <p style={{ fontSize: 14.5, color: "var(--muted)", maxWidth: 390, marginBottom: 28 }}>
-            Our internal build milestones, not contest requirements or live progress. Six served intents do not mean six
+            Our internal build milestones, not contest requirements or live progress. Declared intents do not equal
             submissions. The official Season II deadline is December 1, 2026 at 23:59 UTC.
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14 }}>

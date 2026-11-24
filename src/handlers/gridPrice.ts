@@ -56,6 +56,8 @@ import {
 import {
   SUPPORTED_ZONES,
   fetchCaisoDamLmp,
+  fetchErcotDamSpp,
+  fetchMisoDaLmp,
   fetchNyisoRtLbmp,
   gridFallbackUrl,
   isSettledGridInterval,
@@ -154,10 +156,237 @@ const CAISO_HUB_ALIASES: Record<string, string> = (() => {
   return out;
 })();
 
+/**
+ * Spellings that name MISO rather than one hub (A12), matched like
+ * CAISO_SYSTEM_REQUESTS. Answered for the Illinois hub, the
+ * conventional MISO reference hub; the choice is disclosed in
+ * node_or_zone, market and the answer prose.
+ */
+const MISO_SYSTEM_REQUESTS: Record<string, true> = {
+  miso: true,
+  "miso system": true,
+  "midcontinent iso": true,
+};
+export const MISO_SYSTEM_NODE = "ILLINOIS.HUB";
+export const MISO_SYSTEM_MARKET =
+  "MISO day-ahead ExPost LMP (Illinois hub ILLINOIS.HUB; request named no MISO hub)";
+
+/**
+ * ERCOT system requests (A13): bare "ercot" / "ercot system". Answered
+ * for the ERCOT hub average HB_HUBAVG, the conventional ERCOT-wide
+ * reference; the choice is disclosed in node_or_zone, market and the
+ * answer prose.
+ */
+const ERCOT_SYSTEM_REQUESTS: Record<string, true> = {
+  ercot: true,
+  "ercot system": true,
+};
+export const ERCOT_SYSTEM_NODE = "HB_HUBAVG";
+export const ERCOT_SYSTEM_MARKET =
+  "ERCOT day-ahead SPP (hub average HB_HUBAVG; request named no ERCOT settlement point)";
+
+/**
+ * Natural-name aliases (A11): the name a person uses for a place —
+ * the Elering countries and the NYISO load zones by their common
+ * names — matched on the whitespace-normalised, lower-cased
+ * node_or_zone via Object.hasOwn (no prototype-chain lookup). Each
+ * resolves to the canonical supported zone; the served answer names
+ * that zone (node_or_zone, market, answer prose), the same disclosure
+ * standard as a CAISO hub short name. Bare "nyiso" is answered for
+ * the N.Y.C. load zone, mirroring bare "caiso" -> the NP15 hub.
+ * Places run by operators we have no feed for (ERCOT, PJM, SPP,
+ * ...) are NOT here: they stay an honest 422 UNSUPPORTED_ZONE.
+ */
+const GRID_NATURAL_ZONE_ALIASES: Record<string, string> = {
+  estonia: "EE",
+  finland: "FI",
+  latvia: "LV",
+  lithuania: "LT",
+  "new york": "N.Y.C.",
+  "new york city": "N.Y.C.",
+  nyc: "N.Y.C.",
+  nyiso: "N.Y.C.",
+  "long island": "LONGIL",
+  genesee: "GENESE",
+  "capital district": "CAPITL",
+  "hudson valley": "HUD VL",
+  millwood: "MILLWD",
+  dunwoodie: "DUNWOD",
+  "mohawk valley": "MHK VL",
+  // MISO trading hubs by their common names (A12).
+  "arkansas hub": "ARKANSAS.HUB",
+  "illinois hub": "ILLINOIS.HUB",
+  "indiana hub": "INDIANA.HUB",
+  "louisiana hub": "LOUISIANA.HUB",
+  "michigan hub": "MICHIGAN.HUB",
+  "minnesota hub": "MINN.HUB",
+  "minn hub": "MINN.HUB",
+  "mississippi hub": "MS.HUB",
+  "ms hub": "MS.HUB",
+  "texas hub": "TEXAS.HUB",
+};
+
+/** Canonical supported zone for a natural place name, or undefined. */
+export function resolveNaturalZoneAlias(spelling: string): string | undefined {
+  const key = spelling.trim().replace(/\s+/g, " ").toLowerCase();
+  return Object.hasOwn(GRID_NATURAL_ZONE_ALIASES, key)
+    ? GRID_NATURAL_ZONE_ALIASES[key]
+    : undefined;
+}
+
 /** Canonical CAISO hub for a hub short name, or undefined. */
 export function resolveCaisoHubAlias(spelling: string): string | undefined {
   const key = spelling.trim().replace(/\s+/g, " ").toLowerCase();
   return Object.hasOwn(CAISO_HUB_ALIASES, key) ? CAISO_HUB_ALIASES[key] : undefined;
+}
+
+/**
+ * Free-text `question` fallback: the router may hand us the verbatim
+ * question instead of canonical params. When node_or_zone or
+ * interval_start is ABSENT, try to recover it from the question text.
+ * An explicit param always wins over the question; a question that
+ * yields no candidate falls through to the same strict 400
+ * INVALID_NODE / INVALID_INTERVAL as an absent param — nothing is
+ * guessed, and every recovered spelling flows through the same
+ * validation, alias and refusal pipeline below as a typed param.
+ *
+ * Zone candidates are the exact supported identifiers (matched as
+ * case-SENSITIVE tokens, so "fi" inside "final", "ee" inside
+ * "between" or "west" inside "western" cannot hit) plus the CAISO
+ * system spellings and hub short names (matched case-insensitively,
+ * so prose "caiso" or "np15 hub" resolves). The longest matching
+ * candidate wins; ties break to the earliest occurrence.
+ */
+const QUESTION_ZONE_CANDIDATES: ReadonlyArray<{ re: RegExp; spelling: string; exact: boolean }> = (() => {
+  const esc = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const out: Array<{ re: RegExp; spelling: string; exact: boolean }> = [];
+  for (const key of Object.keys(SUPPORTED_ZONES)) {
+    out.push({
+      re: new RegExp("(?<![A-Za-z0-9_.])" + esc(key) + "(?![A-Za-z0-9_])"),
+      spelling: key,
+      exact: true,
+    });
+  }
+  for (const spelling of [
+    ...Object.keys(CAISO_HUB_ALIASES),
+    ...Object.keys(CAISO_SYSTEM_REQUESTS).filter((k) => k.length > 0),
+    ...Object.keys(MISO_SYSTEM_REQUESTS),
+    ...Object.keys(ERCOT_SYSTEM_REQUESTS),
+    // A11: natural place names are safe case-insensitive candidates
+    // (proper nouns and multi-word names, no english-word collisions).
+    ...Object.keys(GRID_NATURAL_ZONE_ALIASES),
+  ]) {
+    out.push({
+      re: new RegExp("(?<![A-Za-z0-9_.])" + esc(spelling) + "(?![A-Za-z0-9_])", "i"),
+      spelling,
+      exact: false,
+    });
+  }
+  return out;
+})();
+
+/** Resolve one candidate spelling to its canonical supported zone. */
+function resolveZoneSpelling(spelling: string): string | undefined {
+  const req = spelling.trim().replace(/\s+/g, " ");
+  if (Object.hasOwn(CAISO_SYSTEM_REQUESTS, req.toLowerCase())) {
+    return CAISO_SYSTEM_NODE;
+  }
+  if (Object.hasOwn(MISO_SYSTEM_REQUESTS, req.toLowerCase())) {
+    return MISO_SYSTEM_NODE;
+  }
+  if (Object.hasOwn(ERCOT_SYSTEM_REQUESTS, req.toLowerCase())) {
+    return ERCOT_SYSTEM_NODE;
+  }
+  const hub = resolveCaisoHubAlias(req);
+  if (hub) return hub;
+  const natural = resolveNaturalZoneAlias(req);
+  if (natural) return natural;
+  const zk = req.replace(/[a-z]/g, (ch) => ch.toUpperCase());
+  return Object.hasOwn(SUPPORTED_ZONES, zk) ? zk : undefined;
+}
+
+/**
+ * Every zone candidate the question names, longest/earliest first.
+ * Exact supported identifiers (matched case-sensitively) outrank
+ * natural-name and alias candidates regardless of length: "the EE
+ * price for my New York office" serves EE, not N.Y.C. (reviewer
+ * follow-up, 2026-11-23).
+ */
+function questionZoneSpellings(question: string): string[] {
+  const exact: Array<{ spelling: string; index: number }> = [];
+  const loose: Array<{ spelling: string; index: number }> = [];
+  for (const { re, spelling, exact: isExactKey } of QUESTION_ZONE_CANDIDATES) {
+    const m = re.exec(question);
+    if (!m) continue;
+    (isExactKey ? exact : loose).push({ spelling, index: m.index });
+  }
+  const pool = exact.length > 0 ? exact : loose;
+  pool.sort(
+    (a, b) => b.spelling.length - a.spelling.length || a.index - b.index,
+  );
+  return pool.map((c) => c.spelling);
+}
+
+/**
+ * The distinct canonical zones a question names, in candidate order.
+ * More than one distinct zone is an ambiguity the caller refuses
+ * honestly (a comparison question served for one zone would be a
+ * disclosed wrong-zone answer — reviewer follow-up, 2026-11-23).
+ */
+function questionZones(question: string): string[] {
+  const out: string[] = [];
+  for (const spelling of questionZoneSpellings(question)) {
+    const zone = resolveZoneSpelling(spelling);
+    if (zone !== undefined && !out.includes(zone)) out.push(zone);
+  }
+  return out;
+}
+
+const QUESTION_INTERVAL_ISO_RE =
+  /(\d{4}-\d{2}-\d{2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(?:Z\b|UTC\b)/i;
+const QUESTION_INTERVAL_TIME_FIRST_RE =
+  /\b(\d{1,2}):(\d{2})\s*UTC\b[^0-9]{0,60}?(\d{4}-\d{2}-\d{2})/i;
+const QUESTION_INTERVAL_DATE_FIRST_RE =
+  /(\d{4}-\d{2}-\d{2})[^0-9]{0,60}?\b(\d{1,2}):(\d{2})\s*UTC\b/i;
+
+function questionInterval(question: string): string | undefined {
+  const iso = QUESTION_INTERVAL_ISO_RE.exec(question);
+  if (iso) {
+    return (
+      iso[1] + "T" + iso[2].padStart(2, "0") + ":" + iso[3] + ":" + (iso[4] ?? "00") + "Z"
+    );
+  }
+  const timeFirst = QUESTION_INTERVAL_TIME_FIRST_RE.exec(question);
+  if (timeFirst) {
+    return timeFirst[3] + "T" + timeFirst[1].padStart(2, "0") + ":" + timeFirst[2] + ":00Z";
+  }
+  const dateFirst = QUESTION_INTERVAL_DATE_FIRST_RE.exec(question);
+  if (dateFirst) {
+    return dateFirst[1] + "T" + dateFirst[2].padStart(2, "0") + ":" + dateFirst[3] + ":00Z";
+  }
+  return undefined;
+}
+
+/** Recover absent canonical params from a verbatim question string. */
+export function parseGridQuestion(question: string): {
+  nodeOrZone?: string;
+  intervalStart?: string;
+  ambiguousZones?: string[];
+} {
+  const out: { nodeOrZone?: string; intervalStart?: string; ambiguousZones?: string[] } = {};
+  const zones = questionZones(question);
+  if (zones.length > 1) {
+    out.ambiguousZones = zones;
+  } else if (zones.length === 1) {
+    // Pass the question's own spelling downstream so its disclosure
+    // rules (CAISO system, hub short name, natural alias) still apply.
+    out.nodeOrZone = questionZoneSpellings(question).find(
+      (sp) => resolveZoneSpelling(sp) === zones[0],
+    );
+  }
+  const interval = questionInterval(question);
+  if (interval !== undefined) out.intervalStart = interval;
+  return out;
 }
 
 type GridCacheRow = NonNullable<Awaited<ReturnType<typeof getGridPrice>>>;
@@ -260,14 +489,29 @@ function hhmmUtc(ms: number): string {
 export async function handleGridPrice(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
-  const nodeOrZone = query.node_or_zone;
+  // Free-text `question` fallback: fill only ABSENT params from the
+  // verbatim question; explicit params always win. Whatever the
+  // question does not yield falls through to the strict 400s below.
+  const question = typeof query.question === "string" ? query.question : "";
+  const fromQuestion = question.trim() ? parseGridQuestion(question) : {};
+  // Honest refusal beats a disclosed wrong-zone answer: a question
+  // naming two distinct zones (a comparison) is not served for one.
+  if (query.node_or_zone === undefined && fromQuestion.ambiguousZones) {
+    throw badRequest(
+      "AMBIGUOUS_ZONE",
+      "question names more than one zone (" +
+        fromQuestion.ambiguousZones.join(", ") +
+        "); ask for one zone at a time",
+    );
+  }
+  const nodeOrZone = query.node_or_zone ?? fromQuestion.nodeOrZone;
   // A4: only an ABSENT param is 400 — an explicitly empty or
   // whitespace-only value is an empty-ish CAISO system request
   // (resolved below), not a missing param.
   if (nodeOrZone === undefined) {
     throw badRequest("INVALID_NODE", "node_or_zone is required");
   }
-  const rawInterval = query.interval_start;
+  const rawInterval = query.interval_start ?? fromQuestion.intervalStart;
   if (!rawInterval) {
     throw badRequest("INVALID_INTERVAL", "interval_start is required");
   }
@@ -328,14 +572,29 @@ export async function handleGridPrice(
   const requestedZone = nodeOrZone.trim().replace(/\s+/g, " ");
   const systemKey = requestedZone.toLowerCase();
   const isCaisoSystem = Object.hasOwn(CAISO_SYSTEM_REQUESTS, systemKey);
-  const hubAlias = isCaisoSystem ? undefined : resolveCaisoHubAlias(requestedZone);
+  const isMisoSystem =
+    !isCaisoSystem && Object.hasOwn(MISO_SYSTEM_REQUESTS, systemKey);
+  const isErcotSystem =
+    !isCaisoSystem && !isMisoSystem && Object.hasOwn(ERCOT_SYSTEM_REQUESTS, systemKey);
+  const hubAlias = isCaisoSystem || isMisoSystem || isErcotSystem ? undefined : resolveCaisoHubAlias(requestedZone);
+  // A11: a natural place name resolves to its supported zone after the
+  // CAISO system/hub spellings and before the exact-key lookup.
+  const naturalAlias = isCaisoSystem || isMisoSystem || isErcotSystem || hubAlias !== undefined
+    ? undefined
+    : resolveNaturalZoneAlias(requestedZone);
   // Fold ASCII only: Unicode lookalikes, unknown prefixes and near matches
   // must still fail the exact own-property check against SUPPORTED_ZONES.
   const zoneKey = requestedZone.replace(/[a-z]/g, (ch) => ch.toUpperCase());
   // The node every lookup, fetch, cache write, receipt and answer below
   // uses: the NP15 hub for a system request, the canonical hub for a
   // hub short name, else the exact supported-map key.
-  let normalizedZone = isCaisoSystem ? CAISO_SYSTEM_NODE : hubAlias ?? zoneKey;
+  let normalizedZone = isCaisoSystem
+    ? CAISO_SYSTEM_NODE
+    : isMisoSystem
+      ? MISO_SYSTEM_NODE
+      : isErcotSystem
+        ? ERCOT_SYSTEM_NODE
+        : hubAlias ?? naturalAlias ?? zoneKey;
   // An explicit source qualifier may name only an existing identifier in
   // that same source. Strip it once, never recursively or across markets.
   const qualified = /^(NYISO|ELERING) (.+)$/.exec(zoneKey);
@@ -356,7 +615,11 @@ export async function handleGridPrice(
     );
   }
 
-  const intervalStart = start.toISOString();
+  let intervalStart = start.toISOString();
+  // Set when the requested interval had not finished and the latest
+  // finished interval is served instead (see the ruling below).
+  let requestedIntervalStart: string | undefined;
+  let substitutionNote: string | undefined;
   // `let`, not `const`: an on-demand fetch below takes real time, and a
   // row ingested by that fetch must not look "from the future" against
   // a timestamp captured before the fetch started (round-2 J2 M1's
@@ -366,21 +629,34 @@ export async function handleGridPrice(
   // above already ran against the call-start time.
   let nowMs = Date.now();
   const windowMin = zone.windowMin ?? 60;
-  const intervalEndMs = startMs + windowMin * 60_000;
+  const windowMs = windowMin * 60_000;
+  const intervalEndMs = startMs + windowMs;
   if (intervalEndMs > nowMs) {
-    const retryAfterSec = Math.max(1, Math.ceil((intervalEndMs - nowMs) / 1000));
-    throw unprocessable(
-      "FUTURE_INTERVAL",
-      "settlement interval starting " + intervalStart + " has not finished yet",
-      retryAfterSec,
-    );
+    // Delegated ruling (owner, 2026-11-23 02:17 EET, "do the right
+    // thing"): an interval that has not finished yet is served as the
+    // LATEST FINISHED interval, honestly labelled — the answer names the
+    // interval actually served, states the requested one was still in
+    // progress, and never presents the served interval as the asked one
+    // — instead of refusing with 422 FUTURE_INTERVAL. The receipt still
+    // covers exactly the interval served. When no cached/fetchable row
+    // exists for that finished interval the request still fails closed
+    // (GRID_CACHE_MISS), never a guess.
+    requestedIntervalStart = intervalStart;
+    const servedStartMs = Math.floor(nowMs / windowMs) * windowMs - windowMs;
+    intervalStart = new Date(servedStartMs).toISOString();
+    substitutionNote =
+      "The requested interval starting " +
+      requestedIntervalStart +
+      " was still in progress; this answer serves the latest finished interval starting " +
+      intervalStart +
+      " instead.";
   }
 
   // Window alignment: the interval must start on a settlement boundary.
-  // Checked after the future-interval check so an unfinished interval still
-  // reports FUTURE_INTERVAL (with retry_after_sec) rather than alignment.
-  const windowMs = windowMin * 60_000;
-  if (startMs % windowMs !== 0) {
+  // A substituted in-progress interval is never alignment-checked: the
+  // served latest-finished interval is aligned by construction, and the
+  // request was well-formed enough to name a real window.
+  if (substitutionNote === undefined && startMs % windowMs !== 0) {
     const containingStartMs = Math.floor(startMs / windowMs) * windowMs;
     throw unprocessable(
       "OFF_BOUNDARY_INTERVAL",
@@ -431,6 +707,52 @@ export async function handleGridPrice(
       // Refresh the call-start clock (see the `let nowMs` note above):
       // without this, the staleness check below reads this just-fetched
       // row's ingested_at as "in the future" and fetches it a 2nd time.
+      nowMs = Date.now();
+    }
+  }
+  // A12: a MISO hub hour is fetched on demand from the dated
+  // day-ahead ExPost CSV — the same cache-before-serving rule as the
+  // CAISO path above; a fetch/parse failure falls through to 502.
+  if (!row && zone.market === "MISO") {
+    let fetched: { lmp: number; upstreamUrl: string } | null = null;
+    try {
+      fetched = await fetchMisoDaLmp(normalizedZone, intervalStart);
+    } catch {
+      fetched = null;
+    }
+    if (fetched) {
+      const ingestedAt = new Date().toISOString();
+      await saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "MISO", ingestedAt, fetched.upstreamUrl);
+      row = {
+        lmp_usd_per_mwh: fetched.lmp,
+        market: "MISO",
+        ingested_at: ingestedAt,
+        upstream_url: fetched.upstreamUrl,
+      };
+      fetchedLive = true;
+      nowMs = Date.now();
+    }
+  }
+  // A13: an ERCOT settlement point hour is fetched on demand from the
+  // dated cdr DAM page — the same cache-before-serving rule as the
+  // CAISO/MISO paths above; a fetch/parse failure falls through to 502.
+  if (!row && zone.market === "ERCOT") {
+    let fetched: { lmp: number; upstreamUrl: string } | null = null;
+    try {
+      fetched = await fetchErcotDamSpp(normalizedZone, intervalStart);
+    } catch {
+      fetched = null;
+    }
+    if (fetched) {
+      const ingestedAt = new Date().toISOString();
+      await saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "ERCOT", ingestedAt, fetched.upstreamUrl);
+      row = {
+        lmp_usd_per_mwh: fetched.lmp,
+        market: "ERCOT",
+        ingested_at: ingestedAt,
+        upstream_url: fetched.upstreamUrl,
+      };
+      fetchedLive = true;
       nowMs = Date.now();
     }
   }
@@ -486,6 +808,60 @@ export async function handleGridPrice(
     } else if (!corruptRow && !stale && needsRefresh) {
       // Valid post-provisional row, revalidation failed: keep it,
       // but do not label it verified / 1.0 (r3 / J2 minor 2).
+      await markGridRevalidateAttempt(normalizedZone, intervalStart, new Date().toISOString());
+      unconfirmed = true;
+    }
+  }
+  // MISO live path: the dated ExPost CSV is re-fetchable on demand,
+  // so a stale, corrupt or revalidation-due row is refreshed like the
+  // CAISO path (same cache-before-serving rule).
+  if (zone.market === "MISO" && (stale || corruptRow || needsRefresh)) {
+    let fetched: { lmp: number; upstreamUrl: string } | null = null;
+    try {
+      fetched = await fetchMisoDaLmp(normalizedZone, intervalStart);
+    } catch {
+      fetched = null;
+    }
+    if (fetched) {
+      const ingestedAt = new Date().toISOString();
+      await saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "MISO", ingestedAt, fetched.upstreamUrl);
+      row = {
+        lmp_usd_per_mwh: fetched.lmp,
+        market: "MISO",
+        ingested_at: ingestedAt,
+        upstream_url: fetched.upstreamUrl,
+      };
+      fetchedLive = true;
+      stale = false;
+    } else if (!corruptRow && !stale && needsRefresh) {
+      await markGridRevalidateAttempt(normalizedZone, intervalStart, new Date().toISOString());
+      unconfirmed = true;
+    }
+  }
+  // ERCOT live path: the dated cdr DAM page is re-fetchable on demand,
+  // so a stale, corrupt or revalidation-due row is refreshed like the
+  // CAISO/MISO paths (same cache-before-serving rule).
+  if (zone.market === "ERCOT" && (stale || corruptRow || needsRefresh)) {
+    let fetched: { lmp: number; upstreamUrl: string } | null = null;
+    try {
+      fetched = await fetchErcotDamSpp(normalizedZone, intervalStart);
+    } catch {
+      fetched = null;
+    }
+    if (fetched) {
+      const ingestedAt = new Date().toISOString();
+      await saveGridPrice(normalizedZone, intervalStart, fetched.lmp, "ERCOT", ingestedAt, fetched.upstreamUrl);
+      row = {
+        lmp_usd_per_mwh: fetched.lmp,
+        market: "ERCOT",
+        ingested_at: ingestedAt,
+        upstream_url: fetched.upstreamUrl,
+      };
+      fetchedLive = true;
+      stale = false;
+    } else if (!corruptRow && !stale && needsRefresh) {
+      // Valid post-provisional row, revalidation failed: keep it,
+      // but do not label it verified / 1.0.
       await markGridRevalidateAttempt(normalizedZone, intervalStart, new Date().toISOString());
       unconfirmed = true;
     }
@@ -621,7 +997,13 @@ export async function handleGridPrice(
   const upstreamUrl = row.upstream_url || gridFallbackUrl(normalizedZone, intervalStart);
   // GRID-NP15: a CAISO system request discloses the node it was
   // answered for in the market field (hashed) as well as the prose.
-  const servedMarket = isCaisoSystem ? CAISO_SYSTEM_MARKET : row.market;
+  const servedMarket = isCaisoSystem
+    ? CAISO_SYSTEM_MARKET
+    : isMisoSystem
+      ? MISO_SYSTEM_MARKET
+      : isErcotSystem
+        ? ERCOT_SYSTEM_MARKET
+        : row.market;
   const rawBody = JSON.stringify({
     node_or_zone: normalizedZone,
     interval_start: intervalStart,
@@ -633,6 +1015,10 @@ export async function handleGridPrice(
     quorumVotes = "1/1 live CAISO OASIS PRC_LMP DAM fetch (on-demand, cached before serving)";
   } else if (fetchedLive && zone.market === "NYISO") {
     quorumVotes = "1/1 live NYISO MIS realtime LBMP fetch (on-demand, cached before serving)";
+  } else if (fetchedLive && zone.market === "MISO") {
+    quorumVotes = "1/1 live MISO day-ahead ExPost LMP fetch (on-demand, cached before serving)";
+  } else if (fetchedLive && zone.market === "ERCOT") {
+    quorumVotes = "1/1 live ERCOT day-ahead SPP fetch (on-demand, cached before serving)";
   } else if (unconfirmed && gridMarketKind(zone.market) === "ELERING") {
     quorumVotes = "1/1 cache row from official Elering/Nord Pool feed; " + ELERING_NO_HISTORICAL_REFETCH;
   } else if (unconfirmed) {
@@ -642,6 +1028,12 @@ export async function handleGridPrice(
   }
   if (isCaisoSystem) {
     quorumVotes += "; CAISO request with no node named, answered for the NP15 trading hub " + CAISO_SYSTEM_NODE;
+  }
+  if (isMisoSystem) {
+    quorumVotes += "; MISO request with no hub named, answered for the Illinois hub " + MISO_SYSTEM_NODE;
+  }
+  if (isErcotSystem) {
+    quorumVotes += "; ERCOT request with no settlement point named, answered for the hub average " + ERCOT_SYSTEM_NODE;
   }
   const receipt = makeReceipt(
     "GRID_POWER_PRICE_GENERAL",
@@ -671,7 +1063,23 @@ export async function handleGridPrice(
       " USD per MWh for the interval starting " +
       intervalStart +
       ". The request named no CAISO pricing node, so it was answered for NP15; ask for TH_SP15_GEN-APND or TH_ZP26_GEN-APND for the other CAISO hubs."
-    : "The LMP at " +
+    : isMisoSystem
+      ? "The MISO day-ahead ExPost LMP at the Illinois hub (" +
+        MISO_SYSTEM_NODE +
+        ") was $" +
+        plainDecimal(row.lmp_usd_per_mwh) +
+        " USD per MWh for the interval starting " +
+        intervalStart +
+        ". The request named no MISO hub, so it was answered for the Illinois hub; ask for MICHIGAN.HUB, INDIANA.HUB, MINN.HUB, ARKANSAS.HUB, LOUISIANA.HUB, MS.HUB or TEXAS.HUB for the other MISO hubs."
+      : isErcotSystem
+        ? "The ERCOT day-ahead SPP at the hub average (" +
+          ERCOT_SYSTEM_NODE +
+          ") was $" +
+          plainDecimal(row.lmp_usd_per_mwh) +
+          " USD per MWh for the interval starting " +
+          intervalStart +
+          ". The request named no ERCOT settlement point, so it was answered for the hub average; ask for HB_NORTH, HB_SOUTH, HB_WEST, HB_HOUSTON, HB_PAN, HB_BUSAVG or a load zone such as LZ_HOUSTON for a specific point."
+        : "The LMP at " +
       normalizedZone +
       " was $" +
       plainDecimal(row.lmp_usd_per_mwh) +
@@ -681,11 +1089,12 @@ export async function handleGridPrice(
       intervalStart +
       ".";
   // The mapped answer must retain uncertainty even without sibling metadata.
-  const answer = unconfirmed
-    ? "Unverified cached price: " +
-      (gridMarketKind(zone.market) === "ELERING" ? ELERING_NO_HISTORICAL_REFETCH : FAILED_REVALIDATION) +
-      ". " + measuredAnswer
-    : measuredAnswer;
+  const answer =
+    (unconfirmed
+      ? "Unverified cached price: " +
+        (gridMarketKind(zone.market) === "ELERING" ? ELERING_NO_HISTORICAL_REFETCH : FAILED_REVALIDATION) +
+        ". " + measuredAnswer
+      : measuredAnswer) + (substitutionNote ? " " + substitutionNote : "");
   return envelope(
     "GRID_POWER_PRICE_GENERAL",
     {
@@ -694,6 +1103,12 @@ export async function handleGridPrice(
       market: servedMarket,
       interval_start: intervalStart,
       currency,
+      ...(substitutionNote
+        ? {
+            requested_interval_start: requestedIntervalStart,
+            interval_substitution: "latest_finished",
+          }
+        : {}),
     },
     receipt,
     unconfirmed

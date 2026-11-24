@@ -1,0 +1,23 @@
+[
+  {
+    "name": "TESCO PLC",
+    "country": "GB",
+    "url": "https://api.gleif.org/api/v1/lei-records?filter%5Bentity.legalName%5D=TESCO+PLC&filter%5Bentity.jurisdiction%5D=GB&page%5Bsize%5D=100",
+    "captured_at": "2026-11-23T22:47:05.701Z",
+    "status": 200
+  },
+  {
+    "name": "SIEMENS AKTIENGESELLSCHAFT",
+    "country": "DE",
+    "url": "https://api.gleif.org/api/v1/lei-records?filter%5Bentity.legalName%5D=SIEMENS+AKTIENGESELLSCHAFT&filter%5Bentity.jurisdiction%5D=DE&page%5Bsize%5D=100",
+    "captured_at": "2026-11-23T22:47:07.062Z",
+    "status": 200
+  },
+  {
+    "name": "VeriReceipt nonexistent registry control 20261124",
+    "country": "GB",
+    "url": "https://api.gleif.org/api/v1/lei-records?filter%5Bentity.legalName%5D=VeriReceipt+nonexistent+registry+control+20261124&filter%5Bentity.jurisdiction%5D=GB&page%5Bsize%5D=100",
+    "captured_at": "2026-11-23T22:47:08.372Z",
+    "status": 200
+  }
+]

@@ -301,13 +301,13 @@ describe('A1 r9 stubbed: J2-r8 findings', () => {
   });
 
   // ---- m5: separators and form_type=all ----
-  it('m5: form_type "10;K" / "10|K" fold like the entity (10-K); a real list is still 422', async () => {
+  it('m5: form_type "10;K" / "10|K" fold like the entity (10-K); an explicit list selects a union', async () => {
     for (const ft of ['10;K', '10|K', '10 ; K']) {
       expect(parseFormType(ft)).toEqual({ kind: 'form', form: '10-K' });
       expect((await ask({ entity: 'Tesla, Inc.', period: '2023', form_type: ft })).filing_count, ft).toBe(1);
     }
     for (const ft of ['10-K;10-Q', '10-K|8-K', '10-K, 10-Q']) {
-      await refuse({ entity: 'Tesla, Inc.', period: '2023', form_type: ft }, 422, 'MULTIPLE_FORM_TYPES');
+      expect((await ask({ entity: 'Tesla, Inc.', period: '2023', form_type: ft })).requested_forms).toHaveLength(2);
     }
   });
 

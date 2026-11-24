@@ -3,7 +3,7 @@
 // Port of verireceipt_dashboard_proof_hub.html (File B) as a React page,
 // with every placeholder replaced by a live call (see DESIGN-SPEC §6 D-01…D-20
 // and the decisions in the follow-up: grid is /v1/grid-price, miner id
-// 774921 / slug verireceipt, bond $1.50 (lib/minerBond.ts), no $1.84/184-checks figure, no
+// 774921 / slug verireceipt, bond $4.32 (lib/minerBond.ts), no $1.84/184-checks figure, no
 // canned ledger/benchmarks, no fabricated M12/AAPL/TVL numbers).
 //
 // The page owns the session ledger: every live call from any view appends a
@@ -306,7 +306,7 @@ export default function Dashboard() {
           return typeof b?.uptime_s === "number" ? `${b.uptime_s}s` : "—";
         })()}`
       : `/health: HTTP ${lastHealthReceipt.status} — ${lastHealthReceipt.status === 200 ? "refused (body not ok)" : "not ok"}`
-    : "/health: not probed yet";
+    : "No manual /health probe in this tab · live status is in the header";
 
   const authPillLabel = authMode === "sponsored" ? "Sponsored" : "MCP / CLI";
 

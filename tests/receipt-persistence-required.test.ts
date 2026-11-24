@@ -22,12 +22,15 @@ import { buildServer } from "../src/server";
 
 // Unit/injection fixtures only. No live sources, evaluator calls or stored production data.
 let negativeDns = false;
-const holderBody = JSON.stringify({ holders_count: "123", symbol: "USDC" });
+// The fixture carries the indexer's own contract identity: b05bb71 made
+// the handler reject responses whose address/type do not match the
+// requested ERC-20 contract, and this body's shape must satisfy that.
+const holderBody = JSON.stringify({ address_hash: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", type: "ERC-20", holders_count: "123", symbol: "USDC" });
 function fetchFixture(input: unknown): Promise<Response> {
   const url = String(input), date = new Date().toISOString().slice(0, 10);
   let body: unknown;
-  if (url.includes("frankfurter")) body = { base: "USD", date, rates: { EUR: 0.91 } };
-  else if (url.includes("open.er-api")) body = { result: "success", time_last_update_utc: new Date().toUTCString(), rates: { EUR: 0.91 } };
+  if (url.includes("frankfurter")) body = { amount: 1, base: "USD", date, rates: { EUR: 0.91 } };
+  else if (url.includes("open.er-api")) body = { result: "success", base_code: "USD", time_last_update_utc: new Date().toUTCString(), rates: { EUR: 0.91 } };
   else if (url.includes("jsdelivr")) body = { date, usd: { eur: 0.91 } };
   else if (url.includes("dns.google") || url.includes("cloudflare-dns.com") || url.includes("adguard")) {
     body = { Status: negativeDns ? 3 : 0, TC: false,
@@ -61,6 +64,20 @@ afterAll(async () => {
   for (const suffix of ["", "-wal", "-shm"]) rmSync(fixture.path + suffix, { force: true });
 });
 
+function expectSafeSourceWarnings(calls: unknown[][]): void {
+  for (const call of calls) {
+    expect(call).toHaveLength(1);
+    const entry = JSON.parse(String(call[0]));
+    expect(Object.keys(entry).sort()).toEqual(["event", "from", "reason", "source", "to"]);
+    expect(entry).toMatchObject({ event: "fx_source_failure", from: "USD", to: "EUR", reason: "transport_error" });
+    expect(["vatcomply", "floatrates"]).toContain(entry.source);
+  }
+  expect(JSON.stringify(calls)).not.toMatch(/synthetic-storage-diagnostic|STORAGE_TIMEOUT|deadline|sensitive|https?:/);
+}
+it("warning assertion rejects leaked storage diagnostics even inside a source event", () => {
+  expect(() => expectSafeSourceWarnings([[JSON.stringify({ event: "fx_source_failure", from: "USD", to: "EUR", reason: "transport_error", source: "vatcomply", detail: "synthetic-storage-diagnostic" })]])).toThrow();
+  expect(() => expectSafeSourceWarnings([["synthetic-storage-diagnostic"]])).toThrow();
+});
 for (const item of cases) describe(item.name, () => {
   beforeEach(() => { negativeDns = item.name === "DNS negative"; });
   for (const reason of [new Error("synthetic-storage-diagnostic"), Object.assign(new Error("deadline"), { code: "STORAGE_TIMEOUT" }), "untyped persistence rejection"]) {
@@ -68,7 +85,7 @@ for (const item of cases) describe(item.name, () => {
       vi.mocked(saveReceipt).mockRejectedValueOnce(reason);
       await expect(item.call()).rejects.toMatchObject(expectedError);
       expect(saveReceipt).toHaveBeenCalledTimes(1);
-      expect(console.warn).not.toHaveBeenCalled();
+      expectSafeSourceWarnings(vi.mocked(console.warn).mock.calls);
     });
   }
   it("keeps the healthy result and exact receipted evidence hash", async () => {

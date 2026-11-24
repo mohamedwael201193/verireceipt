@@ -138,33 +138,45 @@ describe("handleGridPrice validation", () => {
     await expectApiError(handleGridPrice({}), 400, "INVALID_NODE");
   });
 
-  it("future interval -> 422 FUTURE_INTERVAL with retry_after_sec", async () => {
-    const err = await expectApiError(
-      handleGridPrice({ node_or_zone: "EE", interval_start: futureIso(2) }),
-      422,
-      "FUTURE_INTERVAL",
-    );
-    expect(typeof err.retryAfterSec).toBe("number");
-    expect(err.retryAfterSec as number).toBeGreaterThan(0);
-    // 2h ahead + 15-min Elering window: retry is roughly 2h15m in seconds.
-    expect(err.retryAfterSec as number).toBeGreaterThan(2 * 3600);
-    expect(err.retryAfterSec as number).toBeLessThan(3 * 3600);
+  it("future interval -> latest finished interval served, honestly labelled", async () => {
+    // Ruling (owner, 2026-11-23 02:17 EET): serve the latest FINISHED
+    // interval instead of 422 FUTURE_INTERVAL; the answer names the
+    // interval actually served and states the requested one was still in
+    // progress.
+    const servedMs = Math.floor(Date.now() / 900_000) * 900_000 - 900_000;
+    const served = new Date(servedMs).toISOString();
+    saveGridPrice("EE", served, 88.5, "Elering EE");
+    const requested = futureIso(2);
+    const res = await handleGridPrice({ node_or_zone: "EE", interval_start: requested });
+    expect(res.verdict).toBe("verified");
+    expect(res.lmp_usd_per_mwh).toBe(88.5);
+    expect(res.interval_start).toBe(served);
+    expect(res.requested_interval_start).toBe(requested);
+    expect(res.interval_substitution).toBe("latest_finished");
+    expect(String(res.answer)).toContain("still in progress");
+    expect(String(res.answer)).toContain(served);
+    // The served interval is never presented as the asked one.
+    expect(String(res.answer)).toContain(requested);
   });
 
-  it("unfinished interval (started, not yet settled) -> 422 FUTURE_INTERVAL", async () => {
+  it("unfinished interval (started, not yet settled) -> latest finished interval served", async () => {
     // EE window is 15 min: an interval that started 5 min ago has not finished.
-    const started = new Date(Date.now() - 5 * 60_000).toISOString();
-    const err = await expectApiError(
-      handleGridPrice({ node_or_zone: "EE", interval_start: started }),
-      422,
-      "FUTURE_INTERVAL",
-    );
-    expect(err.retryAfterSec as number).toBeGreaterThan(0);
-    expect(err.retryAfterSec as number).toBeLessThanOrEqual(10 * 60);
+    const servedMs = Math.floor(Date.now() / 900_000) * 900_000 - 900_000;
+    const served = new Date(servedMs).toISOString();
+    saveGridPrice("EE", served, 77.25, "Elering EE");
+    const started = new Date(Math.floor((Date.now() - 5 * 60_000) / 1000) * 1000).toISOString();
+    const res = await handleGridPrice({ node_or_zone: "EE", interval_start: started });
+    expect(res.verdict).toBe("verified");
+    expect(res.interval_start).toBe(served);
+    expect(res.requested_interval_start).toBe(started);
+    expect(String(res.answer)).toContain("latest finished interval starting " + served);
   });
 
+  // Edited by the ERCOT packet (2026-11-23): "HB_NORTH" swapped for
+  // "HB_NOTREAL" — HB_NORTH is a supported ERCOT hub now; an unknown
+  // settlement point spelling must still refuse before storage/fetch.
   it("unsupported zone -> 422 UNSUPPORTED_ZONE", async () => {
-    for (const zone of ["MARS_ZONE", "HB_NORTH", "PJM", ""]) {
+    for (const zone of ["MARS_ZONE", "HB_NOTREAL", "PJM", ""]) {
       if (!zone) continue;
       await expectApiError(
         handleGridPrice({ node_or_zone: zone, interval_start: pastIso(2) }),
@@ -1202,12 +1214,16 @@ describe("GRID round-2 J2: refusal-matrix gaps (M6)", () => {
     expect(res.interval_start).toBe(interval);
   });
 
-  it("lowercase zone is unsupported (zone names are case-sensitive)", async () => {
-    await expectApiError(
-      handleGridPrice({ node_or_zone: "ee", interval_start: pastIso(2) }),
-      422,
-      "UNSUPPORTED_ZONE",
-    );
+  it("lowercase Elering zone resolves to the same canonical cached source row", async () => {
+    const interval = pastIso(2);
+    saveGridPrice("EE", interval, 42.42, "Elering EE");
+    const canonical = await handleGridPrice({ node_or_zone: "EE", interval_start: interval });
+    const lower = await handleGridPrice({ node_or_zone: "ee", interval_start: interval });
+    for (const key of ["node_or_zone", "market", "interval_start", "currency", "lmp_usd_per_mwh"]) {
+      expect(lower[key]).toEqual(canonical[key]);
+    }
+    expect(lower.node_or_zone).toBe("EE");
+    expect(lower.lmp_usd_per_mwh).toBe(42.42);
   });
 
   it("legacy row with empty ingested_at -> 502 GRID_CACHE_STALE (freshness unprovable)", async () => {
@@ -2266,9 +2282,22 @@ describe("GRID-NP15: a CAISO request with no node is answered for the NP15 hub (
     }
   });
 
-  it("a CAISO system request for an unfinished hour is still 422 FUTURE_INTERVAL; off-boundary still 422", async () => {
+  it("a CAISO system request for an unfinished hour substitutes the latest finished hour and fails closed when it is not cached; off-boundary still 422", async () => {
     const future = futureIso(3);
-    await expectApiError(handleGridPrice({ node_or_zone: "CAISO", interval_start: future }), 422, "FUTURE_INTERVAL");
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new Error("stubbed upstream failure");
+    }) as typeof fetch;
+    try {
+      // No usable cached row for the latest finished hour and the live
+      // fetch is down: the request fails closed, never a guess, and never
+      // the old FUTURE_INTERVAL refusal.
+      await expect(
+        handleGridPrice({ node_or_zone: "CAISO", interval_start: future }),
+      ).rejects.toMatchObject({ status: 502, code: expect.stringMatching(/^GRID_CACHE_(MISS|STALE)$/) });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
     await expectApiError(
       handleGridPrice({ node_or_zone: "CAISO", interval_start: "2026-09-13T14:15:00Z" }),
       422,
@@ -2967,12 +2996,15 @@ describe("GRID A4-FIX F7: whitespace-tolerant CAISO system + hub spellings", () 
     expect(res2.node_or_zone).toBe("TH_SP15_GEN-APND");
   });
 
-  it("case stays significant for single hubs (control): lowercase hub still 422", async () => {
-    await expectApiError(
-      handleGridPrice({ node_or_zone: " th_np15_gen-apnd", interval_start: INTERVAL }),
-      422,
-      "UNSUPPORTED_ZONE",
-    );
+  it("lowercase single hub resolves to the canonical CAISO hub without changing its source row", async () => {
+    seedHubs();
+    const result = await handleGridPrice({ node_or_zone: " th_np15_gen-apnd", interval_start: INTERVAL });
+    expect(result.node_or_zone).toBe("TH_NP15_GEN-APND");
+    expect(result.lmp_usd_per_mwh).toBe(38.09);
+    const canonical = await handleGridPrice({ node_or_zone: "TH_NP15_GEN-APND", interval_start: INTERVAL });
+    expect(result.market).toBe(canonical.market);
+    expect(result.currency).toBe(canonical.currency);
+    expect(result.interval_start).toBe(INTERVAL);
   });
 });
 
@@ -4219,4 +4251,292 @@ describe("A9 r3: NYISO post-close revalidation from the dated MIS CSV", () => {
       globalThis.fetch = realFetch;
     }
   }, 8000);
+});
+
+// ---------------------------------------------------------------------------
+// Free-text `question` fallback: the router may supply the verbatim question
+// instead of canonical params. Absent params are recovered from the text;
+// explicit params always win; unrecoverable params keep the strict 400s.
+// Includes the live production failures observed 2026-11-23 (~06:22Z):
+//   ?question=What was the LMP at NP15 for the hour starting ...Z -> 400
+//   natural zone names in prose -> 422 / 400.
+describe("handleGridPrice question fallback", () => {
+  it("question supplies zone + interval when both params are absent (EE)", async () => {
+    const interval = pastIso(3);
+    saveGridPrice("EE", interval, 91.75, "Elering EE");
+    const res = await handleGridPrice({
+      question: "What was the LMP for EE for the interval starting " + interval + "?",
+    });
+    expect(res.verdict).toBe("verified");
+    expect(res.lmp_usd_per_mwh).toBe(91.75);
+    expect(res.node_or_zone).toBe("EE");
+    expect(res.interval_start).toBe(interval);
+  });
+
+  it("question supplies only the missing interval (explicit zone wins)", async () => {
+    const interval = pastIso(4);
+    saveGridPrice("EE", interval, 66.1, "Elering EE");
+    const res = await handleGridPrice({
+      node_or_zone: "EE",
+      question: "What was the EE price at " + interval + "?",
+    });
+    expect(res.lmp_usd_per_mwh).toBe(66.1);
+    expect(res.interval_start).toBe(interval);
+  });
+
+  it("question supplies only the missing zone (explicit interval wins)", async () => {
+    const interval = pastIso(5);
+    saveGridPrice("EE", interval, 55.5, "Elering EE");
+    const res = await handleGridPrice({
+      interval_start: interval,
+      question: "What was the EE LMP then?",
+    });
+    expect(res.lmp_usd_per_mwh).toBe(55.5);
+    expect(res.node_or_zone).toBe("EE");
+  });
+
+  it("live failure 2026-11-23: 'What was the LMP at NP15 for the hour starting <iso>Z' resolves the NP15 hub", async () => {
+    const interval = "2026-11-19T03:00:00.000Z";
+    saveGridPrice("TH_NP15_GEN-APND", interval, 67.57, "CAISO", minutesAgoIso(10), "");
+    const res = await handleGridPrice({
+      question: "What was the LMP at NP15 for the hour starting 2026-11-19T03:00:00Z?",
+    });
+    expect(res.node_or_zone).toBe("TH_NP15_GEN-APND");
+    expect(res.market).toBe("CAISO");
+    expect(res.lmp_usd_per_mwh).toBe(67.57);
+    expect(res.interval_start).toBe(interval);
+  });
+
+  it("lowercase prose hub spelling resolves (np15 hub)", async () => {
+    const interval = "2026-11-19T03:00:00.000Z";
+    saveGridPrice("TH_NP15_GEN-APND", interval, 67.57, "CAISO", minutesAgoIso(10), "");
+    const res = await handleGridPrice({
+      question: "what was the np15 hub price for the hour starting 2026-11-19T03:00:00Z?",
+    });
+    expect(res.node_or_zone).toBe("TH_NP15_GEN-APND");
+    expect(res.lmp_usd_per_mwh).toBe(67.57);
+  });
+
+  it("explicit params win over conflicting question text", async () => {
+    const interval = pastIso(6);
+    saveGridPrice("EE", interval, 44.4, "Elering EE");
+    const res = await handleGridPrice({
+      node_or_zone: "EE",
+      interval_start: interval,
+      question: "What was the ZONE_J price at 2020-01-01T00:00:00Z?",
+    });
+    expect(res.node_or_zone).toBe("EE");
+    expect(res.interval_start).toBe(interval);
+    expect(res.lmp_usd_per_mwh).toBe(44.4);
+  });
+
+  it("question with no zone candidate -> 400 INVALID_NODE (same as absent param)", async () => {
+    await expectApiError(
+      handleGridPrice({ question: "What was the grid power price at 2026-11-19T03:00:00Z?" }),
+      400,
+      "INVALID_NODE",
+    );
+  });
+
+  it("question with a zone but no parseable datetime -> 400 INVALID_INTERVAL", async () => {
+    await expectApiError(
+      handleGridPrice({ question: "What is the EE LMP right now?" }),
+      400,
+      "INVALID_INTERVAL",
+    );
+  });
+
+  it("question naming a nonexistent calendar date -> 400 INVALID_INTERVAL (rollover-hardened path)", async () => {
+    await expectApiError(
+      handleGridPrice({ question: "What was the EE LMP at 2026-02-30T05:00:00Z?" }),
+      400,
+      "INVALID_INTERVAL",
+    );
+  });
+
+  it("case guard: lowercase english words containing zone tokens extract nothing", async () => {
+    // "final" contains fi, "between" contains ee, "western" contains west:
+    // none may resolve to FI / EE / WEST.
+    await expectApiError(
+      handleGridPrice({ question: "what is the final fee between western nodes at 2026-11-19T03:00:00Z?" }),
+      400,
+      "INVALID_NODE",
+    );
+  });
+
+  it("time-first phrasing: '05:00 UTC on 2026-11-19' recovers the interval", async () => {
+    const interval = "2026-11-19T05:00:00.000Z";
+    saveGridPrice("EE", interval, 38.25, "Elering EE");
+    const res = await handleGridPrice({
+      question: "What was the EE LMP at 05:00 UTC on 2026-11-19?",
+    });
+    expect(res.lmp_usd_per_mwh).toBe(38.25);
+    expect(res.interval_start).toBe(interval);
+  });
+
+  it("date-first phrasing: 'on 2026-11-19 at 05:00 UTC' recovers the interval", async () => {
+    const interval = "2026-11-19T05:00:00.000Z";
+    saveGridPrice("EE", interval, 38.25, "Elering EE");
+    const res = await handleGridPrice({
+      question: "EE LMP on 2026-11-19 at 05:00 UTC please",
+    });
+    expect(res.lmp_usd_per_mwh).toBe(38.25);
+    expect(res.interval_start).toBe(interval);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Natural-name zone aliases (A11): the name a person uses for a place
+// resolves to the canonical supported zone, with the served zone named in
+// the answer. Operators with no feed stay an honest 422.
+describe("handleGridPrice natural-name aliases", () => {
+  it("Estonia resolves to the EE bidding zone", async () => {
+    const interval = pastIso(3);
+    saveGridPrice("EE", interval, 83.1, "Elering EE");
+    const res = await handleGridPrice({ node_or_zone: "Estonia", interval_start: interval });
+    expect(res.verdict).toBe("verified");
+    expect(res.lmp_usd_per_mwh).toBe(83.1);
+    expect(res.node_or_zone).toBe("EE");
+  });
+
+  it("Finland / Latvia / Lithuania resolve to FI / LV / LT", async () => {
+    const interval = pastIso(4);
+    saveGridPrice("FI", interval, 10.5, "Elering FI");
+    saveGridPrice("LV", interval, 84.2, "Elering LV");
+    saveGridPrice("LT", interval, 85.3, "Elering LT");
+    for (const [name, zone, lmp] of [
+      ["Finland", "FI", 10.5],
+      ["latvia", "LV", 84.2],
+      ["LITHUANIA", "LT", 85.3],
+    ] as const) {
+      const res = await handleGridPrice({ node_or_zone: name, interval_start: interval });
+      expect(res.node_or_zone).toBe(zone);
+      expect(res.lmp_usd_per_mwh).toBe(lmp);
+    }
+  });
+
+  it("New York City / nyc resolve to the N.Y.C. load zone", async () => {
+    const interval = pastIso(5);
+    saveGridPrice("N.Y.C.", interval, 30.42, "NYISO");
+    for (const name of ["New York City", "nyc", "New York"]) {
+      const res = await handleGridPrice({ node_or_zone: name, interval_start: interval });
+      expect(res.node_or_zone).toBe("N.Y.C.");
+      expect(res.market).toBe("NYISO");
+      expect(res.lmp_usd_per_mwh).toBe(30.42);
+    }
+  });
+
+  it("bare NYISO is answered for the N.Y.C. load zone (mirrors bare CAISO -> NP15)", async () => {
+    const interval = pastIso(6);
+    saveGridPrice("N.Y.C.", interval, 31.11, "NYISO");
+    const res = await handleGridPrice({ node_or_zone: "NYISO", interval_start: interval });
+    expect(res.node_or_zone).toBe("N.Y.C.");
+    expect(res.market).toBe("NYISO");
+    expect(res.lmp_usd_per_mwh).toBe(31.11);
+  });
+
+  it("Long Island resolves to LONGIL", async () => {
+    const interval = pastIso(7);
+    saveGridPrice("LONGIL", interval, 33.7, "NYISO");
+    const res = await handleGridPrice({ node_or_zone: "Long Island", interval_start: interval });
+    expect(res.node_or_zone).toBe("LONGIL");
+    expect(res.lmp_usd_per_mwh).toBe(33.7);
+  });
+
+  // Edited by the MISO packet (2026-11-23): "MISO" removed from the
+  // no-feed list — MISO now has a feed (docs.misoenergy.org DA ExPost
+  // CSV) and bare "MISO" is answered for the Illinois hub with
+  // disclosure (tests/grid-miso.test.ts). Edited again by the ERCOT
+  // packet: "ERCOT" removed — bare "ercot" is answered for the hub
+  // average HB_HUBAVG with disclosure (tests/grid-ercot.test.ts).
+  // PJM and plain "Texas" (the ERCOT region's common name — the MISO
+  // alias is "texas hub") still refuse.
+  it("operators with no feed stay an honest 422 (PJM, Texas)", async () => {
+    const interval = pastIso(8);
+    for (const name of ["PJM", "Texas"]) {
+      await expectApiError(
+        handleGridPrice({ node_or_zone: name, interval_start: interval }),
+        422,
+        "UNSUPPORTED_ZONE",
+      );
+    }
+  });
+
+  it("question path: 'What was the LMP in Estonia ...' recovers EE", async () => {
+    const interval = pastIso(9);
+    saveGridPrice("EE", interval, 77.7, "Elering EE");
+    const res = await handleGridPrice({
+      question: "What was the LMP in Estonia for the interval starting " + interval + "?",
+    });
+    expect(res.node_or_zone).toBe("EE");
+    expect(res.lmp_usd_per_mwh).toBe(77.7);
+  });
+
+  it("question path: 'power price in New York City at <iso>Z' recovers N.Y.C.", async () => {
+    const interval = pastIso(10);
+    saveGridPrice("N.Y.C.", interval, 29.99, "NYISO");
+    const res = await handleGridPrice({
+      question: "What was the power price in New York City at " + interval + "?",
+    });
+    expect(res.node_or_zone).toBe("N.Y.C.");
+    expect(res.lmp_usd_per_mwh).toBe(29.99);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reviewer follow-up (2026-11-23): exact identifiers outrank natural-name
+// candidates regardless of length; a question naming two distinct zones is
+// refused honestly rather than served for one.
+describe("handleGridPrice question zone precedence + ambiguity", () => {
+  it("an exact identifier outranks a longer natural name (EE ... New York office)", async () => {
+    const interval = pastIso(3);
+    saveGridPrice("EE", interval, 61.25, "Elering EE");
+    const res = await handleGridPrice({
+      question: "What was the EE price for my New York office at " + interval + "?",
+    });
+    expect(res.node_or_zone).toBe("EE");
+    expect(res.lmp_usd_per_mwh).toBe(61.25);
+  });
+
+  it("two distinct zones named -> 400 AMBIGUOUS_ZONE listing both", async () => {
+    const err = await expectApiError(
+      handleGridPrice({ question: "Compare the EE and FI prices at 2026-11-19T03:00:00Z" }),
+      400,
+      "AMBIGUOUS_ZONE",
+    );
+    expect(err.message).toContain("EE");
+    expect(err.message).toContain("FI");
+  });
+
+  it("distinct zones across markets -> 400 AMBIGUOUS_ZONE", async () => {
+    await expectApiError(
+      handleGridPrice({
+        question: "What was the price difference between NP15 and New York City at 2026-11-19T03:00:00Z?",
+      }),
+      400,
+      "AMBIGUOUS_ZONE",
+    );
+  });
+
+  it("one zone mentioned twice (exact + natural) is not ambiguous", async () => {
+    const interval = pastIso(4);
+    saveGridPrice("N.Y.C.", interval, 28.05, "NYISO");
+    const res = await handleGridPrice({
+      question: "Was the N.Y.C. price at " + interval + " normal for New York?",
+    });
+    expect(res.node_or_zone).toBe("N.Y.C.");
+    expect(res.lmp_usd_per_mwh).toBe(28.05);
+  });
+
+  it("explicit node_or_zone wins even when the question names two zones", async () => {
+    const interval = pastIso(5);
+    saveGridPrice("EE", interval, 47.6, "Elering EE");
+    const res = await handleGridPrice({
+      node_or_zone: "EE",
+      interval_start: interval,
+      question: "Compare the EE and FI prices",
+    });
+    expect(res.node_or_zone).toBe("EE");
+    expect(res.lmp_usd_per_mwh).toBe(47.6);
+  });
 });

@@ -7,7 +7,7 @@
 // SQLITE_PATH per run.
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, readFileSync } from "fs";
 import { join, resolve } from "path";
 
 const SCRATCH_PARENT = resolve(process.cwd(), "..", "tmp");
@@ -146,7 +146,7 @@ describe("handleMacro validation (stubbed, no network use)", () => {
 
   it("rejects an unsupported indicator with 422 UNSUPPORTED_INDICATOR", async () => {
     await expectApiError(
-      handleMacro({ indicator: "CPI", country: "Egypt", year: "2023" }),
+      handleMacro({ indicator: "unknown statistic", country: "Egypt", year: "2023" }),
       422,
       "UNSUPPORTED_INDICATOR",
     );
@@ -175,6 +175,38 @@ describe("handleMacro validation (stubbed, no network use)", () => {
   });
 });
 
+describe("M1 indicator normalization (stubbed World Bank)", () => {
+  it.each(["Unemployment", "unemployment rate (%)", "jobless rate", "UNEMPLOYMENT   RATE", "unemployment rate (percent)", "unemployment % of total labor force", "the unemployment rate", "the jobless rate", "The Unemployment", "rate of unemployment", "SL.UEM.TOTL.ZS"])(
+    "serves the variant %j as the contract enum, disclosed", async (variant) => {
+      stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2024, 5.2) });
+      const out = await handleMacro({ indicator: variant, country: "Egypt", year: "2024" });
+      expect(out.indicator).toBe("unemployment rate");
+      expect(out.indicator_input).toBe(variant);
+      expect(out.rate_pct).toBe(5.2);
+      const ans = String(out.answer);
+      if (variant !== "unemployment rate") {
+        expect(ans).toContain(`"${variant}" read as "unemployment rate"`);
+      }
+    },
+  );
+
+  it("the exact enum value carries no normalization disclosure", async () => {
+    stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2024, 5.2) });
+    const out = await handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2024" });
+    expect(String(out.answer)).not.toContain("read as");
+  });
+
+  it("unknown indicators still refuse without a default", async () => {
+    await expectApiError(handleMacro({ indicator: "GDP", country: "Egypt" }), 422, "UNSUPPORTED_INDICATOR");
+    await expectApiError(handleMacro({ indicator: "unknown statistic", country: "Egypt" }), 422, "UNSUPPORTED_INDICATOR");
+  });
+
+  it("a non-unit parenthetical is NOT stripped (no smuggling a different statistic past the alias check)", async () => {
+    await expectApiError(handleMacro({ indicator: "unemployment (youth, ages 15-24)", country: "Egypt" }), 422, "UNSUPPORTED_INDICATOR");
+    await expectApiError(handleMacro({ indicator: "the unemployment (youth, ages 15-24)", country: "Egypt" }), 422, "UNSUPPORTED_INDICATOR");
+  });
+});
+
 describe("handleMacro answers (stubbed World Bank)", () => {
   it("uses the source's latest nonempty year when year is absent", async () => {
     const bodies = [indicatorJson(2021, 4.1), indicatorJson(2024, 5.2), indicatorJson(2025, null)].map((text) => JSON.parse(text)[1][0]);
@@ -195,12 +227,12 @@ describe("handleMacro answers (stubbed World Bank)", () => {
 
   it("does not silently use latest when an explicit requested year is missing", async () => {
     stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2024, 5.2) });
-    await expectApiError(handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2023" }), 422, "NO_DATA");
+    expect((await handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2023" })).rate_pct).toBeNull();
   });
 
   it("refuses latest when every returned value is null", async () => {
     stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2025, null) });
-    await expectApiError(handleMacro({ indicator: "unemployment rate", country: "Egypt" }), 422, "NO_DATA");
+    expect((await handleMacro({ indicator: "unemployment rate", country: "Egypt" })).rate_pct).toBeNull();
   });
 
   it("rejects an explicitly empty year rather than silently choosing latest", async () => {
@@ -236,13 +268,11 @@ describe("handleMacro answers (stubbed World Bank)", () => {
     expect(res.rate_pct).toBe(10.25);
   });
 
-  it("422 NO_DATA when the year has a null value", async () => {
+  it("discloses no data when the year has a null value", async () => {
     stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2024, null) });
-    await expectApiError(
-      handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2024" }),
-      422,
-      "NO_DATA",
-    );
+    const out = await handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2024" });
+    expect(out.rate_pct).toBeNull();
+    expect(out.answer).toContain("no data");
   });
 
   it("502 WORLD_BANK_UNAVAILABLE when the catalog call fails", async () => {
@@ -263,13 +293,11 @@ describe("handleMacro answers (stubbed World Bank)", () => {
     );
   });
 
-  it("502 on an out-of-range value, never serves it", async () => {
+  it("discloses an out-of-range value without filling rate_pct", async () => {
     stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2023, 150) });
-    await expectApiError(
-      handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2023" }),
-      502,
-      "WORLD_BANK_UNAVAILABLE",
-    );
+    const out = await handleMacro({ indicator: "unemployment rate", country: "Egypt", year: "2023" });
+    expect(out.rate_pct).toBeNull();
+    expect(out.answer).toContain("150");
   });
 });
 
@@ -320,4 +348,40 @@ describe("latest published annual data LIVE", () => {
     const evidence = await getReceiptEvidence(receipt.receipt_id);
     expect(sha256Hex(evidence.evidence!)).toBe(receipt.raw_response_sha256);
   }, 60000);
+});
+
+
+describe("World Bank endpoint aliases from captured Germany 2022 observations", () => {
+  const series = [
+    ["inflation", "FP.CPI.TOTL.ZG", "cpi"], ["cpi", "FP.CPI.TOTL.ZG", "cpi"],
+    ["consumer prices", "FP.CPI.TOTL.ZG", "cpi"],
+    ["gdp growth", "NY.GDP.MKTP.KD.ZG", "gdp"],
+    ["current account", "BN.CAB.XOKA.GD.ZS", "current-account"],
+    ["gdp per capita", "NY.GDP.PCAP.CD", "gdp-per-capita"],
+    ["population", "SP.POP.TOTL", "population"],
+  ];
+  it.each(series)("maps %s to the exact source series %s", async (input, id, file) => {
+    const raw = readFileSync(resolve("tests/fixtures/macro-alias", `deu-${file}-2022.json`), "utf8");
+    const observed = JSON.parse(raw)[1][0].value;
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const u = String(url); requests.push(u);
+      if (u.includes("/indicator/")) { expect(u).toContain(`/indicator/${id}?date=2022`); return new Response(raw); }
+      return new Response(JSON.stringify([{}, [{ id: "DEU", iso2Code: "DE", name: "Germany", region: { value: "Europe" } }]]));
+    });
+    const out = await handleMacro({ indicator: input, country: "DEU", year: "2022" });
+    expect(out.indicator_id).toBe(id);
+    expect(out.answer).toContain(id);
+    expect(out.answer).toContain(String(observed));
+    expect(out.rate_pct).toBe(observed >= 0 && observed <= 100 && !["population", "gdp per capita"].includes(input) ? Math.round(observed * 1e6) / 1e6 : null);
+    const receipt = out.receipt as { raw_response_sha256: string };
+    expect(receipt.raw_response_sha256).toBe(sha256Hex(raw));
+    expect(requests).toHaveLength(2);
+  });
+  it("reports a null observation with disclosed no-data, never zero or a fabricated rate", async () => {
+    stubWorldBank({ catalog: catalogJson(), indicator: indicatorJson(2022, null) });
+    const out = await handleMacro({ indicator: "inflation", country: "EG", year: "2022" });
+    expect(out.rate_pct).toBeNull(); expect(out.answer).toContain("no data");
+    expect(out.answer).toContain("FP.CPI.TOTL.ZG"); expect(out.verdict).toBe("no_data");
+  });
 });

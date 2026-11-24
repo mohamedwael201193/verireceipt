@@ -30,6 +30,8 @@
 //   caiso-oasis      oasis.caiso.com
 //   nyiso            mis.nyiso.com
 //   elering          dashboard.elering.ee
+//   miso-marketreports docs.misoenergy.org
+//   ercot-cdr        www.ercot.com
 //   fx-er-api        open.er-api.com (EUR→USD, ingester only)
 //   beacon-api       both beacon hosts (lodestar-mainnet.chainsafe.io,
 //                    ethereum-beacon-api.publicnode.com)
@@ -77,14 +79,35 @@ const HOST_TO_SERVICE: Record<string, string> = {
   "oasis.caiso.com": "caiso-oasis",
   "mis.nyiso.com": "nyiso",
   "dashboard.elering.ee": "elering",
+  "docs.misoenergy.org": "miso-marketreports",
+  "www.ercot.com": "ercot-cdr",
   "open.er-api.com": "fx-er-api",
   "lodestar-mainnet.chainsafe.io": "beacon-api",
   "ethereum-beacon-api.publicnode.com": "beacon-api",
   "rpc.mevblocker.io": "evm-rpc",
   "mainnet.base.org": "evm-rpc",
   "api.worldbank.org": "worldbank",
+  "api.geckoterminal.com": "geckoterminal",
   "eth.blockscout.com": "blockscout",
   "explorer.optimism.io": "blockscout",
+  "api.crossref.org": "crossref",
+  "api.github.com": "github",
+  "query1.finance.yahoo.com": "yahoo-finance",
+  "sanctionslistservice.ofac.treas.gov": "ofac",
+  "scsanctions.un.org": "un-sanctions",
+  "ipwho.is": "ipwhois",
+  "air-quality-api.open-meteo.com": "open-meteo",
+  "api.weather.gov": "nws",
+  "hn.algolia.com": "hn-algolia",
+  "router.project-osrm.org": "osrm",
+  "mempool.space": "mempool-space",
+  "aviationweather.gov": "aviationweather-noaa",
+  "api.coinbase.com": "coinbase",
+  "gamma-api.polymarket.com": "polymarket-gamma",
+  "nasstatus.faa.gov": "faa-nas",
+  "feeds.bbci.co.uk": "bbc-rss",
+  "ip-api.com": "ip-api",
+  "site.api.espn.com": "espn",
 };
 
 /** Hostname suffixes shared by every CHAIN_RPCS host family. */
@@ -165,6 +188,7 @@ export function recordUpstreamError(name: string, errorCode?: string): void {
 export function recordUpstreamOkFromReceipt(receipt: unknown): void {
   try {
     if (receipt === null || typeof receipt !== "object") return;
+    if (String((receipt as { quorum_votes?: unknown }).quorum_votes ?? "").includes("STALE DISCLOSED")) return;
     const { upstream_url, fetched_at } = receipt as {
       upstream_url?: unknown;
       fetched_at?: unknown;
@@ -180,6 +204,8 @@ export function recordUpstreamOkFromReceipt(receipt: unknown): void {
 
 /** Primary upstream service per intent, for the 502 error path. */
 export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
+  "security-review": "api.osv.dev",
+  "onchain-metric": "evm-rpc",
   filings: "sec-edgar",
   tvl: "defillama",
   tx: "evm-rpc",
@@ -187,10 +213,36 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   "grid-price": "caiso-oasis",
   validator: "beacon-api",
   "gas-price": "evm-rpc",
+  "transaction-risk": "evm-rpc",
+  "financial-data": "sec-edgar",
+  "cross-chain-state": "evm-rpc",
+  "reserve-attestation": "evm-rpc",
   balance: "evm-rpc",
   "token-supply": "evm-rpc",
   macro: "worldbank",
+  "fx-now": "frankfurter",
   "token-holders": "blockscout",
+  price: "chainlink-evm-rpc",
+  liquidity: "dexscreener",
+  yield: "aave-v3-evm-rpc",
+  weather: "aviationweather-noaa",
+  "weather-history": "ncei-noaa",
+  "academic-search": "crossref",
+  "code-patch": "github",
+  "stock-price": "yahoo-finance",
+  "sanctions-screen": "ofac",
+  "ip-geolocation": "ipwhois",
+  "game-result": "espn",
+  "air-quality": "open-meteo",
+  "storm-alert": "nws",
+  "news-headlines": "hn-algolia",
+  "news-search": "hn-algolia",
+  "route-eta": "osrm",
+  "mining-hashprice": "mempool-space",
+  "crypto-price": "coinbase",
+  "weather-check": "aviationweather-noaa",
+  "event-outcome": "polymarket-gamma",
+  "travel-disruption": "faa-nas",
 };
 
 /**
@@ -226,6 +278,12 @@ export function primaryUpstreamForGridZone(zone: string | undefined): string {
     ) {
       return "nyiso";
     }
+    // MISO classic hubs (ARKANSAS.HUB .. TEXAS.HUB) are served from the
+    // docs.misoenergy.org marketreports DA ExPost CSV.
+    if (z.endsWith(".HUB")) return "miso-marketreports";
+    // ERCOT settlement points (HB_* hubs, LZ_* load zones) are served
+    // from the www.ercot.com cdr html DAM pages.
+    if (z.startsWith("HB_") || z.startsWith("LZ_")) return "ercot-cdr";
     return "caiso-oasis";
   } catch {
     return "caiso-oasis";

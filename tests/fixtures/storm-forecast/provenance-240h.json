@@ -1,0 +1,8 @@
+{
+  "url": "https://api.open-meteo.com/v1/forecast?latitude=30.0444&longitude=31.2357&hourly=wind_gusts_10m%2Cprecipitation&timezone=GMT&timeformat=unixtime&wind_speed_unit=kmh&precipitation_unit=mm&start_hour=2026-11-24T01%3A00&end_hour=2026-12-04T00%3A00",
+  "status": 200,
+  "sha256": "c55709e50f57e2f80d769e722fcaee9d273757118cbc8eac5365235eb4cbdc34",
+  "fetched_at": "2026-11-24T01:29:41.056681+02:00",
+  "start": "2026-11-24T00:00:00+00:00",
+  "end": "2026-12-04T00:00:00+00:00"
+}

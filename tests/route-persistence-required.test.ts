@@ -131,3 +131,25 @@ it("deadline while refusal storage is pending never returns the late receipted b
   finish(); await new Promise(resolve => setTimeout(resolve, 5));
   expect(console.warn).not.toHaveBeenCalled();
 });
+
+it("aggregator-enabled path binds observation and reports median separately from best", async () => {
+  const urls = await Promise.all([rpcFixture(), rpcFixture(), rpcFixture()]);
+  const block = expectedBlockHeight(Math.floor(Date.now() / 1000));
+  const body = JSON.stringify({ priceRoute: { network: 1,
+    srcToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", destToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    srcAmount: "1000000000000000000", srcDecimals: 18, destDecimals: 6, blockNumber: block, destAmount: "3210000000" } });
+  vi.stubGlobal("fetch", async () => new Response(body));
+  try {
+    const r = await handleRouteWithRpcs({ pair: "ETH/USDC" }, urls, 8000, true);
+    expect(r.amount_out).toBe(3200000000);
+    expect(r.best_amount_out_base_units).toBe("3210000000");
+    expect(String(r.answer)).toContain("before gas");
+    expect(String(r.answer)).toMatch(/^Reported amount_out: 3200000000 USDC base units \(3200 USDC\), before gas\. Convention: lower median/);
+    expect(String(r.answer)).toContain("lower actual quote, not their average");
+    expect(String(r.answer)).toContain("not hash-pinned");
+    const calls = vi.mocked(saveReceipt).mock.calls;
+    const ev = JSON.parse(String(calls[calls.length - 1][1]));
+    expect(ev.aggregator.body).toBe(body);
+    expect(ev.amount_out).toBe("3200000000");
+  } finally { vi.unstubAllGlobals(); }
+});

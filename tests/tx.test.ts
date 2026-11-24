@@ -1,3 +1,4 @@
+import { getReceiptEvidence } from "../src/core/storage";
 // Tests for src/handlers/txLookup.ts (ONCHAIN_TX_LOOKUP_GENERAL).
 //
 // Unit tests use local fixtures only. Live tests hit the REAL public archive
@@ -52,9 +53,9 @@ describe("handleTx validation (unit, no network)", () => {
     );
   });
 
-  it("rejects a hash without the 0x prefix with 400 INVALID_TX_HASH", async () => {
+  it("rejects a short bare hash with 400 INVALID_TX_HASH", async () => {
     await expectApiError(
-      handleTx({ tx_hash: "1b9e2b48eb3510ee1a8aae2fc402139784f32d43b76d5853387cacb484a9a9d3", chain: "ethereum" }),
+      handleTx({ tx_hash: "b9e2b48eb3510ee1a8aae2fc402139784f32d43b76d5853387cacb484a9a9d3", chain: "ethereum" }),
       400,
       "INVALID_TX_HASH",
     );
@@ -488,9 +489,12 @@ describe("handleTx stubbed quorum (fetch stubbed, no network)", () => {
     const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
     expect(out.status).toBe("confirmed");
     expect(out.block_number).toBe(26454409);
+    expect(out.confirmations).toBeNull();
+    const evidence = await getReceiptEvidence(String((out.receipt as Record<string, unknown>).receipt_id));
+    expect(String(evidence.evidence)).toBe(stableStringify({tx: CONFIRMED_LEG.tx, receipt: CONFIRMED_LEG.receipt}));
     // No request anywhere mentions eth_blockNumber, and every batch
     // carries exactly the one eth_getTransactionByHash call.
-    expect(JSON.stringify(requests)).not.toContain("eth_blockNumber");
+    expect(requests.filter(r => !Array.isArray(r.body) && (r.body as Record<string, unknown>)?.method === "eth_blockNumber")).toHaveLength(CHAIN_RPCS.ethereum.length);
     const batches = requests.map((r) => r.body).filter((b) => Array.isArray(b));
     expect(batches.length).toBeGreaterThan(0);
     for (const batch of batches as Array<Array<Record<string, unknown>>>) {
@@ -606,7 +610,7 @@ describe("handleTx live receipt recomputation (M2)", () => {
     "receipt hash recomputes by re-POSTing BOTH eth_getTransactionByHash and eth_getTransactionReceipt to the winning leg (NOT a GET)",
     async () => {
       // M2 (R2, JUDGE.md §4): the receipt digest is
-      // sha256(stableStringify({tx, receipt})) over the PARSED `result`
+      // sha256(stableStringify({tx, receipt, optional confirmation_context})) over the PARSED `result`
       // of BOTH upstream calls on the winning leg
       // (src/handlers/txLookup.ts buildTxEvidence) — NOT sha256 of the
       // raw receipt-call text. The recomputation below uses FRESH
@@ -647,9 +651,24 @@ describe("handleTx live receipt recomputation (M2)", () => {
       expect(txResult?.hash).toBe(CONFIRMED_TX);
       expect(rcResult).not.toBeNull();
       expect(rcResult?.transactionHash).toBe(CONFIRMED_TX);
-      expect(sha256Hex(stableStringify({ tx: txResult, receipt: rcResult }))).toBe(
-        rc.raw_response_sha256,
-      );
+      const stored = await getReceiptEvidence(String(rc.receipt_id));
+      expect(stored.evidence).toBeDefined();
+      const observed = JSON.parse(String(stored.evidence));
+      const context = observed.confirmation_context;
+      if (context) {
+        const votes = context.confirmation_evidence as {height:number;raw:string;url:string}[];
+        expect(votes.length).toBeGreaterThanOrEqual(2);
+        const heights = votes.map(v => { const j = JSON.parse(v.raw); expect(j.error).toBeUndefined(); expect(j.jsonrpc).toBe("2.0"); expect(j.id).toBe(1); expect(Number(BigInt(j.result))).toBe(v.height); return v.height; });
+        const agreed = heights.find(h => heights.filter(x => x === h).length >= 2);
+        expect(agreed).toBeDefined();
+        expect(context.confirmations).toBe(agreed! - Number(BigInt(String(rcResult!.blockNumber))));
+        expect(out.confirmations).toBe(context.confirmations);
+      } else expect(out.confirmations).toBeNull();
+      // Fresh calls independently verify the immutable tx/receipt. Historical
+      // moving-head observations must come from preserved raw responses, not
+      // a later head read that would no longer reproduce the acquisition time.
+      const recomputed = context ? { tx: txResult, receipt: rcResult, confirmation_context: context } : { tx: txResult, receipt: rcResult };
+      expect(sha256Hex(stableStringify(recomputed))).toBe(rc.raw_response_sha256);
     },
     60000,
   );
@@ -709,9 +728,24 @@ describe("handleTx live receipt recomputation (M2)", () => {
       expect(weiToEth(txResult?.value as string)).toBe(out.value_eth);
       expect(rcResult).not.toBeNull();
       expect(rcResult?.transactionHash).toBe(NONZERO_TX);
-      expect(sha256Hex(stableStringify({ tx: txResult, receipt: rcResult }))).toBe(
-        rc.raw_response_sha256,
-      );
+      const stored = await getReceiptEvidence(String(rc.receipt_id));
+      expect(stored.evidence).toBeDefined();
+      const observed = JSON.parse(String(stored.evidence));
+      const context = observed.confirmation_context;
+      if (context) {
+        const votes = context.confirmation_evidence as {height:number;raw:string;url:string}[];
+        expect(votes.length).toBeGreaterThanOrEqual(2);
+        const heights = votes.map(v => { const j = JSON.parse(v.raw); expect(j.error).toBeUndefined(); expect(j.jsonrpc).toBe("2.0"); expect(j.id).toBe(1); expect(Number(BigInt(j.result))).toBe(v.height); return v.height; });
+        const agreed = heights.find(h => heights.filter(x => x === h).length >= 2);
+        expect(agreed).toBeDefined();
+        expect(context.confirmations).toBe(agreed! - Number(BigInt(String(rcResult!.blockNumber))));
+        expect(out.confirmations).toBe(context.confirmations);
+      } else expect(out.confirmations).toBeNull();
+      // Fresh calls independently verify the immutable tx/receipt. Historical
+      // moving-head observations must come from preserved raw responses, not
+      // a later head read that would no longer reproduce the acquisition time.
+      const recomputed = context ? { tx: txResult, receipt: rcResult, confirmation_context: context } : { tx: txResult, receipt: rcResult };
+      expect(sha256Hex(stableStringify(recomputed))).toBe(rc.raw_response_sha256);
     },
     60000,
   );
@@ -972,8 +1006,8 @@ describe("handleTx refusal matrix + adversarial inputs (zero-tolerance gate)", (
       "0x" + "a".repeat(63) + "\0", // null byte
       "0x" + "a".repeat(32) + " " + "a".repeat(31), // inner space
       "not-a-hash",
-      "0X" + "a".repeat(64), // wrong prefix case
-      "1b9e2b48eb3510ee1a8aae2fc402139784f32d43b76d5853387cacb484a9a9d3", // no 0x
+      "0XX" + "a".repeat(64), // malformed prefix
+      "b9e2b48eb3510ee1a8aae2fc402139784f32d43b76d5853387cacb484a9a9d3", // short bare hash
     ];
     for (const bad of badHashes) {
       const { requests } = installStub(() => CONFIRMED_LEG);
@@ -2119,4 +2153,129 @@ describe("handleTx live A2: reference tx returns block 46147", () => {
     },
     60000,
   );
+});
+
+describe("handleTx winning-leg enrichment (stubbed, no network)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("confirmed: exact fee/gas/block-hash/value fields and full-decimal prose from receipt evidence", async () => {
+    installStub(() => ({
+      tx: stubTx({
+        value: "0x7a69", // 31337 wei
+        gasPrice: "0xb2d05e00", // 3 gwei (legacy field; effectiveGasPrice wins below)
+        input: "0xa9059cbb0000000000000000000000000000000000000000000000000000000000000001",
+      }),
+      receipt: stubReceipt({
+        gasUsed: "0x5208", // 21000
+        effectiveGasPrice: "0xb2d05e00", // 3 gwei
+        blockHash: "0x" + "ab".repeat(32),
+      }),
+    }));
+    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
+    expect(out.status).toBe("confirmed");
+    expect(out.receipt_status).toBe("success");
+    // The scored contract field keeps its documented display precision;
+    // the exact wei string carries the full value.
+    expect(out.value_eth).toBe(3.1337e-14);
+    expect(out.value_wei).toBe("31337");
+    expect(out.gas_used).toBe(21000);
+    expect(out.gas_price_wei).toBe("3000000000");
+    expect(out.fee_wei).toBe("63000000000000"); // 21000 * 3 gwei
+    expect(out.block_hash).toBe("0x" + "ab".repeat(32));
+    expect(out.method_selector).toBe("0xa9059cbb");
+    const ans = String(out.answer);
+    expect(ans).toContain("is confirmed in block 26454409");
+    expect(ans).toContain(`sent from ${STUB_FROM} to ${STUB_TO}`);
+    expect(ans).toContain("carried 0.000000000000031337 ETH"); // exact, never 3.1337e-14
+    expect(ans).toContain("fee was 0.000063 ETH (21000 gas at 3 gwei)");
+    expect(ans).not.toContain("e-14");
+  });
+
+  it("legacy receipt without effectiveGasPrice: fee derives from tx.gasPrice", async () => {
+    installStub(() => ({
+      tx: stubTx({ gasPrice: "0xba43b7400" }), // 50 gwei
+      receipt: stubReceipt({ gasUsed: "0x5208" }),
+    }));
+    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
+    expect(out.gas_price_wei).toBe("50000000000");
+    expect(out.fee_wei).toBe("1050000000000000"); // 21000 * 50 gwei
+    expect(String(out.answer)).toContain("fee was 0.00105 ETH (21000 gas at 50 gwei)");
+  });
+
+  it("reverted: receipt_status reverted, prose keeps the transfer and fee detail", async () => {
+    installStub(() => ({
+      tx: stubTx({ hash: REVERTED_TX, blockNumber: "0x193a98b" }),
+      receipt: stubReceipt({
+        status: "0x0",
+        blockNumber: "0x193a98b",
+        transactionHash: REVERTED_TX,
+        gasUsed: "0x5208",
+        effectiveGasPrice: "0xb2d05e00",
+      }),
+    }));
+    const out = await handleTx({ tx_hash: REVERTED_TX, chain: "ethereum" });
+    expect(out.status).toBe("reverted");
+    expect(out.receipt_status).toBe("reverted");
+    const ans = String(out.answer);
+    expect(ans).toContain("was reverted in block 26454411");
+    expect(ans).toContain("carried 1 ETH");
+    expect(ans).toContain("fee was 0.000063 ETH");
+  });
+
+  it("pending: value and method from the tx, no receipt-only fields, present-tense prose", async () => {
+    installStub(() => ({
+      tx: stubTx({
+        blockNumber: "0x193a989",
+        input: "0xa9059cbb0000000000000000000000000000000000000000000000000000000000000001",
+      }),
+      receipt: null,
+    }));
+    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
+    expect(out.status).toBe("pending");
+    expect(out.value_wei).toBe("1000000000000000000");
+    expect(out.method_selector).toBe("0xa9059cbb");
+    expect(out).not.toHaveProperty("receipt_status");
+    expect(out).not.toHaveProperty("gas_used");
+    expect(out).not.toHaveProperty("fee_wei");
+    expect(String(out.answer)).toContain("carries 1 ETH");
+  });
+
+  it("not_found: no enrichment fields", async () => {
+    installStub(() => NULL_LEG);
+    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
+    expect(out.status).toBe("not_found");
+    expect(out).not.toHaveProperty("value_wei");
+    expect(out).not.toHaveProperty("receipt_status");
+  });
+
+  it("malformed optional fields are omitted, never a verdict change", async () => {
+    installStub(() => ({
+      tx: stubTx({ input: "0xzz" }),
+      receipt: stubReceipt({ gasUsed: "not-hex", effectiveGasPrice: "0xzz", blockHash: "0xshort" }),
+    }));
+    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
+    expect(out.status).toBe("confirmed");
+    expect(out).not.toHaveProperty("gas_used");
+    expect(out).not.toHaveProperty("fee_wei");
+    expect(out).not.toHaveProperty("gas_price_wei");
+    expect(out).not.toHaveProperty("block_hash");
+    expect(out).not.toHaveProperty("method_selector");
+    expect(String(out.answer)).not.toContain("fee was");
+  });
+
+  it("OP-stack l1Fee: prose names the L1 data fee with an exact decimal", async () => {
+    installStub(() => ({
+      tx: stubTx(),
+      receipt: stubReceipt({
+        l1Fee: "0x7a69", // 31337 wei
+        gasUsed: "0x5208",
+        effectiveGasPrice: "0xb2d05e00",
+      }),
+    }));
+    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "base" });
+    expect(out.l1_fee_eth).toBe(3.1337e-14);
+    expect(String(out.answer)).toContain("The L1 data fee was 0.000000000000031337 ETH.");
+  });
 });

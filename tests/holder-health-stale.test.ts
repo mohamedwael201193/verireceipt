@@ -1,0 +1,26 @@
+import {afterEach,beforeEach,it,expect,vi} from "vitest";
+import {mkdtempSync,readFileSync,rmSync} from "node:fs";
+import {join} from "node:path";
+const dir=mkdtempSync("/tmp/holder-health-stale-");process.env.SQLITE_PATH=join(dir,"r.sqlite");
+import {buildServer} from "../src/server";
+import {setTokenHoldersFetchForTests} from "../src/handlers/tokenHolders";
+import {resetUpstreamsForTests,getUpstreamsSnapshot} from "../src/core/upstreams";
+beforeEach(()=>resetUpstreamsForTests());
+afterEach(()=>{setTokenHoldersFetchForTests(null);vi.useRealTimers();});
+it("health names GeckoTerminal on 429 and never credits stale fallback as a fresh upstream success",async()=>{
+ const raw=readFileSync(join(__dirname,"fixtures/holder-gecko/base-usdc.json"),"utf8");
+ const updated=JSON.parse(raw).data.attributes.holders.last_updated;
+ vi.useFakeTimers();vi.setSystemTime(new Date(Date.parse(updated)+1000));
+ let limited=false;setTokenHoldersFetchForTests(async()=>{if(limited)throw Object.assign(new Error("429"),{status:429});return raw;});
+ const app=buildServer();
+ await app.inject({method:"GET",url:"/v1/token-holders?token=USDC&chain=base"});
+ const initial=getUpstreamsSnapshot().geckoterminal.last_ok;
+ await vi.advanceTimersByTimeAsync(300001);limited=true;
+ const r=await app.inject({method:"GET",url:"/v1/token-holders?token=USDC&chain=base"});expect(r.statusCode).toBe(200);
+ const h=(await app.inject({method:"GET",url:"/health"})).json();
+ expect(h.upstreams.geckoterminal.last_error).toBe("UPSTREAM_RATE_LIMITED");
+ expect(h.upstreams.geckoterminal.last_ok).toBe(initial);expect(h.upstreams.blockscout).toBeUndefined();
+ const noCache=await app.inject({method:"GET",url:"/v1/token-holders?token=USDC&chain=polygon"});expect(noCache.statusCode).toBe(502);
+ expect(getUpstreamsSnapshot().blockscout).toBeUndefined();
+ await app.close();rmSync(dir,{recursive:true,force:true});
+});

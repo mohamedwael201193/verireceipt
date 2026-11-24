@@ -1,0 +1,10 @@
+[
+  {
+    "url": "https://eth-mainnet.public.blastapi.io",
+    "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x1940e78\"}"
+  },
+  {
+    "url": "https://eth.drpc.org",
+    "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x1940e78\"}"
+  }
+]

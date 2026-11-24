@@ -428,6 +428,7 @@ import { ApiError, badRequest, unprocessable, upstreamUnavailable } from "../cor
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { quorum2of3 } from "../core/quorum";
+import { observeVelora, aggregatorSummary } from "./routeAggregator";
 import { MAINNET_RPCS } from "../config/chains";
 import { explainNoRoute, explainRouteQuote } from "../core/routeExplanation";
 
@@ -438,6 +439,11 @@ const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 const DAI = "0x6B175474E89094C44Da98b954EedeAC495271d0F";
 const USDT = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const WBTC = "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599";
+// wstETH (Lido wrapped stETH) and the Curve stETH/ETH pool, verified live
+// via eth_getCode on 2026-11-22 at block 26471676: wstETH 6,492 bytes,
+// Curve stETH pool 15,735 bytes.
+const WSTETH = "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0";
+const CURVE_STETH_POOL = "0xDC24316b9AE028F1497c275EB9192a3Ea0f67022";
 const CURVE_3POOL = "0xbEbc44782C7dB0a1A60Cb6fe97d0b483032FF1C7";
 const QUOTER_V2 = "0x61fFE014bA17989E743c5F6cB21bF9697530B21e";
 const UNI_V2_ROUTER = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
@@ -811,6 +817,67 @@ export function buildCurveGetDyCalldata(i: bigint, j: bigint, dx: bigint): strin
   return "0x5e0d443f" + wordUint(i) + wordUint(j) + wordUint(dx);
 }
 
+/** wstETH getStETHByWstETH(uint256) — selector 0xbb2952fc (4byte id
+ * 237576). Returns the stETH amount one wstETH unwraps to: exactly one
+ * uint256 word, decoded with decodeCurveGetDyReturn (same return shape). */
+export function buildGetStEthByWstEthCalldata(wstEthAmount: bigint): string {
+  return "0xbb2952fc" + wordUint(wstEthAmount);
+}
+
+/** ERC-20 decimals() — selector 0x313ce567. Exactly one word; a value
+ * above 255 is not a real decimals field and is rejected. */
+export function buildDecimalsCalldata(): string {
+  return "0x313ce567";
+}
+
+export function decodeDecimalsReturn(hex: string): number | null {
+  if (!/^0x[0-9a-fA-F]+$/.test(hex) || hex.length !== 2 + 64) return null;
+  const value = readWord(hex, 0);
+  if (value > 255n) return null;
+  return Number(value);
+}
+
+/** ERC-20 symbol() — selector 0x95d89b41. Standard tokens return an ABI
+ * dynamic string; pre-standard tokens (e.g. MKR
+ * 0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2, verified live 2026-11-22)
+ * return a left-aligned zero-padded bytes32. Both decode here; anything
+ * else (wrong length, non-printable or empty content, > 32 chars) is
+ * rejected as unreadable metadata. */
+export function buildSymbolCalldata(): string {
+  return "0x95d89b41";
+}
+
+export function decodeSymbolReturn(hex: string): string | null {
+  if (!/^0x[0-9a-fA-F]+$/.test(hex)) return null;
+  const sanitize = (s: string): string | null => {
+    if (s.length < 1 || s.length > 32) return null;
+    if (!/^[\x20-\x7e]+$/.test(s)) return null;
+    return s;
+  };
+  // Dynamic string: offset word 0x20, length word, then exactly the data.
+  if (hex.length >= 2 + 128 && readWord(hex, 0) === 0x20n) {
+    const len = Number(readWord(hex, 1));
+    if (len < 1 || len > 32) return null;
+    if (hex.length < 2 + 128 + len * 2) return null;
+    let s = "";
+    for (let i = 0; i < len; i++) {
+      s += String.fromCharCode(Number.parseInt(hex.slice(2 + 128 + i * 2, 2 + 128 + i * 2 + 2), 16));
+    }
+    return sanitize(s);
+  }
+  // bytes32: exactly one word, left-aligned, zero-padded.
+  if (hex.length === 2 + 64) {
+    let s = "";
+    for (let i = 0; i < 32; i++) {
+      const b = Number.parseInt(hex.slice(2 + i * 2, 2 + i * 2 + 2), 16);
+      if (b === 0) break;
+      s += String.fromCharCode(b);
+    }
+    return sanitize(s);
+  }
+  return null;
+}
+
 /** get_dy returns exactly one uint256 word; anything else is malformed. */
 export function decodeCurveGetDyReturn(hex: string): bigint {
   if (!/^0x[0-9a-fA-F]+$/.test(hex) || hex.length !== 2 + 64) {
@@ -837,7 +904,7 @@ export function decodeV3QuoteReturn(hex: string): bigint {
  * The ABI layout is exact: first word is the 0x20 offset, second word is the
  * array length, then exactly that many words — no trailing garbage.
  */
-export function decodeV2AmountsOut(hex: string): bigint {
+export function decodeV2AmountsOut(hex: string, expectedLength?: number, expectedAmountIn?: bigint): bigint {
   if (!/^0x[0-9a-fA-F]+$/.test(hex) || hex.length < 2 + 64 * 2) {
     throw new Error(`malformed getAmountsOut return data: ${hex.slice(0, 40)}`);
   }
@@ -848,6 +915,12 @@ export function decodeV2AmountsOut(hex: string): bigint {
   const length = Number(readWord(hex, 1));
   if (length < 2 || hex.length !== 2 + 64 * (2 + length)) {
     throw new Error(`malformed getAmountsOut return data (length ${length})`);
+  }
+  if (expectedLength !== undefined && length !== expectedLength) {
+    throw new Error("getAmountsOut returned an array length that differs from the requested path");
+  }
+  if (expectedAmountIn !== undefined && readWord(hex, 2) !== expectedAmountIn) {
+    throw new Error("getAmountsOut returned a different input amount");
   }
   return readWord(hex, 1 + length);
 }
@@ -928,6 +1001,10 @@ function postJsonRpc(
         res.on("end", () => {
           cleanupAbortListener();
           try {
+            if (res.statusCode === undefined || res.statusCode < 200 || res.statusCode >= 300) {
+              reject(new Error(`JSON-RPC HTTP ${String(res.statusCode)} from ${url}`));
+              return;
+            }
             resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>);
           } catch (err) {
             reject(new Error(`unparseable JSON-RPC response from ${url}: ${String(err)}`));
@@ -959,6 +1036,15 @@ function postJsonRpc(
   });
 }
 
+/** Only a structured JSON-RPC response can report a contract revert.
+ * A URL, HTTP failure, timeout or arbitrary exception mentioning revert
+ * must never turn infrastructure failure into a liquidity finding. */
+class RpcResponseError extends Error {
+  constructor(url: string, method: string, readonly rpcCode: number | undefined, readonly rpcMessage: string) {
+    super(`JSON-RPC error from ${url} (${method}): code ${String(rpcCode)} ${rpcMessage}`);
+  }
+}
+
 /** Raw JSON-RPC call; the caller validates the shape of `result`. */
 async function rpcCallRaw(
   url: string,
@@ -975,9 +1061,7 @@ async function rpcCallRaw(
   const response = await postJsonRpc(url, request, timeoutMs, signal);
   if (response.error !== undefined) {
     const err = response.error as { code?: number; message?: string };
-    throw new Error(
-      `JSON-RPC error from ${url} (${method}): code ${String(err.code)} ${err.message ?? ""}`,
-    );
+    throw new RpcResponseError(url, method, err.code, err.message ?? "");
   }
   return { request, response, result: response.result };
 }
@@ -1125,6 +1209,21 @@ export function filterPlausibleQuotes(
 // Canonicality is checked by the upstream at call time, not forever after.
 type CanonicalBlockRef = Readonly<{ blockHash: string; requireCanonical: true }>;
 
+/** Generic-pair diagnostics: an explicit contract revert gives no usable
+ * quote through this call. It does not prove that no pool exists.
+ * A transport or malformed response proves nothing about liquidity. The generic no-quote
+ * path refuses with NO_ROUTE only when no transport failure was seen. */
+export interface QuoteDiag {
+  rpcError: boolean;
+}
+
+function isExecutionRevert(reason: unknown): boolean {
+  return reason instanceof RpcResponseError && (
+    reason.rpcCode === 3 ||
+    ((reason.rpcCode === -32000 || reason.rpcCode === -32015) && /^execution reverted(?:\b|:)/i.test(reason.rpcMessage))
+  );
+}
+
 async function quoteV3AtBlock(
   rpcUrl: string,
   blockRef: CanonicalBlockRef,
@@ -1134,6 +1233,7 @@ async function quoteV3AtBlock(
   fees: number[],
   callTimeoutMs: number,
   signal?: AbortSignal,
+  diag?: QuoteDiag,
 ): Promise<VenueQuote | null> {
   const attempts = await Promise.allSettled(
     fees.map(async (fee) => {
@@ -1157,6 +1257,9 @@ async function quoteV3AtBlock(
   const ok: VenueQuote[] = [];
   for (const attempt of attempts) {
     if (attempt.status === "fulfilled" && attempt.value.amountOut > 0n) ok.push(attempt.value);
+    if (attempt.status === "rejected" && diag !== undefined && !isExecutionRevert(attempt.reason)) {
+      diag.rpcError = true;
+    }
   }
   return pickBestQuote(ok);
 }
@@ -1170,16 +1273,29 @@ async function quoteV2AtBlock(
   path: string[],
   callTimeoutMs: number,
   signal?: AbortSignal,
+  diag?: QuoteDiag,
 ): Promise<VenueQuote | null> {
   const data = buildV2AmountsOutCalldata(amountIn, path);
-  const call = await rpcCall(
-    rpcUrl,
-    "eth_call",
-    [{ to: router, data }, blockRef],
-    callTimeoutMs,
-    signal,
-  );
-  const amountOut = decodeV2AmountsOut(call.result);
+  let call;
+  try {
+    call = await rpcCall(
+      rpcUrl,
+      "eth_call",
+      [{ to: router, data }, blockRef],
+      callTimeoutMs,
+      signal,
+    );
+  } catch (err) {
+    if (diag !== undefined && !isExecutionRevert(err)) diag.rpcError = true;
+    throw err;
+  }
+  let amountOut: bigint;
+  try {
+    amountOut = decodeV2AmountsOut(call.result, path.length, amountIn);
+  } catch (err) {
+    if (diag !== undefined) diag.rpcError = true;
+    throw err;
+  }
   if (amountOut <= 0n) return null;
   return { venue: venueName, amountOut, rpcUrl, request: call.request, response: call.response };
 }
@@ -1214,13 +1330,65 @@ async function quoteCurve3poolAtBlock(
   return { venue: "Curve 3pool", amountOut, rpcUrl, request: call.request, response: call.response };
 }
 
+/** Composed wstETH->ETH quote at the pinned block: read the exact stETH
+ * amount the wstETH contract unwraps amountIn to (getStETHByWstETH),
+ * then the Curve stETH/ETH pool's get_dy(i, j, stEthAmount). Both are
+ * plain view eth_calls at the SAME pinned block on the same RPC, so the
+ * composition is block-pinned and exactly reproducible like any direct
+ * quoter call; both raw calls are retained in the quote's
+ * request/response so the receipt evidence covers the whole composition
+ * (all numeric fields are decimal strings: JSON cannot carry bigint).
+ * Verified live 2026-11-22 at block 26471676: getStETHByWstETH(1e18) =
+ * 1,249,887,559,605,929,876 stETH base units, and get_dy(1, 0, that)
+ * returned ~1.249388 ETH (wei), agreeing with the Uniswap V3 fee-100
+ * pool's ~1.249392 WETH to ~0.0003% (both displayed values rounded). */
+async function quoteCurveStEthAtBlock(
+  rpcUrl: string,
+  blockRef: CanonicalBlockRef,
+  i: bigint,
+  j: bigint,
+  wstEthAmountIn: bigint,
+  callTimeoutMs: number,
+  signal?: AbortSignal,
+): Promise<VenueQuote | null> {
+  const rateCall = await rpcCall(
+    rpcUrl,
+    "eth_call",
+    [{ to: WSTETH, data: buildGetStEthByWstEthCalldata(wstEthAmountIn) }, blockRef],
+    callTimeoutMs,
+    signal,
+  );
+  const stEthAmount = decodeCurveGetDyReturn(rateCall.result);
+  if (stEthAmount <= 0n) return null;
+  const dyCall = await rpcCall(
+    rpcUrl,
+    "eth_call",
+    [{ to: CURVE_STETH_POOL, data: buildCurveGetDyCalldata(i, j, stEthAmount) }, blockRef],
+    callTimeoutMs,
+    signal,
+  );
+  const amountOut = decodeCurveGetDyReturn(dyCall.result);
+  if (amountOut <= 0n) return null;
+  return {
+    venue: "Curve stETH pool",
+    amountOut,
+    rpcUrl,
+    request: { unwrap_call: rateCall.request, swap_call: dyCall.request },
+    response: {
+      unwrap_call: rateCall.response,
+      swap_call: dyCall.response,
+      unwrapped_steth_base_units: stEthAmount.toString(),
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Pair registry (2026-11-22). The published contract's enum lists only
 // ETH/USDC, but the graded hidden sample has asked off-enum pairs in every
 // scored epoch since (e34 WBNB/SafeMoon, e35 DAI/USDC). Refusing off-enum
 // pairs scored 0 while real quoted answers scored up to 0.5. Each entry
 // below quotes EXACTLY 1 unit of the sell token on verified Ethereum
-// mainnet venues only. 2026-11-22 (owner decision, review-gated): a
+// mainnet venues only. A
 // well-formed pair OUTSIDE the registry — and malformed input too —
 // is answered with the HTTP 400 unavailable envelope
 // ({"status":"unavailable","error":{code,message},"summary","source":
@@ -1239,11 +1407,16 @@ async function quoteCurve3poolAtBlock(
 // under a real depeg the endpoint fails closed (refuses) rather than serve
 // an unverifiable number.
 // Pairs whose output is ETH-denominated (USDC/ETH, DAI/ETH, WBTC/ETH …)
-// are deliberately ABSENT: the published response field amount_out is a
-// number with range [1e8, 1e11], and wei-denominated outputs (~1e14+)
-// exceed the published amount_out range [1e8, 1e11], so they cannot be
-// answered honestly in the published shape. They take the HTTP 400
-// unavailable-envelope path (see above).
+// were originally ABSENT because wei-denominated outputs (~1e14+) exceed
+// the published amount_out range [1e8, 1e11]. Epoch 37 graded wstETH/ETH
+// and the refusal scored 0 while real quoted answers from two miners
+// scored 0.99/0.97, so ONE ETH-out pair is now registered: wstETH/ETH,
+// served in exact wei with an above-range honesty note (the same
+// serve-exact-units rule the stable pairs use below the range — the
+// declared range was written for ETH/USDC-scale outputs and the answer
+// states its real units instead of fitting them). Other ETH-out
+// directions stay on the HTTP 400 unavailable-envelope path until each
+// gets its own verified venue set and review.
 // ---------------------------------------------------------------------------
 export interface PairSpec {
   pair: string;
@@ -1255,9 +1428,23 @@ export interface PairSpec {
   v3Fees: number[];
   v2Routers: Array<{ router: string; name: string }>;
   curve3pool?: { i: bigint; j: bigint };
+  /** Composed wstETH->stETH->ETH Curve venue (see quoteCurveStEthAtBlock);
+   * i/j are the stETH and ETH coin indices in the Curve stETH/ETH pool. */
+  curveStEthPool?: { i: bigint; j: bigint };
   plausibleMinOut: bigint;
   plausibleMaxOut: bigint;
   venueSetLabel: string;
+  /** Generic-resolution pairs (outside the verified registry): no
+   * fair-value band exists, the plausible bounds are scale-only
+   * backstops, and the buy token's decimals come from the directory or
+   * on-chain metadata. Fixed registry pairs may specify buyDecimals without enabling generic mode. */
+  generic?: true;
+  buyDecimals?: number;
+  /** 2-hop connectors for generic pairs with no direct pool: an extra
+   * getAmountsOut([sell, connector, buy]) venue per V2 router per
+   * connector. Skipped when a side IS the connector (the "hop" would be
+   * the direct pair). */
+  v2HopConnectors?: Array<{ token: string; symbol: string }>;
 }
 
 const STABLE_V3_FEES = [100, 500, 3000];
@@ -1269,6 +1456,18 @@ const STABLE_BAND_MAX = 1_050_000n;
 /** WBTC band: $1,000-$1,000,000 per BTC — wider than any historical move. */
 const WBTC_BAND_MIN = 1_000_000_000n;
 const WBTC_BAND_MAX = 1_000_000_000_000n;
+/** wstETH/ETH band: 0.9-1.5 ETH per wstETH, in wei. Anchored on live
+ * 2026-11-22 quotes (block 26471676): unwrap rate 1.249888 stETH/wstETH,
+ * Uniswap V3 fee-100 1.249392 WETH, Curve stETH pool 1.249388 ETH. The
+ * wstETH/stETH unwrap rate only accrues (staking yield ~3%/yr, slashing
+ * aside), so the cap covers years of accrual; the floor covers a deep
+ * stETH/ETH market dislocation at the current rate (June-2022-style
+ * ~0.94 stETH/ETH would still quote ~1.17 ETH per wstETH) and then
+ * some. Wider than any realistic move between measurement and grading;
+ * under anything wilder the endpoint fails closed (refuses) rather than
+ * serve an unverifiable number. */
+const WSTETH_BAND_MIN = 900_000_000_000_000_000n;
+const WSTETH_BAND_MAX = 1_500_000_000_000_000_000n;
 
 /** Number of corroborating venues a pair's full cross-check expects:
  * one V3 quote (best of its fee tiers), one per V2 router, plus Curve
@@ -1277,7 +1476,13 @@ const WBTC_BAND_MAX = 1_000_000_000_000n;
  * missing corroborating voice and caps confidence at 0.9 with the
  * absent venue named. */
 export function expectedVenueCount(spec: PairSpec): number {
-  return 1 + spec.v2Routers.length + (spec.curve3pool === undefined ? 0 : 1);
+  return (
+    1 +
+    spec.v2Routers.length +
+    spec.v2Routers.length * (spec.v2HopConnectors?.length ?? 0) +
+    (spec.curve3pool === undefined ? 0 : 1) +
+    (spec.curveStEthPool === undefined ? 0 : 1)
+  );
 }
 
 export const PAIR_REGISTRY: ReadonlyArray<PairSpec> = [
@@ -1362,9 +1567,144 @@ export const PAIR_REGISTRY: ReadonlyArray<PairSpec> = [
     plausibleMaxOut: WBTC_BAND_MAX,
     venueSetLabel: "Uniswap V2/V3 and SushiSwap V2",
   },
+  // wstETH/ETH (epoch-37 graded pair; e37 leaders scored 0.9932/0.9745
+  // while the refusal scored 0). Venues measured live 2026-11-22 at block
+  // 26471676: Uniswap V3 fee-100 is the canonical wstETH/WETH pool
+  // (1.249392 WETH per wstETH; fee-500 is thin at 1.065188, fee-3000 is
+  // dust at 0.122995, fee-10000 has no pool and reverts), and the Curve
+  // stETH/ETH pool corroborates via the exact unwrap rate (1.249388 ETH).
+  // The V2 routers are deliberately NOT registered: measured live at the
+  // same block, Uniswap V2 returned 0.109285 WETH and SushiSwap V2
+  // 0.002909 WETH for 1 wstETH — dust liquidity at ~9% and ~0.2% of fair
+  // value, which the plausibility band would drop every single time,
+  // permanently capping confidence at 0.9 for zero corroboration. The
+  // output is wei-denominated (~1.25e18), above the published amount_out
+  // range [1e8, 1e11]; it is served with its exact wei units and an
+  // above-range honesty note, the same serve-exact-units rule the stable
+  // pairs use below the range (see routeExplanation.ts).
+  {
+    pair: "wstETH/ETH",
+    sellToken: WSTETH,
+    buyToken: WETH,
+    amountIn: 1_000_000_000_000_000_000n,
+    sellLabel: "1 wstETH",
+    buySymbol: "ETH",
+    v3Fees: [100, 500],
+    v2Routers: [],
+    curveStEthPool: { i: 1n, j: 0n },
+    plausibleMinOut: WSTETH_BAND_MIN,
+    plausibleMaxOut: WSTETH_BAND_MAX,
+    venueSetLabel: "Uniswap V3 and Curve stETH pool",
+    buyDecimals: 18,
+  },
 ];
 
 export const SUPPORTED_PAIRS: string[] = PAIR_REGISTRY.map((spec) => spec.pair);
+
+// ---------------------------------------------------------------------------
+// Generic pair resolution (2026-11-22, scope: resolve any verifiable ERC-20
+// pair on Ethereum mainnet; refuse honestly only when no real liquidity
+// exists or metadata is unreadable). A pair
+// outside the verified registry is resolved generically: directory symbols
+// (below) and any 0x address, whose decimals()/symbol() are read on-chain
+// at the pinned block. Generic pairs quote through the same block-pinned
+// Uniswap V3 fee tiers and both V2 routers as the registry; they have NO
+// fair-value band, so the plausibility bounds are scale-only backstops
+// (output capped at a 1e18:1 whole-token price ratio) and selection relies on
+// the relative median/agreement filters — disclosed in the answer/source.
+// Directory entries verified live 2026-11-22 (~block 26,471,700) via
+// eth_getCode (non-empty bytecode), decimals() and symbol(); MKR returns
+// its symbol as bytes32, the rest as dynamic strings.
+// ---------------------------------------------------------------------------
+export interface GenericTokenMeta {
+  address: string;
+  symbol: string;
+  decimals: number;
+  metadataEvidence?: Array<{ rpcUrl: string; request: Record<string, unknown>; response: Record<string, unknown> }>;
+}
+
+export const GENERIC_TOKENS: ReadonlyArray<GenericTokenMeta> = [
+  { address: "0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE", symbol: "SHIB", decimals: 18 },
+  { address: "0x514910771AF9Ca656af840dff83E8264EcF986CA", symbol: "LINK", decimals: 18 },
+  { address: "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984", symbol: "UNI", decimals: 18 },
+  { address: "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9", symbol: "AAVE", decimals: 18 },
+  { address: "0x6982508145454Ce325dDbE47a25d4ec3d2311933", symbol: "PEPE", decimals: 18 },
+  { address: "0xD533a949740bb3306d119CC777fa900bA034cd52", symbol: "CRV", decimals: 18 },
+  { address: "0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2", symbol: "MKR", decimals: 18 },
+  { address: "0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32", symbol: "LDO", decimals: 18 },
+];
+
+/** Metadata for the registry tokens, needed when a registry token is one
+ * side of a GENERIC pair (e.g. SHIB/USDC). */
+const KNOWN_TOKEN_META: ReadonlyArray<GenericTokenMeta> = [
+  { address: WETH, symbol: "WETH", decimals: 18 },
+  { address: USDC, symbol: "USDC", decimals: 6 },
+  { address: DAI, symbol: "DAI", decimals: 18 },
+  { address: USDT, symbol: "USDT", decimals: 6 },
+  { address: WBTC, symbol: "WBTC", decimals: 8 },
+  { address: WSTETH, symbol: "wstETH", decimals: 18 },
+];
+
+/** One generically-resolved side. decimals/symbol are present when the
+ * side came from a directory; a bare 0x address carries nulls and is
+ * filled from on-chain metadata at the pinned block. */
+export interface GenericPairSide {
+  address: string;
+  symbol: string | null;
+  decimals: number | null;
+}
+
+/** Generic-side counterpart of the pair parser, with the exact same
+ * trimming/control/separator rules as classifyPair. Returns null when
+ * either side is malformed, an unknown symbol, or the same token twice;
+ * such pairs stay on the existing no-route/malformed refusal path. */
+export function parseGenericPairSides(
+  raw: string,
+): { sell: GenericPairSide; buy: GenericPairSide } | null {
+  const trimmed = raw.replace(/^[ \t]+|[ \t]+$/g, "");
+  if (/[\x00-\x1f]/.test(trimmed)) return null;
+  const normalized = trimmed.replace(/->/g, "/");
+  const sides = normalized.includes("/")
+    ? normalized.split("/")
+    : normalized.includes("-")
+      ? normalized.split("-")
+      : [normalized];
+  if (sides.length !== 2) return null;
+  const sellRaw = sides[0].trim();
+  const buyRaw = sides[1].trim();
+  if (!PAIR_SIDE_RE.test(sellRaw) || !PAIR_SIDE_RE.test(buyRaw)) return null;
+  const one = (sideRaw: string): GenericPairSide | null => {
+    if (/^0x[0-9a-fA-F]{40}$/.test(sideRaw)) {
+      const lower = sideRaw.toLowerCase();
+      const known = [...KNOWN_TOKEN_META, ...GENERIC_TOKENS].find(
+        (t) => t.address.toLowerCase() === lower,
+      );
+      if (known !== undefined) {
+        return { address: known.address, symbol: known.symbol, decimals: known.decimals };
+      }
+      return { address: sideRaw, symbol: null, decimals: null };
+    }
+    const upper = sideRaw.toUpperCase();
+    const registryAddress = TOKEN_ALIASES[upper];
+    if (registryAddress !== undefined) {
+      const meta = KNOWN_TOKEN_META.find(
+        (t) => t.address.toLowerCase() === registryAddress.toLowerCase(),
+      );
+      return meta === undefined
+        ? null
+        : { address: meta.address, symbol: meta.symbol, decimals: meta.decimals };
+    }
+    const generic = GENERIC_TOKENS.find((t) => t.symbol.toUpperCase() === upper);
+    return generic === undefined
+      ? null
+      : { address: generic.address, symbol: generic.symbol, decimals: generic.decimals };
+  };
+  const sell = one(sellRaw);
+  const buy = one(buyRaw);
+  if (sell === null || buy === null) return null;
+  if (sell.address.toLowerCase() === buy.address.toLowerCase()) return null;
+  return { sell, buy };
+}
 
 /** Symbols and 0x addresses both resolve to the same token. "ETH" and
  * "WETH" are the same leg for routing purposes. */
@@ -1375,13 +1715,14 @@ const TOKEN_ALIASES: Record<string, string> = {
   DAI: DAI,
   USDT: USDT,
   WBTC: WBTC,
+  WSTETH: WSTETH,
 };
 
 function resolveRouteToken(raw: string): string | null {
   const trimmed = raw.trim();
   if (/^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
     const lower = trimmed.toLowerCase();
-    for (const addr of [WETH, USDC, DAI, USDT, WBTC]) {
+    for (const addr of [WETH, USDC, DAI, USDT, WBTC, WSTETH]) {
       if (addr.toLowerCase() === lower) return addr;
     }
     return null;
@@ -1430,8 +1771,7 @@ export type PairResolution =
     }
   | { kind: "malformed" };
 
-/** Classify a raw pair string for the no-route path (2026-11-22, owner
- * decision). A well-formed pair that does not resolve to the verified
+/** Classify a raw pair string for the no-route path. A well-formed pair that does not resolve to the verified
  * registry is answered with an HTTP 400 unavailable envelope (the
  * no-route refusal); malformed input stays 422 INVALID_PAIR. */
 export function classifyPair(raw: string): PairResolution {
@@ -1469,7 +1809,7 @@ export function classifyPair(raw: string): PairResolution {
 }
 
 /** Single revert switch for the unavailable-envelope refusal path
- * (owner decision 2026-11-22): ROUTE_NO_ROUTE_ENVELOPE=0 (or false/off)
+ * ROUTE_NO_ROUTE_ENVELOPE=0 (or false/off)
  * restores the legacy 422 INVALID_PAIR for every refused pair. Default
  * ON. Read at call time so tests and ops can toggle it without a
  * rebuild. */
@@ -1642,10 +1982,16 @@ class HeaderGarbageError extends Error {}
 // Handler.
 // ---------------------------------------------------------------------------
 
+export function normalizeRoutePhrase(raw: string | undefined): string | undefined {
+  if (raw === undefined || /[\x00-\x1f]/.test(raw)) return raw;
+  const phrase = raw.match(/^ *(?:1 +)?([A-Za-z0-9.]+|0x[0-9a-fA-F]{40}) +(?:to|for) +([A-Za-z0-9.]+|0x[0-9a-fA-F]{40}) *$/i);
+  return phrase ? `${phrase[1]}/${phrase[2]}` : raw;
+}
+
 export async function handleRoute(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
-  return handleRouteWithRpcs(query, MAINNET_RPCS);
+  return handleRouteWithRpcs(query, MAINNET_RPCS, ROUTE_TOTAL_DEADLINE_MS, true);
 }
 
 /**
@@ -1662,6 +2008,7 @@ export async function handleRoute(
  * without a wrapper; the wrapper always supplies all three.
  */
 interface RouteRequestContext {
+  includeAggregator?: boolean;
   signal?: AbortSignal;
   startedAtMs?: number;
   deadlineMs?: number;
@@ -1782,6 +2129,7 @@ export async function handleRouteWithRpcs(
   query: Record<string, string | undefined>,
   rpcUrls: string[],
   deadlineMs: number = ROUTE_TOTAL_DEADLINE_MS,
+  includeAggregator: boolean = false,
 ): Promise<Record<string, unknown>> {
   const startedAtMs = Date.now();
   const controller = new AbortController();
@@ -1790,6 +2138,7 @@ export async function handleRouteWithRpcs(
     return await Promise.race([
       handleRouteInner(query, rpcUrls, {
         signal: controller.signal,
+        includeAggregator,
         startedAtMs,
         deadlineMs,
       }),
@@ -1823,6 +2172,184 @@ async function saveRouteReceipt(receipt: Receipt, evidence: string, ctx: RouteRe
   if (ctx.signal?.aborted) {
     throw upstreamUnavailable("ROUTE_DEADLINE", "route request exceeded its total deadline; answer unavailable");
   }
+}
+
+/** Read ERC-20 decimals()/symbol() for an address that is not in any
+ * directory, at the SAME pinned block as the quotes, failing over across
+ * the quorum-agreeing RPCs in order. If every attempt fails, diagnostics
+ * distinguish infrastructure/malformed responses (502) from explicit
+ * contract reverts or empty metadata (a scoped metadata limitation). */
+async function fetchErc20Meta(
+  rpcUrls: string[],
+  blockRef: CanonicalBlockRef,
+  address: string,
+  callTimeoutMs: number,
+  signal?: AbortSignal,
+  diag?: QuoteDiag,
+): Promise<GenericTokenMeta | null> {
+  for (const rpcUrl of rpcUrls) {
+    try {
+      const [decCall, symCall] = await Promise.all([
+        rpcCall(rpcUrl, "eth_call", [{ to: address, data: buildDecimalsCalldata() }, blockRef], callTimeoutMs, signal),
+        rpcCall(rpcUrl, "eth_call", [{ to: address, data: buildSymbolCalldata() }, blockRef], callTimeoutMs, signal),
+      ]);
+      const decimals = decodeDecimalsReturn(decCall.result);
+      const symbol = decodeSymbolReturn(symCall.result);
+      if ((decimals === null || symbol === null) && !(decCall.result === "0x" && symCall.result === "0x")) {
+        if (diag !== undefined) diag.rpcError = true;
+      }
+      if (decimals !== null && symbol !== null) return {
+        address, symbol, decimals,
+        metadataEvidence: [
+          { rpcUrl, request: decCall.request, response: decCall.response },
+          { rpcUrl, request: symCall.request, response: symCall.response },
+        ],
+      };
+    } catch (error) {
+      if (diag !== undefined && !isExecutionRevert(error)) diag.rpcError = true;
+      // Retry within the agreeing set. Infrastructure errors are not
+      // evidence of missing ERC-20 metadata if every attempt fails.
+    }
+  }
+  return null;
+}
+
+/** Fill any directory-missing metadata for a generically resolved pair. */
+async function resolveGenericSides(
+  rpcOrder: string[],
+  blockRef: CanonicalBlockRef,
+  sides: { sell: GenericPairSide; buy: GenericPairSide },
+  callTimeoutMs: number,
+  signal?: AbortSignal,
+  diag?: QuoteDiag,
+): Promise<{ sell: GenericTokenMeta; buy: GenericTokenMeta } | null> {
+  const fill = (side: GenericPairSide): Promise<GenericTokenMeta | null> =>
+    side.symbol !== null && side.decimals !== null
+      ? Promise.resolve({ address: side.address, symbol: side.symbol, decimals: side.decimals })
+      : fetchErc20Meta(rpcOrder, blockRef, side.address, callTimeoutMs, signal, diag);
+  const [sell, buy] = await Promise.all([fill(sides.sell), fill(sides.buy)]);
+  if (sell === null || buy === null) return null;
+  return { sell, buy };
+}
+
+/** Synthetic PairSpec for a generic pair. Exactly 1 unit of the sell
+ * token, all four V3 fee tiers plus both V2 routers, and SCALE-ONLY
+ * plausibility backstops: no floor (a real quote can be dust-tiny in
+ * base units — 1 SHIB is ~10 USDC base units) and a cap at a 1e18:1
+ * unit-price ratio, computed in whole-token terms so decimal asymmetry
+ * cannot filter a real quote (1 USDC is ~1e5 SHIB: in base units that
+ * ratio is 1e17, which a base-unit cap would wrongly drop). No
+ * fair-value band exists for an arbitrary pair, so selection relies on
+ * the relative median/agreement filters, disclosed in answer/source. */
+export function buildGenericSpec(
+  sell: GenericTokenMeta,
+  buy: GenericTokenMeta,
+): PairSpec {
+  // A single ERC-20 amount must fit uint256, regardless of metadata.
+  if (sell.decimals > 77) {
+    throw unprocessable("AMOUNT_UNREPRESENTABLE", "one whole sell token exceeds the uint256 amount limit; no liquidity conclusion was made");
+  }
+  const amountIn = 10n ** BigInt(sell.decimals);
+  const uint256Max = (1n << 256n) - 1n;
+  const unitPriceCap = 10n ** BigInt(18 + buy.decimals);
+  return {
+    pair: `${sell.symbol}/${buy.symbol}`,
+    sellToken: sell.address,
+    buyToken: buy.address,
+    amountIn,
+    sellLabel: `1 ${sell.symbol}`,
+    buySymbol: buy.symbol,
+    v3Fees: [100, 500, 3000, 10000],
+    v2Routers: V2_VENUES,
+    plausibleMinOut: 0n,
+    plausibleMaxOut: unitPriceCap < uint256Max ? unitPriceCap : uint256Max,
+    venueSetLabel:
+      sell.address.toLowerCase() === WETH.toLowerCase() || buy.address.toLowerCase() === WETH.toLowerCase()
+        ? "Uniswap V3 direct (fees 100/500/3000/10000), Uniswap V2 and SushiSwap V2 direct"
+        : "Uniswap V3 direct (fees 100/500/3000/10000), Uniswap V2 and SushiSwap V2 direct and via WETH",
+    generic: true,
+    buyDecimals: buy.decimals,
+    // 2-hop via WETH covers pairs with no direct pool but real liquidity
+    // on both legs (e.g. SHIB/LINK). Not useful when a side IS WETH.
+    v2HopConnectors:
+      sell.address.toLowerCase() === WETH.toLowerCase() ||
+      buy.address.toLowerCase() === WETH.toLowerCase()
+        ? []
+        : [{ token: WETH, symbol: "WETH" }],
+  };
+}
+
+/** Receipted refusal for a generically resolved pair whose venue calls
+ * ALL answered at the pinned block without any pool quoting a positive
+ * output. This is a limited route-search result, not proof of globally
+ * absent liquidity. Transport failures stay a 502. */
+async function refuseGenericNoLiquidity(
+  rawPair: string,
+  spec: PairSpec,
+  blockNumber: number,
+  ctx: RouteRequestContext,
+): Promise<ApiError> {
+  const cappedRaw = rawPair.length > 80 ? rawPair.slice(0, 80) + "…" : rawPair;
+  const connectors = spec.v2HopConnectors ?? [];
+  const searchedRoutes = connectors.length === 0
+    ? "direct routes"
+    : `direct routes and routes via ${connectors.map(hop => hop.symbol).join(", ")}`;
+  const summary =
+    `No route found for selling ${spec.sellLabel} for ${spec.buySymbol} on Ethereum mainnet: ` +
+    `every verified venue call (${spec.venueSetLabel}, block-pinned eth_call quotes attested by ` +
+    `a 2-of-3 RPC quorum) answered at block ${blockNumber} and none returned a pool quote with a ` +
+    `positive output through the tested ${searchedRoutes}. This is not proof that the tokens lack ` +
+    `liquidity elsewhere: pools, fee tiers and other multi-hop routes outside this search were not ` +
+    `tested, and a revert can also reflect an unsupported token or quoter limitation. ` +
+    `This service does not invent quotes it cannot verify.`;
+  const receiptEvidence = JSON.stringify({
+    pair_raw: cappedRaw,
+    pair_raw_length: rawPair.length,
+    resolution: "no-liquidity",
+    sell_token: spec.sellToken,
+    buy_token: spec.buyToken,
+    block_number: blockNumber,
+    verified_venues: `${spec.venueSetLabel} (block-pinned eth_call quotes)`,
+  });
+  const receipt = makeReceipt(
+    INTENT,
+    `verireceipt venue set (every venue call answered at block ${blockNumber}; no pool quoted the pair)`,
+    receiptEvidence,
+    "venue calls answered on the quorum-agreeing RPCs; every quoter reverted or returned zero",
+  );
+  await saveRouteReceipt(receipt, receiptEvidence, ctx);
+  return routeUnavailable("NO_ROUTE", `no route found for pair "${cappedRaw}"`, summary, receipt);
+}
+
+/** Receipted refusal for a generic pair whose token metadata could not
+ * be read at the pinned block from any agreeing RPC. */
+async function refuseGenericMetadata(
+  rawPair: string,
+  sides: { sell: GenericPairSide; buy: GenericPairSide },
+  ctx: RouteRequestContext,
+): Promise<ApiError> {
+  const cappedRaw = rawPair.length > 80 ? rawPair.slice(0, 80) + "…" : rawPair;
+  const summary =
+    `No route found for pair "${cappedRaw}": at least one token address did not return readable ` +
+    `ERC-20 metadata (decimals()/symbol()) at the pinned Ethereum block through this service's ` +
+    `agreeing RPCs, so this service cannot determine the units needed for a quote. ` +
+    `This is a metadata limitation, not proof that the address is not an ERC-20 or lacks liquidity. ` +
+    `This service does not invent quotes it cannot verify.`;
+  const receiptEvidence = JSON.stringify({
+    pair_raw: cappedRaw,
+    pair_raw_length: rawPair.length,
+    resolution: "metadata-unreadable",
+    sell_token: sides.sell.address,
+    buy_token: sides.buy.address,
+  });
+  const receipt = makeReceipt(
+    INTENT,
+    "verireceipt generic resolution (token metadata unreadable at the pinned block)",
+    receiptEvidence,
+    "no venue was queried: token metadata unreadable",
+  );
+  await saveRouteReceipt(receipt, receiptEvidence, ctx);
+  return routeUnavailable("NO_ROUTE", `no route found for pair "${cappedRaw}"`, summary, receipt);
 }
 
 /** The receipted refusal path:
@@ -1888,7 +2415,10 @@ async function handleRouteInner(
       );
     }
   }
-  const pair = query.pair;
+  const requestedPair = query.pair;
+  // Accept only explicit one-unit language; do not silently change quantities.
+  const pair = normalizeRoutePhrase(requestedPair);
+  const pairNormalization = pair !== requestedPair ? `Requested "${requestedPair}" resolved explicitly to ${pair}; quotes sell exactly one unit of the first token, never reverse the direction. ` : "";
   if (pair === undefined) {
     throw badRequest("MISSING_PARAM", `pair is required; supported pairs: ${SUPPORTED_PAIRS.join(", ")}`);
   }
@@ -1897,18 +2427,28 @@ async function handleRouteInner(
   // downstream values and receipts. A refused unregistered/malformed pair
   // uses the HTTP400 unavailable envelope only after its evidence is saved.
   const resolution = classifyPair(pair);
-  if (resolution.kind !== "registered") {
+  let spec: PairSpec | undefined;
+  let genericSides: { sell: GenericPairSide; buy: GenericPairSide } | null = null;
+  if (resolution.kind === "registered") {
+    spec = resolution.spec;
+  } else {
     if (!noRouteEnvelopeEnabled()) {
       throw unprocessable(
         "INVALID_PAIR",
         `unsupported pair "${pair}"; supported pairs: ${SUPPORTED_PAIRS.join(", ")}`,
       );
     }
-    // Refusals throw AFTER the receipt is minted and persisted (the
-    // same phantom-receipt guard as the quote path applies).
-    throw await refusePair(pair, resolution, ctx);
+    // Generic resolution (2026-11-22): a well-formed pair outside the
+    // verified registry first resolves through the generic directory and
+    // on-chain metadata; only pairs that cannot resolve keep the
+    // receipted refusal path.
+    genericSides = parseGenericPairSides(pair);
+    if (genericSides === null) {
+      // Refusals throw AFTER the receipt is minted and persisted (the
+      // same phantom-receipt guard as the quote path applies).
+      throw await refusePair(pair, resolution, ctx);
+    }
   }
-  const spec = resolution.spec;
   if (rpcUrls.length < 2) {
     throw upstreamUnavailable(
       "RPC_CONFIG",
@@ -2190,6 +2730,28 @@ async function handleRouteInner(
     );
   }
   const callTimeoutMs = venueCallTimeoutMs(ctx);
+  // Generic pairs: fill any directory-missing metadata at the pinned
+  // block (same quorum-agreeing RPCs, same canonical hash), then build
+  // the synthetic spec. Unreadable metadata is an honest refusal, never
+  // an invented quote.
+  let genericMeta: { sell: GenericTokenMeta; buy: GenericTokenMeta } | null = null;
+  if (genericSides !== null) {
+    const metadataDiag: QuoteDiag = { rpcError: false };
+    genericMeta = await resolveGenericSides(rpcOrder, blockRef, genericSides, callTimeoutMs, ctx.signal, metadataDiag);
+    if (genericMeta === null) {
+      if (metadataDiag.rpcError) {
+        throw upstreamUnavailable("METADATA_RPC_FAILED", "token metadata could not be verified because RPC requests failed; no liquidity conclusion was made");
+      }
+      throw await refuseGenericMetadata(pair, genericSides, ctx);
+    }
+    spec = buildGenericSpec(genericMeta.sell, genericMeta.buy);
+  }
+  if (spec === undefined) {
+    // Unreachable: classification assigns spec or throws; the guard keeps
+    // the invariant explicit instead of relying on a non-null assertion.
+    throw upstreamUnavailable("INTERNAL", "pair resolution produced no spec");
+  }
+  const genericDiag: QuoteDiag = { rpcError: false };
   const curve = spec.curve3pool;
   const venueAttempts: Array<{
     offset: number;
@@ -2198,13 +2760,33 @@ async function handleRouteInner(
     {
       offset: 0,
       quoter: (rpcUrl, signal) =>
-        quoteV3AtBlock(rpcUrl, blockRef, spec.sellToken, spec.buyToken, spec.amountIn, spec.v3Fees, callTimeoutMs, signal),
+        quoteV3AtBlock(rpcUrl, blockRef, spec.sellToken, spec.buyToken, spec.amountIn, spec.v3Fees, callTimeoutMs, signal, genericDiag),
     },
     ...spec.v2Routers.map((venue, index) => ({
       offset: index + 1,
       quoter: (rpcUrl: string, signal?: AbortSignal) =>
-        quoteV2AtBlock(rpcUrl, blockRef, venue.router, venue.name, spec.amountIn, [spec.sellToken, spec.buyToken], callTimeoutMs, signal),
+        quoteV2AtBlock(rpcUrl, blockRef, venue.router, venue.name, spec.amountIn, [spec.sellToken, spec.buyToken], callTimeoutMs, signal, genericDiag),
     })),
+    // Generic 2-hop venues: one per V2 router per connector, named so the
+    // route is visible in the answer and the receipt evidence (the exact
+    // getAmountsOut calldata carries the 3-token path).
+    ...spec.v2Routers.flatMap((venue, index) =>
+      (spec.v2HopConnectors ?? []).map((hop) => ({
+        offset: index + 1,
+        quoter: (rpcUrl: string, signal?: AbortSignal) =>
+          quoteV2AtBlock(
+            rpcUrl,
+            blockRef,
+            venue.router,
+            `${venue.name} via ${hop.symbol}`,
+            spec.amountIn,
+            [spec.sellToken, hop.token, spec.buyToken],
+            callTimeoutMs,
+            signal,
+            genericDiag,
+          ),
+      })),
+    ),
     ...(curve === undefined
       ? []
       : [
@@ -2212,6 +2794,23 @@ async function handleRouteInner(
             offset: spec.v2Routers.length + 1,
             quoter: (rpcUrl: string, signal?: AbortSignal) =>
               quoteCurve3poolAtBlock(rpcUrl, blockRef, curve.i, curve.j, spec.amountIn, callTimeoutMs, signal),
+          },
+        ]),
+    ...(spec.curveStEthPool === undefined
+      ? []
+      : [
+          {
+            offset: spec.v2Routers.length + (curve === undefined ? 1 : 2),
+            quoter: (rpcUrl: string, signal?: AbortSignal) =>
+              quoteCurveStEthAtBlock(
+                rpcUrl,
+                blockRef,
+                (spec.curveStEthPool as { i: bigint; j: bigint }).i,
+                (spec.curveStEthPool as { i: bigint; j: bigint }).j,
+                spec.amountIn,
+                callTimeoutMs,
+                signal,
+              ),
           },
         ]),
   ];
@@ -2234,6 +2833,8 @@ async function handleRouteInner(
   // grace expires serves nothing, whenever it reports later. The two
   // waits are different mechanisms with different purposes, and the
   // grace is bounded at 1 s and deadline-aware, not 4.5 s.
+  const aggregatorPending = ctx.includeAggregator && remainingBudgetMs(ctx) > 1500
+    ? observeVelora(blockNumber, ctx.signal, { sellToken: spec.sellToken, buyToken: spec.buyToken, amountIn: spec.amountIn, sellDecimals: spec.amountIn.toString().length - 1, buyDecimals: spec.buyDecimals ?? (spec.buyToken.toLowerCase() === USDC.toLowerCase() || spec.buyToken.toLowerCase() === USDT.toLowerCase() ? 6 : spec.buyToken.toLowerCase() === WBTC.toLowerCase() ? 8 : 18) }) : null;
   const venueResults = await Promise.allSettled(
     venueAttempts.map((attempt) =>
       tryVenue(rotatedOrder(attempt.offset), blockHex, attempt.quoter, ctx.signal),
@@ -2246,6 +2847,12 @@ async function handleRouteInner(
     }
   });
   if (quotes.length === 0) {
+    // Generic pairs: when every venue call ANSWERED (all reverts/zero,
+    // no transport failure), zero quotes is a proven no-liquidity
+    // finding — refuse honestly with a receipt instead of a 502.
+    if (spec.generic === true && !genericDiag.rpcError) {
+      throw await refuseGenericNoLiquidity(pair, spec, blockNumber, ctx);
+    }
     throw upstreamUnavailable(
       "ALL_QUOTERS_FAILED",
       `all quoters failed at Ethereum block ${blockNumber}; no quote returned`,
@@ -2266,10 +2873,31 @@ async function handleRouteInner(
   // agreement band, applied AFTER decoding and BEFORE winner selection.
   // A quote failing any stage is dropped as if the venue failed; if every
   // quote is dropped the endpoint fails closed with ALL_QUOTERS_FAILED.
-  const plausibleQuotes = filterPlausibleQuotes(quotes, {
-    maxOut: spec.plausibleMaxOut,
-    minOut: spec.plausibleMinOut,
-  });
+  const bounds = { maxOut: spec.plausibleMaxOut, minOut: spec.plausibleMinOut };
+  let plausibleQuotes = filterPlausibleQuotes(quotes, bounds);
+  // Adding route coverage must not make a usable direct-only result worse.
+  // Thin hop routes can pull the iterative lower median down repeatedly,
+  // dropping the best direct quote as a high outlier until only dust survives.
+  // Keep the independently filtered direct baseline in that case. Its safety
+  // checks are unchanged; this does not admit a quote rejected by that baseline.
+  const isHop = (q: VenueQuote) => q.venue.endsWith(" via WETH");
+  const directBaseline = quotes.some(isHop)
+    ? filterPlausibleQuotes(quotes.filter(q => !isHop(q)), bounds)
+    : [];
+  const directBest = pickBestQuote(directBaseline);
+  const combinedBest = pickBestQuote(plausibleQuotes);
+  const useDirectBaseline = directBest !== null &&
+    (combinedBest === null || directBest.amountOut > combinedBest.amountOut);
+  const directHopSafety = useDirectBaseline ? {
+    policy: "non-degrading direct-only baseline",
+    combined_winner_base_units: combinedBest?.amountOut.toString() ?? null,
+    direct_winner_base_units: directBest.amountOut.toString(),
+    rejected_hop_quotes: quotes.filter(isHop).map(q => ({
+      venue: q.venue, amount_out_base_units: q.amountOut.toString(),
+      rpc_url: q.rpcUrl, request: q.request, response: q.response,
+    })),
+  } : null;
+  if (useDirectBaseline) plausibleQuotes = directBaseline;
   if (plausibleQuotes.length === 0) {
     throw upstreamUnavailable(
       "ALL_QUOTERS_FAILED",
@@ -2351,27 +2979,69 @@ async function handleRouteInner(
   if (spec.curve3pool !== undefined && !plausibleQuotes.some((q) => q.venue === "Curve 3pool")) {
     degradedReasons.push("Curve 3pool produced no plausible quote");
   }
+  if (spec.curveStEthPool !== undefined && !plausibleQuotes.some((q) => q.venue === "Curve stETH pool")) {
+    degradedReasons.push("Curve stETH pool produced no plausible quote");
+  }
+  if (directHopSafety !== null) {
+    degradedReasons.push("direct-versus-hop disagreement: kept the independently filtered direct-only baseline because adding hop candidates reduced its output");
+  }
   const degraded = degradedReasons.length > 0;
   const confidence = plausibleQuotes.length >= 2 && !degraded ? 1.0 : 0.9;
-  const answer = explainRouteQuote({
+  let answer = explainRouteQuote({
     blockNumber, venue: best.venue, amountOut: best.amountOut,
     survivingQuotes: plausibleQuotes.length, degradedReasons,
     sellLabel: spec.sellLabel, buySymbol: spec.buySymbol,
     venueSetLabel: spec.venueSetLabel,
+    buyDecimals: spec.buyDecimals,
     quotes: plausibleQuotes.map((q) => ({ venue: q.venue, amountOut: q.amountOut })),
   });
+  if (spec.generic === true) {
+    answer +=
+      ` No fair-value band is published for this pair: quote selection used relative ` +
+      `cross-venue agreement only (median rule and ±5% agreement band), with scale-only ` +
+      `plausibility bounds [${spec.plausibleMinOut}, ${spec.plausibleMaxOut}] ${spec.buySymbol} ` +
+      `base units as the absurdity backstop, and the token metadata (symbol/decimals) came ` +
+      `from this service's verified directory or the contracts' own decimals()/symbol() ` +
+      `calls at the pinned block.`;
+  }
 
+  answer = pairNormalization + answer;
+  const outputDecimals = spec.buyDecimals ?? (spec.buyToken.toLowerCase() === USDC.toLowerCase() || spec.buyToken.toLowerCase() === USDT.toLowerCase() ? 6 : spec.buyToken.toLowerCase() === WBTC.toLowerCase() ? 8 : 18);
+  const aggregator = aggregatorPending ? await aggregatorPending : null;
+  const summary = aggregator ? aggregatorSummary(best.amountOut, aggregator) : null;
+  const servedAmount = summary?.median ?? best.amountOut;
+  if (aggregator) {
+    answer = `Reported amount_out: ${servedAmount} ${spec.buySymbol} base units (${Number(servedAmount) / 10 ** outputDecimals} ${spec.buySymbol}), before gas. ` +
+      `Convention: lower median of surviving source observations, using the block-pinned venue baseline as one observation and an eligible Velora quote as the other; with two observations this means the lower actual quote, not their average. ` + answer;
+    answer += ` Source observations: block-pinned venue baseline ${best.amountOut} base units (${Number(best.amountOut) / 10 ** outputDecimals} ${spec.buySymbol}); ` +
+      (aggregator.excluded ? `Velora/ParaSwap excluded: ${aggregator.excluded}. ` :
+        `Velora/ParaSwap ${aggregator.amount_out} base units (${Number(aggregator.amount_out) / 10 ** outputDecimals} ${spec.buySymbol}), block ${aggregator.block_number}. `) +
+      `Reported amount_out is the lower median of surviving source observations: ${servedAmount} base units (${Number(servedAmount) / 10 ** outputDecimals} ${spec.buySymbol}). ` +
+      `Best single route is ${summary!.bestSource} at ${summary!.best} base units (${Number(summary!.best) / 10 ** outputDecimals} ${spec.buySymbol}), before gas. ` +
+      `The aggregator is a provider-block observation, not hash-pinned by our RPC quorum. KyberSwap unavailable (403); no second aggregator claimed.`;
+  }
   // 4. Receipt over the exact winning quoter call, pinned to the block.
   const receiptEvidence = JSON.stringify({
     block_number: blockNumber,
     block_number_hex: blockHex,
     block_hash: block.blockHash,
     winning_venue: best.venue,
+    ...(aggregator ? { aggregator, amount_out_method: "lower median of block-pinned baseline and surviving Velora observation", amount_out: servedAmount.toString() } : {}),
+    ...(directHopSafety === null ? {} : { direct_hop_safety: directHopSafety }),
     pair: spec.pair,
     amount_in: spec.amountIn.toString(),
     amount_in_label: spec.sellLabel,
     request: best.request,
     response: best.response,
+    ...(genericMeta === null
+      ? {}
+      : {
+          generic_resolution: {
+            sell_token: genericMeta.sell,
+            buy_token: genericMeta.buy,
+            metadata_source: "verified directory or on-chain decimals()/symbol() at the pinned block",
+          },
+        }),
   });
   const receipt = makeReceipt(INTENT, winningRpc, receiptEvidence, votes);
 
@@ -2392,25 +3062,40 @@ async function handleRouteInner(
   return envelope(
     INTENT,
     {
-      amount_out: Number(best.amountOut),
+      // R126 (2026-11-22): a JSON number cannot hold a wei-scale integer
+      // exactly, so amount_out stays a best-effort rendering and the exact
+      // base-unit integer rides alongside as a decimal string.
+      amount_out: Number(servedAmount),
+      amount_out_base_units: servedAmount.toString(),
+      ...(summary ? { best_route: summary.bestSource, best_amount_out_base_units: summary.best.toString(), baseline_amount_out_base_units: best.amountOut.toString() } : {}),
       block_number: blockNumber,
       winning_venue: best.venue,
+      ...(aggregator && !aggregator.excluded && aggregator.amount_out ? {
+        source_spread_pct: Number((BigInt(aggregator.amount_out) > best.amountOut ? BigInt(aggregator.amount_out) - best.amountOut : best.amountOut - BigInt(aggregator.amount_out)) * 1000000n / best.amountOut) / 10000,
+      } : {}),
     },
     receipt,
     {
       answer,
       verdict: "verified",
-      confidence,
+      confidence: aggregator ? Math.min(confidence, 0.9) : confidence,
       source:
         `Block-pinned ${spec.venueSetLabel} quotes via 2-of-3 Ethereum RPC ` +
         "(quorum-pinned); each venue quote comes from a single RPC — quorum attests " +
         "block number+hash agreement only; the winner is the max quote within ±5% " +
         `of the cross-venue median after this pair's plausibility band ` +
-        `[${spec.plausibleMinOut}, ${spec.plausibleMaxOut}] ${spec.buySymbol} base units, and confidence ` +
+        `[${spec.plausibleMinOut}, ${spec.plausibleMaxOut}] ${spec.buySymbol} base units` +
+        (spec.generic === true
+          ? " (scale-only backstops: no fair-value band exists for this pair; selection relied on relative agreement alone)"
+          : "") +
+        ", and confidence " +
         `is 1.0 only when all ${expectedVenues} venues this pair registers produced plausible quotes with no ` +
         "quote dropped by the filter, and reflects venue count, family coverage " +
         "and cross-venue agreement" +
-        (degraded ? `; degraded: ${degradedReasons.join("; ")}` : ""),
+        "; amount_out is the JSON-number rendering (approximate above 2^53 base units)" +
+        "; amount_out_base_units is the exact integer base-unit string" +
+        (degraded ? `; degraded: ${degradedReasons.join("; ")}` : "") +
+        (aggregator ? `; reported amount_out uses lower-median source observations; Velora provider-block observation ${aggregator.url}; KyberSwap unavailable (403)` : ""),
     },
   );
 }

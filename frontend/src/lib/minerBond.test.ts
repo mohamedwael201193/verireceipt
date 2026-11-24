@@ -21,18 +21,18 @@ import { SPRINT_STEPS } from "../pages/landing/data";
 const word = (n: number) => "0x" + n.toString(16).padStart(64, "0");
 
 describe("miner bond (single source)", () => {
-  it("is the on-chain 6160 bond for six intents: 1,500,000 = $1.50", () => {
+  it("is the on-chain 6177 bond for 45 intents: 4,320,000 = $4.32", () => {
     expect(BOND_REGISTRATION_ID).toBe(SEPOLIA_REGISTRATION_ID);
-    expect(BOND_INTENT_COUNT).toBe(6);
-    expect(MINER_BOND_BASE_UNITS).toBe(1_500_000);
-    expect(MINER_BOND_USD).toBe(1.5);
-    expect(MINER_BOND_USD_TEXT).toBe("$1.50");
+    expect(BOND_INTENT_COUNT).toBe(45);
+    expect(MINER_BOND_BASE_UNITS).toBe(4_320_000);
+    expect(MINER_BOND_USD).toBe(4.32);
+    expect(MINER_BOND_USD_TEXT).toBe("$4.32");
   });
 
   it("reproduces quoteMinerBond(n) as read on-chain 2026-11-21", () => {
     // live: n=1 1000000, 2 1100000, 3 1200000, 6 1500000, 9 1800000, 10 1870000, 12 2010000
     const live: Array<[number, number]> = [
-      [1, 1_000_000], [2, 1_100_000], [3, 1_200_000], [6, 1_500_000], [9, 1_800_000], [10, 1_870_000], [12, 2_010_000],
+      [1, 1_000_000], [2, 1_100_000], [3, 1_200_000], [6, 1_500_000], [9, 1_800_000], [10, 1_870_000], [12, 2_010_000], [14, 2_150_000],
     ];
     for (const [n, v] of live) expect(bondForIntents(n)).toBe(v);
     expect(bondForIntents(BOND_INTENT_COUNT)).toBe(MINER_BOND_BASE_UNITS);
@@ -40,18 +40,18 @@ describe("miner bond (single source)", () => {
   });
 
   it("formats base units exactly", () => {
-    expect(formatUsdcBaseUnits(1_500_000)).toBe("$1.50");
+    expect(formatUsdcBaseUnits(2_150_000)).toBe("$2.15");
     expect(formatUsdcBaseUnits(1_870_000)).toBe("$1.87");
     expect(formatUsdcBaseUnits(BigInt(2_010_000))).toBe("$2.01");
     expect(formatUsdcBaseUnits(0)).toBe("$0.00");
   });
 
   it("every display derives from it (no stale $1.40)", () => {
-    expect(BOND_DISPLAY).toBe("$1.50 Test USDC Bond");
-    expect(MINER_BOND_USDC).toBe(1.5);
-    expect(DASH_BOND).toBe("$1.50 Test USDC");
+    expect(BOND_DISPLAY).toBe("$4.32 Test USDC Bond");
+    expect(MINER_BOND_USDC).toBe(4.32);
+    expect(DASH_BOND).toBe("$4.32 Test USDC");
     const plan = SPRINT_STEPS.map((s) => s.g2).join("\n");
-    expect(plan).toContain("$1.50 Test USDC bond");
+    expect(plan).toContain("$4.32 Test USDC bond");
     expect(plan).not.toContain("$1.40");
   });
 
@@ -65,7 +65,7 @@ describe("miner bond (single source)", () => {
 describe("fetchLiveMinerBond", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("reads minerBond(6160) and quoteMinerBond(6) and reports a match", async () => {
+  it("reads minerBond(6177) and quoteMinerBond(45) and reports a match", async () => {
     const calls: string[] = [];
     vi.stubGlobal(
       "fetch",
@@ -74,16 +74,16 @@ describe("fetchLiveMinerBond", () => {
         const body = JSON.parse(String(init.body));
         calls.push(body.params[0].data);
         expect(body.params[0].to).toBe("0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b");
-        const out = body.params[0].data.startsWith(SEL_QUOTE_MINER_BOND) ? word(1_500_000) + word(1_500_000).slice(2) : word(1_500_000);
+        const out = body.params[0].data.startsWith(SEL_QUOTE_MINER_BOND) ? word(4_320_000) + word(4_320_000).slice(2) : word(4_320_000);
         return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: out }), { status: 200 });
       }),
     );
     const r = await fetchLiveMinerBond();
-    expect(r.registrationBond).toBe(BigInt(1_500_000));
-    expect(r.quoteForIntents).toBe(BigInt(1_500_000));
+    expect(r.registrationBond).toBe(BigInt(4_320_000));
+    expect(r.quoteForIntents).toBe(BigInt(4_320_000));
     expect(r.matchesConstant).toBe(true);
     expect(calls.sort()).toEqual(
-      [SEL_MINER_BOND + (6160).toString(16).padStart(64, "0"), SEL_QUOTE_MINER_BOND + (6).toString(16).padStart(64, "0")].sort(),
+      [SEL_MINER_BOND + (6177).toString(16).padStart(64, "0"), SEL_QUOTE_MINER_BOND + (45).toString(16).padStart(64, "0")].sort(),
     );
   });
 

@@ -41,7 +41,8 @@
         "outcome": "Native indicator fetch hit existing12s budget and returned502WORLD_BANK_UNAVAILABLE; no HTTP challenge recorded, no source or timeout change. One later native retry after other independent captures."
       }
     ],
-    "initial_no_data_record_sha256": "a3f06c1a19666a86a2602e9a20afc063fb655a87db7e7331a579e707a072040e"
+    "initial_no_data_record_sha256": "a3f06c1a19666a86a2602e9a20afc063fb655a87db7e7331a579e707a072040e",
+    "repinned_2026_11_23": "Re-pinned after handler changes: GAS_PRICE_GENERAL serves computed transfer_fee_usd (Coinbase spot leg recorded), TOKEN_TOTAL_SUPPLY receipt carries chain_resolution, MACRO echoes indicator_input. One new recorded row: Coinbase ETH-USD spot. All other rows and scenarios replay unchanged."
   },
   "scenarios": {
     "gas": {
@@ -49,14 +50,15 @@
         "chain": "ethereum"
       },
       "expected_fields": {
-        "answer": "Current gas price on ethereum: 0.162859 gwei (3/3 sources agreed).",
+        "answer": "Current gas price on ethereum: 0.162859 gwei (3/3 sources agreed). 21,000-gas transfer ≈ $0.005883 = 0.162859 gwei x 21000 gas x ETH $1720.19 (Coinbase spot) / 1e9. Not a quote for a future transaction; the price moves block to block.",
         "chain": "ethereum",
         "gas_price_gwei": 0.162859,
+        "transfer_fee_usd": 0.005883,
         "as_of": "2026-11-22T10:34:43.395Z",
         "verdict": "verified",
         "confidence": 1,
         "source": "EVM RPC quorum (ethereum, 2-of-3)",
-        "checked_at": "2026-11-22T10:34:43.397Z"
+        "checked_at": "2026-11-22T10:34:43.395Z"
       },
       "expected_raw_text": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x9b50954\"}",
       "expected_raw_sha256": "2f2dad18b4d1ed859d5ae06ded8ae1c0255990eaa0e9365460956c3f54c9d19a",
@@ -68,10 +70,11 @@
         "country": "AFG"
       },
       "expected_fields": {
-        "answer": "Afghanistan latest published unemployment rate in 2025: 13.351% of the total labour force (World Bank SL.UEM.TOTL.ZS).",
+        "answer": "Mapping: unemployment rate -> World Bank SL.UEM.TOTL.ZS. Afghanistan latest published observation in 2025: 13.351 % of total labour force.",
         "rate_pct": 13.351,
         "indicator": "unemployment rate",
         "indicator_id": "SL.UEM.TOTL.ZS",
+        "indicator_input": "unemployment rate",
         "country": "Afghanistan",
         "country_iso3": "AFG",
         "year": 2025,
@@ -80,7 +83,7 @@
         "verdict": "verified",
         "confidence": 1,
         "source": "World Bank API (api.worldbank.org, authoritative publisher)",
-        "checked_at": "2026-11-22T10:35:38.969Z"
+        "checked_at": "2026-11-22T10:35:38.967Z"
       },
       "expected_raw_text": "[{\"page\":1,\"pages\":1,\"per_page\":100,\"total\":1,\"sourceid\":null,\"lastupdated\":\"2026-11-11\"},[{\"indicator\":{\"id\":\"SL.UEM.TOTL.ZS\",\"value\":\"Unemployment, total (% of total labor force) (modeled ILO estimate)\"},\"country\":{\"id\":\"AF\",\"value\":\"Afghanistan\"},\"countryiso3code\":\"AFG\",\"date\":\"2025\",\"value\":13.351,\"obs_status\":\"\",\"decimal\":1}]]",
       "expected_raw_sha256": "f85238d6cc4952dfd4d075c372bfe546b775f9cf8011cb14ce67eee60ca6f42f",
@@ -99,10 +102,10 @@
         "verdict": "verified",
         "confidence": 0.9,
         "source": "EVM RPC quorum (ethereum, 2-of-3, finalized)",
-        "checked_at": "2026-11-22T10:36:29.450Z"
+        "checked_at": "2026-11-22T10:36:29.449Z"
       },
-      "expected_raw_text": "{\"as_of\":\"2026-11-22T10:36:29.449Z\",\"block_tag\":\"finalized\",\"chain\":\"ethereum\",\"decimals\":18,\"method\":\"eth_call totalSupply+decimals+symbol\",\"rpc_url\":\"https://eth.drpc.org\",\"supply_base_units_hex\":\"0xe16e099bbe4792f21b90443\",\"token_contract\":\"0x6B175474E89094C44Da98b954EedeAC495271d0F\",\"token_symbol_onchain\":\"DAI\"}",
-      "expected_raw_sha256": "dbe076018d756ec730d249cb703699a4be4ce74b5b2ccc8263e377ef2668a49c",
+      "expected_raw_text": "{\"as_of\":\"2026-11-22T10:36:29.449Z\",\"block_tag\":\"finalized\",\"chain\":\"ethereum\",\"chain_resolution\":\"not used (chain given)\",\"decimals\":18,\"method\":\"eth_call totalSupply+decimals+symbol\",\"rpc_url\":\"https://eth.drpc.org\",\"supply_base_units_hex\":\"0xe16e099bbe4792f21b90443\",\"token_contract\":\"0x6B175474E89094C44Da98b954EedeAC495271d0F\",\"token_symbol_onchain\":\"DAI\"}",
+      "expected_raw_sha256": "7c9af501b35bb39dcca2625f7dfa3fcd8211b44dd1de1ee6144ecf985637a438",
       "clock": "2026-11-22T10:36:29.449Z"
     },
     "balance_native": {
@@ -111,7 +114,16 @@
         "address": "0x881d40237659c251811cec9c364ef91dc08d300c"
       },
       "expected_fields": {
-        "answer": "0x881d40237659c251811cec9c364ef91dc08d300c holds 0 ETH on ethereum (finalized block, 2/3 sources agreed).",
+        "answer": "0x881d40237659c251811cec9c364ef91dc08d300c holds 0 ETH on ethereum (finalized block, 2/3 sources agreed). Zero balance; unknown; outgoing transaction count unavailable. account context unavailable: no 2-source exact block/hash/nonce/code quorum; balance remains independently finalized-tag agreed.",
+        "transaction_count": null,
+        "is_contract": null,
+        "account_type": "unknown",
+        "block_number": null,
+        "context_scope": "account context unavailable: no 2-source exact block/hash/nonce/code quorum; balance remains independently finalized-tag agreed",
+        "balance_wei": "0",
+        "balance_base_units": "0",
+        "funded": false,
+        "funding_status": "zero_balance",
         "address": "0x881d40237659c251811cec9c364ef91dc08d300c",
         "chain": "ethereum",
         "balance": 0,
@@ -122,8 +134,8 @@
         "source": "EVM RPC quorum (ethereum, 2-of-3, finalized)",
         "checked_at": "2026-11-22T10:36:29.759Z"
       },
-      "expected_raw_text": "{\"address\":\"0x881d40237659c251811cec9c364ef91dc08d300c\",\"as_of\":\"2026-11-22T10:36:29.759Z\",\"balance_base_units_hex\":\"0x0\",\"block_tag\":\"finalized\",\"chain\":\"ethereum\",\"decimals\":18,\"ens\":null,\"method\":\"eth_getBalance\",\"rpc_url\":\"https://eth.drpc.org\",\"token_contract\":null,\"token_symbol\":\"ETH\"}",
-      "expected_raw_sha256": "02b1a20b9b8d51f05710cb4426be943ea6ba84f0bbbe5c8da7e608732779884b",
+      "expected_raw_text": "{\"account_context\":{\"account_type\":\"unknown\",\"block_number\":null,\"context_evidence\":[],\"context_scope\":\"account context unavailable: no 2-source exact block/hash/nonce/code quorum; balance remains independently finalized-tag agreed\",\"is_contract\":null,\"transaction_count\":null},\"address\":\"0x881d40237659c251811cec9c364ef91dc08d300c\",\"as_of\":\"2026-11-22T10:36:29.759Z\",\"balance_base_units_hex\":\"0x0\",\"block_tag\":\"finalized\",\"chain\":\"ethereum\",\"decimals\":18,\"ens\":null,\"method\":\"eth_getBalance\",\"rpc_url\":\"https://eth.drpc.org\",\"token_contract\":null,\"token_symbol\":\"ETH\"}",
+      "expected_raw_sha256": "4e9a4c30af1bb64841401d98a04f3e0f4beeff3be39570cccfd37109cb045a2a",
       "clock": "2026-11-22T10:36:29.759Z"
     },
     "balance_token": {
@@ -133,7 +145,16 @@
         "token": "DAI"
       },
       "expected_fields": {
-        "answer": "0x881d40237659c251811cec9c364ef91dc08d300c holds 475.040409 DAI on ethereum (finalized block, 2/3 sources agreed).",
+        "answer": "0x881d40237659c251811cec9c364ef91dc08d300c holds 475.040409 DAI on ethereum (finalized block, 2/3 sources agreed). Funded; unknown; outgoing transaction count unavailable. account context unavailable: no 2-source exact block/hash/nonce/code quorum; balance remains independently finalized-tag agreed.",
+        "transaction_count": null,
+        "is_contract": null,
+        "account_type": "unknown",
+        "block_number": null,
+        "context_scope": "account context unavailable: no 2-source exact block/hash/nonce/code quorum; balance remains independently finalized-tag agreed",
+        "balance_wei": null,
+        "balance_base_units": "475040409175066851169",
+        "funded": true,
+        "funding_status": "funded",
         "address": "0x881d40237659c251811cec9c364ef91dc08d300c",
         "chain": "ethereum",
         "balance": 475.040409,
@@ -142,10 +163,10 @@
         "verdict": "verified",
         "confidence": 0.9,
         "source": "EVM RPC quorum (ethereum, 2-of-3, finalized)",
-        "checked_at": "2026-11-22T10:36:30.550Z"
+        "checked_at": "2026-11-22T10:36:30.549Z"
       },
-      "expected_raw_text": "{\"address\":\"0x881d40237659c251811cec9c364ef91dc08d300c\",\"as_of\":\"2026-11-22T10:36:30.549Z\",\"balance_base_units_hex\":\"0x19c0828f45d412b761\",\"block_tag\":\"finalized\",\"chain\":\"ethereum\",\"decimals\":18,\"ens\":null,\"method\":\"eth_call balanceOf+decimals+symbol\",\"rpc_url\":\"https://eth.drpc.org\",\"token_contract\":\"0x6B175474E89094C44Da98b954EedeAC495271d0F\",\"token_symbol\":\"DAI\"}",
-      "expected_raw_sha256": "29f491d730c4316cb1458fcd6b0281f7d559890f56fa7ffa121ee513912ff5d9",
+      "expected_raw_text": "{\"account_context\":{\"account_type\":\"unknown\",\"block_number\":null,\"context_evidence\":[],\"context_scope\":\"account context unavailable: no 2-source exact block/hash/nonce/code quorum; balance remains independently finalized-tag agreed\",\"is_contract\":null,\"transaction_count\":null},\"address\":\"0x881d40237659c251811cec9c364ef91dc08d300c\",\"as_of\":\"2026-11-22T10:36:30.549Z\",\"balance_base_units_hex\":\"0x19c0828f45d412b761\",\"block_tag\":\"finalized\",\"chain\":\"ethereum\",\"decimals\":18,\"ens\":null,\"method\":\"eth_call balanceOf+decimals+symbol\",\"rpc_url\":\"https://eth.drpc.org\",\"token_contract\":\"0x6B175474E89094C44Da98b954EedeAC495271d0F\",\"token_symbol\":\"DAI\"}",
+      "expected_raw_sha256": "ff1eb9e986e1083b45e1940b98c9147e054ce9b1be1081c6262d67bc874fee46",
       "clock": "2026-11-22T10:36:30.549Z"
     },
     "macro_year": {
@@ -155,10 +176,11 @@
         "year": "2025"
       },
       "expected_fields": {
-        "answer": "Afghanistan unemployment rate in 2025: 13.351% of the total labour force (World Bank SL.UEM.TOTL.ZS).",
+        "answer": "Mapping: unemployment rate -> World Bank SL.UEM.TOTL.ZS. Afghanistan in 2025: 13.351 % of total labour force.",
         "rate_pct": 13.351,
         "indicator": "unemployment rate",
         "indicator_id": "SL.UEM.TOTL.ZS",
+        "indicator_input": "unemployment rate",
         "country": "Afghanistan",
         "country_iso3": "AFG",
         "year": 2025,
@@ -463,6 +485,16 @@
       "bytes": 342,
       "sha256": "5dd002e156bff017582d046a73333f54d42d89b4a1bbae7c6480c0e336896881",
       "captured_at": "2026-11-22T10:36:30.655Z"
+    },
+    {
+      "url": "https://api.coinbase.com/v2/prices/ETH-USD/spot",
+      "method": "GET",
+      "body": null,
+      "status": 200,
+      "raw_text": "{\"data\":{\"amount\":\"1720.19\",\"base\":\"ETH\",\"currency\":\"USD\"}}",
+      "bytes": 59,
+      "sha256": "fac0f9fa994a7bf954d9b9c45d3b3f5545713a82749d75a94ddb63af11f3493f",
+      "captured_at": "2026-11-22T10:34:43.395Z"
     }
   ]
 }

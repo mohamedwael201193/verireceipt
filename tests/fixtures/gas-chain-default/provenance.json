@@ -1,0 +1,39 @@
+{
+  "fetched_at": "2026-11-23T18:00:15.109939+00:00",
+  "sources": [
+    {
+      "file": "blast-eth_chainId.json",
+      "url": "https://eth-mainnet.public.blastapi.io",
+      "method": "eth_chainId"
+    },
+    {
+      "file": "blast-eth_gasPrice.json",
+      "url": "https://eth-mainnet.public.blastapi.io",
+      "method": "eth_gasPrice"
+    },
+    {
+      "file": "drpc-eth_chainId.json",
+      "url": "https://eth.drpc.org",
+      "method": "eth_chainId"
+    },
+    {
+      "file": "drpc-eth_gasPrice.json",
+      "url": "https://eth.drpc.org",
+      "method": "eth_gasPrice"
+    },
+    {
+      "file": "mev-eth_chainId.json",
+      "url": "https://rpc.mevblocker.io",
+      "method": "eth_chainId"
+    },
+    {
+      "file": "mev-eth_gasPrice.json",
+      "url": "https://rpc.mevblocker.io",
+      "method": "eth_gasPrice"
+    },
+    {
+      "file": "coinbase-eth-spot.json",
+      "url": "https://api.coinbase.com/v2/prices/ETH-USD/spot"
+    }
+  ]
+}

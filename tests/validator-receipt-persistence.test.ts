@@ -22,7 +22,7 @@ import { buildServer } from "../src/server";
 const INDEX = 729041;
 const ROOT = "0x" + createHash("sha256").update("original-validator-persistence-control-v1").digest("hex");
 const ROOT_BODY = JSON.stringify({ data: { root: ROOT }, finalized: true, execution_optimistic: false });
-const BODY = JSON.stringify({ data: { index: String(INDEX), status: "active_ongoing", validator: { effective_balance: "97000000000" } }, finalized: true, execution_optimistic: false });
+const BODY = JSON.stringify({ data: { index: String(INDEX), balance: "97000000000", status: "active_ongoing", validator: { effective_balance: "97000000000", pubkey: "0x" + "ab".repeat(48), slashed: false, activation_eligibility_epoch: "0", activation_epoch: "0", exit_epoch: "18446744073709551615", withdrawable_epoch: "18446744073709551615" } }, finalized: true, execution_optimistic: false });
 const expected = { status: 502, code: "RECEIPT_PERSIST_FAILED", message: "receipt evidence could not be stored; answer unavailable" };
 let validatorFetches = 0;
 const transport: typeof fetch = async (input) => {

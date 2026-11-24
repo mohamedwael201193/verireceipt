@@ -1,3 +1,6 @@
+import {answerDiagnostics} from "./core/answerClass";
+import { refreshSourceReachability, sourceReachabilitySnapshot } from "./core/sourceReachability";
+import { handleFraudDetection } from './handlers/fraudDetection';
 // VeriReceipt — Fastify server entrypoint.
 //
 // Zero-LLM. Routes the five deterministic intents to their handlers and
@@ -15,18 +18,55 @@ import { handleTvl, startTvlListsRefreshTimer, stopTvlListsRefreshTimer, tvlDisk
 import { handleRoute } from "./handlers/optimalRoute";
 import { handleGridPrice } from "./handlers/gridPrice";
 import { handleValidator } from "./handlers/validator";
+import { handleOnchainMetric } from "./handlers/onchainMetric";
+import { handlePackageSecurity } from "./handlers/packageSecurity";
 import { handleGasPrice } from "./handlers/gasPrice";
+import { handleTransactionRisk } from "./handlers/transactionRisk";
+import { handleFinancialData } from "./handlers/financialData";
+import { handleCrossChainState } from "./handlers/crossChainState";
+import { handleReserveAttestation } from "./handlers/reserveAttestation";
+import { handleThreatIndicator } from "./handlers/threatIntel";
+import { handleUrlScan } from "./handlers/urlScan";
+import { handleWeatherForecast } from "./handlers/weatherForecast";
+import { handleVendorVerify } from "./handlers/vendorVerify";
+import { handlePaymentMethod } from "./handlers/paymentMethod";
+import { handleUrlSafe } from "./handlers/urlSafe";
+import { handleMalwareHash } from "./handlers/malwareHash";
+import { handleSlaCompliance } from "./handlers/slaCompliance";
+import { handleSportsScore } from "./handlers/sportsScore";
 import { handleBalance } from "./handlers/walletBalance";
 import { handleTokenSupply } from "./handlers/tokenSupply";
-import { handleFx } from "./handlers/currencyConvert";
+import { fxLogLine, handleFx, handleFxNow } from "./handlers/currencyConvert";
 import { handleDns } from "./handlers/dnsLookup";
 import { handleSsl } from "./handlers/sslVerification";
-import { handleCve } from "./handlers/cveLookup";
+import { handleCve, handleVulnTriage } from "./handlers/cveLookup";
+import { handleAcademicSearch } from "./handlers/academicSearch";
+import { handleCodePatchVerify } from "./handlers/codePatchVerify";
+import { handleStockPrice } from "./handlers/stockPrice";
+import { handleSanctionsScreen } from "./handlers/sanctionsScreening";
+import { handleIpGeolocation } from "./handlers/ipGeolocation";
+import { handleGameResult } from "./handlers/gameResult";
+import { handleCorporateRegistry } from "./handlers/corporateRegistry";
+import { handleAirQuality } from "./handlers/airQuality";
+import { handleStormAlert } from "./handlers/stormAlert";
+import { handleNewsHeadlines } from "./handlers/newsHeadlines";
+import { handleNewsSearch } from "./handlers/newsSearch";
+import { handleRouteEta } from "./handlers/routeEta";
+import { handleApiHealth } from "./handlers/apiHealth";
+import { handleServerUptime } from "./handlers/serverUptime";
+import { handleMiningHashprice } from "./handlers/miningHashprice";
+import { handleCryptoPrice } from "./handlers/cryptoPrice";
+import { handleCryptoTransferVerify } from "./handlers/cryptoTransferVerify";
+import { handleWeatherCheck } from "./handlers/weatherCheck";
+import { handleEventOutcome } from "./handlers/eventOutcome";
+import { handleTravelDisruption } from "./handlers/travelDisruption";
 import { handleEmailSecurity } from "./handlers/emailSecurity";
 import { exactQuery } from "./core/exactQuery";
-import { diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
+import { intentFor, diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
 import { handleMacro } from "./handlers/macroEconomic";
-import { handleTokenHolders } from "./handlers/tokenHolders";
+import { handleTokenHolders, holderUpstreamForQuery } from "./handlers/tokenHolders";
+import { createWiredFinanceHandlers } from "./handlers/financeWired";
+import { createWiredWeatherHandlers } from "./handlers/weatherWired";
 import { ApiError, badRequest, errorBody } from "./core/errors";
 import { getDb } from "./core/db";
 import {
@@ -40,6 +80,7 @@ import {
 import { installGracefulShutdown } from "./core/shutdown";
 import { maybeMigrateOnBoot } from "./tools/bootMigrate";
 import { registerReceiptRoutes } from "./core/receiptRoutes";
+import { registerAccuracyRoute } from "./core/accuracy";
 import { getJobsSnapshot, getLoopLagSnapshot, startLoopLagSampler } from "./core/loopLag";
 import {
   INTENT_PRIMARY_UPSTREAM,
@@ -135,14 +176,20 @@ export function buildServer(): FastifyInstance {
   const app = Fastify({ logger: false });
   const requestStart = new WeakMap<object, bigint>();
   const requestErrors = new WeakMap<object, string>();
+  const requestAnswers = new WeakMap<object, {receiptId?:string;answerClass?:Record<string,unknown>}>();
+  app.addHook("preSerialization",async(request,reply,payload)=>{
+    try { if(reply.statusCode===200){const intent=payload && typeof payload==='object' ? Object.getOwnPropertyDescriptor(Object.getOwnPropertyDescriptor(payload,'receipt')?.value??{},'intent')?.value : undefined;
+      const routeIntent=intentFor(request.routeOptions.url);
+      if(typeof intent==='string'||routeIntent!=='other')requestAnswers.set(request,answerDiagnostics(typeof intent==='string'?intent:routeIntent,payload));} }catch{}return payload;
+  });
   app.addHook("onRequest", async (request) => {
     requestStart.set(request, process.hrtime.bigint());
-    recordRequestArrival(request.routeOptions.url);
+    recordRequestArrival(request.routeOptions.url, request.query);
   });
   app.addHook("onResponse", async (request, reply) => {
     const started = requestStart.get(request);
     const elapsedMs = started === undefined ? 0 : Number(process.hrtime.bigint() - started) / 1e6;
-    recordRequestCompletion(request.routeOptions.url, reply.statusCode, elapsedMs, { query: request.query, errorCode: requestErrors.get(request) });
+    recordRequestCompletion(request.routeOptions.url, reply.statusCode, elapsedMs, { query: request.query, errorCode: requestErrors.get(request), ...requestAnswers.get(request) });
   });
 
   // Initialise storage (creates tables on first run). Handlers rely on it
@@ -162,6 +209,7 @@ export function buildServer(): FastifyInstance {
   app.setErrorHandler((err, request, reply) => {
     if (err instanceof ApiError) {
       requestErrors.set(request, diagnosticErrorCode(err.code));
+      try { const info=answerDiagnostics(intentFor(request.routeOptions.url),err); if(info.answerClass)requestAnswers.set(request,info); } catch {}
       void reply.status(err.status).send(err.responseBody ?? errorBody(err));
       return;
     }
@@ -199,15 +247,17 @@ export function buildServer(): FastifyInstance {
   // 2026-11-20 by grep of the frontend repo — so both are kept);
   // `upstreams` is now the live registry snapshot ({} until a handler
   // call observes an upstream) instead of a hardcoded {}. /health
-  // stays cheap: all three are in-memory reads, no upstream calls,
+  // stays cheap: reads the last result and launches nonblocking bounded source checks,
   // no DB touch.
   app.get("/health", async () => {
+    refreshSourceReachability();
     const loopLag = getLoopLagSnapshot();
     return {
       status: "ok",
       service: "verireceipt",
       uptime_s: Math.floor((Date.now() - startedAtMs) / 1000),
       upstreams: getUpstreamsSnapshot(),
+      source_reachability: sourceReachabilitySnapshot(),
       loopLagMs: loopLag,
       loop_lag_ms: loopLag,
       jobs: getJobsSnapshot(),
@@ -224,6 +274,29 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/dns", async (request) => trackIntent("dns", () => handleDns(asQuery(request.query))));
   app.get("/v1/ssl", async (request) => trackIntent("ssl", () => handleSsl(asQuery(request.query))));
   app.get("/v1/cve", async (request) => trackIntent("cve", () => handleCve(asQuery(request.query))));
+  app.get("/v1/vulnerability-triage", async (request) => trackIntent("vulnerability-triage", () => handleVulnTriage(asQuery(request.query))));
+  app.get("/v1/academic-search", async (request) => trackIntent("academic-search", () => handleAcademicSearch(asQuery(request.query))));
+  app.get("/v1/code-patch", async (request) => trackIntent("code-patch", () => handleCodePatchVerify(asQuery(request.query))));
+  app.get("/v1/stock-price", async (request) => trackIntent("stock-price", () => handleStockPrice(asQuery(request.query))));
+  app.get("/v1/sanctions-screen", async (request) => trackIntent("sanctions-screen", () => handleSanctionsScreen(asQuery(request.query))));
+  app.get("/v1/ip-geolocation", async (request) => trackIntent("ip-geolocation", () => handleIpGeolocation(asQuery(request.query))));
+  app.get("/v1/onchain-metric", async (request) => trackIntent("onchain-metric", () => handleOnchainMetric(exactQuery(request.raw.url ?? "", ["address", "block", "chain", "metric"]))));
+  app.get("/v1/security-review", async (request) => trackIntent("security-review", () => handlePackageSecurity(exactQuery(request.raw.url ?? "", ["target"]))));
+  app.get("/v1/game-result", async (request) => trackIntent("game-result", () => handleGameResult(asQuery(request.query))));
+  app.get("/v1/corporate-registry", async (request) => trackIntent("corporate-registry", () => handleCorporateRegistry(asQuery(request.query))));
+  app.get("/v1/air-quality", async (request) => trackIntent("air-quality", () => handleAirQuality(exactQuery(request.raw.url ?? "", ["lat", "lon"]))));
+  app.get("/v1/storm-alert", async (request) => trackIntent("storm-alert", () => handleStormAlert(asQuery(request.query))));
+  app.get("/v1/news-headlines", async (request) => trackIntent("news-headlines", () => handleNewsHeadlines(asQuery(request.query))));
+  app.get("/v1/news-search", async (request) => trackIntent("news-search", () => handleNewsSearch(asQuery(request.query))));
+  app.get("/v1/route-eta", async (request) => trackIntent("route-eta", () => handleRouteEta(asQuery(request.query))));
+  app.get("/v1/api-health", async (request) => trackIntent("api-health", () => handleApiHealth(exactQuery(request.raw.url ?? "", ["url"]))));
+  app.get("/v1/server-uptime", async (request) => trackIntent("server-uptime", () => handleServerUptime(exactQuery(request.raw.url ?? "", ["host"]))));
+  app.get("/v1/mining-hashprice", async (request) => trackIntent("mining-hashprice", () => handleMiningHashprice(asQuery(request.query))));
+  app.get("/v1/crypto-price", async (request) => trackIntent("crypto-price", () => handleCryptoPrice(asQuery(request.query))));
+  app.get("/v1/crypto-transfer", async (request) => trackIntent("crypto-transfer", () => handleCryptoTransferVerify(asQuery(request.query))));
+  app.get("/v1/weather-check", async (request) => trackIntent("weather-check", () => handleWeatherCheck(asQuery(request.query))));
+  app.get("/v1/event-outcome", async (request) => trackIntent("event-outcome", () => handleEventOutcome(asQuery(request.query))));
+  app.get("/v1/travel-disruption", async (request) => trackIntent("travel-disruption", () => handleTravelDisruption(asQuery(request.query))));
   app.get("/v1/email-security", async (request) => trackIntent("email-security", () => handleEmailSecurity(exactQuery(request.raw.url ?? "", ["domain", "record_type"])), "dns.google"));
   app.get("/v1/filings", async (request) =>
     trackIntent("filings", () => {
@@ -276,6 +349,20 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/gas-price", async (request) =>
     trackIntent("gas-price", () => handleGasPrice(asQuery(request.query))),
   );
+  app.get("/v1/fraud-detection", async (request) => trackIntent("fraud-detection", () => handleFraudDetection(asQuery(request.query))));
+  app.get("/v1/transaction-risk", async (request) => trackIntent("transaction-risk", () => handleTransactionRisk(asQuery(request.query))));
+  app.get("/v1/financial-data", async (request) => trackIntent("financial-data", () => handleFinancialData(asQuery(request.query))));
+  app.get("/v1/cross-chain-state", async (request) => trackIntent("cross-chain-state", () => handleCrossChainState(asQuery(request.query))));
+  app.get("/v1/reserve-attestation", async (request) => trackIntent("reserve-attestation", () => handleReserveAttestation(asQuery(request.query))));
+  app.get("/v1/url-scan", async (request) => trackIntent("url-scan", () => handleUrlScan(asQuery(request.query))));
+  app.get("/v1/weather-forecast", async (request) => trackIntent("weather-forecast", () => handleWeatherForecast(asQuery(request.query))));
+  app.get("/v1/vendor-verify", async (request) => trackIntent("vendor-verify", () => handleVendorVerify(asQuery(request.query))));
+  app.get("/v1/payment-method", async (request) => trackIntent("payment-method", () => handlePaymentMethod(asQuery(request.query))));
+  app.get("/v1/url-safe", async (request) => trackIntent("url-safe", () => handleUrlSafe(asQuery(request.query))));
+  app.get("/v1/malware-hash", async (request) => trackIntent("malware-hash", () => handleMalwareHash(asQuery(request.query))));
+  app.get("/v1/sla-compliance", async (request) => trackIntent("sla-compliance", () => handleSlaCompliance(asQuery(request.query))));
+  app.get("/v1/sports-score", async (request) => trackIntent("sports-score", () => handleSportsScore(asQuery(request.query))));
+  app.get("/v1/threat-indicator", async (request) => trackIntent("threat-indicator", () => handleThreatIndicator(asQuery(request.query))));
   app.get("/v1/balance", async (request) =>
     trackIntent("balance", () => handleBalance(asQuery(request.query))),
   );
@@ -285,11 +372,53 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/macro", async (request) =>
     trackIntent("macro", () => handleMacro(asQuery(request.query))),
   );
-  app.get("/v1/fx", async (request) =>
-    trackIntent("fx", () => handleFx(asQuery(request.query))),
+  app.get("/v1/fx", async (request) => {
+    // Scoring-window observability (2026-11-23, epoch-41 postmortem): one
+    // structured line per FX request so a scoring pass is reconstructable
+    // from Render logs. Currency codes and amount only, whitelisted by
+    // fxLogLine against log injection; no caller identity (no PII).
+    const started = Date.now();
+    const query = asQuery(request.query);
+    try {
+      const result = await trackIntent("fx", () => handleFx(query));
+      console.log(fxLogLine(query, { ok: true }, started, Date.now()));
+      return result;
+    } catch (err) {
+      const outcome =
+        err instanceof ApiError
+          ? { ok: false as const, status: err.status, code: err.code }
+          : { ok: false as const, status: 500, code: "INTERNAL" };
+      console.log(fxLogLine(query, outcome, started, Date.now()));
+      throw err;
+    }
+  });
+  app.get("/v1/fx-now", async (request) =>
+    trackIntent("fx-now", () => handleFxNow(asQuery(request.query))),
   );
   app.get("/v1/token-holders", async (request) =>
-    trackIntent("token-holders", () => handleTokenHolders(asQuery(request.query))),
+    trackIntent("token-holders", () => handleTokenHolders(asQuery(request.query)), holderUpstreamForQuery(asQuery(request.query))),
+  );
+  // Wired finance observations (expansion): primary/fallback sources, no
+  // averaging; keyed failover legs appear only when their env keys are set.
+  const wiredFinance = createWiredFinanceHandlers();
+  app.get("/v1/price", async (request) =>
+    trackIntent("price", () => wiredFinance.price(asQuery(request.query))),
+  );
+  app.get("/v1/liquidity", async (request) =>
+    trackIntent("liquidity", () => wiredFinance.liquidity(asQuery(request.query))),
+  );
+  app.get("/v1/yield", async (request) =>
+    trackIntent("yield", () => wiredFinance.yield(asQuery(request.query))),
+  );
+  // Wired measured-weather observations (expansion): NOAA station
+  // observations only, exact reviewed station spellings, no forecast or
+  // reanalysis substitution.
+  const wiredWeather = createWiredWeatherHandlers();
+  app.get("/v1/weather", async (request) =>
+    trackIntent("weather", () => wiredWeather.current(asQuery(request.query))),
+  );
+  app.get("/v1/weather-history", async (request) =>
+    trackIntent("weather-history", () => wiredWeather.past(asQuery(request.query))),
   );
 
   // G10: serve stored receipts + their exact raw evidence bytes
@@ -297,6 +426,10 @@ export function buildServer(): FastifyInstance {
   // src/core/receiptRoutes.ts for the contract.
   registerReceiptRoutes(app);
   registerBuyer(app);
+
+  // S2: serve the daily accuracy document (exact counts over stored
+  // receipts, same contract as scripts/accuracy.mjs — core/accuracy.ts).
+  registerAccuracyRoute(app);
 
   return app;
 }
