@@ -49,3 +49,12 @@ describe('Floatrates target identity',()=>{
  });
  it('absent optional alphaCode does not discard a matching explicit code',async()=>{const j=JSON.parse(originals.floatrates);delete j.eur.alphaCode;stub('floatrates',JSON.stringify(j));expect((await handleFx({from_currency:'USD',to_currency:'EUR'})).rate).toBe(Number(j.eur.rate));});
 });
+
+describe('ISO publication calendar boundary without age policy change',()=>{
+ it.each(['2026-02-30','2026-02-29','2026-00-10','2026-13-01','2026-11-31','2026-01-00'])('impossible %s never becomes a covering quote',async date=>{
+  for(const name of ['frankfurter','vatcomply','fawaz']){const j=JSON.parse(originals[name]);j.date=date;stub(name,JSON.stringify(j));await expect(handleFx({from_currency:'USD',to_currency:'EUR'})).rejects.toMatchObject({code:'FX_SOURCES_DOWN'});await expect(handleFxNow({currency:'EUR'})).rejects.toMatchObject({code:'FX_SOURCES_DOWN'});}
+ });
+ it.each(['2024-02-29','2000-02-29','2026-11-23','unknown','2099-01-01'])('calendar-valid/unknown label %s does not introduce freshness refusal',async date=>{
+  const j=JSON.parse(originals.frankfurter);j.date=date;stub('frankfurter',JSON.stringify(j));expect((await handleFx({from_currency:'USD',to_currency:'EUR'})).rate).toBe(j.rates.EUR);
+ });
+});

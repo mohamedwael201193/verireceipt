@@ -144,6 +144,7 @@ async function quoteFrankfurter(from: string, to: string): Promise<SourceQuote |
   if (parsed.amount !== 1) throw new Error("FX quote amount must be one base unit");
   const rate = parsed.rates?.[to];
   if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
+  validateFxCalendarLabel(parsed.date);
   return { source: "Frankfurter (ECB reference rates)", url, rawBody, rate, rateDate: String(parsed.date ?? "unknown") };
 }
 
@@ -180,6 +181,7 @@ async function quoteVatcomply(from: string, to: string): Promise<SourceQuote | n
   if (parsed.base !== from) throw new Error("FX base identity mismatch");
   const rate = parsed.rates?.[to];
   if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
+  validateFxCalendarLabel(parsed.date);
   return { source: "vatcomply", url, rawBody, rate, rateDate: String(parsed.date ?? "unknown") };
 }
 
@@ -208,7 +210,18 @@ async function quoteFawaz(from: string, to: string): Promise<SourceQuote | null>
   const table = parsed[fromLower] as Record<string, unknown> | undefined;
   const rate = table?.[to.toLowerCase()];
   if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
+  validateFxCalendarLabel(parsed.date);
   return { source: "fawaz currency-api", url, rawBody, rate, rateDate: String(parsed.date ?? "unknown") };
+}
+
+/** Reject impossible calendar labels before Date.parse can normalize a rollover.
+ * Unknown labels remain day0 under the existing policy; no age/future bound. */
+export function validateFxCalendarLabel(label:unknown):void {
+ if(typeof label!=='string')return;
+ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(label);if(!m)return;
+ const year=Number(m[1]),month=Number(m[2]),day=Number(m[3]);
+ const d=new Date(0);d.setUTCHours(0,0,0,0);d.setUTCFullYear(year,month-1,day);
+ if(d.getUTCFullYear()!==year||d.getUTCMonth()!==month-1||d.getUTCDate()!==day)throw new Error('impossible FX publication calendar date');
 }
 
 /** Comparable day key for a source's rate date: Frankfurter and fawaz
