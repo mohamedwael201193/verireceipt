@@ -45,9 +45,10 @@ function failureClass(error:unknown):GameSourceFailure {
 }
 async function fetchText(url: string): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
+  let timer:ReturnType<typeof setTimeout>|undefined;
   let stage:GameSourceFailure = 'transport';
   try {
+    const request=(async()=>{
     const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
     if (!res.ok) {
       const status=res.status;
@@ -56,6 +57,10 @@ async function fetchText(url: string): Promise<string> {
     }
     stage='body_read';
     return await res.text();
+    })();
+    return await Promise.race([request,new Promise<never>((_,reject)=>{
+      timer=setTimeout(()=>{stage='timeout';controller.abort();reject(new Error('source deadline'));},SOURCE_TIMEOUT_MS);
+    })]);
   } catch(error) {
     try {if(error && typeof error==='object')sourceFailures.set(error,controller.signal.aborted?'timeout':stage);} catch {}
     throw error;

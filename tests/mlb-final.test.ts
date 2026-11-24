@@ -48,3 +48,20 @@ it('successful ESPN observation never starts independent fallback',async()=>{
  const nfl=readFileSync('tests/fixtures/game-result/espn-nfl-20261116.json','utf8');const f=vi.fn(async(u:unknown)=>new Response(String(u).includes('/nfl/')?nfl:'{"events":[]}'));vi.stubGlobal('fetch',f);
  await handleGameResult({game:'Chargers vs Ravens 2026-11-16'});expect(f).toHaveBeenCalledTimes(4);
 });
+
+it('statusCode is independently required even when every other final field agrees',()=>{
+ const j=JSON.parse(raw);j.dates[0].games[0].status.statusCode='I';expect(()=>parseMlbFinal(JSON.stringify(j),date,a,b)).toThrow();
+});
+it.each([-1,1001])('out-of-range score %s refuses with internally consistent winner flags',score=>{
+ const j=JSON.parse(raw),g=j.dates[0].games[0];g.teams.home.score=score;g.teams.home.isWinner=score>g.teams.away.score;g.teams.away.isWinner=score<g.teams.away.score;g.isTie=score===g.teams.away.score;
+ expect(()=>parseMlbFinal(JSON.stringify(j),date,a,b)).toThrow();
+});
+it('abort-ignoring primary body reads terminate at6seconds and never start fallback or save late',async()=>{
+ vi.useFakeTimers();const f=vi.fn(async()=>({ok:true,text:()=>new Promise(resolve=>setTimeout(()=>resolve(raw),7000))}));vi.stubGlobal('fetch',f);
+ let settled=false;const p=handleGameResult({game:'Brewers vs Rays 2026-10-24'}).finally(()=>{settled=true;});const checked=expect(p).rejects.toMatchObject({code:'ESPN_UNREACHABLE'});
+ await vi.advanceTimersByTimeAsync(5999);expect(settled).toBe(false);await vi.advanceTimersByTimeAsync(1);await checked;expect(f).toHaveBeenCalledTimes(4);await vi.advanceTimersByTimeAsync(2000);expect(saveReceipt).not.toHaveBeenCalled();
+});
+it('abort-ignoring primary header waits also terminate at6seconds',async()=>{
+ vi.useFakeTimers();const f=vi.fn(()=>new Promise(()=>{}));vi.stubGlobal('fetch',f);
+ const p=expect(handleGameResult({game:'Brewers vs Rays 2026-10-24'})).rejects.toMatchObject({code:'ESPN_UNREACHABLE'});await vi.advanceTimersByTimeAsync(6000);await p;expect(f).toHaveBeenCalledTimes(4);expect(saveReceipt).not.toHaveBeenCalled();
+});
