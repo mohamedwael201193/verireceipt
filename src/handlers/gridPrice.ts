@@ -1,3 +1,4 @@
+import {withAnswerClass} from '../core/answerClass';
 import { plainDecimal } from "../core/plainDecimal";
 // GET /v1/grid-price — wholesale electricity LMP.
 // Elering is served from the SQLite cache only (a cache miss is a 502
@@ -48,6 +49,7 @@ import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import {
   getGridPrice,
+  getGridRange,
   getGridRevalidate,
   markGridRevalidateAttempt,
   saveGridPrice,
@@ -757,10 +759,19 @@ export async function handleGridPrice(
     }
   }
   if (!row) {
-    throw upstreamUnavailable(
-      "GRID_CACHE_MISS",
-      "no cached price for " + normalizedZone + " at " + intervalStart,
-    );
+    const error=upstreamUnavailable("GRID_CACHE_MISS","no cached price for " + normalizedZone + " at " + intervalStart);
+    let position='unknown';
+    try {
+      const alias=resolveGridAlias(normalizedZone);
+      let diagnosticTimer:ReturnType<typeof setTimeout>|undefined;
+      const ranges=await Promise.race([Promise.all([getGridRange(normalizedZone),...(alias?[getGridRange(alias)]:[])]),new Promise<never>((_,reject)=>{diagnosticTimer=setTimeout(()=>reject(Error('diagnostic deadline')),100);})]).finally(()=>clearTimeout(diagnosticTimer));
+      const oldest=ranges.map(r=>r.oldest).filter((v):v is string=>typeof v==='string').sort()[0];
+      const newest=ranges.map(r=>r.newest).filter((v):v is string=>typeof v==='string').sort().at(-1);
+      if(!oldest&&!newest)position='empty';
+      else if(oldest&&newest&&Number.isFinite(Date.parse(oldest))&&Number.isFinite(Date.parse(newest)))position=Date.parse(intervalStart)<Date.parse(oldest)?'older':Date.parse(intervalStart)>Date.parse(newest)?'newer':'within';
+    }catch{} // Diagnostics must not replace the original refusal.
+    withAnswerClass(error,'GRID_POWER_PRICE_GENERAL',{grid_market:zone.market.startsWith('Elering ')?'Elering':['CAISO','NYISO','MISO','ERCOT'].includes(zone.market)?zone.market:'unknown',grid_interval_position:position});
+    throw error;
   }
 
   // Staleness bound: a row older than GRID_CACHE_TTL_MS is refused, and a

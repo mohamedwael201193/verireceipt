@@ -339,3 +339,6 @@ export function stopStoragePinger(): void {
 export function getStorageHealth(): StorageHealth {
   return { ...health, backend: storageBackend() };
 }
+
+export const getGridRange=async(nodeOrZone:string):Promise<{oldest:string|null;newest:string|null}>=>
+ isPg()?pg.getGridRangePg(nodeOrZone):sqlite.getGridRange(nodeOrZone);

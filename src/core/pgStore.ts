@@ -668,3 +668,8 @@ export async function purgeGridCacheOverflowPg(
 export async function pgQueryForTests<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
   return q<T>(sql, params);
 }
+
+export async function getGridRangePg(nodeOrZone:string):Promise<{oldest:string|null;newest:string|null}> {
+ const [row]=await q<{oldest:string|null;newest:string|null}>('SELECT MIN(interval_start) AS oldest, MAX(interval_start) AS newest FROM grid_cache WHERE node_or_zone = $1',[nodeOrZone]);
+ return row??{oldest:null,newest:null};
+}

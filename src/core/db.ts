@@ -1754,3 +1754,9 @@ export function selectGridEvictions(
   }
   return out;
 }
+
+/** Read-only per-zone cache extent for closed operational diagnostics. */
+export function getGridRange(nodeOrZone:string):{oldest:string|null;newest:string|null} {
+ const row=getDb().prepare('SELECT MIN(interval_start) AS oldest, MAX(interval_start) AS newest FROM grid_cache WHERE node_or_zone = ?').get(nodeOrZone) as {oldest:string|null;newest:string|null};
+ return row;
+}
