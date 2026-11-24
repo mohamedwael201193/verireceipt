@@ -8,18 +8,9 @@
 // or place name"), window_hours (integer 1..240, default 24); scored
 // temp_max_c in [-90, 60]; judgment class.
 //
-// GEOCODING RULING (maintainer ruling 2026-11-23, recorded in
-// src/handlers/weatherCheck.ts: "place names are refused, never
-// geocoded" and src/handlers/stormAlert.ts: "place names are not
-// geocoded in this slice"): both rulings are scoped to THEIR slices —
-// weather-check needs an explicit ICAO station so the measurement is
-// attributable, storm-alert needs explicit coordinates. This intent's
-// contract REQUIRES a place name ("City or place name"), so this slice
-// geocodes, under three rules: the resolved place and its coordinates
-// are named in every answer; an ambiguous name (the same place name in
-// more than one country, or far apart) is REFUSED with the candidate
-// list, never silently first-hit; "lat,lon" is accepted directly for
-// callers that already know where they mean.
+// Place names use the provider's rank-1 result, with chosen coordinates,
+// match count and non-unique selection disclosed. Explicit coordinates
+// bypass geocoding. A missing or malformed top result is never guessed.
 //
 // SOURCES (both keyless, probed live 2026-11-23):
 //   1. Open-Meteo geocoder (geocoding-api.open-meteo.com/v1/search)
@@ -33,6 +24,7 @@
 // the current local hour; a window the upstream arrays do not cover is
 // refused, never extrapolated. FAIL CLOSED on any upstream failure,
 // truncation or null-filled window.
+import { parseRankedLocation } from "./routeGeocoder";
 import { ApiError, badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, sha256Hex } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -69,7 +61,7 @@ async function fetchText(url: string, what: string): Promise<string> {
   }
 }
 
-interface GeoHit { name: string; latitude: number; longitude: number; country?: string; admin1?: string; country_code?: string; timezone?: string }
+interface GeoHit { name: string; latitude: number; longitude: number; country?: string; admin1?: string; country_code?: string; timezone?: string; selection?: string }
 
 export function haversineKm(aLat: number, aLon: number, bLat: number, bLon: number): number {
   const rad = Math.PI / 180;
@@ -78,30 +70,14 @@ export function haversineKm(aLat: number, aLon: number, bLat: number, bLon: numb
   return 6371 * 2 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-/** Resolve a place name, failing closed on ambiguity. Exported for tests. */
+/** Resolve provider rank 1 and disclose its limits. Exported for tests. */
 export function resolveGeocode(body: string, queried: string): GeoHit {
-  let data: { results?: GeoHit[] };
-  try {
-    data = JSON.parse(body);
-  } catch {
-    throw upstreamUnavailable("GEOCODER_MALFORMED", "the geocoder returned a body that is not JSON; refusing to guess a location");
-  }
-  const results = data.results ?? [];
-  if (results.length === 0) {
-    throw unprocessable("PLACE_NOT_FOUND", `no place matching "${queried}"; the name is not resolved to coordinates it might not mean — qualify it (e.g. "Cairo, Egypt") or pass "lat,lon"`);
-  }
-  const top = results[0];
-  // Ambiguous: another hit with the SAME name that is a genuinely
-  // different place (different country, or more than 100 km away).
-  const rivals = results.slice(1).filter((r) =>
-    r.name.toLowerCase() === top.name.toLowerCase() &&
-    ((r.country_code ?? "") !== (top.country_code ?? "") || haversineKm(top.latitude, top.longitude, r.latitude, r.longitude) > 100));
-  if (rivals.length > 0) {
-    const candidates = [top, ...rivals].map((r) => `${r.name}, ${r.admin1 ? r.admin1 + ", " : ""}${r.country ?? "?"} (${r.latitude.toFixed(3)}, ${r.longitude.toFixed(3)})`);
-    throw unprocessable("AMBIGUOUS_LOCATION",
-      `"${queried}" matches ${candidates.length} distinct places: ${candidates.join("; ")}. Qualify the name (e.g. "${top.name}, ${top.country ?? "?"}") or pass "lat,lon" — a first-hit pick is never made silently`);
-  }
-  return top;
+  let ranked;
+  try { ranked = parseRankedLocation(body, "Open-Meteo"); }
+  catch { throw upstreamUnavailable("GEOCODER_MALFORMED", "the geocoder returned an invalid top result; refusing to guess a location"); }
+  if (!ranked) throw unprocessable("PLACE_NOT_FOUND", `no place matching "${queried}"; qualify the name or pass "lat,lon"`);
+  const top = JSON.parse(body).results[0] as GeoHit;
+  return { ...top, selection: `chose ${ranked.label} at ${ranked.latitude},${ranked.longitude} of ${ranked.count} matches returned (rank 1, provider order; not confirmed unique)` };
 }
 
 function dominantCondition(codes: number[]): string {
@@ -116,8 +92,8 @@ function dominantCondition(codes: number[]): string {
 
 export async function handleWeatherForecast(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const location = query.location?.trim();
-  if (!location) throw badRequest("MISSING_PARAM", "location is required: a city or place name (ambiguous names are refused), or \"lat,lon\"");
-  if (location.length > 200) throw badRequest("INVALID_LOCATION", "location is over 200 characters");
+  if (!location) throw badRequest("MISSING_PARAM", "location is required: a city or place name (provider-ranked selection is disclosed), or \"lat,lon\"");
+  if (Buffer.byteLength(location, "utf8") > 256) throw badRequest("INVALID_LOCATION", "location is over 256 UTF-8 bytes");
   let windowHours = 24;
   if (query.window_hours !== undefined && query.window_hours !== "") {
     if (!/^\d+$/.test(query.window_hours.trim())) throw badRequest("INVALID_WINDOW", "window_hours must be an integer between 1 and 240");
@@ -126,6 +102,7 @@ export async function handleWeatherForecast(query: Record<string, string | undef
   }
 
   // Resolve the location: direct coordinates, or the keyless geocoder.
+  let locationSelection: string | null = null;
   let lat: number, lon: number, resolvedName: string, geoBody: string | null = null, geoUrl: string | null = null;
   const ll = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(location);
   if (ll) {
@@ -144,7 +121,7 @@ export async function handleWeatherForecast(query: Record<string, string | undef
     const first = await geocode(location);
     try {
       const hit = resolveGeocode(first.body, location);
-      geoUrl = first.url; geoBody = first.body;
+      geoUrl = first.url; geoBody = first.body; locationSelection = hit.selection!;
       resolved = { lat: hit.latitude, lon: hit.longitude, name: nameOf(hit) };
     } catch (e) {
       if (e instanceof ApiError && e.code === "PLACE_NOT_FOUND") notFound = e;
@@ -153,8 +130,8 @@ export async function handleWeatherForecast(query: Record<string, string | undef
     if (!resolved && notFound && /\s/.test(location)) {
       // A space-separated "City Country" without the comma defeats the
       // geocoder's literal search. Retry with the trailing tokens as a
-      // country qualifier against a fresh city search, and fail closed
-      // on zero or several country matches — never a silent first hit.
+      // country qualifier against a fresh city search. Select rank1 among
+      // matching-country results, disclosing the remaining ambiguity.
       const tokens = location.split(/\s+/);
       for (let hintLen = 1; hintLen <= Math.min(3, tokens.length - 1) && !resolved; hintLen++) {
         const city = tokens.slice(0, tokens.length - hintLen).join(" ");
@@ -168,12 +145,9 @@ export async function handleWeatherForecast(query: Record<string, string | undef
         }
         const matches = hits.filter((r) =>
           (r.country ?? "").toLowerCase() === hint || (r.country_code ?? "").toLowerCase() === hint);
-        if (matches.length > 1) {
-          const candidates = matches.map((r) => `${r.name}, ${r.admin1 ? r.admin1 + ", " : ""}${r.country ?? "?"} (${r.latitude.toFixed(3)}, ${r.longitude.toFixed(3)})`);
-          throw unprocessable("AMBIGUOUS_LOCATION",
-            `"${location}" matches ${candidates.length} places: ${candidates.join("; ")}. Pass the place as "City, Country" or "lat,lon" — a first-hit pick is never made silently`);
-        }
-        if (matches.length === 1) {
+        if (matches.length > 0) {
+          const selected = resolveGeocode(JSON.stringify({ results: matches }), location);
+          locationSelection = `chose ${selected.name} at ${selected.latitude},${selected.longitude}; rank 1 among ${matches.length} country-matching results for "${hint}" (${hits.length} total upstream matches; provider order within country filter; not confirmed unique)`;
           geoUrl = retry.url; geoBody = retry.body;
           resolved = { lat: matches[0].latitude, lon: matches[0].longitude, name: nameOf(matches[0]) };
         }
@@ -232,13 +206,13 @@ export async function handleWeatherForecast(query: Record<string, string | undef
   const when = `${times[0]} to ${times[times.length - 1]} ${tzAbbr} (${windowHours}h window)`;
 
   const evidence = JSON.stringify({
-    location_queried: location, resolved: resolvedName, grid_point: { latitude: fc.latitude, longitude: fc.longitude },
+    location_queried: location, resolved: resolvedName, location_selection: locationSelection, grid_point: { latitude: fc.latitude, longitude: fc.longitude },
     window_hours: windowHours, when, timezone: tzName,
     temp_max_c: tempMax, temp_min_c: tempMin,
     precipitation_probability_pct: precipPeak, precip_hours_reporting: precipVals.length,
     condition,
     method: "Open-Meteo best-match NWP model forecast (single model, no ensemble spread), hourly values sliced from the current local hour; NOT a measurement",
-    geocode_upstream: geoUrl ? { url: geoUrl, sha256: sha256Hex(Buffer.from(geoBody!, "utf8")) } : "not used (coordinates given directly)",
+    geocode_upstream: geoUrl ? { url: geoUrl, raw_body: geoBody, sha256: sha256Hex(Buffer.from(geoBody!, "utf8")) } : "not used (coordinates given directly)",
     forecast_upstream: { url: fcUrl, sha256: sha256Hex(Buffer.from(fcBody, "utf8")) },
     fetched_at: asOf,
   });
@@ -253,7 +227,7 @@ export async function handleWeatherForecast(query: Record<string, string | undef
     `Forecast for ${resolvedName}, ${when}: high ${tempMax}°C, low ${tempMin}°C, ` +
     (precipPeak !== null ? `peak precipitation chance ${precipPeak}%, ` : "no precipitation-probability data in the window, ") +
     `dominant condition: ${condition}. ` +
-    `This is a single-model numerical forecast (Open-Meteo best-match) for ${tzName}, not a measurement, and carries no ensemble spread.`;
+    `This is a single-model numerical forecast (Open-Meteo best-match) for ${tzName}, not a measurement, and carries no ensemble spread.${locationSelection ? " Location selection: " + locationSelection + ". Geocoding: Open-Meteo / GeoNames (CC BY 4.0)." : ""}`;
   return envelope(INTENT, {
     location: resolvedName,
     when,

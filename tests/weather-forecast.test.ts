@@ -77,15 +77,15 @@ describe("WEATHER_FORECAST_GENERAL", () => {
     expect(String(result.answer)).toContain("not a measurement");
     expect(String(result.answer)).toContain("°C");
   });
-  it("bare 'Cairo' is AMBIGUOUS (Egypt vs US) and refuses with the candidate list, no first-hit pick", async () => {
-    stub();
-    await expect(handleWeatherForecast({ location: "Cairo" })).rejects.toMatchObject({ status: 422, code: "AMBIGUOUS_LOCATION" });
-    try {
-      await handleWeatherForecast({ location: "Cairo" });
-    } catch (e) {
-      expect((e as Error).message).toContain("Cairo, Cairo Governorate, Egypt");
-      expect((e as Error).message).toContain("United States");
-    }
+  it("bare Cairo selects provider rank1 and discloses non-uniqueness", async () => {
+    stub(); const result = await handleWeatherForecast({ location: "Cairo" });
+    expect(String(result.location)).toContain("Egypt");
+    expect(String(result.answer)).toContain("rank 1, provider order; not confirmed unique");
+    expect(String(result.answer)).toContain("10 matches returned");
+    const ev = await getReceiptEvidence((result.receipt as any).receipt_id);
+    const evidence = JSON.parse(ev.evidence!.toString());
+    expect(evidence.geocode_upstream.raw_body).toBe(GEO_CAIRO);
+    expect(evidence.location_selection).toContain("rank 1");
   });
   it("an unresolvable name is 422 PLACE_NOT_FOUND", async () => {
     stub({ geoBody: GEO_NOMATCH });
@@ -131,8 +131,8 @@ describe("WEATHER_FORECAST_GENERAL", () => {
     expect(ev).toContain("api.open-meteo.com/v1/forecast");
     expect(ev).toContain("NOT a measurement");
   });
-  it("resolveGeocode ambiguity rule: same name in another country refuses, different features of one place accept", () => {
-    expect(() => resolveGeocode(GEO_CAIRO, "Cairo")).toThrowError(/AMBIGUOUS|distinct places/);
+  it("resolveGeocode selects provider order with validated coordinates", () => {
+    expect(resolveGeocode(GEO_CAIRO, "Cairo").country).toBe("Egypt");
     const hit = resolveGeocode(GEO_CAIRO_EG, "Cairo, Egypt");
     expect(hit.country).toBe("Egypt");
     expect(hit.name).toBe("Cairo");
@@ -176,15 +176,51 @@ describe("WEATHER_FORECAST_GENERAL space-separated city+country (no comma)", () 
     expect(String(result.location)).toContain("Egypt");
     expect(String(result.location)).toContain("30.0444");
   });
-  it("two places in the hinted country refuse ambiguous, never a silent first hit", async () => {
+  it("several country-qualified matches disclose rank1 rather than claim uniqueness", async () => {
     stubSplit({ cityBody: JSON.stringify({ results: [
       { name: "Cairo", latitude: 30.0444, longitude: 31.2357, country: "Egypt", country_code: "EG" },
       { name: "New Cairo", latitude: 30.03, longitude: 31.47, country: "Egypt", country_code: "EG" },
     ]}) });
-    await expect(handleWeatherForecast({ location: "Cairo Egypt" })).rejects.toMatchObject({ status: 422, code: "AMBIGUOUS_LOCATION" });
+    const result = await handleWeatherForecast({ location: "Cairo Egypt" });
+    expect(result.location).toContain("Cairo");
+    expect(result.answer).toContain("rank 1 among 2 country-matching results");
+    expect(result.answer).toContain("2 total upstream matches");
+  });
+  it("country retry discloses filtered rank when the selected country is upstream second", async () => {
+    stubSplit({ cityBody: JSON.stringify({ results: [
+      { name: "Cairo", latitude: 39.98, longitude: -89.13, country: "United States", country_code: "US" },
+      { name: "Cairo", latitude: 30.0444, longitude: 31.2357, country: "Egypt", country_code: "EG" },
+    ] }) });
+    const result = await handleWeatherForecast({ location: "Cairo Egypt" });
+    expect(result.location).toContain("Egypt");
+    expect(result.answer).toContain('rank 1 among 1 country-matching results for "egypt" (2 total upstream matches; provider order within country filter; not confirmed unique)');
+    expect(result.answer).not.toContain("1 matches returned (rank 1, provider order");
+    const stored = await getReceiptEvidence((result.receipt as any).receipt_id);
+    const evidence = JSON.parse(stored.evidence!.toString());
+    expect(JSON.parse(evidence.geocode_upstream.raw_body).results[0].country).toBe("United States");
+    expect(evidence.location_selection).toContain("country-matching results");
   });
   it("no country match keeps the honest PLACE_NOT_FOUND", async () => {
     stubSplit({ cityBody: GEO_EMPTY });
     await expect(handleWeatherForecast({ location: "Cairo Egypt" })).rejects.toMatchObject({ status: 422, code: "PLACE_NOT_FOUND" });
   });
+});
+
+describe("ranked place validation controls",()=>{
+ it.each([NaN,91,-91,Infinity,"30"])("rejects invalid top latitude %s without selecting a lower result",latitude=>{
+  const body=JSON.stringify({results:[{name:"Bad",latitude,longitude:31},{name:"Cairo",latitude:30,longitude:31}]});
+  expect(()=>resolveGeocode(body,"place")).toThrow();
+ });
+ it("rejects malformed rows and top longitude outside bounds",()=>{
+  for(const body of ['null','{"results":{}}','{"results":[{"name":"Bad","latitude":30,"longitude":181}]}'])expect(()=>resolveGeocode(body,"place")).toThrow();
+ });
+ it("does not sort by a different metric or silently select a lower-ranked hit",()=>{
+  const hit=resolveGeocode(JSON.stringify({results:[{name:"First",latitude:1,longitude:2,population:1},{name:"Second",latitude:3,longitude:4,population:9999}]}),"place");
+  expect(hit.name).toBe("First");expect(hit.selection).toContain("2 matches returned");
+ });
+ it("accepts a201-byte place at validation while rejecting257 UTF8 bytes",async()=>{
+  const requested=stub({geoBody:GEO_NOMATCH});
+  await expect(handleWeatherForecast({location:"A".repeat(201)})).rejects.toMatchObject({code:"PLACE_NOT_FOUND"});expect(requested).toHaveLength(1);
+  await expect(handleWeatherForecast({location:"A".repeat(257)})).rejects.toMatchObject({status:400,code:"INVALID_LOCATION"});expect(requested).toHaveLength(1);
+ });
 });
