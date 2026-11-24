@@ -8,3 +8,26 @@ it('ticker refuses similar but different assets and nonpositive prices', async (
 it('pool requires exact chain/address/dex, not a name-search first result', async () => { const address = '0x' + '1'.repeat(40); const p = { pool: 'synthetic-pool', chain: 'ethereum', address, dexScreenerChain: 'ethereum', dexId: 'synthetic-dex' }; vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ pairs: [{ chainId: 'ethereum', pairAddress: address, dexId: 'synthetic-dex', liquidity: { usd: 123 } }] }))); const s = dexScreenerLiquiditySource([p], approval); expect((await s.read({ pool: p.pool, chain: p.chain }, new AbortController().signal)).value.liquidityUsd).toBe(123); vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ pairs: [{ chainId: 'arbitrum', pairAddress: address, dexId: 'synthetic-dex', liquidity: { usd: 123 } }] }))); await expect(s.read({ pool: p.pool, chain: p.chain }, new AbortController().signal)).rejects.toThrow('identity'); });
 it('pool refuses duplicate matching rows instead of picking one', async () => { const address = '0x' + '1'.repeat(40); const row = { chainId: 'ethereum', pairAddress: address, dexId: 'synthetic-dex', liquidity: { usd: 123 } }; const p = { pool: 'synthetic-pool', chain: 'ethereum', address, dexScreenerChain: 'ethereum', dexId: 'synthetic-dex' }; vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ pairs: [row, { ...row }] }))); const s = dexScreenerLiquiditySource([p], approval); await expect(s.read({ pool: p.pool, chain: p.chain }, new AbortController().signal)).rejects.toThrow('wrong or duplicate pool identity'); });
 it('pool observation time is the retrieval time and says so in the evidence', async () => { const address = '0x' + '2'.repeat(40); const p = { pool: 'synthetic-pool', chain: 'ethereum', address, dexScreenerChain: 'ethereum' }; vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ pairs: [{ chainId: 'ethereum', pairAddress: address, dexId: 'any-dex', liquidity: { usd: 5 } }] }))); const s = dexScreenerLiquiditySource([p], approval); const r = await s.read({ pool: p.pool, chain: p.chain }, new AbortController().signal); expect(r.observedAt).toBe(r.fetchedAt); expect(r.rawBody).toContain('retrieval time'); expect(JSON.parse(r.rawBody).source_raw_body).toContain('"usd":5'); });
+
+it('exact EVM pool address needs no named binding and is checked against returned chain/address',async()=>{
+ const address='0x'+'3'.repeat(40);let url='';
+ vi.stubGlobal('fetch',async(u:unknown)=>{url=String(u);return new Response(JSON.stringify({pairs:[{chainId:'base',pairAddress:address.toUpperCase().replace('0X','0x'),liquidity:{usd:1234}}]}));});
+ const s=dexScreenerLiquiditySource([],approval);const out=await s.read({pool:address,chain:'base'},new AbortController().signal);
+ expect(url).toBe('https://api.dexscreener.com/latest/dex/pairs/base/'+address);expect(out.value.liquidityUsd).toBe(1234);expect(out.identity).toBe(JSON.stringify(['base',address]));
+ for(const row of [{chainId:'ethereum',pairAddress:address},{chainId:'base',pairAddress:'0x'+'4'.repeat(40)}]){
+ vi.stubGlobal('fetch',async()=>new Response(JSON.stringify({pairs:[{...row,liquidity:{usd:1234}}]})));
+ await expect(s.read({pool:address,chain:'base'},new AbortController().signal)).rejects.toThrow('identity');
+ }
+});
+it.each(['0x123','0x'+'g'.repeat(40),'WETH/USDC','https://private.example/','../ethereum'])('never searches or substitutes for unbound %s',async pool=>{
+ const f=vi.fn();vi.stubGlobal('fetch',f);await expect(dexScreenerLiquiditySource([],approval).read({pool,chain:'ethereum'},new AbortController().signal)).rejects.toThrow('binding');expect(f).not.toHaveBeenCalled();
+});
+it.each(['../ethereum','ethereum/other','https://private.example','unknown'])('exact address refuses unreviewed or path-bearing chain %s without fetch',async chain=>{
+ const f=vi.fn();vi.stubGlobal('fetch',f);await expect(dexScreenerLiquiditySource([],approval).read({pool:'0x'+'3'.repeat(40),chain},new AbortController().signal)).rejects.toThrow('binding');expect(f).not.toHaveBeenCalled();
+});
+it('replays fresh exact-pair API bytes through an empty binding list',async()=>{
+ const {readFileSync}=await import('node:fs');const raw=readFileSync('tests/fixtures/dexscreener-bound-pool.json','utf8');const row=JSON.parse(raw).pairs[0];
+ vi.stubGlobal('fetch',async()=>new Response(raw));const s=dexScreenerLiquiditySource([],approval);
+ const out=await s.read({pool:row.pairAddress,chain:row.chainId},new AbortController().signal);
+ expect(out.value.liquidityUsd).toBe(row.liquidity.usd);expect(JSON.parse(out.rawBody).source_raw_body).toBe(raw);
+});

@@ -37,7 +37,10 @@ export interface PoolBinding {
     dexScreenerChain: string;
     dexId?: string;
 }
-/** Unconfigured provider factory: no pool binding is enabled by this file. */
+// Canonical EVM chain slugs supported by the exact-pair endpoint. No arbitrary
+// URL paths, chain guessing, token-address search or similar-name substitution.
+const DEX_EVM_CHAINS=new Set(['ethereum','base','arbitrum','optimism','polygon','bsc','avalanche','linea','scroll','gnosis','zksync','blast','mantle','celo','sonic','unichain']);
+/** Unconfigured provider factory: names require a unique reviewed binding. */
 export function dexScreenerLiquiditySource(bindings: readonly PoolBinding[], approval: SourceApproval): ObservationSource<PoolQuery, PoolValue> {
     return {
         name: 'DEX Screener named pool reserve liquidity', approval,
@@ -45,9 +48,11 @@ export function dexScreenerLiquiditySource(bindings: readonly PoolBinding[], app
             let failure='binding';
             try {
             const matches = bindings.filter(b => b.chain.toLowerCase() === q.chain.toLowerCase() && (b.pool.toLowerCase() === q.pool.toLowerCase() || b.address.toLowerCase() === q.pool.toLowerCase()));
-            if (matches.length !== 1)
+            const exactAddress=/^0x[0-9a-fA-F]{40}$/.test(q.pool);
+            const chain=q.chain.toLowerCase();
+            if(matches.length>1 || (!exactAddress && matches.length!==1) || (exactAddress&&!DEX_EVM_CHAINS.has(chain)))
                 throw new Error('ambiguous pool binding');
-            const p = matches[0];
+            const p:PoolBinding=matches[0]??{pool:q.pool,chain,address:q.pool,dexScreenerChain:chain};
             if (!/^[a-z0-9-]+$/.test(p.dexScreenerChain) || !/^[A-Za-z0-9]{20,100}$/.test(p.address))
                 throw new Error('invalid pool identity');
             if (signal.aborted)
@@ -61,7 +66,7 @@ export function dexScreenerLiquiditySource(bindings: readonly PoolBinding[], app
             failure='malformed';
             const j = JSON.parse(b.raw);
             failure='identity_or_value';
-            const rows = Array.isArray(j.pairs) ? j.pairs.filter((r: any) => r.chainId === p.dexScreenerChain && r.pairAddress?.toLowerCase() === p.address.toLowerCase() && (!p.dexId || r.dexId === p.dexId)) : [];
+            const rows = Array.isArray(j.pairs) ? j.pairs.filter((r: any) => r.chainId === p.dexScreenerChain && typeof r.pairAddress === 'string' && r.pairAddress.toLowerCase() === p.address.toLowerCase() && (!p.dexId || r.dexId === p.dexId)) : [];
             if (rows.length !== 1 || typeof rows[0].liquidity?.usd !== 'number' || !Number.isFinite(rows[0].liquidity.usd) || rows[0].liquidity.usd < 0)
                 throw new Error('wrong or duplicate pool identity');
             // The API exposes no per-pair observation timestamp: the
