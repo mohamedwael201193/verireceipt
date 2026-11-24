@@ -114,6 +114,7 @@ semantics:
     - API_HEALTH_CHECK_GENERAL
     - SERVER_UPTIME_MONITOR_GENERAL
     - SECURITY_REVIEW_GENERAL
+    - WEATHER_FORECAST_VERIFY_GENERAL
   signal_mapping:
     confidence_field: confidence
     label_field: answer
@@ -1199,6 +1200,30 @@ endpoints:
           - SECURITY_REVIEW_GENERAL
           description: 'Exact npm package@major.minor.patch, for example semver@7.5.1. No ranges, tags, URLs or prereleases.'
 
+  - path: /v1/weather-history
+    external_path: /v1/weather-history
+    method: GET
+    description: 'Measured NOAA NCEI daily station archive only, for Cairo, London, New York JFK,
+      Dubai or Frankfurt on an explicit past YYYY-MM-DD date. Coverage depends on published complete
+      TMAX, TMIN and precipitation observations for the bound station. Missing or quality-failed days
+      are refused, never replaced by zero, forecast or reanalysis. Reports a station-labelled climate
+      day, not necessarily local midnight; weather condition is not inferred from daily extrema.'
+    intents:
+    - WEATHER_FORECAST_VERIFY_GENERAL
+    params:
+      query:
+        required:
+        - name: location
+          type: string
+          intents:
+          - WEATHER_FORECAST_VERIFY_GENERAL
+          description: 'Cairo, London, New York JFK, Dubai or Frankfurt; exact bound station only.'
+        - name: date
+          type: string
+          intents:
+          - WEATHER_FORECAST_VERIFY_GENERAL
+          description: 'Explicit past YYYY-MM-DD calendar date, not today or a future date.'
+
 intent_mapping:
   ONCHAIN_TX_LOOKUP_GENERAL:
     endpoint: /v1/tx
@@ -2064,3 +2089,27 @@ intent_mapping:
         path: issues
       summary:
         path: summary
+
+  WEATHER_FORECAST_VERIFY_GENERAL:
+    endpoint: /v1/weather-history
+    input:
+      location:
+        from: location
+      date:
+        from: date
+    output:
+      location:
+        path: location
+      date:
+        path: date
+      temp_max_c:
+        path: temp_max_c
+        unit: "degrees Celsius"
+      temp_min_c:
+        path: temp_min_c
+        unit: "degrees Celsius"
+      precipitation_mm:
+        path: precipitation_mm
+        unit: "mm"
+      condition:
+        path: condition

@@ -301,10 +301,11 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, Outpu
   SERVER_UPTIME_MONITOR_GENERAL: { endpoint: "/v1/server-uptime", inputs: ["host"], outputs: {"host": null, "reachable_now": null, "http_status": null, "latency_ms": "milliseconds"} },
 
   SECURITY_REVIEW_GENERAL: { endpoint: "/v1/security-review", inputs: ["target"], outputs: { verdict: null, vulnerability_count: "vulnerabilities", issues: null, summary: null } },
+  WEATHER_FORECAST_VERIFY_GENERAL: { endpoint: "/v1/weather-history", inputs: ["location", "date"], outputs: {"location": null, "date": null, "temp_max_c": "degrees Celsius", "temp_min_c": "degrees Celsius", "precipitation_mm": "mm", "condition": null} },
 };
 
 describe("A8 miner.yaml vs the official intent schemas", () => {
-  it("declares exactly the fifty-four reviewed intents, each on its own endpoint", () => {
+  it("declares exactly the fifty-five reviewed intents, each on its own endpoint", () => {
     const si = block("  supported_intents:").map((l) => l.trim().replace(/^- /, "")).filter(Boolean);
     expect(si).toEqual(Object.keys(OFFICIAL));
     for (const [intent, o] of Object.entries(OFFICIAL)) {

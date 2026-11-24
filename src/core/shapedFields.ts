@@ -323,10 +323,19 @@ export const OUTPUT_MAPPING: Record<string, Record<string, OutputMapping>> = {
     summary: {"path":"summary"},
   },
 
+  WEATHER_FORECAST_VERIFY_GENERAL: {
+    location: {"path": "location"},
+    date: {"path": "date"},
+    temp_max_c: {"path": "temp_max_c", "unit": "degrees Celsius"},
+    temp_min_c: {"path": "temp_min_c", "unit": "degrees Celsius"},
+    precipitation_mm: {"path": "precipitation_mm", "unit": "mm"},
+    condition: {"path": "condition"},
+  },
+
 };
 
 /** Official intent response field types (GET /engine/v1/intents/{intent} → response.fields), pinned here so the fill does not depend on a live fetch. `number` fields are never filled from raw, even if a future mapping omits `unit`. */
-export type FieldFormatType = "number" | "string" | "datetime" | "list" | "enum" | "bool";
+export type FieldFormatType = "number" | "string" | "datetime" | "date" | "list" | "enum" | "bool";
 
 export interface FieldFormat {
   type: FieldFormatType;
@@ -630,6 +639,15 @@ export const FIELD_FORMAT: Record<string, Record<string, FieldFormat>> = {
     summary: { type: "string" },
   },
 
+  WEATHER_FORECAST_VERIFY_GENERAL: {
+    location: { type: "string" },
+    date: { type: "date" },
+    temp_max_c: { type: "number" },
+    temp_min_c: { type: "number" },
+    precipitation_mm: { type: "number" },
+    condition: { type: "string" },
+  },
+
 };
 
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -666,6 +684,10 @@ export function valueMatchesFormat(value: unknown, fmt: FieldFormat | undefined,
       }
       return true;
     }
+    case "date":
+      return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+        Number.isFinite(Date.parse(value + "T00:00:00Z")) &&
+        new Date(value + "T00:00:00Z").toISOString().slice(0, 10) === value;
     case "datetime":
       return typeof value === "string" && value !== "" && !Number.isNaN(Date.parse(value));
     case "bool":

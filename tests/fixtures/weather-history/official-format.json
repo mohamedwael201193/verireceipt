@@ -1,0 +1,79 @@
+{
+  "intent": "WEATHER_FORECAST_VERIFY_GENERAL",
+  "request": {
+    "params": [
+      {
+        "name": "location",
+        "type": "string",
+        "required": true,
+        "description": "City or place name"
+      },
+      {
+        "name": "date",
+        "type": "date",
+        "required": true,
+        "description": "Past date to verify"
+      }
+    ],
+    "schema_version": 3,
+    "served_by": "WEATHER_FORECAST_VERIFY"
+  },
+  "response": {
+    "fields": [
+      {
+        "name": "location",
+        "description": "The place the recorded weather is for",
+        "type": "string",
+        "off_chain": true
+      },
+      {
+        "name": "date",
+        "description": "The past date verified",
+        "type": "date",
+        "off_chain": true
+      },
+      {
+        "name": "temp_max_c",
+        "description": "Recorded high temperature on that date, degrees Celsius",
+        "type": "number",
+        "unit": "degrees Celsius",
+        "range": [
+          -90,
+          60
+        ],
+        "scored": true,
+        "decimals": 6
+      },
+      {
+        "name": "temp_min_c",
+        "description": "Recorded low temperature on that date, degrees Celsius",
+        "type": "number",
+        "unit": "degrees Celsius",
+        "range": [
+          -90,
+          60
+        ],
+        "decimals": 6
+      },
+      {
+        "name": "precipitation_mm",
+        "description": "Recorded precipitation on that date, millimetres",
+        "type": "number",
+        "unit": "mm",
+        "range": [
+          0,
+          2000
+        ],
+        "decimals": 6
+      },
+      {
+        "name": "condition",
+        "description": "Recorded weather condition",
+        "type": "string",
+        "off_chain": true
+      }
+    ],
+    "format_version": 3,
+    "served_by": "WEATHER_FORECAST_VERIFY"
+  }
+}

@@ -261,6 +261,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - API_HEALTH_CHECK_GENERAL\n' +
     '    - SERVER_UPTIME_MONITOR_GENERAL\n' +
     '    - SECURITY_REVIEW_GENERAL\n' +
+    '    - WEATHER_FORECAST_VERIFY_GENERAL\n' +
     '  signal_mapping:\n' +
     '    confidence_field: confidence\n' +
     '    label_field: answer\n' +
@@ -1346,6 +1347,30 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          - SECURITY_REVIEW_GENERAL\n' +
     '          description: \'Exact npm package@major.minor.patch, for example semver@7.5.1. No ranges, tags, URLs or prereleases.\'\n' +
     '\n' +
+    '  - path: /v1/weather-history\n' +
+    '    external_path: /v1/weather-history\n' +
+    '    method: GET\n' +
+    '    description: \'Measured NOAA NCEI daily station archive only, for Cairo, London, New York JFK,\n' +
+    '      Dubai or Frankfurt on an explicit past YYYY-MM-DD date. Coverage depends on published complete\n' +
+    '      TMAX, TMIN and precipitation observations for the bound station. Missing or quality-failed days\n' +
+    '      are refused, never replaced by zero, forecast or reanalysis. Reports a station-labelled climate\n' +
+    '      day, not necessarily local midnight; weather condition is not inferred from daily extrema.\'\n' +
+    '    intents:\n' +
+    '    - WEATHER_FORECAST_VERIFY_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: location\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - WEATHER_FORECAST_VERIFY_GENERAL\n' +
+    '          description: \'Cairo, London, New York JFK, Dubai or Frankfurt; exact bound station only.\'\n' +
+    '        - name: date\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - WEATHER_FORECAST_VERIFY_GENERAL\n' +
+    '          description: \'Explicit past YYYY-MM-DD calendar date, not today or a future date.\'\n' +
+    '\n' +
     'intent_mapping:\n' +
     '  ONCHAIN_TX_LOOKUP_GENERAL:\n' +
     '    endpoint: /v1/tx\n' +
@@ -2210,6 +2235,30 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '      issues:\n' +
     '        path: issues\n' +
     '      summary:\n' +
-    '        path: summary\n',
+    '        path: summary\n' +
+    '\n' +
+    '  WEATHER_FORECAST_VERIFY_GENERAL:\n' +
+    '    endpoint: /v1/weather-history\n' +
+    '    input:\n' +
+    '      location:\n' +
+    '        from: location\n' +
+    '      date:\n' +
+    '        from: date\n' +
+    '    output:\n' +
+    '      location:\n' +
+    '        path: location\n' +
+    '      date:\n' +
+    '        path: date\n' +
+    '      temp_max_c:\n' +
+    '        path: temp_max_c\n' +
+    '        unit: "degrees Celsius"\n' +
+    '      temp_min_c:\n' +
+    '        path: temp_min_c\n' +
+    '        unit: "degrees Celsius"\n' +
+    '      precipitation_mm:\n' +
+    '        path: precipitation_mm\n' +
+    '        unit: "mm"\n' +
+    '      condition:\n' +
+    '        path: condition\n',
   cast: REGISTRATION_CAST_SNIPPET,
 };
