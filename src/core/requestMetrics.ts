@@ -200,7 +200,10 @@ export function recordRequestCompletion(route: string | undefined, status: numbe
       // Fixed input shape only. Never log the prefix itself, its length or unknown keys.
       const paymentBin=intent==='PAYMENT_METHOD_VERIFY_GENERAL'?ownString(details.query,'bin'):undefined;
       const paymentClass=intent==='PAYMENT_METHOD_VERIFY_GENERAL'?{input_class:paymentBin===undefined||paymentBin.trim()===''?'missing':/^\d{6,8}$/.test(paymentBin.trim())?'prefix':'invalid'}:undefined;
-      const answerClass=sanitizeAnswerClass(intent,details.answerClass??paymentClass??refused);
+      // Error-code constants only; no resolver messages or DNS input values inspected.
+      const dnsReasons:Record<string,string>={DNS_RESOLVERS_DISAGREE:'resolver_disagreement',DNS_RESOLVERS_DOWN:'inconclusive',INVALID_RECORD_TYPE:'bad_type',MISSING_PARAM:'missing_param',INVALID_NAME:'invalid_name',RECEIPT_PERSIST_FAILED:'persistence_failed',INTERNAL:'internal'};
+      const dnsClass=intent==='DNS_RECORD_LOOKUP_GENERAL'&&status>=400?{dns_refusal_reason:typeof details.errorCode==='string'&&Object.hasOwn(dnsReasons,details.errorCode)?dnsReasons[details.errorCode]:'other'}:undefined;
+      const answerClass=sanitizeAnswerClass(intent,details.answerClass??dnsClass??paymentClass??refused);
       console.info(JSON.stringify({ event: "request_complete", intent, path: route, param_keys,
         ...(input_shape ? { input_shape } : {}), ...(receiptId?{receipt_id:receiptId}:{}), ...(answerClass?{answer_class:answerClass}:{}),
         error_code: details.errorCode == null ? null : diagnosticErrorCode(details.errorCode), status: code, latency_ms: latency }));
