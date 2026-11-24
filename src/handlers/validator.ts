@@ -1052,6 +1052,49 @@ interface EpochBalanceDelta {
  * would, so best-effort enrichment can never burn the verified path's
  * budget.
  */
+const activePerformanceSources = new Set<string>();
+export function resetValidatorPerformanceReadsForTests() { activePerformanceSources.clear(); }
+/** Optional reads share one 900ms budget. Ownership outlives a caller timeout. */
+async function readPerformanceBody(url: string, fetchImpl: typeof fetch, deadline: number, nowMs: () => number): Promise<string | undefined> {
+  const host = new URL(url).origin;
+  if (Date.now() >= deadline || activePerformanceSources.has(host)) return undefined;
+  activePerformanceSources.add(host);
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const io = (async () => {
+    try {
+      const res = await fetchImpl(url, {headers:{accept:"application/json"},redirect:"error",signal:controller.signal});
+      if (!res.ok) {
+        if (res.status === 429) noteSource429(host, parseRetryAfterMs(retryAfterHeader(res)), nowMs());
+        return undefined;
+      }
+      let body: string;
+      if (res.body?.getReader) {
+        const reader = res.body.getReader();
+        const parts: Uint8Array[] = []; let size = 0;
+        while (true) {
+          const part = await reader.read(); if (part.done) break;
+          size += part.value.byteLength;
+          if (size > 65536) { void reader.cancel().catch(() => {}); return undefined; }
+          parts.push(part.value);
+        }
+        body = Buffer.concat(parts).toString("utf8");
+      } else {
+        // Dependency-injected response doubles may expose only text().
+        body = await res.text();
+        if (Buffer.byteLength(body) > 65536) return undefined;
+      }
+      return Date.now() >= deadline ? undefined : body;
+    } catch { return undefined; }
+    finally { activePerformanceSources.delete(host); }
+  })();
+  try {
+    return await Promise.race([io, new Promise<undefined>(resolve => {
+      timer = setTimeout(() => {controller.abort();resolve(undefined);}, Math.max(0, deadline-Date.now()));
+    })]);
+  } finally {clearTimeout(timer);}
+}
+
 async function fetchEpochBalanceDelta(
   index: string,
   bases: string[],
@@ -1066,17 +1109,12 @@ async function fetchEpochBalanceDelta(
   });
   if (eligible.length < 2) return undefined;
   const probeBases = eligible.slice(0, 2);
+  const deadline = Date.now() + 900;
   const getJson = async (url: string): Promise<Record<string, unknown> | undefined> => {
     try {
-      const res = await fetchImpl(url, {
-        headers: { accept: "application/json" },
-        signal: AbortSignal.timeout(3000),
-      });
-      if (!res.ok) return undefined;
-      return (await res.json()) as Record<string, unknown>;
-    } catch {
-      return undefined;
-    }
+      const raw = await readPerformanceBody(url, fetchImpl, deadline, nowMs);
+      return raw === undefined ? undefined : JSON.parse(raw);
+    } catch { return undefined; }
   };
   const head = await getJson(`${probeBases[0]}/eth/v1/beacon/headers/finalized`);
   const finalizedSlotRaw =
@@ -1092,21 +1130,8 @@ async function fetchEpochBalanceDelta(
   const sampleAt = async (base: string, slot: number): Promise<{ url: string; body: string; balance: string } | undefined> => {
     const url = `${base}/eth/v1/beacon/states/${slot}/validator_balances?id=${index}`;
     try {
-      const res = await fetchImpl(url, {
-        headers: { accept: "application/json" },
-        signal: AbortSignal.timeout(3000),
-      });
-      if (!res.ok) {
-        if (res.status === 429) {
-          let retryAfter: string | null = null;
-          try {
-            retryAfter = res.headers?.get?.("retry-after") ?? null;
-          } catch { /* header access is best-effort */ }
-          noteSource429(base, parseRetryAfterMs(retryAfter), nowMs());
-        }
-        return undefined;
-      }
-      const body = await res.text();
+      const body = await readPerformanceBody(url, fetchImpl, deadline, nowMs);
+      if (body === undefined) return undefined;
       const parsed = JSON.parse(body) as Record<string, unknown>;
       if (parsed.execution_optimistic !== false || parsed.finalized !== true) return undefined;
       const rows = parsed.data;
