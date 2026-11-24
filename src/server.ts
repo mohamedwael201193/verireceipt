@@ -177,7 +177,7 @@ export function buildServer(): FastifyInstance {
   const requestErrors = new WeakMap<object, string>();
   app.addHook("onRequest", async (request) => {
     requestStart.set(request, process.hrtime.bigint());
-    recordRequestArrival(request.routeOptions.url);
+    recordRequestArrival(request.routeOptions.url, request.query);
   });
   app.addHook("onResponse", async (request, reply) => {
     const started = requestStart.get(request);

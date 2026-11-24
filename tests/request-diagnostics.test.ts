@@ -69,3 +69,10 @@ it.each([
  for(let i=0;i<=input.length-8;i++)expect(text).not.toContain(input.slice(i,i+8));
  }finally{await app.close();}
 });
+it('emits privacy-safe start before completion on a real failing request',async()=>{
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{});const app=buildServer();
+ try {const response=await app.inject({method:'GET',url:'/v1/filings?entity=PRIVATE_PERSON&period=2026&form_type=NOT_A_FORM'});expect(response.statusCode).toBe(422);
+ const rows=log.mock.calls.map(c=>{try{return JSON.parse(String(c[0]));}catch{return null;}}).filter(r=>r?.event==='request_start'||r?.event==='request_complete');
+ expect(rows.map(r=>r.event)).toEqual(['request_start','request_complete']);expect(rows[0].input_enums).toEqual({form_type:'other',period_kind:'year'});expect(rows[1].error_code).toBe('UNKNOWN_FORM');expect(JSON.stringify(rows)).not.toContain('PRIVATE_PERSON');expect(JSON.stringify(rows)).not.toContain('NOT_A_FORM');
+ }finally{await app.close();}
+});

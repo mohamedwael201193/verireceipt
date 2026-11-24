@@ -1,4 +1,6 @@
-// Fixed-label observability. Never retain URL/query values, bodies, headers, IPs or user ids.
+// Fixed-label observability. Only route-owned closed enums may expose canonical values.
+// Never retain free text, URL/query strings, bodies, headers, IPs or user ids.
+import { EDGAR_FORM_TYPES } from "../handlers/edgarFormTypes";
 const ROUTE_INTENTS: Record<string, string> = {
   "/v1/tx": "ONCHAIN_TX_LOOKUP_GENERAL", "/v1/tvl": "TVL_LOOKUP_GENERAL",
   "/v1/grid-price": "GRID_POWER_PRICE_GENERAL", "/v1/filings": "REGULATORY_FILING_MONITOR_GENERAL",
@@ -38,13 +40,16 @@ const ROUTE_INTENTS: Record<string, string> = {
 // or unknown names: callers can put a credential into an arbitrary query key.
 const KNOWN_QUERY_KEYS = [
   "address", "amount", "base", "block", "block_height", "chain", "country", "cve", "domain",
-  "company", "entity", "event", "form_type", "from", "game", "jurisdiction", "destination", "host", "indicator", "lat", "location", "lon", "window_hours", "ip", "interval_start", "node_or_zone",
+  "company", "entity", "event", "form_type", "form", "cik", "patch", "from", "game", "jurisdiction", "destination", "host", "indicator", "lat", "location", "lon", "window_hours", "ip", "interval_start", "node_or_zone",
   "origin", "pair", "period", "symbol", "protocol", "query", "question", "quote", "record_type", "route_or_flight",
   "ticker", "to", "token", "topic", "url", "transaction", "tx_hash", "validator_index", "year",
 ] as const;
 // Fixed internal categories only. A regex alone could admit a secret-looking code.
 const DIAGNOSTIC_ERROR_CODES = new Set([
   "ALL_QUOTERS_FAILED",
+  "UNKNOWN_FORM", "MULTIPLE_FORM_TYPES", "CONFLICTING_FORM_TYPE", "CONFUSABLE_FORM_TYPE",
+  "ENTITY_NOT_FOUND", "AMBIGUOUS_ENTITY", "ENTITY_CIK_MISMATCH", "INVALID_CIK",
+  "INVALID_PERIOD", "FISCAL_PERIOD_UNSUPPORTED", "MISSING_ENTITY", "MISSING_PERIOD", "INVALID_FORM_TYPE",
   "CHAIN_MISMATCH",
   "CIRCUIT_OPEN",
   "COUNTRY_NOT_FOUND",
@@ -122,9 +127,48 @@ function bucket(intent: string): Counts {
   if (!value) { value = { arrived: 0, completed: 0, total_latency_ms: 0, max_latency_ms: 0, statuses: {} }; counts.set(intent, value); }
   return value;
 }
-export function recordRequestArrival(route?: string): void {
-  try { bucket(intentFor(route)).arrived++; } catch { /* observability never changes a response */ }
+const CHAIN_ROUTES = new Set(["/v1/tx", "/v1/gas-price", "/v1/transaction-risk", "/v1/balance", "/v1/token-supply", "/v1/token-holders", "/v1/onchain-metric"]);
+const CHAINS = new Set(["ethereum", "base", "arbitrum", "optimism", "polygon", "bsc", "avalanche", "sepolia", "base-sepolia"]);
+const FORMS = new Set(EDGAR_FORM_TYPES);
+/** Own data properties only: diagnostics never execute request getters. */
+function ownString(query: unknown, key: string): string | undefined {
+  if (!query || typeof query !== "object") return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(query, key);
+  return descriptor && "value" in descriptor && typeof descriptor.value === "string" ? descriptor.value : undefined;
 }
+export function safeRequestEnums(route: string, query: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  const pick = (key: string, allowed: Set<string>, upper = false) => {
+    const raw = ownString(query, key); if (raw === undefined) return;
+    const value = upper ? raw.trim().toUpperCase() : raw.trim().toLowerCase();
+    out[key] = allowed.has(value) ? value : "other";
+  };
+  if (CHAIN_ROUTES.has(route)) pick("chain", CHAINS);
+  if (route === "/v1/dns") pick("record_type", new Set(["A", "AAAA", "MX", "TXT", "NS", "CNAME", "SOA", "CAA", "PTR"]), true);
+  if (route === "/v1/fx" || route === "/v1/fx-now") {
+    for (const key of ["base", "quote"]) pick(key, new Set(["USD", "EUR", "CAD", "SEK", "GBP", "JPY", "CHF", "AUD", "NZD", "CNY"]), true);
+  }
+  if (route === "/v1/filings") {
+    for (const key of ["form_type", "form"]) pick(key, FORMS, true);
+    const period = ownString(query, "period");
+    if (period !== undefined) {
+      const value = period.trim().toLowerCase();
+      out.period_kind = /^\d{4}$/.test(value) ? "year" : /^(?:last|past|trailing)?[ _-]*\d+[ _-]*(?:months?|years?)$/.test(value) ? "relative_months"
+        : /^(?:year[ _-]*to[ _-]*date|y[ _-]*t[ _-]*d)$/.test(value) ? "ytd" : /quarter|^q[1-4] /.test(value) ? "quarter_like"
+        : /^\d{4}-\d{2}-\d{2}(?:\.\.| to )\d{4}-\d{2}-\d{2}$/.test(value) ? "date_range" : "other";
+    }
+  }
+  return out;
+}
+export function recordRequestArrival(route?: string, query?: unknown): void {
+  try {
+    const intent = intentFor(route); bucket(intent).arrived++;
+    if (intent !== "other") console.info(JSON.stringify({ event: "request_start", intent, path: route,
+      param_keys: query && typeof query === "object" ? KNOWN_QUERY_KEYS.filter(key => Object.hasOwn(query, key)) : [],
+      input_enums: safeRequestEnums(route!, query) }));
+  } catch { /* observability never changes a response */ }
+}
+
 export function recordRequestCompletion(route: string | undefined, status: number, latencyMs: number, details: { query?: unknown; errorCode?: unknown } = {}): void {
   try {
     const intent = intentFor(route), row = bucket(intent);
