@@ -116,6 +116,7 @@ semantics:
     - SECURITY_REVIEW_GENERAL
     - WEATHER_FORECAST_VERIFY_GENERAL
     - RETURN_POLICY_VERIFY_GENERAL
+    - GAME_RESULT_GENERAL
   signal_mapping:
     confidence_field: confidence
     label_field: answer
@@ -1244,6 +1245,24 @@ endpoints:
           - RETURN_POLICY_VERIFY_GENERAL
           description: 'Exact Apple US or Walmart US. Plain Apple and Walmart explicitly mean US only.'
 
+  - path: /v1/game-result
+    external_path: /v1/game-result
+    method: GET
+    description: 'Exact dated completed game with two named teams separated by vs, v or at.
+      NFL, NBA, MLB and NHL ESPN scoreboards; MLB-only official final fallback if all
+      primary sources fail fast. No latest-game substitution, no other sports, no
+      ambiguous doubleheaders, no inferred scores. Source failures are errors, not zero scores.'
+    intents:
+    - GAME_RESULT_GENERAL
+    params:
+      query:
+        required:
+        - name: game
+          type: string
+          intents:
+          - GAME_RESULT_GENERAL
+          description: 'Two competitor names and exact YYYY-MM-DD date, at most 200 characters.'
+
 intent_mapping:
   ONCHAIN_TX_LOOKUP_GENERAL:
     endpoint: /v1/tx
@@ -2151,3 +2170,24 @@ intent_mapping:
         path: verified
       sources:
         path: sources
+
+  GAME_RESULT_GENERAL:
+    endpoint: /v1/game-result
+    input:
+      game:
+        from: game
+    output:
+      winner:
+        path: winner
+      home_team:
+        path: home_team
+      away_team:
+        path: away_team
+      home_score:
+        path: home_score
+        unit: "points"
+      away_score:
+        path: away_score
+        unit: "points"
+      date:
+        path: date

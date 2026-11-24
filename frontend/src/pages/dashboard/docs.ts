@@ -264,6 +264,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - SECURITY_REVIEW_GENERAL\n' +
     '    - WEATHER_FORECAST_VERIFY_GENERAL\n' +
     '    - RETURN_POLICY_VERIFY_GENERAL\n' +
+    '    - GAME_RESULT_GENERAL\n' +
     '  signal_mapping:\n' +
     '    confidence_field: confidence\n' +
     '    label_field: answer\n' +
@@ -1392,6 +1393,24 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          - RETURN_POLICY_VERIFY_GENERAL\n' +
     '          description: \'Exact Apple US or Walmart US. Plain Apple and Walmart explicitly mean US only.\'\n' +
     '\n' +
+    '  - path: /v1/game-result\n' +
+    '    external_path: /v1/game-result\n' +
+    '    method: GET\n' +
+    '    description: \'Exact dated completed game with two named teams separated by vs, v or at.\n' +
+    '      NFL, NBA, MLB and NHL ESPN scoreboards; MLB-only official final fallback if all\n' +
+    '      primary sources fail fast. No latest-game substitution, no other sports, no\n' +
+    '      ambiguous doubleheaders, no inferred scores. Source failures are errors, not zero scores.\'\n' +
+    '    intents:\n' +
+    '    - GAME_RESULT_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: game\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - GAME_RESULT_GENERAL\n' +
+    '          description: \'Two competitor names and exact YYYY-MM-DD date, at most 200 characters.\'\n' +
+    '\n' +
     'intent_mapping:\n' +
     '  ONCHAIN_TX_LOOKUP_GENERAL:\n' +
     '    endpoint: /v1/tx\n' +
@@ -2298,6 +2317,28 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '      verified:\n' +
     '        path: verified\n' +
     '      sources:\n' +
-    '        path: sources\n',
+    '        path: sources\n' +
+    '\n' +
+    '  GAME_RESULT_GENERAL:\n' +
+    '    endpoint: /v1/game-result\n' +
+    '    input:\n' +
+    '      game:\n' +
+    '        from: game\n' +
+    '    output:\n' +
+    '      winner:\n' +
+    '        path: winner\n' +
+    '      home_team:\n' +
+    '        path: home_team\n' +
+    '      away_team:\n' +
+    '        path: away_team\n' +
+    '      home_score:\n' +
+    '        path: home_score\n' +
+    '        unit: "points"\n' +
+    '      away_score:\n' +
+    '        path: away_score\n' +
+    '        unit: "points"\n' +
+    '      date:\n' +
+    '        path: date\n',
+
   cast: REGISTRATION_CAST_SNIPPET,
 };

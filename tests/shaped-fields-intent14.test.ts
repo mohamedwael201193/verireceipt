@@ -9,10 +9,10 @@ const contracts = JSON.parse(readFileSync(resolve(process.cwd(), "tests/fixtures
 describe("fourteen-intent consumer format mirror", () => {
   it("pins every added mapped field to its captured official format type", () => {
     expect(Object.keys(contracts)).toHaveLength(8);
-    // All 56 declared intents have consumer output and format mirrors.
+    // All 57 declared intents have consumer output and format mirrors.
     // This historical contract fixture checks its original 8 additions; the
     // complete mapping/type loop also runs in shaped-fields.test.ts.
-    expect(Object.keys(OUTPUT_MAPPING)).toHaveLength(56);
+    expect(Object.keys(OUTPUT_MAPPING)).toHaveLength(57);
     expect(Object.keys(FIELD_FORMAT).sort()).toEqual(Object.keys(OUTPUT_MAPPING).sort());
     for (const [intent, contract] of Object.entries(contracts)) {
       const source = Object.fromEntries(contract.response.fields.map((f) => [f.name, f]));
