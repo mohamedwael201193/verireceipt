@@ -202,7 +202,7 @@ export async function handleTokenHolders(
       : { body: await fetchText(url, Math.min(4_000, deadlineAt - Date.now())), fetchedAt: new Date().toISOString() };
     bodyFetchedAt = observation.fetchedAt;
     staleReason = "staleReason" in observation ? observation.staleReason : undefined;
-    if (staleReason) recordUpstreamError("geckoterminal", "UPSTREAM_RATE_LIMITED");
+    if (staleReason) recordUpstreamError("geckoterminal", staleReason.includes("429") ? "UPSTREAM_RATE_LIMITED" : "INDEXER_UNREACHABLE");
     info = network ? parseGecko(observation.body, network, contract) : parseIndexerResponse(observation.body, url, contract);
   } catch (err) {
     throw upstreamUnavailable(
@@ -233,7 +233,7 @@ export async function handleTokenHolders(
     ...(staleReason ? { stale_reason: staleReason } : {}),
   };
 
-  const receiptDoc: Receipt = makeReceipt(INTENT, url, info.rawBody, `1/1 indexer of record (${sourceName})${staleReason ? "; STALE DISCLOSED: HTTP 429 fallback; source observation " + asOf : ""}`);
+  const receiptDoc: Receipt = makeReceipt(INTENT, url, info.rawBody, `1/1 indexer of record (${sourceName})${staleReason ? "; STALE DISCLOSED: source failure fallback; source observation " + asOf : ""}`);
   receiptDoc.fetched_at = bodyFetchedAt;
   if (Date.now() >= deadlineAt) throw upstreamUnavailable("HOLDER_DEADLINE", "holder lookup exceeded its 7.5s observation budget; no answer served");
   try {
@@ -250,10 +250,10 @@ export async function handleTokenHolders(
 
   if (Date.now() >= startedAt + 8_000) throw upstreamUnavailable("HOLDER_DEADLINE", "holder lookup exceeded its 8s total budget; no answer served");
   return envelope(INTENT, fields, receiptDoc, {
-    answer: `${staleReason ? "STALE CACHED OBSERVATION, not a current count. " : ""}${symbol} (${contract}) on ${chain} has ${info.holdersCount} distinct holder addresses (${sourceName} indexer, as of ${asOf}).${staleReason ? " Upstream returned HTTP 429. This is the last real cached value observed at " + asOf + "; no count has been estimated or updated." : ""}`,
+    answer: `${staleReason ? "STALE CACHED OBSERVATION, not a current count. " : ""}${symbol} (${contract}) on ${chain} has ${info.holdersCount} distinct holder addresses (${sourceName} indexer, as of ${asOf}).${staleReason ? " Upstream lookup failed (" + staleReason + "). This is the last real cached value observed at " + asOf + "; no count has been estimated or updated." : ""}`,
     verdict: staleReason ? "stale" : "verified",
     confidence: staleReason ? 0.5 : 0.9,
-    source: `${sourceName} indexer (${url}, keyless, receipted); holder aggregate, not RPC state${network ? "; original body may be reused for up to 5 minutes (or disclosed 429 fallback within the 24h source-age bound); as_of is provider holders.last_updated" : ""}`,
+    source: `${sourceName} indexer (${url}, keyless, receipted); holder aggregate, not RPC state${network ? "; original body may be reused for up to 5 minutes (5 additional minutes disclosed stale on failure, maximum 10-minute acquisition age and 24h source-age bound); as_of is provider holders.last_updated" : ""}`,
   });
 }
 

@@ -29,11 +29,10 @@ describe("holder source bounded cache and pacing", () => {
   expect(maxActive).toBe(1);expect(starts).toHaveLength(2);
   for(let i=1;i<starts.length;i++)expect(starts[i]-starts[i-1]).toBeGreaterThanOrEqual(2100);
  });
- it("retries one 429 after backoff and does not cache the failure",async()=>{
-  const starts:number[]=[];
-  const load=vi.fn(async()=>{starts.push(Date.now());if(starts.length===1)throw Object.assign(new Error("limited"),{status:429});return "raw";});
-  expect((await settle(cachedHolderBody("base",load,accept))).body).toBe("raw");
-  expect(starts[1]-starts[0]).toBeGreaterThanOrEqual(5000);
+ it("makes only one attempt on HTTP429 even when retry fits the budget",async()=>{
+  const load=vi.fn(async()=>{throw Object.assign(new Error("limited"),{status:429});});
+  const failed=expect(cachedHolderBody("base",load,accept)).rejects.toThrow("limited");await settle(failed);
+  expect(load).toHaveBeenCalledTimes(1);
  });
  it("respects a long Retry-After without an early second request",async()=>{
   const load=vi.fn(async()=>{throw Object.assign(new Error("limited"),{status:429,retryAfterMs:60000});});
@@ -92,10 +91,10 @@ it("429 fallback returns only the last validated body and original acquisition t
  const calls=load.mock.calls.length;
  expect((await cachedHolderBody("x",load,validate)).staleReason).toContain("429");expect(load.mock.calls.length).toBe(calls);
 });
-it("does not use retained data for non-429 failures",async()=>{
+it("discloses a retained observation for non-429 failures within the short window",async()=>{
  let fail=false;const load=async()=>{if(fail)throw new Error("503");return "real-body";};
  await settle(cachedHolderBody("x",load,accept));await vi.advanceTimersByTimeAsync(300001);fail=true;
- const checked=expect(cachedHolderBody("x",load,accept)).rejects.toThrow("503");await settle(checked);
+ const stale=await settle(cachedHolderBody("x",load,accept));expect(stale.body).toBe("real-body");expect(stale.staleReason).toContain("request failed");
 });
 it("rejects a retained observation crossing the 24h source bound during 429",async()=>{
  const source=Date.now();let fail=false;
@@ -103,4 +102,25 @@ it("rejects a retained observation crossing the 24h source bound during 429",asy
  const validate=()=>{if(Date.now()-source>86400000)throw new Error("stale source");};
  await settle(cachedHolderBody("x",load,validate));await vi.advanceTimersByTimeAsync(86400001);fail=true;
  const checked=expect(cachedHolderBody("x",load,validate)).rejects.toThrow("429");await settle(checked);
+});
+
+it.each([600000,600001,86400001])("refuses retained data at acquisition age %ims",async age=>{
+ let fail=false;const load=vi.fn(async()=>{if(fail)throw new Error("503");return "exact-original";});
+ await settle(cachedHolderBody("bound",load,accept));await vi.advanceTimersByTimeAsync(age);fail=true;
+ const checked=expect(cachedHolderBody("bound",load,accept)).rejects.toThrow("503");await settle(checked);expect(load).toHaveBeenCalledTimes(2);
+});
+it("keeps stale fallback below ten minutes and never refreshes its acquisition timestamp",async()=>{
+ let fail=false;const load=vi.fn(async()=>{if(fail)throw new Error("503");return "exact-original";});
+ const first=await settle(cachedHolderBody("bound",load,accept));await vi.advanceTimersByTimeAsync(599999);fail=true;
+ const stale=await settle(cachedHolderBody("bound",load,accept));expect(stale.body).toBe(first.body);expect(stale.fetchedAt).toBe(first.fetchedAt);expect(stale.staleReason).toBeTruthy();
+ await vi.advanceTimersByTimeAsync(1);const checked=expect(cachedHolderBody("bound",load,accept)).rejects.toThrow("503");await settle(checked);
+});
+it("never serves a stale value belonging to another token",async()=>{
+ await settle(cachedHolderBody("one",async()=>"real",accept));await vi.advanceTimersByTimeAsync(300001);
+ const checked=expect(cachedHolderBody("two",async()=>{throw new Error("503");},accept)).rejects.toThrow("503");await settle(checked);
+});
+it("invalid replacement falls back only to the original validated observation",async()=>{
+ let invalid=false;const load=async()=>invalid?"invalid":"original";const validate=(s:string)=>{if(s!=="original")throw new Error("invalid response");};
+ const first=await settle(cachedHolderBody("x",load,validate));await vi.advanceTimersByTimeAsync(300001);invalid=true;
+ const stale=await settle(cachedHolderBody("x",load,validate));expect(stale.body).toBe(first.body);expect(stale.fetchedAt).toBe(first.fetchedAt);expect(stale.staleReason).toContain("invalid response");
 });
