@@ -65,3 +65,7 @@ it('abort-ignoring primary header waits also terminate at6seconds',async()=>{
  vi.useFakeTimers();const f=vi.fn(()=>new Promise(()=>{}));vi.stubGlobal('fetch',f);
  const p=expect(handleGameResult({game:'Brewers vs Rays 2026-10-24'})).rejects.toMatchObject({code:'ESPN_UNREACHABLE'});await vi.advanceTimersByTimeAsync(6000);await p;expect(f).toHaveBeenCalledTimes(4);expect(saveReceipt).not.toHaveBeenCalled();
 });
+
+it('receipt contains neutral source scope and no private owner permission claim',async()=>{
+ vi.stubGlobal('fetch',async()=>new Response(raw));await observeMlbFinal(date,a,b);const evidence=String(vi.mocked(saveReceipt).mock.calls[0][1]);expect(evidence).not.toMatch(/owner|waiver|terms_basis|2026-11-23/i);expect(JSON.parse(evidence).source_note).toBe('MLB Stats API official final; single-source observation, not cross-provider consensus');
+});
