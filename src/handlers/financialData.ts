@@ -18,6 +18,7 @@ import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { COINPAPRIKA_APPROVAL } from "./financeWired";
+import { cachedEquityQuote, assertYahooAllowed, noteYahooRateLimit, type EquityObservation } from "./equityQuoteCache";
 import { cachedMarketBody } from "./marketSourceCache";
 
 const SOURCE_TIMEOUT_MS = 10000;
@@ -27,11 +28,14 @@ const TICKERS_URL = "https://www.sec.gov/files/company_tickers.json";
 export const INTENT = "FINANCIAL_DATA_GENERAL";
 
 async function fetchText(url: string, ua: string = UA): Promise<string> {
+  const yahoo = new URL(url).hostname === "query1.finance.yahoo.com";
+  if (yahoo) assertYahooAllowed();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
   try {
     const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": ua, Accept: "application/json" } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (yahoo && res.status === 429) noteYahooRateLimit(res.headers.get("retry-after"));
+    if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), {status:res.status});
     return await res.text();
   } finally {
     clearTimeout(timer);
@@ -210,14 +214,21 @@ export async function handleFinancialData(query: Record<string, string | undefin
   }
   const ticker = String(row.ticker).toUpperCase();
   const cik10 = String(row.cik_str).padStart(10, "0");
+  let quote: EquityObservation;
   try {
-    [sharesBody, chartBody] = await Promise.all([
+    [sharesBody, quote] = await Promise.all([
       fetchText(`https://data.sec.gov/api/xbrl/companyconcept/CIK${cik10}/dei/EntityCommonStockSharesOutstanding.json`, ua),
-      fetchText(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`),
+      cachedEquityQuote(ticker, () => fetchText(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`), body => {
+        const m = JSON.parse(body)?.chart?.result?.[0]?.meta;
+        if (!m || m.symbol !== ticker || m.instrumentType !== "EQUITY" || m.currency !== "USD" || typeof m.regularMarketPrice !== "number" || !Number.isFinite(m.regularMarketPrice) || m.regularMarketPrice <= 0 || typeof m.regularMarketTime !== "number" || !Number.isFinite(m.regularMarketTime) || m.regularMarketTime * 1000 > Date.now()+60_000 || Date.now()-m.regularMarketTime*1000 > 7*86400000) throw new Error("invalid or over7day quote");
+      }),
     ]);
   } catch (err) {
     throw upstreamUnavailable("SOURCE_UNREACHABLE", `an equity source could not be reached: ${err instanceof Error ? err.message : "unknown"}`);
   }
+  chartBody = quote.body;
+  const quoteAgeSeconds = Math.floor((Date.now()-Date.parse(quote.fetchedAt))/1000);
+  const quoteStale = Boolean(quote.staleReason);
   let shares: ReturnType<typeof latestShares>;
   let meta: Record<string, unknown> | undefined;
   try { JSON.parse(sharesBody); } catch { throw upstreamUnavailable("SEC_MALFORMED", "SEC shares response was malformed JSON"); }
@@ -240,7 +251,7 @@ export async function handleFinancialData(query: Record<string, string | undefin
   const volumeUsd: number | null = null;
   const sessionVolumeUsd = Number.isFinite(volumeShares) && volumeShares >= 0 ? Math.round(volumeShares * price) : null;
   const asOf = new Date().toISOString();
-  const evidence = JSON.stringify({ asset: ticker, as_of: asOf, cik: cik10,
+  const evidence = JSON.stringify({ asset: ticker, as_of: quote.fetchedAt, derivation_at: asOf, cik: cik10, stale: quoteStale, stale_reason: quote.staleReason, quote_fetched_at: quote.fetchedAt, quote_age_seconds: quoteAgeSeconds,
     derivation: "market_cap_usd = Yahoo regularMarketPrice x SEC EDGAR dei:EntityCommonStockSharesOutstanding (latest reported); volume_24h_usd is null: the contract field is rolling 24h USD volume and Yahoo's keyless chart carries only the latest regular session (reported separately in metrics); Yahoo's own market-cap endpoints are crumb-gated, so the cap is derived, not copied",
     price_usd: price, market_time: marketTime, shares_outstanding: shares.val,
     shares_as_of: shares.end, shares_filed: shares.filed, shares_accession: shares.accn,
@@ -248,21 +259,21 @@ export async function handleFinancialData(query: Record<string, string | undefin
     session_volume_usd: sessionVolumeUsd,
     resolution: { requested_asset: asset, resolved_name: row.title, ticker, yahoo_search_url: searchBody === null ? null : searchUrl },
     raw_bodies: { company_tickers: tickersBody, yahoo_search: searchBody, sec_shares: sharesBody, yahoo_chart: chartBody }, fetched_at: fetchedAt });
-  const receipt = makeReceipt(INTENT, `${TICKERS_URL} + data.sec.gov + query1.finance.yahoo.com`, evidence, "SEC EDGAR shares outstanding x Yahoo regular-market price; derivation disclosed");
+  const receipt = makeReceipt(INTENT, `${TICKERS_URL} + data.sec.gov + query1.finance.yahoo.com`, evidence, `SEC EDGAR shares outstanding x Yahoo regular-market price; derivation disclosed${quoteStale ? "; STALE QUOTE DISCLOSED" : ""}`);
   receipt.fetched_at = fetchedAt;
   try {
     await saveReceipt(receipt, evidence);
   } catch {
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
-  const answer = `${ticker} market cap: $${cap.toLocaleString("en-US")}, derived as the Yahoo regular-market price ($${price}, exchange time ${marketTime}) x ${shares.val.toLocaleString("en-US")} shares outstanding reported to the SEC as of ${shares.end} (filed ${shares.filed}, accession ${shares.accn}). ` +
+  const answer = `${quoteStale ? "STALE CACHED QUOTE, not current market data. " : ""}${ticker} market cap: $${cap.toLocaleString("en-US")}, derived as the Yahoo regular-market price ($${price}, exchange time ${marketTime}) x ${shares.val.toLocaleString("en-US")} shares outstanding reported to the SEC as of ${shares.end} (filed ${shares.filed}, accession ${shares.accn}). ` +
     (sessionVolumeUsd !== null ? `Rolling 24h USD volume is not served (the keyless source carries only the latest regular session: $${sessionVolumeUsd.toLocaleString("en-US")} in that session). ` : "Volume is not served: the price source carried none. ") +
     `The cap is derived from two named sources, not copied from a vendor; the quote may be delayed. P/E, revenue, net income and EPS are not served: those figures are not present in the retrieved shares/price records.`;
   return envelope(INTENT, {
     asset: ticker, asset_type: "equity", symbol: ticker, name: row.title, resolved_name: row.title, market_cap_usd: cap, volume_24h_usd: volumeUsd,
     metrics: [`shares_outstanding=${shares.val} as of ${shares.end} (filed ${shares.filed}, ${shares.accn})`, `price_usd=${price} at ${marketTime}`, "derivation=price x shares outstanding",
       `latest_regular_session_volume_usd=${sessionVolumeUsd ?? "none"} (not rolling 24h)`],
-    as_of: asOf,
-  }, receipt, { answer, verdict: "verified", confidence: 0.85,
+    as_of: quote.fetchedAt, stale: quoteStale, quote_fetched_at: quote.fetchedAt, quote_age_seconds: quoteAgeSeconds, ...(quoteStale ? {stale_reason:quote.staleReason}:{}),
+  }, receipt, { answer: answer + ` Quote acquired ${quote.fetchedAt}, age ${quoteAgeSeconds}s; exchange time ${marketTime}. ${quoteStale ? quote.staleReason + "; original exact quote retained; SEC shares fetched independently now, mixed-age derivation, no price estimated or updated." : "Quote may be cached up to5minutes."}`, verdict: quoteStale ? "stale" : "verified", confidence: quoteStale ? 0.5 : 0.85,
     source: `SEC EDGAR (${TICKERS_URL} + companyconcept) + Yahoo chart; fetched ${fetchedAt}` });
 }
