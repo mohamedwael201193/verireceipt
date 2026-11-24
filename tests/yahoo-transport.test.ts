@@ -1,4 +1,8 @@
-import {beforeEach,afterEach,it,expect,vi} from 'vitest';import {fetchYahooBody,resetYahooTransportForTests} from '../src/handlers/yahooTransport';
+import {rmSync} from 'node:fs';
+const scratch=vi.hoisted(()=>{const fs=require('node:fs');const path=fs.mkdtempSync('/tmp/yahoo-transport-');process.env.SQLITE_PATH=path+'/receipts.sqlite';delete process.env.DATABASE_URL;return path;});
+afterAll(()=>rmSync(scratch,{recursive:true,force:true}));
+import {beforeEach,afterEach,afterAll,it,expect,vi} from 'vitest';import {fetchYahooBody,resetYahooTransportForTests} from '../src/handlers/yahooTransport';
+it('SQLite replay path is confined to its scratch directory',()=>{expect(process.env.SQLITE_PATH).toBe(scratch+'/receipts.sqlite');expect(process.env.DATABASE_URL).toBeUndefined();});
 const chart='https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&range=1d',search='https://query1.finance.yahoo.com/v1/finance/search?q=apple';
 const allowed=()=>{};beforeEach(()=>{resetYahooTransportForTests();vi.useFakeTimers();vi.setSystemTime(0);});afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();});
 it('shared search/chart slot, >=1s spacing, single project UA and redirects refused',async()=>{const calls:any[]=[];vi.stubGlobal('fetch',async(url:any,o:any)=>{calls.push([url,Date.now(),o]);return new Response('{}');});const a=fetchYahooBody(search,allowed,()=>{}),b=fetchYahooBody(chart,allowed,()=>{});await vi.advanceTimersByTimeAsync(999);expect(calls).toHaveLength(1);await vi.advanceTimersByTimeAsync(1);await Promise.all([a,b]);expect(calls).toHaveLength(2);expect(calls[1][1]).toBe(1000);expect(calls[0][2].redirect).toBe('error');expect(calls[0][2].headers['User-Agent']).toBe(calls[1][2].headers['User-Agent']);});
