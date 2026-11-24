@@ -96,7 +96,7 @@ async function aggregatedCrypto(asset: string, crypto: { id: string; symbol: str
   receipt.fetched_at = fetchedAt;
   try { await saveReceipt(receipt, evidence); } catch { throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable"); }
   return envelope(INTENT, { asset: crypto.symbol, asset_type: "crypto", symbol: crypto.symbol, name: crypto.name, resolved_name: crypto.name, market_cap_usd: cap,
-    volume_24h_usd: volume, metrics: ["methodology=CoinPaprika aggregated market cap and rolling 24h volume", ...(staleReason ? [`stale=${staleReason}; original acquisition ${fetchedAt}`] : [])], as_of: asOf }, receipt,
+    volume_24h_usd: volume, metrics: ["methodology=CoinPaprika aggregated market cap and rolling 24h volume", ...(staleReason ? [`stale=${staleReason}; original acquisition ${fetchedAt}`] : [])].join("; "), as_of: asOf }, receipt,
     { answer: `${staleReason ? "STALE CACHED OBSERVATION, not current market data. " : ""}${crypto.name} (${crypto.symbol}) market cap: $${cap.toLocaleString("en-US")}; rolling 24h USD volume: $${volume.toLocaleString("en-US")}, source update ${asOf}. Source: CoinPaprika aggregated market data, not the derived BTC emission-schedule methodology.${staleReason ? ` ${staleReason}; last real observation acquired ${fetchedAt}; no values estimated or updated.` : ""}`,
       verdict: staleReason ? "stale" : "verified", confidence: staleReason ? 0.5 : 0.85, source: `${url}; fetched ${fetchedAt}${staleReason ? `; STALE: ${staleReason}; attempted ${attemptedAt}` : ""}` });
 }
@@ -170,7 +170,7 @@ export async function handleFinancialData(query: Record<string, string | undefin
       `24h USD volume is not served: this slice has no keyless measured source for it. The cap is derived from two named sources, not copied from a market-data vendor.`;
     return envelope(INTENT, {
       asset: "BTC", asset_type: "crypto", symbol: "BTC", name: "Bitcoin", market_cap_usd: cap, volume_24h_usd: null,
-      metrics: [`supply_btc=${supply} at tip ${height}`, `spot_usd=${price}`, "derivation=spot x emission-schedule supply"],
+      metrics: [`supply_btc=${supply} at tip ${height}`, `spot_usd=${price}`, "derivation=spot x emission-schedule supply"].join("; "),
       as_of: asOf,
     }, receipt, { answer, verdict: "verified", confidence: 0.9,
       source: `api.coinbase.com BTC-USD spot + mempool.space tip height; fetched ${fetchedAt}` });
@@ -293,7 +293,7 @@ export async function handleFinancialData(query: Record<string, string | undefin
   return envelope(INTENT, {
     asset: ticker, asset_type: "equity", symbol: ticker, name: row.title, resolved_name: row.title, market_cap_usd: cap, volume_24h_usd: volumeUsd,
     metrics: [`shares_outstanding=${shares.val} as of ${shares.end} (filed ${shares.filed}, ${shares.accn})`, `price_usd=${price} at ${marketTime}`, "derivation=price x shares outstanding",
-      `latest_regular_session_volume_usd=${sessionVolumeUsd ?? "none"} (not rolling 24h)`],
+      `latest_regular_session_volume_usd=${sessionVolumeUsd ?? "none"} (not rolling 24h)`].join("; "),
     sec_observations:secObservations,
     as_of: quote.fetchedAt, stale: anyStale, quote_stale: quoteStale, resolution_observation: resolutionEvidence, quote_fetched_at: quote.fetchedAt, quote_age_seconds: quoteAgeSeconds, ...(anyStale ? {stale_reason:staleReason}:{}),
   }, receipt, { answer: (searchStale ? `STALE CACHED NAME-TO-TICKER RESOLUTION. Original search acquired ${searchObservation!.fetchedAt}, age ${resolutionEvidence!.age_seconds}s; ${searchObservation!.staleReason}; revalidated against the bounded-cache SEC index, not a fresh search. ` : "") + answer + ` SEC company index acquired ${indexObservation.fetchedAt} (cached up to1hour); shares acquired ${sharesObservation.fetchedAt} (cached up to15minutes). Mixed-age derivation, no source timestamp advanced by cache reuse. Quote acquired ${quote.fetchedAt}, age ${quoteAgeSeconds}s; exchange time ${marketTime}. ${quoteStale ? quote.staleReason + "; original exact quote retained; SEC shares acquired independently at their disclosed timestamp, mixed-age derivation, no price estimated or updated." : "Quote may be cached up to5minutes."}`, verdict: anyStale ? "stale" : "verified", confidence: anyStale ? 0.5 : 0.85,
