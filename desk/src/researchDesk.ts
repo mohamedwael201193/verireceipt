@@ -14,7 +14,7 @@ export interface FactSpec {
 export interface Assumption { id: string; value: string; unit: string; rationale: string }
 export interface Calculation { id: string; op: 'multiply' | 'divide' | 'subtract'; left: string; right: string; unit: string }
 export interface ThesisSpec {
-  version: typeof VERSION; network: typeof NETWORK; template: 'onchain-valuation' | 'issuer-macro' | 'private-mark' | 'diligence-pack';
+  version: typeof VERSION; network: typeof NETWORK; template: 'onchain-valuation' | 'issuer-macro' | 'private-mark' | 'diligence-pack' | 'listing-risk';
   question: string; frozen_at: string; facts: FactSpec[]; assumptions: Assumption[]; calculations: Calculation[];
   budget_uusdc: string; max_call_uusdc: '10000'; max_escalations: 1;
 }
@@ -28,6 +28,7 @@ const CONTRACTS: Record<string, { field: string; unit: string; required: string[
   REGULATORY_FILING_MONITOR_GENERAL: {field:'filing_count',unit:'filings',required:['entity','period']},
   MACRO_ECONOMIC_INDICATOR_GENERAL: {field:'rate_pct',unit:'percent',required:['indicator','country'],optional:['year']},
   SANCTIONS_SCREENING_MATCH_GENERAL: {field:'match_score',unit:'score',required:['name']},
+  TOKEN_HOLDER_COUNT_GENERAL: {field:'holders_count',unit:'addresses',required:['token','chain']},
 };
 // Required observations per template. A template with no entry is rejected.
 const REQUIRED: Record<string, string[]> = {
@@ -35,6 +36,7 @@ const REQUIRED: Record<string, string[]> = {
   'issuer-macro':['STOCK_PRICE_US_EQUITY','REGULATORY_FILING_MONITOR_GENERAL','MACRO_ECONOMIC_INDICATOR_GENERAL'],
   'private-mark':['STOCK_PRICE_US_EQUITY','REGULATORY_FILING_MONITOR_GENERAL','MACRO_ECONOMIC_INDICATOR_GENERAL'],
   'diligence-pack':['SANCTIONS_SCREENING_MATCH_GENERAL','REGULATORY_FILING_MONITOR_GENERAL'],
+  'listing-risk':['TOKEN_HOLDER_COUNT_GENERAL','LIQUIDITY_DEPTH_VERIFY_GENERAL','TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL'],
 };
 function invariant(ok: unknown, message: string): asserts ok { if (!ok) throw new Error(message); }
 const uint = (s: unknown): s is string => typeof s === 'string' && /^(0|[1-9]\d*)$/.test(s);

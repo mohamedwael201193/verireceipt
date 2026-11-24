@@ -1,7 +1,7 @@
 // Templates contain selectors and declared analyst thresholds, never numeric
 // observations. Freeze the resolved timestamp before the first purchase.
 import type {ThesisSpec,Claim} from './researchDesk.js';
-export function researchTemplate(id:'A'|'B'|'C'|'D',frozen_at:string):{spec:ThesisSpec;claims:Claim[]}{
+export function researchTemplate(id:'A'|'B'|'C'|'D'|'E',frozen_at:string):{spec:ThesisSpec;claims:Claim[]}{
  const base={version:'research-desk-v1' as const,network:'eip155:11155111' as const,frozen_at,budget_uusdc:'60000',max_call_uusdc:'10000' as const,max_escalations:1 as const};
  if(id==='A')return {
   spec:{...base,template:'onchain-valuation',question:'Is UNI Ethereum-contract implied valuation below the declared analyst ceiling, with protocol TVL context?',facts:[
@@ -29,6 +29,16 @@ export function researchTemplate(id:'A'|'B'|'C'|'D',frozen_at:string):{spec:Thes
    {id:'filings',intent:'REGULATORY_FILING_MONITOR_GENERAL',params:{entity:'Form 10-Q filings by Ares Capital Corp (CIK 1287750)',period:'2026'},field:'filing_count',unit:'filings',max_age_seconds:86400},
   ],assumptions:[{id:'sanctions_threshold',value:'0.85',unit:'score',rationale:'Declared screening threshold equal to the miner\'s own published match threshold; a fuzzy name match is not identity confirmation and a non-match is not legal clearance.'},{id:'filing_floor',value:'1',unit:'filings',rationale:'Declared analyst minimum of one current-year quarterly filing for an overnight diligence pass; not a legal or compliance opinion.'}],calculations:[]},
   claims:[{id:'sanctions_below_threshold',fact_refs:['sanctions'],assumption_refs:['sanctions_threshold'],predicate:{left:'sanctions',op:'<',right:'sanctions_threshold'}},{id:'filings_present',fact_refs:['filings'],assumption_refs:['filing_floor'],predicate:{left:'filings',op:'>=',right:'filing_floor'}}],
+ };
+ if(id==='E')return {
+  spec:{...base,template:'listing-risk',question:'Does UNI (Uniswap governance token on Ethereum) pass the declared listing-risk screen: holder count at or above the declared floor and UNI/WETH 0.3% pool liquidity at or above the declared floor, with total supply context?',facts:[
+   {id:'holders',intent:'TOKEN_HOLDER_COUNT_GENERAL',params:{token:'UNI',chain:'ethereum'},field:'holders_count',unit:'addresses',max_age_seconds:86400},
+   // UNI/WETH 0.3% Uniswap v3 pool on Ethereum; pool identity is pinned
+   // by address and the primary re-read checks the exact pool id.
+   {id:'liquidity',intent:'LIQUIDITY_DEPTH_VERIFY_GENERAL',params:{pool:'0x1d42064Fc4Beb5F8aAF85F4617AE8b3b5B8Bd801',chain:'ethereum'},field:'liquidity_usd',unit:'USD',max_age_seconds:1800},
+   {id:'supply',intent:'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL',params:{token:'UNI on ethereum'},field:'total_supply',unit:'token',max_age_seconds:86400},
+  ],assumptions:[{id:'holders_floor',value:'100000',unit:'addresses',rationale:'Declared analyst listing-risk floor for holder-distribution breadth; a screen threshold, not a market forecast or investment recommendation.'},{id:'liquidity_floor',value:'5000000',unit:'USD',rationale:'Declared analyst minimum DEX pool reserve depth for the listing-liquidity screen; a screen threshold, not a market forecast or investment recommendation.'}],calculations:[]},
+  claims:[{id:'holders_above_floor',fact_refs:['holders'],assumption_refs:['holders_floor'],predicate:{left:'holders',op:'>=',right:'holders_floor'}},{id:'liquidity_above_floor',fact_refs:['liquidity'],assumption_refs:['liquidity_floor'],predicate:{left:'liquidity',op:'>=',right:'liquidity_floor'}},{id:'supply_context',fact_refs:['supply'],assumption_refs:[]}],
  };
  return {
   spec:{...base,template:'issuer-macro',question:'Did Tesla file at least the declared number of Form 10-Qs in calendar 2024, with share-price and US unemployment context?',facts:[

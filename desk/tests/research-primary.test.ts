@@ -37,6 +37,18 @@ describe('source-byte replay, injected unit transports',()=>{
  it('will not fetch a source URL chosen by a packet',async()=>{const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(macro,'4.123457',{f:transport([{},[macroRow]]),now});const reads=JSON.parse(r.source!.raw_text);reads[0].url='https://example.invalid/attacker';r.source!.raw_text=JSON.stringify(reads);const {createHash}=await import('node:crypto');r.source!.content_sha256=createHash('sha256').update(r.source!.raw_text).digest('hex');expect(await replayPrimaryBytes(macro,{source:r.source,value:'4.123457',as_of:r.as_of} as any,now().toISOString())).toBe(false);});
 });
 
+describe('blockscout token holders primary, unit transport only',()=>{
+ const UNI='0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984';
+ const holders:FactSpec={id:'holders',intent:'TOKEN_HOLDER_COUNT_GENERAL',params:{token:'UNI',chain:'ethereum'},field:'holders_count',unit:'addresses',max_age_seconds:86400};
+ it('matches holder count within the declared 100bps tolerance',async()=>{const r=await verifyResearchPrimary(holders,'432000',{f:transport({address_hash:UNI,holders_count:'432070'}),now});expect(r.ok).toBe(true);expect(r.source!.parser).toBe('blockscout-ethereum-token-holders-v1-100bps');});
+ it('rejects contract identity mismatch',async()=>expect((await verifyResearchPrimary(holders,'432000',{f:transport({address_hash:'0x0000000000000000000000000000000000000000',holders_count:'432000'}),now})).ok).toBe(false));
+ it('rejects drift beyond the declared tolerance',async()=>expect((await verifyResearchPrimary(holders,'500000',{f:transport({address_hash:UNI,holders_count:'432070'}),now})).ok).toBe(false));
+ it('rejects malformed holder count',async()=>expect((await verifyResearchPrimary(holders,'432000',{f:transport({address_hash:UNI,holders_count:'many'}),now})).ok).toBe(false));
+ it('refuses non-ethereum chains without fetching',async()=>{let calls=0;const f=async()=>{calls++;return Response.json({});};expect((await verifyResearchPrimary({...holders,params:{token:'UNI',chain:'base'}},'1',{f,now})).ok).toBe(false);expect(calls).toBe(0);});
+ it('refuses a symbol outside the verified contract registry without fetching',async()=>{let calls=0;const f=async()=>{calls++;return Response.json({});};expect((await verifyResearchPrimary({...holders,params:{token:'NOTAREALTOKEN',chain:'ethereum'}},'1',{f,now})).ok).toBe(false);expect(calls).toBe(0);});
+ it('source bytes replay exactly',async()=>{const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(holders,'432000',{f:transport({address_hash:UNI,holders_count:'432070'}),now});expect(await replayPrimaryBytes(holders,{source:r.source,value:'432000',as_of:r.as_of} as any,now().toISOString())).toBe(true);});
+});
+
 describe('chain-bound token supply primary, unit RPC transport only',()=>{
  const supply:FactSpec={id:'supply',intent:'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL',params:{token:'UNI on ethereum'},field:'total_supply',unit:'token',max_age_seconds:1800};
  function rpc(mutant?:'chain'|'block'|'decimals'|'supply'){

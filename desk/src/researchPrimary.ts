@@ -86,6 +86,17 @@ export async function verifyResearchPrimary(fact:FactSpec,value:string,options:{
     for(const s of result.sources)reads.push({url:s.url,raw_text:s.raw_text,observed_at:s.retrieved_at,json:null});
     as_of=reads.at(-1)!.observed_at;parser='sec-independent-full-history-form-recount-v1';break;
    }
+   case 'TOKEN_HOLDER_COUNT_GENERAL':{
+    const chain=(fact.params.chain??'').toLowerCase();if(chain!=='ethereum')fail('holder-count primary is ethereum only; other chains have no parser');
+    const token=fact.params.token;const contract=/^0x[0-9a-fA-F]{40}$/.test(token)?token:TOKEN_CONTRACTS.ethereum?.[token.toUpperCase()];if(!contract)fail('holder-count token not in verified contract registry');
+    const r=await read(`https://eth.blockscout.com/api/v2/tokens/${contract}`);
+    const j=r.json;if(typeof j?.address_hash!=='string'||j.address_hash.toLowerCase()!==contract.toLowerCase())fail('holder-count token identity mismatch');
+    const count=j?.holders_count;if(typeof count!=='string'||!/^(0|[1-9]\d*)$/.test(count))fail('holder count unavailable');
+    // Declared 100 bps tolerance absorbs holder drift between the paid and
+    // independent reads. It is not the network scoring tolerance.
+    if(!within(value,count,100n))fail('holder count differs beyond declared 100 bps independent-read tolerance');
+    as_of=r.observed_at;parser='blockscout-ethereum-token-holders-v1-100bps';break;
+   }
    case 'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL':{
     const match=/^(\S+) on (ethereum|base|arbitrum|optimism|polygon)$/.exec(fact.params.token);if(!match)throw new Error('supply primary requires token on chain');
     const chain=match[2],token=match[1];const contract=/^0x[0-9a-fA-F]{40}$/.test(token)?token:TOKEN_CONTRACTS[chain]?.[token.toUpperCase()];if(!contract)fail('supply token not in verified contract registry');

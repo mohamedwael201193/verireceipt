@@ -917,6 +917,70 @@
       "our_registered_supply": false,
       "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/WEB_SEARCH_GENERAL",
       "source_sha256": "af10acee4d2e27f156c99e22133d37a2a364cb7f2efa595edd541797caa02fb1"
+    },
+    {
+      "intent_name": "TOKEN_HOLDER_COUNT_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "token",
+            "type": "string",
+            "required": true,
+            "description": "Token contract address or name"
+          },
+          {
+            "name": "chain",
+            "type": "string",
+            "required": true,
+            "description": "Chain of the token"
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "TOKEN_HOLDER_COUNT"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "token",
+            "description": "The token contract address or name",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "chain",
+            "description": "The chain the token is on",
+            "type": "string",
+            "off_chain": true
+          },
+          {
+            "name": "holders_count",
+            "description": "Number of distinct addresses holding the token",
+            "type": "number",
+            "unit": "addresses",
+            "range": [
+              0,
+              10000000000
+            ],
+            "scored": true,
+            "decimals": 0
+          },
+          {
+            "name": "token_symbol",
+            "description": "The token's symbol",
+            "type": "string",
+            "off_chain": true
+          }
+        ],
+        "format_version": 3,
+        "served_by": "TOKEN_HOLDER_COUNT"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": true,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/TOKEN_HOLDER_COUNT_GENERAL",
+      "source_sha256": "f89c211b7795da0d92639f767d8c6a1d721bc9b631a55247dc55d8f79d0b0d58"
     }
   ],
   "limits": [
