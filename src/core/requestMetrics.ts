@@ -41,7 +41,7 @@ const ROUTE_INTENTS: Record<string, string> = {
 // Only known parameter NAMES are emitted, including rejected aliases. Never values
 // or unknown names: callers can put a credential into an arbitrary query key.
 const KNOWN_QUERY_KEYS = [
-  "address", "asset", "amount", "base", "block", "block_height", "chain", "country", "cve", "domain",
+  "address", "asset", "amount", "base", "bin", "block", "block_height", "chain", "country", "cve", "domain",
   "company", "entity", "event", "form_type", "form", "cik", "patch", "from", "game", "jurisdiction", "destination", "host", "indicator", "lat", "location", "lon", "window_hours", "ip", "interval_start", "node_or_zone",
   "metric", "origin", "pair", "period", "symbol", "protocol", "query", "question", "quote", "record_type", "route_or_flight",
   "ticker", "to", "token", "topic", "url", "transaction", "tx_hash", "validator_index", "year",
@@ -194,7 +194,10 @@ export function recordRequestCompletion(route: string | undefined, status: numbe
       };
       const receiptId=status===200&&typeof details.receiptId==='string'&&/^rcpt_[A-Z0-9]{26}$/.test(details.receiptId)?details.receiptId:undefined;
       const refused=status>=400 ? intent==='EVENT_OUTCOME_RESOLUTION_GENERAL'?{outcome:'refused',source:'none'}:intent==='ONCHAIN_METRIC_VERIFY_GENERAL'?{metric_kind:ownString(details.query,'metric')??'balance',leg:'none',result:'refused',refusal_reason:status===400?'invalid_input':'other'}:undefined:undefined;
-      const answerClass=sanitizeAnswerClass(intent,details.answerClass??refused);
+      // Fixed input shape only. Never log the prefix itself, its length or unknown keys.
+      const paymentBin=intent==='PAYMENT_METHOD_VERIFY_GENERAL'?ownString(details.query,'bin'):undefined;
+      const paymentClass=intent==='PAYMENT_METHOD_VERIFY_GENERAL'?{input_class:paymentBin===undefined||paymentBin.trim()===''?'missing':/^\d{6,8}$/.test(paymentBin.trim())?'prefix':'invalid'}:undefined;
+      const answerClass=sanitizeAnswerClass(intent,details.answerClass??paymentClass??refused);
       console.info(JSON.stringify({ event: "request_complete", intent, path: route, param_keys,
         ...(input_shape ? { input_shape } : {}), ...(receiptId?{receipt_id:receiptId}:{}), ...(answerClass?{answer_class:answerClass}:{}),
         error_code: details.errorCode == null ? null : diagnosticErrorCode(details.errorCode), status: code, latency_ms: latency }));
