@@ -15,14 +15,21 @@ it('known pool exact address is equivalent to its verified label, preserving raw
  expect(JSON.parse(out.rawBody).source_raw_body).toBe(raw);
  expect(f.mock.calls).toHaveLength(1);
 });
-it('refuses wrong chain and near-match address before network',async()=>{
+it('refuses unsupported chain and malformed address before network',async()=>{
  const f=vi.fn();vi.stubGlobal('fetch',f);const s=dexScreenerLiquiditySource(DEXSCREENER_POOLS,DEXSCREENER_APPROVAL);
- await expect(s.read({pool:binding.address,chain:'arbitrum'},new AbortController().signal)).rejects.toThrow('binding');
- await expect(s.read({pool:binding.address.slice(0,-1)+'1',chain:'ethereum'},new AbortController().signal)).rejects.toThrow('binding');expect(f).not.toHaveBeenCalled();
+ await expect(s.read({pool:binding.address,chain:'unsupported'},new AbortController().signal)).rejects.toThrow('binding');
+ await expect(s.read({pool:binding.address.slice(0,-1),chain:'ethereum'},new AbortController().signal)).rejects.toThrow('binding');expect(f).not.toHaveBeenCalled();
 });
 it('refuses wrong-address response even when name/address request resolves',async()=>{
  const changed=JSON.parse(raw);changed.pairs[0].pairAddress='0x'+'1'.repeat(40);
  vi.stubGlobal('fetch',async()=>new Response(JSON.stringify(changed)));
  const s=dexScreenerLiquiditySource(DEXSCREENER_POOLS,DEXSCREENER_APPROVAL);
  await expect(s.read({pool:binding.address,chain:'ethereum'},new AbortController().signal)).rejects.toThrow('identity');
+});
+
+it('supported alternative chain and exact near-match address require exact returned identity, not a name binding',async()=>{
+ const f=vi.fn(async()=>new Response(raw));vi.stubGlobal('fetch',f);const s=dexScreenerLiquiditySource(DEXSCREENER_POOLS,DEXSCREENER_APPROVAL);
+ await expect(s.read({pool:binding.address,chain:'arbitrum'},new AbortController().signal)).rejects.toThrow('identity');
+ await expect(s.read({pool:binding.address.slice(0,-1)+'1',chain:'ethereum'},new AbortController().signal)).rejects.toThrow('identity');
+ expect(f).toHaveBeenCalledTimes(2);
 });

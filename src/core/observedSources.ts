@@ -1,4 +1,5 @@
 import {answerDiagnostics,withAnswerClass} from './answerClass';
+import {publicSourceFailure} from './publicSource';
 import { upstreamUnavailable } from './errors';
 import { envelope, makeReceipt } from './receipt';
 import { saveReceipt } from './storage';
@@ -33,6 +34,10 @@ export interface ObservationPolicy<Q, T> {
     answer(value: T): string;
     maxAgeMs: number;
     sourceTimeoutMs: number;
+    /** Optional shared network budget across primary and fallback legs. */
+    totalTimeoutMs?: number;
+    /** Preserve fail-fast timeout behavior instead of starting another slow leg. */
+    stopAfterTimeout?: boolean;
     /** Label source granularity honestly. This is not an agreement quorum. */
     scope: string;
 }
@@ -51,16 +56,19 @@ function approved(a: SourceApproval): boolean {
 export async function observeFromSources<Q, T>(query: Q, sources: readonly ObservationSource<Q, T>[], policy: ObservationPolicy<Q, T>): Promise<Record<string, unknown>> {
     const identity = policy.identity(query);
     const failed: string[] = [];
+    const deadline = policy.totalTimeoutMs === undefined ? Infinity : Date.now() + policy.totalTimeoutMs;
     let liquidityClass:Record<string,unknown>|undefined;
     for (const source of sources) {
         if (!approved(source.approval)) {
             failed.push(source.name + ':unapproved');
             continue;
         }
+        const remainingMs = Math.min(policy.sourceTimeoutMs, deadline - Date.now());
+        if (remainingMs <= 0) break;
         const controller = new AbortController();
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
-            const timeout = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => { controller.abort(); const deadlineError=new Error('source deadline');if(policy.intent==='LIQUIDITY_DEPTH_VERIFY_GENERAL'&&source.name==='DEX Screener named pool reserve liquidity')withAnswerClass(deadlineError,policy.intent,{dexscreener_failure:'timeout'});reject(deadlineError); }, policy.sourceTimeoutMs); });
+            const timeout = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => { controller.abort(); const deadlineError=new Error('source deadline');if(policy.intent==='LIQUIDITY_DEPTH_VERIFY_GENERAL'&&source.name==='DEX Screener named pool reserve liquidity')withAnswerClass(deadlineError,policy.intent,{dexscreener_failure:'timeout'});reject(deadlineError); }, remainingMs); });
             const observation = await Promise.race([source.read(query, controller.signal), timeout]);
             if (controller.signal.aborted)
                 throw new Error('source deadline');
@@ -91,6 +99,7 @@ export async function observeFromSources<Q, T>(query: Q, sources: readonly Obser
                 throw error;
             if(policy.intent==='LIQUIDITY_DEPTH_VERIFY_GENERAL')liquidityClass=answerDiagnostics(policy.intent,error).answerClass??liquidityClass;
             failed.push(source.name + ':unavailable');
+            if (policy.stopAfterTimeout && (controller.signal.aborted || publicSourceFailure(error) === 'timeout')) break;
         }
         finally {
             if (timer)
