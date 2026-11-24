@@ -1,3 +1,4 @@
+import {fetchYahooBody} from './yahooTransport';
 // STOCK_PRICE_US_EQUITY — GET /v1/stock-price?ticker=AAPL
 //
 // Zero-LLM. Serves the latest quote for a US-listed equity from the
@@ -36,19 +37,7 @@ import { saveReceipt } from "../core/storage";
 const SOURCE_TIMEOUT_MS = 5000;
 const UA = "VeriReceipt/2.0 stock-price observer (+https://verireceipt.vercel.app)";
 
-async function fetchText(url: string): Promise<string> {
-  assertYahooAllowed();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
-    if (res.status === 429) noteYahooRateLimit(res.headers.get("retry-after"));
-    if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), {status:res.status});
-    return await res.text();
-  } finally {
-    clearTimeout(timer);
-  }
-}
+async function fetchText(url:string):Promise<string>{return fetchYahooBody(url,assertYahooAllowed,noteYahooRateLimit);}
 
 const TICKER_RE = /^[A-Za-z]{1,5}([.-][A-Za-z]{1,2})?$/;
 

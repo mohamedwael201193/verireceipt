@@ -1,3 +1,4 @@
+import {fetchYahooBody} from './yahooTransport';
 import {cachedSecFinancial,type SecObservation} from './secFinancialCache';
 // FINANCIAL_DATA_GENERAL — GET /v1/financial-data?asset=<company|ticker|BTC|ETH|SOL>
 //
@@ -30,7 +31,7 @@ export const INTENT = "FINANCIAL_DATA_GENERAL";
 
 async function fetchText(url: string, ua: string = UA): Promise<string> {
   const yahoo = new URL(url).hostname === "query1.finance.yahoo.com";
-  if (yahoo) assertYahooAllowed();
+  if(yahoo)return fetchYahooBody(url,assertYahooAllowed,noteYahooRateLimit);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
   try {

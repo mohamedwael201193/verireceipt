@@ -1,3 +1,4 @@
+vi.mock('../src/handlers/yahooTransport',()=>({resetYahooTransportForTests:()=>{},fetchYahooBody:async(url:string,allowed:()=>void,limited:(s:string|null)=>void)=>{allowed();const r=await fetch(url);if(r.status===429)limited(r.headers.get('retry-after'));if(!r.ok)throw Object.assign(Error('HTTP'),{status:r.status});return r.text();}}));
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {readFileSync,mkdtempSync} from 'node:fs';import {join} from 'node:path';
 process.env.SQLITE_PATH=join(mkdtempSync('/tmp/stock-search-cache-'),'r.sqlite');
