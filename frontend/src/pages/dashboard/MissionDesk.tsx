@@ -60,7 +60,7 @@ function checksLine(ev: DeskEvaluation): string {
 }
 
 export default function MissionDesk({ onRecord, onInspect, showToast }: MissionDeskProps) {
-  const [mission, setMission] = useState<"m13" | "m12" | "m03">("m13");
+  const [mission, setMission] = useState<"m13" | "m12" | "m03" | "m04">("m13");
   const [presetIdx, setPresetIdx] = useState(0);
   const [inputs, setInputs] = useState<DeskInputs>(DESK_PRESETS[0].inputs);
   const [budget, setBudget] = useState(0.04);
@@ -106,7 +106,7 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
     setStreamState("READY");
   }
 
-  function selectMission(m: "m13" | "m12" | "m03") {
+  function selectMission(m: "m13" | "m12" | "m03" | "m04") {
     if (running) return;
     const idx = DESK_PRESETS.findIndex((p) => p.mission === m);
     if (idx >= 0) selectPreset(idx);
@@ -224,6 +224,9 @@ export default function MissionDesk({ onRecord, onInspect, showToast }: MissionD
           </button>
           <button type="button" className={`pill${mission === "m03" ? " active" : ""}`} onClick={() => selectMission("m03")}>
             Mission 03 · Institutional Markets (#191)
+          </button>
+          <button type="button" className={`pill${mission === "m04" ? " active" : ""}`} onClick={() => selectMission("m04")}>
+            Mission 04 · Legal (#192)
           </button>
         </div>
       </div>

@@ -7,21 +7,25 @@
 
 import type {
   FilingsResponse,
+  CorporateRegistryResponse,
   GridPriceResponse,
   HealthResponse,
   Receipt,
   RouteResponse,
+  SanctionsScreenResponse,
   StockPriceResponse,
   TvlResponse,
   TxResponse,
 } from "../../lib/types";
 
 export type {
+  CorporateRegistryResponse,
   FilingsResponse,
   GridPriceResponse,
   HealthResponse,
   Receipt,
   RouteResponse,
+  SanctionsScreenResponse,
   StockPriceResponse,
   TvlResponse,
   TxResponse,

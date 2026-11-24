@@ -8,7 +8,9 @@ import type {
   FilingsResponse,
   GridPriceResponse,
   HealthResponse,
+  CorporateRegistryResponse,
   RouteResponse,
+  SanctionsScreenResponse,
   StockPriceResponse,
   TvlResponse,
   TxResponse,
@@ -586,6 +588,31 @@ export async function getFilings(
     query.form_type = params.form_type;
   }
   return fetchJson<FilingsResponse>(buildUrl("/v1/filings", query), { expectReceipt: true, signal });
+}
+
+export async function getSanctionsScreen(
+  params: { name: string },
+  signal?: AbortSignal,
+): Promise<SanctionsScreenResponse> {
+  assertValidParamsObject(params, "getSanctionsScreen");
+  assertValidParam(params.name, "name");
+  return fetchJson<SanctionsScreenResponse>(buildUrl("/v1/sanctions-screen", { name: params.name }), {
+    expectReceipt: true,
+    signal,
+  });
+}
+
+export async function getCorporateRegistry(
+  params: { company: string; jurisdiction: string },
+  signal?: AbortSignal,
+): Promise<CorporateRegistryResponse> {
+  assertValidParamsObject(params, "getCorporateRegistry");
+  assertValidParam(params.company, "company");
+  assertValidParam(params.jurisdiction, "jurisdiction");
+  return fetchJson<CorporateRegistryResponse>(
+    buildUrl("/v1/corporate-registry", { company: params.company, jurisdiction: params.jurisdiction }),
+    { expectReceipt: true, signal },
+  );
 }
 
 export async function getStockPrice(

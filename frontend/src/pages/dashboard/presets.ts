@@ -19,11 +19,11 @@
 //   are the repo's own test fixtures (tests/tx.test.ts).
 // - grid zone TH_NP15_GEN-APND + a 2h-ago interval returns live CAISO LMP.
 
-import { getFilings, getGridPrice, getRoute, getStockPrice, getTvl, getTx } from "../../lib/api";
-import type { FilingsResponse, GridPriceResponse, LiveReceipt, ProbeOutcome, RouteResponse, StockPriceResponse, TvlResponse, TxResponse } from "./types";
+import { getCorporateRegistry, getFilings, getGridPrice, getRoute, getSanctionsScreen, getStockPrice, getTvl, getTx } from "../../lib/api";
+import type { CorporateRegistryResponse, FilingsResponse, GridPriceResponse, LiveReceipt, ProbeOutcome, RouteResponse, SanctionsScreenResponse, StockPriceResponse, TvlResponse, TxResponse } from "./types";
 import { formatUsd, formatUsdPrecise, isVerified, probe, recentGridInterval } from "./utils";
 
-export type MissionId = "m13" | "m12" | "m03";
+export type MissionId = "m13" | "m12" | "m03" | "m04";
 /**
  * APPROVE / REJECT / HOLD: a decision against a rule the scenario states.
  * VERIFIED: the data was retrieved and receipted, but no decision rule
@@ -603,6 +603,163 @@ export const DESK_PRESETS: DeskPreset[] = [
             // Two live checks, both verified; the HOLD is the rule
             // outcome (no 10-Q in the window), not a failed check.
             score: scoreOf(2, 2),
+            headline: `NEEDS REVIEW: no Form 10-Q filed in the last 12 months (evaluated ${evaluatedOn} UTC).`,
+            why,
+          };
+    },
+  },
+  {
+    id: "m04-diligence",
+    mission: "m04",
+    tag: "M04 · LEGAL",
+    title: "Overnight Counterparty Diligence",
+    sub: "Sanctions screen + active registry record + current 10-Q, receipted — live",
+    inputs: {
+      entity: "Ares Capital Corporation",
+      ref: "10-Q",
+      scope: "last 12 months · ARCC · US-MD",
+    },
+    buildChecks: (inputs) => {
+      // entity = legal name screened and looked up; scope segments are
+      // period · filings ticker · registry jurisdiction. No silent
+      // defaults: a cleared segment runs empty and the lib refuses it.
+      const segs = splitSegments(inputs.scope);
+      const period = segs[0] ?? "";
+      const ticker = segs[1] ?? "";
+      const jurisdiction = segs[2] ?? "";
+      const form = inputs.ref.trim();
+      return [
+        {
+          label: "Sanctions screen",
+          intent: "SANCTIONS_SCREENING_MATCH_GENERAL",
+          query: `name=${inputs.entity}`,
+          requestUrl: direct("/v1/sanctions-screen", { name: inputs.entity }),
+          run: (signal) => probe((s) => getSanctionsScreen({ name: inputs.entity }, s), signal),
+        },
+        {
+          label: "Corporate registry",
+          intent: "CORPORATE_REGISTRY_LOOKUP_GENERAL",
+          query: `company=${inputs.entity} · ${jurisdiction}`,
+          requestUrl: direct("/v1/corporate-registry", { company: inputs.entity, jurisdiction }),
+          run: (signal) => probe((s) => getCorporateRegistry({ company: inputs.entity, jurisdiction }, s), signal),
+        },
+        {
+          label: "SEC filing",
+          intent: "REGULATORY_FILING_MONITOR_GENERAL",
+          query: `${ticker} · ${form} · ${period}`,
+          requestUrl: direct("/v1/filings", { entity: ticker, period, form_type: form }),
+          run: (signal) => probe((s) => getFilings({ entity: ticker, period, form_type: form }, s), signal),
+        },
+      ];
+    },
+    evaluate: (results) => {
+      const [sanctions, registry, filings] = results;
+      const evaluatedOn = new Date().toISOString().slice(0, 10);
+      const sBody = sanctions ? bodyOf<SanctionsScreenResponse>(sanctions) : null;
+      const sanctionsOk = !!sanctions && isVerified(sanctions.receipt) && typeof sBody?.matched === "boolean";
+      const matched = sanctionsOk ? sBody!.matched === true : null;
+      const rBody = registry ? bodyOf<CorporateRegistryResponse>(registry) : null;
+      const registryOk =
+        !!registry &&
+        isVerified(registry.receipt) &&
+        rBody?.lookup_status === "found" &&
+        typeof rBody?.active === "boolean";
+      const active = registryOk ? rBody!.active === true : null;
+      const fBody = filings ? bodyOf<FilingsResponse>(filings) : null;
+      const verified = !!filings && isVerified(filings.receipt) && typeof fBody?.filing_count === "number";
+      const asked = filingsFormOf(filings);
+      const period = filingsPeriodOf(filings);
+      const detail = Array.isArray(fBody?.filings_detail) ? fBody.filings_detail : [];
+      const formMatches =
+        verified &&
+        asked !== "" &&
+        fBody?.form_type === asked &&
+        detail.length === fBody.filing_count &&
+        detail.every((f) => f && f.form === asked);
+      const rollingWindow = /^last 12 months$/i.test(period.trim());
+      const ruleApplies = asked === "10-Q" && rollingWindow;
+      const count = verified ? fBody!.filing_count : null;
+      const why: WhyCard[] = [
+        {
+          k: "Sanctions Screen",
+          v: !sanctionsOk
+            ? "not verified"
+            : matched
+              ? `MATCH above threshold${typeof sBody?.match_score === "number" ? ` (best ${sBody.match_score})` : ""} — a fuzzy name match is not identity confirmation, but it blocks an overnight pass`
+              : `no match above threshold${typeof sBody?.match_score === "number" ? ` (best ${sBody.match_score})` : ""} — a non-match is not legal clearance`,
+          ok: sanctionsOk && matched === false,
+        },
+        {
+          k: "Registry Record",
+          v: !registryOk
+            ? "not verified"
+            : active
+              ? `${rBody?.legal_name ?? "entity"} GLEIF entity status ACTIVE · ${rBody?.jurisdiction ?? "?"}${rBody?.registration_id ? ` · reg ${rBody.registration_id}` : ""}`
+              : `${rBody?.legal_name ?? "entity"} GLEIF entity status not active · ${rBody?.jurisdiction ?? "?"}`,
+          ok: registryOk && active === true,
+        },
+        {
+          k: "Official EDGAR",
+          v:
+            verified && formMatches
+              ? `${count} Form ${asked} filing(s) in ${period}`
+              : verified
+                ? `answer does not match the requested form_type=${asked || "(empty)"}`
+                : "no live filings returned",
+          ok: verified && formMatches,
+        },
+        {
+          k: "Diligence Rule",
+          v: ruleApplies
+            ? `pass = no sanctions match + active registry + at least one Form 10-Q in the last 12 months (evaluated ${evaluatedOn} UTC). An overnight screen, not a legal opinion.`
+            : `not applied — the rule covers form 10-Q over "last 12 months"; this run is a data retrieval for ${period || "the given period"}.`,
+          ok: ruleApplies ? sanctionsOk && matched === false && registryOk && active === true && verified && formMatches && (count ?? 0) > 0 : "na",
+        },
+      ];
+      if (matched === true) {
+        // Never a public finding against a named company: a fuzzy name
+        // match is a review trigger, so the outcome is HOLD, not REJECT.
+        return {
+          verdict: "HOLD",
+          score: scoreOf(2, 3),
+          headline: "Sanctions match above threshold — overnight diligence blocked pending review. A fuzzy match is not identity confirmation.",
+          why,
+        };
+      }
+      if (!sanctionsOk || !registryOk || !verified || !formMatches) {
+        return {
+          verdict: "HOLD",
+          score: scoreOf((sanctionsOk ? 1 : 0) + (registryOk ? 1 : 0) + (verified && formMatches ? 1 : 0), 3),
+          headline: "Evidence did not verify — review the rows before acting.",
+          why,
+        };
+      }
+      if (!ruleApplies) {
+        return {
+          verdict: "VERIFIED",
+          score: 100,
+          headline: `Data verified: no sanctions match, registry ${active ? "active" : "inactive"}, ${count} Form ${asked} filing(s) in ${period}. No diligence verdict is derived for this window.`,
+          why,
+        };
+      }
+      if (active !== true) {
+        return {
+          verdict: "HOLD",
+          score: scoreOf(2, 3),
+          headline: `NEEDS REVIEW: registry record is not active (evaluated ${evaluatedOn} UTC).`,
+          why,
+        };
+      }
+      return (count ?? 0) > 0
+        ? {
+            verdict: "APPROVE",
+            score: 100,
+            headline: `Overnight diligence pass: no sanctions match, registry active, ${count} Form 10-Q in the last 12 months (evaluated ${evaluatedOn} UTC). Not a legal opinion.`,
+            why,
+          }
+        : {
+            verdict: "HOLD",
+            score: scoreOf(2, 3),
             headline: `NEEDS REVIEW: no Form 10-Q filed in the last 12 months (evaluated ${evaluatedOn} UTC).`,
             why,
           };

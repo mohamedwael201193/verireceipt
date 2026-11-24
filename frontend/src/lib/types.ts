@@ -55,6 +55,40 @@ export interface FilingsResponse extends ReceiptedResponse {
   urls: string[];
 }
 
+export interface SanctionsMatch {
+  list: string;
+  name: string;
+  score?: number;
+  alias?: boolean;
+}
+
+export interface SanctionsScreenResponse extends ReceiptedResponse {
+  name: string;
+  matched: boolean;
+  matches?: SanctionsMatch[];
+  lists?: string[];
+  match_score?: number;
+  verdict?: string;
+  confidence?: number;
+  source?: string;
+  checked_at?: string;
+}
+
+export interface CorporateRegistryResponse extends ReceiptedResponse {
+  legal_name?: string;
+  registration_id?: string;
+  active?: boolean;
+  jurisdiction?: string;
+  registered_address?: string;
+  incorporated?: string;
+  lei?: string;
+  lookup_status?: string;
+  verdict?: string;
+  confidence?: number;
+  source?: string;
+  checked_at?: string;
+}
+
 export interface StockPriceResponse extends ReceiptedResponse {
   ticker: string;
   price_usd: number;
