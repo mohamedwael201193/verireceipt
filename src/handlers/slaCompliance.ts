@@ -1,3 +1,4 @@
+import {withAnswerClass} from '../core/answerClass';
 // SLA_COMPLIANCE_GENERAL — GET /v1/sla-compliance?service=<alias>&period=<Nd>
 //
 // Zero-LLM. Answers "what uptime did this service deliver over the
@@ -143,6 +144,7 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
   const resolvedPeriod = parsePeriod(query.period);
   const days = resolvedPeriod?.days;
   const host=resolveSlaHost(service);
+  const aliasName=Object.entries(STATUSPAGES).find(([,h])=>h===host)?.[0]??'none';
   if (!host || days === undefined) {
     const at=new Date().toISOString();
     const status=!host?'not_found':'unknown';
@@ -153,7 +155,7 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
     const receipt=makeReceipt(INTENT,'local:verified-statuspage-bindings',evidence,'No supported observation window; no uptime observation');receipt.fetched_at=at;
     try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
     const answer=`${service}: ${reason}. Uptime, SLA target and compliance are unknown, not zero or fully operational.`;
-    return envelope(INTENT,{service,period,status,uptime_pct:null,sla_target_pct:null,compliant:null,summary:answer},receipt,{answer,verdict:'unverified',confidence:0,source:'Verified statuspage binding list only; no provider observation'});
+    return withAnswerClass(envelope(INTENT,{service,period,status,uptime_pct:null,sla_target_pct:null,compliant:null,summary:answer},receipt,{answer,verdict:'unverified',confidence:0,source:'Verified statuspage binding list only; no provider observation'}),INTENT,{service_bound:!!host,alias_name:aliasName});
   }
   const summaryUrl=`https://${host}/api/v2/summary.json`;
   let summaryBody:string,summaryFetchedAt:string, summary:any;
@@ -227,7 +229,7 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
     `downtime counts only major/critical incidents from its statuspage.io log (${countedList.length} such incident(s), ~${downtimeMin} minutes); ` +
     `${excluded.length} minor/none degradation(s) are excluded from downtime. ` +
     `sla_target_pct and compliant are NOT provided: a machine-readable SLA target was not established by this endpoint, so a compliance verdict would be invented, not observed.`;
-  return envelope(INTENT, {
+  return withAnswerClass(envelope(INTENT, {
     service,
     period: `${days}d`,
     uptime_pct: uptimeRounded,
@@ -242,5 +244,5 @@ export async function handleSlaCompliance(query: Record<string, string | undefin
     excluded_degradations: excluded.length,
     downtime_minutes: downtimeMin,
     summary: `${service} ${uptimeRounded}% uptime over ${days}d per the disclosed major/critical-only rule (${countedList.length} counted incidents); sla_target_pct/compliant not provided (SLA target not established).`,
-  }, receipt, { answer, verdict: "verified", confidence: 0.85, source: upstreamDesc });
+  }, receipt, { answer, verdict: "verified", confidence: 0.85, source: upstreamDesc }),INTENT,{service_bound:true,alias_name:aliasName,window_covered:true});
 }

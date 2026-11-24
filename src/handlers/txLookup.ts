@@ -1,3 +1,4 @@
+import {withAnswerClass} from '../core/answerClass';
 // ONCHAIN_TX_LOOKUP_GENERAL — GET /v1/tx?tx_hash=&chain=
 //
 // Zero-LLM. Looks a transaction up on a 2-of-N archive-RPC quorum
@@ -847,6 +848,7 @@ export async function handleTx(
   const l1FeeApplies = OP_STACK_CHAINS.has(chain);
   let value: RpcOutcome;
   let votes: string;
+  let retryUsed=false;
   if (successes.length < 2) {
     // R4 MINOR 2: do NOT 502 before any re-poll. A transient error that
     // recovers on re-poll could have confirmed the tx. Re-poll the errored
@@ -859,6 +861,7 @@ export async function handleTx(
     // re-poll round follows: legs that answered in this re-poll round
     // have fresh answers, so the vote is evaluated directly by
     // pickQuorum below.
+    retryUsed=true;
     await new Promise((resolve) => setTimeout(resolve, REPOLL_DELAY_MS));
     // A2-fix: re-poll sequentially, like round 0 — same fan-out rule.
     const recovered: (RpcOutcome | null)[] = [];
@@ -915,7 +918,8 @@ export async function handleTx(
       isFinalitySplit(successes) ||
       (successes.every(isEmptyOutcome) && errored.length > 0);
     if (needsRepoll) {
-      await new Promise((resolve) => setTimeout(resolve, REPOLL_DELAY_MS));
+      retryUsed=true;
+    await new Promise((resolve) => setTimeout(resolve, REPOLL_DELAY_MS));
       // R4 BLOCKER B: a throw during the re-poll of a null/pending leg
       // marks that leg ERRORED — it is removed from `successes` and its
       // URL is added to `errored`. The old code kept the original null
@@ -1117,10 +1121,10 @@ export async function handleTx(
     );
   }
 
-  return envelope(INTENT, fields, receiptDoc, {
+  return withAnswerClass(envelope(INTENT, fields, receiptDoc, {
     answer,
     verdict,
     confidence,
     source: `Archive RPC quorum (${chain}, 2-of-${total})`,
-  });
+  }),INTENT,{status,chain,quorum_votes:Number(/^(\d+)\//.exec(votes)?.[1]),retry_used:retryUsed});
 }
