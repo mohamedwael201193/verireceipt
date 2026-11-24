@@ -33,7 +33,7 @@ import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { CHAIN_RPCS } from "../config/chains";
 
-const RPC_TIMEOUT_MS = 12000;
+const RESERVE_DEADLINE_MS = 9000;
 const UA = "VeriReceipt/2.0 reserve-attestation observer (+https://verireceipt.vercel.app)";
 const HEARTBEAT_S = 86400;
 
@@ -61,30 +61,18 @@ const ETHEREUM_TOKENS: Record<string, { address: string; decimals: number }> = {
 const DECIMALS_SEL = "0x313ce567";
 const LATEST_ROUND_SEL = "0xfeaf968c";
 
-async function rpcCall(url: string, data: string, to: string): Promise<{ body: string; result: string }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { method: "POST", signal: controller.signal,
-      headers: { "content-type": "application/json", "User-Agent": UA },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to, data }, "latest"] }) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const body = await res.text();
-    const result = (JSON.parse(body) as { result?: string }).result;
-    if (typeof result !== "string" || !/^0x[0-9a-fA-F]*$/.test(result)) throw new Error("no result");
-    return { body, result: result.toLowerCase() };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// Optional enrichment has one shared budget, independent of the validated reserve.
+// Required feed reads and optional enrichment use separate budgets and ownership pools.
 const activeSupplyReads = new Set<string>();
+// One required operation per URL/feed, held until underlying I/O really settles.
+// The three enabled feeds and three configured URLs give at most nine keys.
+const activeFeedReads = new Set<string>();
+export function resetReserveFeedReadsForTests() { activeFeedReads.clear(); }
 export function resetReserveSupplyReadsForTests() { activeSupplyReads.clear(); }
-async function optionalRpcCall(url: string, data: string, to: string, deadline: number): Promise<{body: string; result: string}> {
-  const key = JSON.stringify([url, data, to]);
-  if (Date.now() >= deadline || activeSupplyReads.has(key) || activeSupplyReads.size >= 16) throw Error("optional supply unavailable");
-  activeSupplyReads.add(key);
+async function boundedRpcCall(url: string, data: string, to: string, deadline: number, required: boolean): Promise<{body: string; result: string}> {
+  const active = required ? activeFeedReads : activeSupplyReads;
+  const key = JSON.stringify(required ? [url, to] : [url, data, to]);
+  if (Date.now() >= deadline || active.has(key) || (!required && active.size >= 16)) throw Error("reserve source unavailable");
+  active.add(key);
   const abort = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const io = (async () => {
@@ -92,7 +80,7 @@ async function optionalRpcCall(url: string, data: string, to: string, deadline: 
       const res = await fetch(url, { method: "POST", redirect: "error", signal: abort.signal,
         headers: { "content-type": "application/json", "User-Agent": UA },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{to, data}, "latest"] }) });
-      if (!res.ok || !res.body) throw Error("optional supply HTTP unavailable");
+      if (!res.ok || !res.body) throw Error("reserve RPC HTTP unavailable");
       const reader = res.body.getReader();
       const chunks: Uint8Array[] = [];
       let bytes = 0;
@@ -100,24 +88,24 @@ async function optionalRpcCall(url: string, data: string, to: string, deadline: 
         const part = await reader.read();
         if (part.done) break;
         bytes += part.value.byteLength;
-        if (bytes > 10000) { void reader.cancel().catch(() => {}); throw Error("optional supply body too large"); }
+        if (bytes > 10000) { void reader.cancel().catch(() => {}); throw Error("reserve RPC body too large"); }
         chunks.push(part.value);
       }
       const body = Buffer.concat(chunks).toString("utf8");
       const parsed = JSON.parse(body);
-      if (parsed.error || typeof parsed.result !== "string" || !/^0x[0-9a-fA-F]*$/.test(parsed.result)) throw Error("optional supply invalid envelope");
+      if (parsed.error || typeof parsed.result !== "string" || !/^0x[0-9a-fA-F]*$/.test(parsed.result)) throw Error("reserve RPC invalid envelope");
       return {body, result: parsed.result.toLowerCase()};
-    } finally { activeSupplyReads.delete(key); }
+    } finally { active.delete(key); }
   })();
   try {
     return await Promise.race([io, new Promise<never>((_, reject) => {
-      timer = setTimeout(() => { abort.abort(); reject(Error("optional supply deadline")); }, Math.max(0, deadline - Date.now()));
+      timer = setTimeout(() => { abort.abort(); reject(Error("reserve RPC deadline")); }, Math.max(0, deadline - Date.now()));
     })]);
   } finally { clearTimeout(timer); }
 }
 
-async function quorumCall(rpcs: string[], data: string, to: string, what: string, deadline?: number): Promise<{ result: string; bodies: Record<string, string> }> {
-  const settled = await Promise.allSettled(rpcs.map((url) => deadline === undefined ? rpcCall(url, data, to) : optionalRpcCall(url, data, to, deadline)));
+async function quorumCall(rpcs: string[], data: string, to: string, what: string, deadline: number, required = false): Promise<{ result: string; bodies: Record<string, string> }> {
+  const settled = await Promise.allSettled(rpcs.map((url) => boundedRpcCall(url, data, to, deadline, required)));
   const ok = settled.filter((s): s is PromiseFulfilledResult<{ body: string; result: string }> => s.status === "fulfilled").map((s) => s.value);
   if (ok.length < 2) {
     throw upstreamUnavailable("RPC_QUORUM_UNREACHABLE", `fewer than two ethereum RPC legs answered ${what} (${ok.length}/${rpcs.length})`);
@@ -164,14 +152,15 @@ export async function handleReserveAttestation(query: Record<string, string | un
       reserve_vs_ethereum_supply_pct: null, collateral_ratio_pct: null,
       verdict: "unavailable", confidence: 0, receipt: null }, INTENT, {asset_known:false,source_kind:"coverage_only",numeric_vs_null:"null"});
   }
+  const feedDeadline = Date.now() + RESERVE_DEADLINE_MS;
   const fetchedAt = new Date().toISOString();
   const rpcs = CHAIN_RPCS.ethereum;
-  const dec = await quorumCall(rpcs, DECIMALS_SEL, feed.proxy, "decimals()");
+  const dec = await quorumCall(rpcs, DECIMALS_SEL, feed.proxy, "decimals()", feedDeadline, true);
   const decimals = Number(BigInt(dec.result));
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
     throw upstreamUnavailable("FEED_BAD_BODY", `the feed reported implausible decimals (${decimals})`);
   }
-  const round = await quorumCall(rpcs, LATEST_ROUND_SEL, feed.proxy, "latestRoundData()");
+  const round = await quorumCall(rpcs, LATEST_ROUND_SEL, feed.proxy, "latestRoundData()", feedDeadline, true);
   const data = parseRoundData(round.result);
   if (data.answer <= 0n) throw unprocessable("NO_USABLE_ATTESTATION", "the feed's latest round carries a non-positive reserve; refusing to serve it");
   // Micro-units of the underlying: answer x 10^(6 - decimals).
