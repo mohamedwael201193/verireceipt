@@ -19,7 +19,19 @@ interface Leg {
     raw: string[];
 }
 // A timed-out caller does not release ownership of an abort-ignoring source.
-class MetricDeadline extends Error {}
+type ProviderFailure = 'not_finalized' | 'rate_limited' | 'timeout' | 'wrong_chain' | 'other';
+class MetricProviderFailure extends Error {
+    constructor(readonly failureClass: ProviderFailure, message: string) {super(message);}
+}
+class MetricDeadline extends MetricProviderFailure {
+    constructor(message: string) {super('timeout',message);}
+}
+// Most frequent class; ties use this fixed order, independent of provider arrival.
+const FAILURE_ORDER: ProviderFailure[] = ['not_finalized','rate_limited','timeout','wrong_chain','other'];
+function providerDiagnostics(failures: ProviderFailure[], fullLegCount: number) {
+    const dominant = [...FAILURE_ORDER].sort((a,b) => failures.filter(x=>x===b).length-failures.filter(x=>x===a).length)[0];
+    return {full_leg_count:fullLegCount,...(failures.length ? {provider_failure:dominant} : {})};
+}
 const activeMetricCalls = new Set<string>();
 export function resetMetricCallsForTests() { activeMetricCalls.clear(); }
 async function call(url: string, method: string, params: unknown[], deadline: number): Promise<{
@@ -37,7 +49,7 @@ async function call(url: string, method: string, params: unknown[], deadline: nu
             throw new MetricDeadline('metric deadline');
         const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), redirect: 'error', signal: abort.signal });
         if (!r.ok)
-            throw new Error(`RPC HTTP ${r.status}`);
+            throw new MetricProviderFailure(r.status === 429 ? 'rate_limited' : 'other', `RPC HTTP ${r.status}`);
         const reader = r.body?.getReader();
         if (!reader)
             throw new Error('missing body');
@@ -100,15 +112,16 @@ export async function handleOnchainMetric(query: Record<string, string | undefin
     const legs: Leg[] = [];
     const errors: string[] = [];
     let deadlineHit = false;
+    const providerFailures: ProviderFailure[] = [];
     for (const url of CHAIN_RPCS[chain]) {
         try {
             const raw: string[] = [];
             const request = async (m: string, p: unknown[]) => { const x = await call(url, m, p, deadline); raw.push(x.raw); return x.result; };
             if (qty(await request('eth_chainId', [])) !== qty(IDS[chain]))
-                throw new Error('wrong chain');
+                throw new MetricProviderFailure('wrong_chain','wrong chain');
             const finalized = await request('eth_getBlockByNumber', ['finalized', false]);
             if (!finalized || qty(finalized.number) < block)
-                throw new Error('block is not finalized');
+                throw new MetricProviderFailure('not_finalized','block is not finalized');
             const before = await request('eth_getBlockByNumber', [tag, false]);
             if (!before || qty(before.number) !== block || !/^0x[0-9a-fA-F]{64}$/.test(before.hash))
                 throw new Error('wrong block identity');
@@ -123,6 +136,7 @@ export async function handleOnchainMetric(query: Record<string, string | undefin
         }
         catch (err) {
             if (err instanceof MetricDeadline) deadlineHit = true;
+            providerFailures.push(err instanceof MetricProviderFailure ? err.failureClass : 'other');
             errors.push(url);
         }
         const groups = new Map<string, Leg[]>();
@@ -142,7 +156,7 @@ export async function handleOnchainMetric(query: Record<string, string | undefin
         const evidence = JSON.stringify({ chain, address: address.toLowerCase(), block: block.toString(), block_hash: w.hash, balance_wei: w.balance, tx_count: w.nonce, sources: legs, unavailable_sources: errors });
         const receipt = makeReceipt('ONCHAIN_METRIC_VERIFY_GENERAL', w.url, evidence, `${wins.length}/${CHAIN_RPCS[chain].length} same finalized block hash, balance and nonce`);
         await saveReceipt(receipt, evidence);
-        return withAnswerClass(envelope('ONCHAIN_METRIC_VERIFY_GENERAL', { address, chain, block: block.toString(), block_hash: w.hash, balance_gwei: balanceGwei, balance_wei: w.balance, tx_count: count, metric }, receipt, { answer: metric === 'balance' ? balanceSentence : `${address} had sent ${count} transactions (nonce) on ${chain} at finalized block ${block}. ${balanceSentence}`, verdict: 'verified', confidence: wins.length === CHAIN_RPCS[chain].length ? 1 : 0.95, source: `Block-pinned RPC agreement; ${w.url}; balance is Gwei, not ETH/POL; nonce is not received transfers.` }),'ONCHAIN_METRIC_VERIFY_GENERAL',{metric_kind:metric,leg:'quorum',result:'value'});
+        return withAnswerClass(envelope('ONCHAIN_METRIC_VERIFY_GENERAL', { address, chain, block: block.toString(), block_hash: w.hash, balance_gwei: balanceGwei, balance_wei: w.balance, tx_count: count, metric }, receipt, { answer: metric === 'balance' ? balanceSentence : `${address} had sent ${count} transactions (nonce) on ${chain} at finalized block ${block}. ${balanceSentence}`, verdict: 'verified', confidence: wins.length === CHAIN_RPCS[chain].length ? 1 : 0.95, source: `Block-pinned RPC agreement; ${w.url}; balance is Gwei, not ETH/POL; nonce is not received transfers.` }),'ONCHAIN_METRIC_VERIFY_GENERAL',{metric_kind:metric,leg:'quorum',result:'value',...providerDiagnostics(providerFailures,legs.length)});
     }
     let refusalReason = deadlineHit ? 'deadline' : 'insufficient_providers';
     if (!deadlineHit && legs.length >= 2) {
@@ -150,5 +164,5 @@ export async function handleOnchainMetric(query: Record<string, string | undefin
             : new Set(legs.map(l => l.balance)).size > 1 ? 'balance_mismatch' : 'nonce_mismatch';
     }
     throw withAnswerClass(upstreamUnavailable('METRIC_QUORUM_UNAVAILABLE', 'two sources did not agree on the exact finalized block identity, balance and nonce'),
-        'ONCHAIN_METRIC_VERIFY_GENERAL', {metric_kind:metric,leg:'none',result:'refused',refusal_reason:refusalReason});
+        'ONCHAIN_METRIC_VERIFY_GENERAL', {metric_kind:metric,leg:'none',result:'refused',refusal_reason:refusalReason,...providerDiagnostics(providerFailures,legs.length)});
 }
