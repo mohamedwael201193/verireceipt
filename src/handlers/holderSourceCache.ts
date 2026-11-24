@@ -1,3 +1,4 @@
+import {markFailure} from '../core/upstreamFailureDiagnostics';
 // Process-local provider pacing; cached bytes and acquisition time are atomic.
 const TTL_MS = 5 * 60_000;
 const MAX_STALE_AGE_MS = 10 * 60_000;
@@ -32,7 +33,7 @@ export async function cachedHolderBody(url: string, load: (remainingMs: number) 
   if (Date.now() < rateLimitedUntil) {
     const prior = staleFallback("GeckoTerminal HTTP 429");
     if (prior) return prior;
-    throw Object.assign(new Error("GeckoTerminal HTTP 429 cooldown; no eligible cached observation"), { status: 429 });
+    const error=Object.assign(new Error("GeckoTerminal HTTP 429 cooldown; no eligible cached observation"), { status: 429 });markFailure(error,'rate_limited');throw error;
   }
   const existing = inFlight.get(url);
   if (existing) return existing;

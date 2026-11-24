@@ -1,3 +1,5 @@
+import {markFailure,failureKind} from '../core/upstreamFailureDiagnostics';
+import {withAnswerClass} from '../core/answerClass';
 // TOKEN_HOLDER_COUNT_GENERAL — GET /v1/token-holders?token=&chain=
 //
 // Zero-LLM. Answers the number of distinct addresses holding an ERC-20
@@ -66,9 +68,13 @@ async function fetchText(url: string, timeoutMs = HTTP_TIMEOUT_MS): Promise<stri
         const millis = /^\d+$/.test(retry.trim()) ? Number(retry) * 1000 : Date.parse(retry) - Date.now();
         if (Number.isFinite(millis) && millis >= 0) error.retryAfterMs = millis;
       }
+      markFailure(error,res.status===429?'rate_limited':'unreachable');
       throw error;
     }
     return await res.text();
+  } catch(error) {
+    if(failureKind(error)==='unknown')markFailure(error,'unreachable');
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -198,17 +204,17 @@ export async function handleTokenHolders(
   let staleReason: string | undefined;
   try {
     const observation = network
-      ? await cachedHolderBody(url, (remaining) => fetchText(url, remaining), (raw) => { parseGecko(raw, network, contract); }, deadlineAt)
+      ? await cachedHolderBody(url, (remaining) => fetchText(url, remaining), (raw) => { try{parseGecko(raw, network, contract);}catch(error){markFailure(error,'bad_payload');throw error;} }, deadlineAt)
       : { body: await fetchText(url, Math.min(4_000, deadlineAt - Date.now())), fetchedAt: new Date().toISOString() };
     bodyFetchedAt = observation.fetchedAt;
     staleReason = "staleReason" in observation ? observation.staleReason : undefined;
     if (staleReason) recordUpstreamError("geckoterminal", staleReason.includes("429") ? "UPSTREAM_RATE_LIMITED" : "INDEXER_UNREACHABLE");
-    info = network ? parseGecko(observation.body, network, contract) : parseIndexerResponse(observation.body, url, contract);
+    try{info = network ? parseGecko(observation.body, network, contract) : parseIndexerResponse(observation.body, url, contract);}catch(error){markFailure(error,'bad_payload');throw error;}
   } catch (err) {
-    throw upstreamUnavailable(
+    throw withAnswerClass(upstreamUnavailable(
       "INDEXER_UNREACHABLE",
       `${sourceName} holder-count indexer failed for ${chain}: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    ),INTENT,{upstream_name:network?'geckoterminal':'blockscout',upstream_failure:failureKind(err)});
   }
 
   // A symbol request must match the indexer's own symbol for the

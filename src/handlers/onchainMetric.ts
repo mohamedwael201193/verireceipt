@@ -1,3 +1,4 @@
+import {markFailure,failureKind,combineFailures,metricUpstream,type FailureClass} from '../core/upstreamFailureDiagnostics';
 import {answerDiagnostics,withAnswerClass} from "../core/answerClass";
 import { badRequest, upstreamUnavailable } from '../core/errors';
 import { envelope, makeReceipt } from '../core/receipt';
@@ -43,6 +44,7 @@ async function call(url: string, method: string, params: unknown[], deadline: nu
     activeMetricCalls.add(url);
     const abort = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let diagnosticStage:'unreachable'|'bad_payload'='unreachable';
     const io = (async () => {
     try {
         if (Date.now() >= deadline)
@@ -62,6 +64,7 @@ async function call(url: string, method: string, params: unknown[], deadline: nu
                     break;
                 size += p.value.length;
                 if (size > 65536) {
+                    diagnosticStage='bad_payload';
                     await reader.cancel();
                     throw new Error('RPC body limit');
                 }
@@ -71,12 +74,14 @@ async function call(url: string, method: string, params: unknown[], deadline: nu
         finally {
             reader.releaseLock();
         }
+        diagnosticStage='bad_payload';
         const raw = Buffer.concat(parts).toString('utf8');
         const j = JSON.parse(raw);
         if (j.jsonrpc !== '2.0' || j.id !== 1 || j.error || !Object.hasOwn(j, 'result'))
             throw new Error('invalid RPC envelope');
         return { result: j.result, raw };
     }
+    catch(error){try{markFailure(error,error instanceof MetricProviderFailure&&error.failureClass==='rate_limited'?'rate_limited':diagnosticStage);}catch{}throw error;}
     finally { activeMetricCalls.delete(url); }
     })();
     try {
@@ -139,6 +144,7 @@ async function runMetricWorkflow(address:string,block:bigint,tag:string,chain:st
     const errors: string[] = [];
     let deadlineHit = false;
     const providerFailures: ProviderFailure[] = [];
+    const diagnosticFailures:Array<{upstream_name:string;upstream_failure:FailureClass}>=[];
     for (const url of CHAIN_RPCS[chain]) {
         try {
             const raw: string[] = [];
@@ -162,6 +168,7 @@ async function runMetricWorkflow(address:string,block:bigint,tag:string,chain:st
         }
         catch (err) {
             if (err instanceof MetricDeadline) deadlineHit = true;
+            try{diagnosticFailures.push({upstream_name:metricUpstream(url),upstream_failure:err instanceof MetricProviderFailure?err.failureClass==='rate_limited'?'rate_limited':err.failureClass==='timeout'?'unreachable':'other':failureKind(err)});}catch{}
             providerFailures.push(err instanceof MetricProviderFailure ? err.failureClass : 'other');
             errors.push(url);
         }
@@ -190,5 +197,5 @@ async function runMetricWorkflow(address:string,block:bigint,tag:string,chain:st
             : new Set(legs.map(l => l.balance)).size > 1 ? 'balance_mismatch' : 'nonce_mismatch';
     }
     throw withAnswerClass(upstreamUnavailable('METRIC_QUORUM_UNAVAILABLE', 'two sources did not agree on the exact finalized block identity, balance and nonce'),
-        'ONCHAIN_METRIC_VERIFY_GENERAL', {metric_kind:metric,leg:'none',result:'refused',refusal_reason:refusalReason,...providerDiagnostics(providerFailures,legs.length)});
+        'ONCHAIN_METRIC_VERIFY_GENERAL', {...combineFailures(diagnosticFailures),metric_kind:metric,leg:'none',result:'refused',refusal_reason:refusalReason,...providerDiagnostics(providerFailures,legs.length)});
 }
