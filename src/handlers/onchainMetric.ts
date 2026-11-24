@@ -4,6 +4,11 @@ import { saveReceipt } from '../core/storage';
 import { CHAIN_RPCS } from '../config/chains';
 import { normalizeChain } from './txLookup';
 import { ADDRESS_RE } from './tokenContracts';
+/** Exact native-unit text for presentation only; canonical numeric Gwei is unchanged. */
+export function metricNativeText(wei: bigint): string {
+    const fraction = (wei % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '');
+    return `${wei / 10n ** 18n}${fraction ? '.' + fraction : ''}`;
+}
 const IDS: Record<string, string> = { ethereum: '0x1', polygon: '0x89', arbitrum: '0xa4b1' };
 interface Leg {
     url: string;
@@ -111,10 +116,12 @@ export async function handleOnchainMetric(query: Record<string, string | undefin
         const wei = BigInt(w.balance);
         const balanceGwei = Number(wei / 1000000000n) + Number(wei % 1000000000n) / 1e9;
         const count = Number(w.nonce);
+        const nativeSymbol = chain === 'polygon' ? 'POL' : 'ETH';
+        const balanceSentence = `${address} held exactly ${metricNativeText(wei)} ${nativeSymbol} (${balanceGwei} Gwei) on ${chain} at finalized block ${block}.`;
         const evidence = JSON.stringify({ chain, address: address.toLowerCase(), block: block.toString(), block_hash: w.hash, balance_wei: w.balance, tx_count: w.nonce, sources: legs, unavailable_sources: errors });
         const receipt = makeReceipt('ONCHAIN_METRIC_VERIFY_GENERAL', w.url, evidence, `${wins.length}/${CHAIN_RPCS[chain].length} same finalized block hash, balance and nonce`);
         await saveReceipt(receipt, evidence);
-        return envelope('ONCHAIN_METRIC_VERIFY_GENERAL', { address, chain, block: block.toString(), block_hash: w.hash, balance_gwei: balanceGwei, balance_wei: w.balance, tx_count: count, metric }, receipt, { answer: metric === 'balance' ? `${address} held ${balanceGwei} Gwei on ${chain} at finalized block ${block}.` : `${address} had sent ${count} transactions (nonce) on ${chain} at finalized block ${block}; native balance ${balanceGwei} Gwei.`, verdict: 'verified', confidence: wins.length === CHAIN_RPCS[chain].length ? 1 : 0.95, source: `Block-pinned RPC agreement; ${w.url}; balance is Gwei, not ETH/POL; nonce is not received transfers.` });
+        return envelope('ONCHAIN_METRIC_VERIFY_GENERAL', { address, chain, block: block.toString(), block_hash: w.hash, balance_gwei: balanceGwei, balance_wei: w.balance, tx_count: count, metric }, receipt, { answer: metric === 'balance' ? balanceSentence : `${address} had sent ${count} transactions (nonce) on ${chain} at finalized block ${block}. ${balanceSentence}`, verdict: 'verified', confidence: wins.length === CHAIN_RPCS[chain].length ? 1 : 0.95, source: `Block-pinned RPC agreement; ${w.url}; balance is Gwei, not ETH/POL; nonce is not received transfers.` });
     }
     throw upstreamUnavailable('METRIC_QUORUM_UNAVAILABLE', 'two sources did not agree on the exact finalized block identity, balance and nonce');
 }
