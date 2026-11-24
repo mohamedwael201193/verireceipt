@@ -74,11 +74,11 @@ describe("complete finalized validator record", () => {
       balance: "34302537532", balance_unit: "gwei", effective_balance: 34000000000,
       slashed: false, activation_eligibility_epoch: "0", activation_epoch: "0",
       exit_epoch: farFuture, withdrawable_epoch: farFuture, finalized_state_root: root });
-    // V1 framing: status and slashed first, ETH balances (effective in
-    // both ETH and gwei), then activation and exit, pubkey last and
-    // shortened. Fields stay in gwei.
+    // Canonical effective balance first; status and actual balance stay distinct.
+    // Activation/exit and shortened pubkey remain; fields stay in gwei.
     expect(String(result.answer)).toContain("Validator 0 is active_ongoing and has not been slashed");
-    expect(String(result.answer)).toContain("balance 34.302537532 ETH (effective 34 ETH = 34000000000 gwei)");
+    expect(String(result.answer)).toMatch(/^Validator 0 effective balance is 34000000000 gwei \(34 ETH\)\./);
+    expect(String(result.answer)).toContain("balance 34.302537532 ETH,");
     expect(String(result.answer)).toContain("active since epoch 0");
     expect(String(result.answer)).toContain("no exit scheduled");
     expect(String(result.answer)).toContain("far-future sentinel");

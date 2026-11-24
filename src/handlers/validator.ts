@@ -1492,8 +1492,9 @@ export async function handleValidator(
     ? "Epoch 18446744073709551615 is the beacon far-future sentinel, not a scheduled date. "
     : "";
   const answer =
+    `Validator ${leg.index} effective balance is ${leg.effectiveBalance} gwei (${gweiToEth(leg.effectiveBalance)} ETH). ` +
     `Validator ${leg.index} is ${leg.status} and ${leg.slashed ? "HAS been slashed" : "has not been slashed"}; ` +
-    `balance ${gweiToEth(leg.balance)} ETH (effective ${gweiToEth(leg.effectiveBalance)} ETH = ${leg.effectiveBalance} gwei), ` +
+    `balance ${gweiToEth(leg.balance)} ETH, ` +
     `active since epoch ${leg.activationEpoch} (eligible from epoch ${leg.activationEligibilityEpoch}), ` +
     `${leg.exitEpoch === "18446744073709551615" ? "no exit scheduled" : `exit scheduled at epoch ${leg.exitEpoch}, withdrawable epoch ${leg.withdrawableEpoch}`}. ` +
     sentinelNote +
