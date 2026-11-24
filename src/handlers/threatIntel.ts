@@ -33,8 +33,9 @@
 // exit) shows why — a feed can delist while the risk stays. The feeds
 // are blocklists, not safelists.
 //
-// FAIL CLOSED: every feed must download and clear its truncation floor,
-// else 502 — a "clean" answer against a partial view is a wrong answer.
+// Bounded degraded view: at most one missing feed and at least two
+// applicable feeds. Only a positive listing supports a boolean answer;
+// no-hit incomplete views refuse. URL_SAFE can instead report Unknown.
 // Lists are cached in memory for CACHE_TTL_MS; freshness is named.
 import { isIP } from "node:net";
 import { threatContext } from "./threatContext";
@@ -72,7 +73,8 @@ export interface FeedState {
   published: string; // Last-Modified header or in-file version line, when present
   lines: string[]; // parsed entries (comments/headers stripped)
 }
-let cache: { at: number; states: FeedState[] } | null = null;
+export interface FeedView { states: FeedState[]; unavailable: string[] }
+let cache: { at: number; view: FeedView } | null = null;
 let floors: Record<string, number> = Object.fromEntries(FEEDS.map((f) => [f.name, f.floor]));
 export function resetThreatIntelCacheForTests(testFloors?: Record<string, number>): void {
   cache = null;
@@ -119,10 +121,10 @@ function parseEntries(feed: Feed, raw: string): string[] {
 }
 
 // Exported for the URL_SCAN_VERDICT handler, which screens against the
-// same seven feeds and shares this cache. Additive export only; the
-// loading, floor and fail-closed behaviour is unchanged.
-export async function loadFeeds(): Promise<FeedState[]> {
-  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.states;
+// same seven feeds and shares this cache. Failed/truncated feeds are
+// retained as unavailable metadata, never treated as empty clean lists.
+export async function loadFeedView(): Promise<FeedView> {
+  if (cache && Date.now() - cache.at < (cache.view.unavailable.length ? 60_000 : CACHE_TTL_MS)) return cache.view;
   const settled = await Promise.allSettled(FEEDS.map((f) => fetchText(f.url)));
   const states: FeedState[] = [];
   const failed: string[] = [];
@@ -145,12 +147,35 @@ export async function loadFeeds(): Promise<FeedState[]> {
       lines,
     });
   });
-  if (failed.length > 0 || states.length !== FEEDS.length) {
-    throw upstreamUnavailable("THREAT_FEED_DEGRADED",
-      `${failed.length} of ${FEEDS.length} threat feeds failed or parsed below floor: ${failed.join("; ")}; refusing to answer from a partial view`);
+  const view = { states, unavailable: failed };
+  if (failed.length > 1 || states.length < FEEDS.length - 1) {
+    throw upstreamUnavailable("THREAT_FEED_DEGRADED", `${failed.length} of ${FEEDS.length} feeds unavailable: ${failed.join("; ")}; too few feeds for bounded screening`);
   }
-  cache = { at: Date.now(), states };
-  return states;
+  cache = { at: Date.now(), view };
+  return view;
+}
+
+/** Strict loader retained for callers requiring the complete view. */
+export async function loadFeeds(): Promise<FeedState[]> {
+  const view = await loadFeedView();
+  if (view.unavailable.length) throw upstreamUnavailable("THREAT_FEED_DEGRADED", view.unavailable.join("; "));
+  return view.states;
+}
+
+export function requireBoundedThreatView(view: FeedView, indicator: string, positive: boolean, unknownAllowed = false): void {
+  if (!view.unavailable.length) return;
+  const host = /^https?:\/\//i.test(indicator) ? canonicalScreeningHost(indicator) : indicator;
+  const ip = isIP(host) === 4;
+  const url = /^https?:\/\//i.test(indicator);
+  const applicable = view.states.filter(s => ip
+    ? s.feed.kind === "ip" || s.feed.kind === "cidr" || (url && s.feed.kind === "url")
+    : s.feed.kind === "domain" || s.feed.kind === "wildcard-domain" || (url && s.feed.kind === "url"));
+  if (view.unavailable.length > 1 || applicable.length < 2 || (!positive && !unknownAllowed)) {
+    throw upstreamUnavailable("THREAT_FEED_DEGRADED", `Incomplete threat screening: ${view.unavailable.join("; ")}; no supported definitive verdict`);
+  }
+}
+export function degradedThreatDisclosure(view: FeedView): string {
+  return view.unavailable.length ? ` INCOMPLETE SCREENING: unavailable feeds: ${view.unavailable.join("; ")}. Results cover only ${view.states.length} available feeds; missing data is not a clean result.` : "";
 }
 
 function ipToInt(ip: string): number | null {
@@ -252,16 +277,18 @@ export async function handleThreatIndicator(query: Record<string, string | undef
   if (indicator.length > 2048) throw badRequest("INVALID_INDICATOR", "indicator is over 2048 characters");
   if (/\s/.test(indicator)) throw badRequest("INVALID_INDICATOR", "indicator must be a single IPv4 address, domain or URL, no whitespace");
   validateThreatIndicator(indicator);
-  const states = await loadFeeds();
+  const view = await loadFeedView();
+  const { states } = view;
   const fetchedAt = new Date().toISOString();
   const { type, matches } = matchIndicator(indicator, states);
   const malicious = matches.length > 0;
+  requireBoundedThreatView(view, indicator, malicious);
   const context = await threatContext(indicator);
   const listedBy = [...new Set([...matches.map(m => m.feed), ...((context.context_listed_by as string[]) ?? [])])];
   const asOf = new Date().toISOString();
   const feedMeta = states.map((s) => ({ feed: s.feed.name, url: s.feed.url, entries: s.lines.length, sha256: s.sha256, published: s.published }));
   const evidence = JSON.stringify({
-    indicator, type, malicious, as_of: asOf, context,
+    indicator, type, malicious, as_of: asOf, context, unavailable_feeds: view.unavailable,
     matches: matches.map((m) => ({ feed: m.feed, matched_entry: m.raw })),
     feeds: feedMeta,
     honesty: "a blocklist match means at least one feed lists the indicator; absence means only that NONE of these feeds list it as of their fetch times — blocklists are not safelists, and a delisted indicator is not a cleared one",
@@ -287,7 +314,7 @@ export async function handleThreatIndicator(query: Record<string, string | undef
       `Checked against ${checkedDesc}.`
     : `${indicator} is NOT listed in the ${checkedDesc} as of ${asOf}. ` +
       `That is NOT a clearance: blocklists are not safelists, and these feeds cover only what they have seen.`;
-  const answer = coreAnswer + ` Supplemental listed_by: ${listedBy.join(", ") || "none"}. ${context.tor_context ?? ""} ${context.context_scope}.`;
+  const answer = coreAnswer + degradedThreatDisclosure(view) + ` Supplemental listed_by: ${listedBy.join(", ") || "none"}. ${context.tor_context ?? ""} ${context.context_scope}.`;
   return envelope(INTENT, {
     ...context, listed_by: listedBy, indicator_type: type,
     malicious,
@@ -295,9 +322,11 @@ export async function handleThreatIndicator(query: Record<string, string | undef
     type,
     matches: matches.map((m) => ({ feed: m.feed, matched_entry: m.raw })),
     feeds_checked: states.length,
+    unavailable_feeds: view.unavailable,
+    screening_complete: view.unavailable.length === 0,
     summary: malicious
       ? `Listed by ${matches.length} of ${states.length} blocklists checked.`
       : `Not listed in any of the ${states.length} blocklists checked; not a clearance.`,
-  }, receipt, { answer, verdict: "verified", confidence: 0.9,
+  }, receipt, { answer, verdict: "verified", confidence: view.unavailable.length ? 0.65 : 0.9,
     source: states.map((s) => `${s.feed.name} ${s.feed.url} (fetched ${s.fetchedAt}, published ${s.published}, sha256 ${s.sha256.slice(0, 12)}…)`).join("; ") });
 }

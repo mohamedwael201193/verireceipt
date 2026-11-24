@@ -23,7 +23,7 @@ import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { probeUrlHeaders } from './urlProbe';
-import { loadFeeds, matchIndicator, canonicalScreeningHost, type IndicatorMatch } from "./threatIntel";
+import { loadFeedView, requireBoundedThreatView, degradedThreatDisclosure, matchIndicator, canonicalScreeningHost, type IndicatorMatch } from "./threatIntel";
 
 export const INTENT = "URL_SCAN_VERDICT";
 
@@ -43,7 +43,8 @@ export async function handleUrlScan(query: Record<string, string | undefined>): 
   const host = canonicalScreeningHost(raw);
   if (!host) throw badRequest("INVALID_URL", "url has no host");
 
-  const states = await loadFeeds();
+  const view = await loadFeedView();
+  const { states } = view;
   const fetchedAt = new Date().toISOString();
   // Screen the full URL (OpenPhish exact-URL list + host via domain and
   // wildcard lists) and the bare host (adds the IP lists when the host
@@ -55,11 +56,12 @@ export async function handleUrlScan(query: Record<string, string | undefined>): 
     if (!matches.some((x) => x.feed === m.feed && x.raw === m.raw)) matches.push(m);
   }
   const safe = matches.length === 0;
+  requireBoundedThreatView(view, raw, !safe);
   const liveProbe = safe ? await probeUrlHeaders(raw) : {kind:"not attempted",stop:"listed-target-not-contacted",hops:[]};
   const asOf = new Date().toISOString();
   const feedMeta = states.map((s) => ({ feed: s.feed.name, url: s.feed.url, entries: s.lines.length, sha256: s.sha256, published: s.published }));
   const evidence = JSON.stringify({
-    url: raw, host, safe, as_of: asOf, live_probe: liveProbe,
+    url: raw, host, safe, as_of: asOf, unavailable_feeds: view.unavailable, live_probe: liveProbe,
     matches: matches.map((m) => ({ feed: m.feed, matched_entry: m.raw })),
     feeds: feedMeta,
     method: "blocklist screening plus optional bounded header-only public-target observation; page body NOT fetched, rendered or executed",
@@ -86,9 +88,11 @@ export async function handleUrlScan(query: Record<string, string | undefined>): 
     host,
     matches: matches.map((m) => ({ feed: m.feed, matched_entry: m.raw })),
     feeds_checked: states.length,
+    unavailable_feeds: view.unavailable,
+    screening_complete: view.unavailable.length === 0,
     summary: safe
       ? `No listing in any of the ${states.length} blocklists checked; blocklist screening only, not a guarantee.`
       : `Listed by ${matches.length} of ${states.length} blocklists checked.`,
-  }, receipt, { answer, verdict: "verified", confidence: 0.9,
+  }, receipt, { answer: answer + degradedThreatDisclosure(view), verdict: "verified", confidence: view.unavailable.length ? 0.65 : 0.9,
     source: states.map((s) => `${s.feed.name} ${s.feed.url} (fetched ${s.fetchedAt}, published ${s.published}, sha256 ${s.sha256.slice(0, 12)}…)`).join("; ") });
 }

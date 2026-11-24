@@ -76,9 +76,12 @@ describe("URL_SAFE_GENERAL", () => {
     await expect(handleUrlSafe({ url: "not a url" })).rejects.toMatchObject({ status: 400 });
     await expect(handleUrlSafe({ url: "ftp://example.com/x" })).rejects.toMatchObject({ status: 400 });
   });
-  it("fails closed with 502 when any feed is down", async () => {
+  it("returns Unknown with disclosed incomplete screening when one feed is down", async () => {
     stub(["blocklist.de"]);
-    await expect(handleUrlSafe({ url: "https://example.com/" })).rejects.toMatchObject({ status: 502, code: "THREAT_FEED_DEGRADED" });
+    const result = await handleUrlSafe({ url: "https://example.com/" });
+    expect(result.url_check).toEqual({ verdict: "Unknown" });
+    expect(result.screening_complete).toBe(false);
+    expect(result.answer).toContain("blocklist.de");
   });
   it("the receipt is persisted with matching evidence hash", async () => {
     stub();
