@@ -124,6 +124,6 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
       : `Crossref index: no works match "${q}" (0 matches). The Crossref corpus is large but not exhaustive; absence here is not proof no paper exists.`),
     verdict: stale ? "stale" : "verified",
     confidence: stale ? 0.5 : 0.9,
-    source: `${url}; Crossref REST API single source, Crossref relevance order; fetched ${fetchedAt}; checked ${asOf}`,
+    source: `${url}; Crossref REST API single source, Crossref relevance order; fetched ${fetchedAt}; acquired ${asOf}`,
   });
 }
