@@ -1,0 +1,1 @@
+Actual MIT licence condition copied verbatim from the installed esbuild package LICENSE.md, distributed under MIT. The full licence notice is retained beside the captured obligation sentence; only that sentence is used in the replay, no evaluation response. Synthetic scenarios elsewhere are labelled synthetic. No network needed.

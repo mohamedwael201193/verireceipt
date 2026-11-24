@@ -12,7 +12,7 @@ describe("fourteen-intent consumer format mirror", () => {
     // All 54 declared intents have consumer output and format mirrors.
     // This historical contract fixture checks its original 8 additions; the
     // complete mapping/type loop also runs in shaped-fields.test.ts.
-    expect(Object.keys(OUTPUT_MAPPING)).toHaveLength(54);
+    expect(Object.keys(OUTPUT_MAPPING)).toHaveLength(55);
     expect(Object.keys(FIELD_FORMAT).sort()).toEqual(Object.keys(OUTPUT_MAPPING).sort());
     for (const [intent, contract] of Object.entries(contracts)) {
       const source = Object.fromEntries(contract.response.fields.map((f) => [f.name, f]));

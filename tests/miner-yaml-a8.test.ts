@@ -54,6 +54,7 @@ function acceptedFieldEntries(lines: string[]): Array<{ value: string; lines: st
 
 type OutputSpec = string | null | { unit: string | null; path: string };
 const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, OutputSpec>; inputs: string[] }> = {
+  CONTRACT_OBLIGATION_AUDIT_GENERAL: {endpoint:"/v1/contract-obligation-audit",inputs:["contract"],outputs:{verdict:null,obligations:null,clauses:null,summary:null}},
   ONCHAIN_TX_LOOKUP_GENERAL: {
     endpoint: "/v1/tx",
     inputs: ["tx_hash", "chain"],
@@ -304,7 +305,7 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, Outpu
 };
 
 describe("A8 miner.yaml vs the official intent schemas", () => {
-  it("declares exactly the fifty-four reviewed intents, each on its own endpoint", () => {
+  it("declares exactly the fifty-five declared intents, each on its own endpoint", () => {
     const si = block("  supported_intents:").map((l) => l.trim().replace(/^- /, "")).filter(Boolean);
     expect(si).toEqual(Object.keys(OFFICIAL));
     for (const [intent, o] of Object.entries(OFFICIAL)) {

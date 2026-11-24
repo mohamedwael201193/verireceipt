@@ -27,6 +27,7 @@ export interface OutputMapping {
 /** Mirror of miner.yaml `intent_mapping.<INTENT>.output` (pinned by
  *  tests/shaped-fields.test.ts against the file itself). */
 export const OUTPUT_MAPPING: Record<string, Record<string, OutputMapping>> = {
+  CONTRACT_OBLIGATION_AUDIT_GENERAL: {verdict:{path:"verdict"},obligations:{path:"obligations"},clauses:{path:"clauses"},summary:{path:"summary"}},
   ONCHAIN_TX_LOOKUP_GENERAL: {
     tx_hash: { path: "tx_hash" },
     status: { path: "status" },
@@ -334,6 +335,7 @@ export interface FieldFormat {
 }
 
 export const FIELD_FORMAT: Record<string, Record<string, FieldFormat>> = {
+  CONTRACT_OBLIGATION_AUDIT_GENERAL: {verdict:{type:"enum",allowed:["Compliant","Partially compliant","Non-compliant","Unclear"]},obligations:{type:"list"},clauses:{type:"list"},summary:{type:"string"}},
   ONCHAIN_TX_LOOKUP_GENERAL: {
     tx_hash: { type: "string" },
     status: { type: "enum", allowed: ["confirmed", "reverted", "pending", "not_found"] },

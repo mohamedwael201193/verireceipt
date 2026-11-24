@@ -60,6 +60,7 @@ errors:
 
 semantics:
   supported_intents:
+    - CONTRACT_OBLIGATION_AUDIT_GENERAL
     - ONCHAIN_TX_LOOKUP_GENERAL
     - REGULATORY_FILING_MONITOR_GENERAL
     - TVL_LOOKUP_GENERAL
@@ -1199,7 +1200,36 @@ endpoints:
           - SECURITY_REVIEW_GENERAL
           description: 'Exact npm package@major.minor.patch, for example semver@7.5.1. No ranges, tags, URLs or prereleases.'
 
+  - path: /v1/contract-obligation-audit
+    external_path: /v1/contract-obligation-audit
+    method: GET
+    description: 'Local literal-text obligation candidate index only, not a compliance attestation or legal opinion. Up to256 UTF-8 bytes; no URL retrieval. Always Unclear because performance and applicability are not independently verified. Exact input clauses returned to caller; public receipt retains only input digest, offsets, counts and methodology, not source text. Unsupported inputs get disclosed Unclear with no extracted clauses.'
+    intents:
+    - CONTRACT_OBLIGATION_AUDIT_GENERAL
+    params:
+      query:
+        required:
+        - name: contract
+          type: string
+          intents:
+          - CONTRACT_OBLIGATION_AUDIT_GENERAL
+          description: 'Literal contract clause up to256 UTF-8 bytes. Links are not loaded.'
+
 intent_mapping:
+  CONTRACT_OBLIGATION_AUDIT_GENERAL:
+    endpoint: /v1/contract-obligation-audit
+    input:
+      contract:
+        from: contract
+    output:
+      verdict:
+        path: verdict
+      obligations:
+        path: obligations
+      clauses:
+        path: clauses
+      summary:
+        path: summary
   ONCHAIN_TX_LOOKUP_GENERAL:
     endpoint: /v1/tx
     input:
