@@ -151,3 +151,41 @@ it("malformed upstream JSON is an honest502 not an escaping SyntaxError",async()
  vi.stubGlobal("fetch",async()=>new Response("{not-json"));
  await expect(handlePaymentMethod({bin:"411111"})).rejects.toMatchObject({status:502});
 });
+
+it('rejects wrong-prefix open-list evidence instead of asserting it for requested BIN or caching it',async()=>{
+ const raw=JSON.parse(readFileSync(join(FX,'open-bin-411111.json'),'utf8'));raw.data.bin='516732';let calls=0;
+ vi.stubGlobal('fetch',async(u:unknown)=>{if(String(u).includes('api.dharun.dev')){calls++;return new Response(JSON.stringify(raw));}return new Response('{}');});
+ for(let i=0;i<2;i++)await expect(handlePaymentMethod({bin:'411111'})).rejects.toMatchObject({code:'BIN_COVERAGE_INCOMPLETE'});
+ expect(calls).toBe(2);
+});
+it.each([undefined,411111,'41111200'])('refuses missing, typed or wrong-length source BIN identity %s',async identity=>{
+ const raw=JSON.parse(readFileSync(join(FX,'open-bin-411111.json'),'utf8'));raw.data.bin=identity;
+ vi.stubGlobal('fetch',async(u:unknown)=>new Response(String(u).includes('api.dharun.dev')?JSON.stringify(raw):'{}'));
+ await expect(handlePaymentMethod({bin:'411111'})).rejects.toMatchObject({code:'BIN_COVERAGE_INCOMPLETE'});
+});
+it('HTTP400 is a failed lookup, never a negative allocation observation or cached absence',async()=>{
+ let calls=0;vi.stubGlobal('fetch',async(u:unknown)=>{if(String(u).includes('api.dharun.dev'))return new Response('{}',{status:404});calls++;return new Response('invalid request',{status:400});});
+ for(let i=0;i<2;i++)await expect(handlePaymentMethod({bin:'411111'})).rejects.toMatchObject({code:'BIN_COVERAGE_INCOMPLETE'});
+ expect(calls).toBe(2);
+});
+it('a wrong-prefix source cannot override a valid matching primary observation',async()=>{
+ const raw=JSON.parse(readFileSync(join(FX,'open-bin-411111.json'),'utf8'));raw.data.bin='516732';
+ vi.stubGlobal('fetch',async(u:unknown)=>new Response(String(u).includes('api.dharun.dev')?JSON.stringify(raw):BIN_424242));
+ const out=await handlePaymentMethod({bin:'424242'});expect(out.valid).toBe(true);expect(out.field_sources).toMatchObject({network:'binlist.net'});expect(out.answer).toContain('One source unavailable');
+ expect(out.issuing_bank).not.toBe('CONOTOXIA SP. Z O.O');
+});
+
+it('accepts only6digit parent evidence for8digit query, discloses scope and original bytes when primary is unavailable',async()=>{
+ const raw=readFileSync(join(FX,'open-bin-411111.json'),'utf8');
+ vi.stubGlobal('fetch',async(u:unknown)=>{if(String(u).includes('api.dharun.dev'))return new Response(raw);throw Error('primary unavailable');});
+ const out=await handlePaymentMethod({bin:'41111100'});expect(out.valid).toBe(true);expect(out.allocation_scope).toEqual([{source:'open BIN list',requested_bin:'41111100',allocation_prefix:'411111',scope:'six-digit parent only; not an exact eight-digit allocation'}]);
+ expect(out.answer).toContain('no exact eight-digit allocation is asserted');expect(out.summary).toContain('no exact eight-digit allocation asserted');
+ const evidence=await getReceiptEvidence((out.receipt as any).receipt_id);expect(String(evidence.evidence)).toContain(JSON.stringify(raw));expect(JSON.parse(evidence.evidence!.toString()).allocation_scope).toEqual(out.allocation_scope);
+});
+it('does not accept7digit parent or arbitrary shorter prefixes as8digit coverage',async()=>{
+ for(const prefix of ['41111','4111110','411112']){
+  resetBinCacheForTests();const data=JSON.parse(readFileSync(join(FX,'open-bin-411111.json'),'utf8'));data.data.bin=prefix;
+  vi.stubGlobal('fetch',async(u:unknown)=>{if(String(u).includes('api.dharun.dev'))return new Response(JSON.stringify(data));throw Error('unavailable');});
+  await expect(handlePaymentMethod({bin:'41111100'})).rejects.toMatchObject({code:'BIN_SOURCES_UNAVAILABLE'});
+ }
+});
