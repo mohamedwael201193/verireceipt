@@ -22,6 +22,7 @@
 import { ApiError, badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+import { receiptQuorum } from "../core/receiptQuorum";
 import { CHAIN_RPCS } from "../config/chains";
 
 const RPC_TIMEOUT_MS = 12000;
@@ -29,9 +30,9 @@ const UA = "VeriReceipt/2.0 cross-chain-state observer (+https://verireceipt.ver
 
 export const INTENT = "CROSS_CHAIN_STATE_VERIFY_GENERAL";
 
-async function rpcCall(url: string, method: string, params: unknown[]): Promise<{ body: string; result: unknown }> {
+async function rpcCall(url: string, method: string, params: unknown[], timeoutMs=RPC_TIMEOUT_MS): Promise<{ body: string; result: unknown }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, { method: "POST", signal: controller.signal,
       headers: { "content-type": "application/json", "User-Agent": UA },
@@ -50,30 +51,14 @@ export interface ChainState { chain: string; found: boolean | null; status: numb
 
 /** Terminal state of a tx hash on one chain via 2-of-N receipt quorum. */
 export async function chainState(chain: string, rpcs: string[], txHash: string): Promise<ChainState> {
-  const settled = await Promise.allSettled(rpcs.map((url) => rpcCall(url, "eth_getTransactionReceipt", [txHash])));
-  const ok = settled.filter((s): s is PromiseFulfilledResult<{ body: string; result: unknown }> => s.status === "fulfilled").map((s) => s.value);
-  if (ok.length < 2) {
-    throw upstreamUnavailable("RPC_QUORUM_UNREACHABLE", `fewer than two ${chain} RPC legs answered (${ok.length}/${rpcs.length}); no consistency claim from a partial read`);
-  }
-  const groups = new Map<string, { result: unknown; bodies: Record<string, string>; n: number }>();
-  ok.forEach((r, i) => {
-    const key = JSON.stringify(r.result);
-    const g = groups.get(key) ?? { result: r.result, bodies: {}, n: 0 };
-    g.bodies[`${chain}-leg${i}`] = r.body;
-    g.n += 1;
-    groups.set(key, g);
-  });
-  const best = [...groups.values()].sort((a, b) => b.n - a.n)[0];
-  if (best.n < 2) {
-    throw upstreamUnavailable("RPC_QUORUM_DISAGREEMENT", `the ${chain} RPC legs disagree on the receipt; no consistency claim from a split read`);
-  }
-  if (best.result === null) return { chain, found: false, status: null, bodies: best.bodies };
+  const best=await receiptQuorum(rpcs,txHash,url=>rpcCall(url,"eth_getTransactionReceipt",[txHash],4000));
+  if(best.result===null)return {chain,found:false,status:null,bodies:Object.fromEntries(Object.entries(best.bodies).map(([k,v])=>[chain+":"+k,v]))};
   // txLookup's effectiveStatus doctrine: a pre-Byzantium receipt carries
   // `root` instead of `status` and means success; neither field means
   // failure. Never default a missing status to success.
   const r = best.result as Record<string, unknown>;
-  const status = typeof r.status === "string" ? (r.status === "0x0" ? 0 : 1) : typeof r.root === "string" ? 1 : 0;
-  return { chain, found: true, status, bodies: best.bodies };
+  const status = typeof r.status === "string" ? (BigInt(r.status) === 0n ? 0 : 1) : typeof r.root === "string" ? 1 : 0;
+  return { chain, found: true, status, bodies: Object.fromEntries(Object.entries(best.bodies).map(([k,v])=>[chain+":"+k,v])) };
 }
 
 /** Exact runtime-code comparison only; not balance, nonce, ownership or bridge state. */
@@ -104,7 +89,11 @@ export async function handleCrossChainState(query: Record<string, string | undef
   const states: ChainState[] = [];
   const reads=await Promise.all(chains.map(async c=>{
     try{return mode==='address-runtime-code'?await addressState(c,CHAIN_RPCS[c],reference):await chainState(c,CHAIN_RPCS[c],reference);}
-    catch(error){return {chain:c,found:null,status:null,bodies:{},error:error instanceof ApiError?error.code:'RPC_UNREADABLE'} as ChainState;}
+    catch(error){
+      const raw=error instanceof ApiError&&'receiptEvidence' in error?(error as ApiError&{receiptEvidence:unknown}).receiptEvidence:null;
+      const bodies=raw&&typeof raw==='object'?Object.fromEntries(Object.entries(raw).filter((entry):entry is [string,string]=>typeof entry[1]==='string').map(([k,v])=>[c+':'+k,v])):{};
+      return {chain:c,found:null,status:null,bodies,error:error instanceof ApiError?error.code:'RPC_UNREADABLE'} as ChainState;
+    }
   }));
   states.push(...reads);
   const first = states[0];
@@ -116,7 +105,7 @@ export async function handleCrossChainState(query: Record<string, string | undef
     narrowing: "consistent means only that the reference resolves to the same terminal state on every listed chain, each checked independently via its own 2-of-N RPC quorum; bridge-transfer completion is NOT verified or claimed",
     address_scope:'Address mode compares exact runtime code at independent latest snapshots only, not ownership, balances, nonce, token identity or bridge state; no synchronized-height guarantee. Empty code is not account absence.',
     per_chain: states.map(({bodies,...state}) => state),
-    consistent, raw_bodies: Object.assign({}, ...states.map((s) => s.bodies)), fetched_at: fetchedAt });
+    receipt_quorum_policy:"null/found split retried once after1100ms; at least two matching present providers, scored-content conflict refused; all attempts retained",consistent, raw_bodies: Object.assign({}, ...states.map((s) => s.bodies)), fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, "per-chain 2-of-N RPC quorums", evidence, "independent per-chain RPC quorums; narrowing disclosed");
   receipt.fetched_at = fetchedAt;
   try {

@@ -136,3 +136,17 @@ describe("transaction-risk follow-ups (reviewer)", () => {
     expect((bad.signals as string[]).join(" ")).toContain("TX_REVERTED");
   });
 });
+
+it('null-vs-found receipt recovery preserves actual risk and all attempts in stored evidence',async()=>{
+ const calls=new Map<string,number>();vi.stubGlobal('fetch',async(u:unknown,init?:RequestInit)=>{
+  const url=String(u);if(url.includes('ofac.treas.gov'))return new Response(sdnWithout);
+  const method=JSON.parse(String(init?.body)).method;if(method!=='eth_getTransactionReceipt')return new Response(rpcBody(txResult));
+  calls.set(url,(calls.get(url)??0)+1);return new Response(rpcBody(url.includes('mevblocker')?null:receiptResult));
+ });
+ const out=await handleTransactionRisk({transaction:TX_HASH});expect(out.risk_level).toBe('LOW');expect([...calls.values()]).toEqual([2,2,2]);
+ const stored=await getReceiptEvidence((out.receipt as any).receipt_id),ev=JSON.parse(stored.evidence!.toString());expect(Object.keys(ev.raw_bodies.receipt)).toHaveLength(6);expect(ev.receipt_quorum_policy).toContain('1100ms');expect(sha256Hex(stored.evidence!)).toBe((out.receipt as any).raw_response_sha256);
+});
+it('RPC error envelopes never masquerade as null not-found quorum',async()=>{
+ vi.stubGlobal('fetch',async(u:unknown)=>new Response(String(u).includes('ofac.treas.gov')?sdnWithout:JSON.stringify({jsonrpc:'2.0',id:1,error:{code:-32029,message:'synthetic rate limit'}})));
+ await expect(handleTransactionRisk({transaction:TX_HASH})).rejects.toMatchObject({status:502,code:'RPC_QUORUM_UNREACHABLE'});
+});

@@ -35,6 +35,7 @@
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+import { receiptQuorum } from "../core/receiptQuorum";
 import { CHAIN_RPCS } from "../config/chains";
 
 const RPC_TIMEOUT_MS = 12000;
@@ -50,17 +51,18 @@ export const RUBRIC =
   "reverted (status 0) +0.3; contract creation +0.1; zero value with no logs +0.1; value >= 100 ETH +0.1; " +
   "levels: >=0.75 CRITICAL, >=0.5 HIGH, >=0.25 MEDIUM, else LOW; heuristic-only combinations (no ground-truth signal) are capped at 0.4, never reaching HIGH";
 
-async function rpcCall(url: string, method: string, params: unknown[]): Promise<{ body: string; result: unknown }> {
+async function rpcCall(url: string, method: string, params: unknown[], timeoutMs=RPC_TIMEOUT_MS): Promise<{ body: string; result: unknown }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, { method: "POST", signal: controller.signal,
       headers: { "content-type": "application/json", "User-Agent": UA },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.text();
-    const parsed = JSON.parse(body) as { result?: unknown };
-    return { body, result: parsed.result ?? null };
+    const parsed = JSON.parse(body);
+    if(parsed.error || !Object.prototype.hasOwnProperty.call(parsed,"result"))throw new Error("invalid RPC response");
+    return { body, result: parsed.result };
   } finally {
     clearTimeout(timer);
   }
@@ -171,7 +173,8 @@ export async function handleTransactionRisk(query: Record<string, string | undef
     throw upstreamUnavailable("SANCTIONS_UNAVAILABLE", "the OFAC SDN list could not be fetched; a risk grade without sanctions screening is never served");
   }
   const tx = await quorumRpc(rpcs, "eth_getTransactionByHash", [txHash]);
-  const receipt = await quorumRpc(rpcs, "eth_getTransactionReceipt", [txHash]);
+  const receipt = await receiptQuorum(rpcs,txHash,url=>rpcCall(url,"eth_getTransactionReceipt",[txHash],4000));
+  if(!receipt.result)throw unprocessable("TX_NOT_FOUND","receipt not found by two-source agreement");
   const from = String(tx.result.from ?? "").toLowerCase();
   const to = tx.result.to === null || tx.result.to === undefined ? null : String(tx.result.to).toLowerCase();
   const valueWei = BigInt(String(tx.result.value ?? "0x0"));
@@ -180,7 +183,7 @@ export async function handleTransactionRisk(query: Record<string, string | undef
   // failure. Never default a missing status to success.
   const statusRaw = receipt.result.status;
   const root = receipt.result.root;
-  const reverted = typeof statusRaw === "string" ? statusRaw === "0x0" : typeof root !== "string";
+  const reverted = typeof statusRaw === "string" ? BigInt(statusRaw) === 0n : typeof root !== "string";
   const logs = Array.isArray(receipt.result.logs) ? receipt.result.logs : [];
   const listed = new Set(sdn.addresses);
   const sanctionedFrom = listed.has(from);
@@ -204,7 +207,7 @@ export async function handleTransactionRisk(query: Record<string, string | undef
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({ transaction: txHash, chain: "ethereum", as_of: asOf,
     narrowing: "ethereum mainnet only in this slice",
-    rubric: RUBRIC,
+    rubric: RUBRIC,receipt_quorum_policy:receipt.policy,
     heuristic_notice: "only the OFAC SDN exact address match is ground truth; every other signal is a heuristic flag with a published weight, and a LOW grade means no listed signal fired, never that the transaction is safe",
     from, to, value_wei: valueWei.toString(), reverted, log_count: logs.length,
     sdn_crypto_addresses: sdn.addresses.length, sanctioned_from: sanctionedFrom, sanctioned_to: sanctionedTo,

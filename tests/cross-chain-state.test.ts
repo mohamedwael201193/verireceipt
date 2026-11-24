@@ -102,3 +102,16 @@ describe("CROSS_CHAIN_STATE_VERIFY_GENERAL", () => {
     await app.close();
   });
 });
+
+it('cross-chain receipt recovery preserves terminal states and all split-read bodies',async()=>{
+ vi.stubGlobal('fetch',async(u:unknown)=>new Response(rpcBody(String(u).includes('polygon')||String(u).includes('mevblocker')?null:receiptResult)));
+ const out=await handleCrossChainState({reference:TX_HASH,chains:'ethereum,polygon'});expect(out.complete).toBe(true);expect(out.consistent).toBe(false);
+ const stored=await getReceiptEvidence((out.receipt as any).receipt_id),ev=JSON.parse(stored.evidence!.toString());expect(Object.keys(ev.raw_bodies)).toHaveLength(8);expect(sha256Hex(stored.evidence!)).toBe((out.receipt as any).raw_response_sha256);
+});
+
+it('conflicting chain retains namespaced raw disagreement evidence and receipt hash without claiming consistency',async()=>{
+ const changed={...receiptResult,status:'0x0'};const originals=new Map<string,string>();vi.stubGlobal('fetch',async(u:unknown)=>{const url=String(u),body=rpcBody(url.includes('polygon')?null:url.includes('mevblocker')?changed:receiptResult);originals.set(url,body);return new Response(body);});
+ const out=await handleCrossChainState({reference:TX_HASH,chains:'ethereum,polygon'});expect(out.complete).toBe(false);expect(out.consistent).toBe(false);expect((out.per_chain as any[])[0].error).toBe('RPC_QUORUM_DISAGREEMENT');
+ const r=out.receipt as any,stored=await getReceiptEvidence(r.receipt_id),ev=JSON.parse(stored.evidence!.toString());expect(sha256Hex(stored.evidence!)).toBe(r.raw_response_sha256);
+ const eth=Object.entries(ev.raw_bodies).filter(([k])=>k.startsWith('ethereum:'));expect(eth).toHaveLength(3);for(const[k,v]of eth)expect(v).toBe(originals.get(k.slice('ethereum:attempt1:'.length)));expect(out).not.toHaveProperty('receiptEvidence');expect(JSON.stringify(out.per_chain)).not.toContain('attempt1');
+});
