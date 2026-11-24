@@ -1,3 +1,4 @@
+import {withAnswerClass} from "../core/answerClass";
 // CURRENCY_EXCHANGE_CONVERT — GET /v1/fx?from_currency=&to_currency=&amount=
 //
 // Zero-LLM. Converts an amount between two ISO-4217 currencies using
@@ -595,7 +596,7 @@ export async function handleFx(
     sources_used: quotes.map((q) => q.source),
   };
 
-  return envelope(INTENT, fields, receiptDoc, {
+  return withAnswerClass(envelope(INTENT, fields, receiptDoc, {
     answer:
       `${amount} ${from} = ${converted} ${to} at a rate of ${rate} ${to} per ${from}` +
       ` (${clusterDetail.startsWith("largest complete-span") ? serving.map(q => q.source).join(" + ") : winner.source}${clusterDetail.startsWith("largest complete-span") && serving.length > 1 && serving[0].rate !== serving[1].rate ? "; median midpoint, not a single-source quote" : ""}, rates dated ${winner.rateDate}` +
@@ -619,7 +620,7 @@ export async function handleFx(
         ? clusterDetail.startsWith("largest complete-span") ? `; ${clusterDetail}` : `; the served rate is the median of the tightest single-linkage agreeing cluster (5bps), not the full pool`
         : "") +
       (degradedReasons.length ? `; degraded: ${degradedReasons.join("; ")}` : ""),
-  });
+  }),INTENT,{currency:to,from_currency:from,source_set:quotes.map(q=>q.source),serving_rule:straddledUpdate||quotes.length===1?"freshest_alone":degradedReasons.some(reason=>reason.startsWith("same-date pool"))?"anchor_cluster":"full_median"});
 }
 
 // FX_NOW_{EUR,CAD,SEK} — GET /v1/fx-now?currency=EUR
@@ -968,7 +969,7 @@ export async function handleFxNow(
     sources_used: quotes.map((q) => q.source),
   };
 
-  return envelope(intent, fields, receiptDoc, {
+  return withAnswerClass(envelope(intent, fields, receiptDoc, {
     answer:
       `1 USD buys ${rate} ${currency}` +
       ` (${clusterDetail.startsWith("largest complete-span") ? serving.map(q => q.source).join(" + ") : winner.source}${clusterDetail.startsWith("largest complete-span") && serving.length > 1 && serving[0].rate !== serving[1].rate ? "; median midpoint, not a single-source quote" : ""}, rates dated ${winner.rateDate}` +
@@ -992,5 +993,5 @@ export async function handleFxNow(
         ? clusterDetail.startsWith("largest complete-span") ? `; ${clusterDetail}` : `; the served rate is the median of the tightest single-linkage agreeing cluster (5bps), not the full pool`
         : "") +
       (degradedReasons.length ? `; degraded: ${degradedReasons.join("; ")}` : ""),
-  });
+  }),intent,{currency:currency,source_set:quotes.map(q=>q.source),serving_rule:straddledUpdate||quotes.length===1?"freshest_alone":degradedReasons.some(reason=>reason.startsWith("same-date pool"))?"anchor_cluster":"full_median"});
 }

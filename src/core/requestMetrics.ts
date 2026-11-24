@@ -1,3 +1,4 @@
+import {sanitizeAnswerClass} from "./answerClass";
 // Fixed-label observability. Only route-owned closed enums may expose canonical values.
 // Never retain free text, URL/query strings, bodies, headers, IPs or user ids.
 import { EDGAR_FORM_TYPES } from "../handlers/edgarFormTypes";
@@ -169,7 +170,7 @@ export function recordRequestArrival(route?: string, query?: unknown): void {
   } catch { /* observability never changes a response */ }
 }
 
-export function recordRequestCompletion(route: string | undefined, status: number, latencyMs: number, details: { query?: unknown; errorCode?: unknown } = {}): void {
+export function recordRequestCompletion(route: string | undefined, status: number, latencyMs: number, details: { query?: unknown; errorCode?: unknown; receiptId?:unknown; answerClass?:unknown } = {}): void {
   try {
     const intent = intentFor(route), row = bucket(intent);
     const code = Number.isInteger(status) && status >= 100 && status <= 599 ? String(status) : "other";
@@ -190,8 +191,11 @@ export function recordRequestCompletion(route: string | undefined, status: numbe
         hex_digits: (tail.match(/[0-9a-f]/gi) ?? []).length,
         has_whitespace_inside: /\s/.test(input),
       };
+      const receiptId=status===200&&typeof details.receiptId==='string'&&/^rcpt_[A-Z0-9]{26}$/.test(details.receiptId)?details.receiptId:undefined;
+      const refused=status>=400 ? intent==='EVENT_OUTCOME_RESOLUTION_GENERAL'?{outcome:'refused',source:'none'}:intent==='ONCHAIN_METRIC_VERIFY_GENERAL'?{metric_kind:ownString(details.query,'metric')??'balance',result:'refused'}:undefined:undefined;
+      const answerClass=sanitizeAnswerClass(intent,details.answerClass??refused);
       console.info(JSON.stringify({ event: "request_complete", intent, path: route, param_keys,
-        ...(input_shape ? { input_shape } : {}),
+        ...(input_shape ? { input_shape } : {}), ...(receiptId?{receipt_id:receiptId}:{}), ...(answerClass?{answer_class:answerClass}:{}),
         error_code: details.errorCode == null ? null : diagnosticErrorCode(details.errorCode), status: code, latency_ms: latency }));
     }
   } catch { /* never log an exception or request content */ }

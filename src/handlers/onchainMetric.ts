@@ -1,3 +1,4 @@
+import {withAnswerClass} from "../core/answerClass";
 import { badRequest, upstreamUnavailable } from '../core/errors';
 import { envelope, makeReceipt } from '../core/receipt';
 import { saveReceipt } from '../core/storage';
@@ -121,7 +122,7 @@ export async function handleOnchainMetric(query: Record<string, string | undefin
         const evidence = JSON.stringify({ chain, address: address.toLowerCase(), block: block.toString(), block_hash: w.hash, balance_wei: w.balance, tx_count: w.nonce, sources: legs, unavailable_sources: errors });
         const receipt = makeReceipt('ONCHAIN_METRIC_VERIFY_GENERAL', w.url, evidence, `${wins.length}/${CHAIN_RPCS[chain].length} same finalized block hash, balance and nonce`);
         await saveReceipt(receipt, evidence);
-        return envelope('ONCHAIN_METRIC_VERIFY_GENERAL', { address, chain, block: block.toString(), block_hash: w.hash, balance_gwei: balanceGwei, balance_wei: w.balance, tx_count: count, metric }, receipt, { answer: metric === 'balance' ? balanceSentence : `${address} had sent ${count} transactions (nonce) on ${chain} at finalized block ${block}. ${balanceSentence}`, verdict: 'verified', confidence: wins.length === CHAIN_RPCS[chain].length ? 1 : 0.95, source: `Block-pinned RPC agreement; ${w.url}; balance is Gwei, not ETH/POL; nonce is not received transfers.` });
+        return withAnswerClass(envelope('ONCHAIN_METRIC_VERIFY_GENERAL', { address, chain, block: block.toString(), block_hash: w.hash, balance_gwei: balanceGwei, balance_wei: w.balance, tx_count: count, metric }, receipt, { answer: metric === 'balance' ? balanceSentence : `${address} had sent ${count} transactions (nonce) on ${chain} at finalized block ${block}. ${balanceSentence}`, verdict: 'verified', confidence: wins.length === CHAIN_RPCS[chain].length ? 1 : 0.95, source: `Block-pinned RPC agreement; ${w.url}; balance is Gwei, not ETH/POL; nonce is not received transfers.` }),'ONCHAIN_METRIC_VERIFY_GENERAL',{metric_kind:metric,result:'value'});
     }
     throw upstreamUnavailable('METRIC_QUORUM_UNAVAILABLE', 'two sources did not agree on the exact finalized block identity, balance and nonce');
 }

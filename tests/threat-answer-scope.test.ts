@@ -1,3 +1,4 @@
+import {answerDiagnostics} from "../src/core/answerClass";
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 vi.mock('../src/core/storage',()=>({saveReceipt:vi.fn(async()=>{})}));
@@ -21,6 +22,7 @@ describe('applicable feed wording with unchanged actual excerpt replay',()=>{
   ['http://185.220.101.4/path',true,5,['Spamhaus','stamparm ipsum','OpenPhish'],['HaGeZi']],
  ] as const)('limits inventory for %s',async(indicator,malicious,count,include,exclude)=>{
   const out=await handleThreatIndicator({indicator});
+  expect(answerDiagnostics("THREAT_INTELLIGENCE_INDICATOR",out).answerClass).toMatchObject({verdict:malicious?"malicious":"not_listed",feeds_available:count,feeds_applicable:count});
   const core=String(out.answer).split('Supplemental listed_by:')[0];
   expect(core).toContain(`${count} applicable feeds`);
   for(const term of include)expect(core).toContain(term);

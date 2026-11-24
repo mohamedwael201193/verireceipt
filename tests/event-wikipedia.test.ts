@@ -1,3 +1,4 @@
+import {answerDiagnostics} from "../src/core/answerClass";
 import {afterEach, expect, it, vi} from 'vitest';
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -16,7 +17,7 @@ function stub() {
 }
 it('real captured no-match falls back to explicit Wikipedia winner and preserves all bodies and digest',async()=>{
  const f=stub(); const out=await handleEventOutcome({event:title});
- expect(out.winner).toBe('Joe Biden');expect(out.outcome).toBe('yes');expect(out.resolved_at).toBeNull();
+ expect(answerDiagnostics('EVENT_OUTCOME_RESOLUTION_GENERAL',out).answerClass).toEqual({outcome:'yes',source:'wikipedia'});expect(out.winner).toBe('Joe Biden');expect(out.outcome).toBe('yes');expect(out.resolved_at).toBeNull();
  expect(String(out.answer)).toContain('Single-source');expect(String(out.answer)).toContain('CC BY-SA 4.0');expect(f).toHaveBeenCalledTimes(3);
  const [r,e]=vi.mocked(saveReceipt).mock.calls[0];expect(r.raw_response_sha256).toBe(sha256Hex(e));
  const ev=JSON.parse(e);expect(ev.raw_bodies.summary).toBe(read('summary'));expect(ev.raw_bodies.search).toBe(read('search'));expect(ev.raw_bodies.primary).toBe(read('polymarket'));

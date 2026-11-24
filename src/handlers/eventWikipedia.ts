@@ -1,3 +1,4 @@
+import {withAnswerClass} from "../core/answerClass";
 import {unprocessable, upstreamUnavailable} from '../core/errors';
 import {readPublicBody} from '../core/publicSource';
 import {envelope, makeReceipt} from '../core/receipt';
@@ -45,6 +46,6 @@ export async function wikipediaEventOutcome(event: string, primaryBody: string, 
     try { await saveReceipt(receipt, evidence); }
     catch { throw upstreamUnavailable('RECEIPT_PERSIST_FAILED', 'receipt evidence could not be stored; answer unavailable'); }
     const answer = `${summary.title}: ${result.winner} won. Wikipedia states: "${result.sentence}" Single-source Wikipedia fallback, not independently corroborated. English Wikipedia contributors, CC BY-SA 4.0, excerpt unchanged. ${result.sourceUrl}`;
-    return envelope('EVENT_OUTCOME_RESOLUTION_GENERAL', {event, outcome:'yes', resolved_yes:true, winner:result.winner, resolved_at:null, sources:[result.sourceUrl]}, receipt,
-        {answer, verdict:'verified', confidence:0.75, source:result.sourceUrl + '; single-source Wikipedia; fetched ' + body.fetchedAt});
+    return withAnswerClass(envelope('EVENT_OUTCOME_RESOLUTION_GENERAL', {event, outcome:'yes', resolved_yes:true, winner:result.winner, resolved_at:null, sources:[result.sourceUrl]}, receipt,
+        {answer, verdict:'verified', confidence:0.75, source:result.sourceUrl + '; single-source Wikipedia; fetched ' + body.fetchedAt}),'EVENT_OUTCOME_RESOLUTION_GENERAL',{outcome:'yes',source:'wikipedia'});
 }

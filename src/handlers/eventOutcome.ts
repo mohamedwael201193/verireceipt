@@ -1,3 +1,4 @@
+import {withAnswerClass} from "../core/answerClass";
 // EVENT_OUTCOME_RESOLUTION_GENERAL — GET /v1/event-outcome?event=<market question>
 //
 // Zero-LLM. The resolved outcome of a prediction-market event, with a
@@ -139,7 +140,7 @@ export async function handleEventOutcome(query: Record<string, string | undefine
     `"${market.question}" resolved ${r.winner.toUpperCase()} on Polymarket (UMA resolution status: resolved; market closed, end date ${market.endDate})` +
     `${market.resolutionSource ? `; named resolution source: ${market.resolutionSource}` : ""}. ` +
     `This is one venue's resolution record (Polymarket), not an independent determination of the underlying event.`;
-  return envelope(INTENT, {
+  return withAnswerClass(envelope(INTENT, {
     outcome: r.outcome,
     resolved_yes: r.resolved_yes,
     event: market.question,
@@ -147,5 +148,5 @@ export async function handleEventOutcome(query: Record<string, string | undefine
     resolved_at: market.endDate,
     sources: ["Polymarket gamma (UMA-resolved market)"],
   }, receipt, { answer, verdict: "verified", confidence: 0.85,
-    source: `${url}; Polymarket UMA-resolved market, one venue's record; fetched ${fetchedAt}` });
+    source: `${url}; Polymarket UMA-resolved market, one venue's record; fetched ${fetchedAt}` }),INTENT,{outcome:r.outcome,source:"polymarket"});
 }

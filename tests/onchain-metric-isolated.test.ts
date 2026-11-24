@@ -1,3 +1,4 @@
+import {answerDiagnostics} from "../src/core/answerClass";
 import { afterEach, describe, it, expect, vi } from 'vitest';
 vi.mock('../src/core/storage', () => ({ saveReceipt: vi.fn(async () => { }) }));
 import { handleOnchainMetric } from '../src/handlers/onchainMetric';
@@ -7,7 +8,7 @@ function stub(change?: (host: string, m: string, result: any, n: number) => any)
     result = change(u, q.method, result, n); return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result })); }); vi.stubGlobal('fetch', f); return f; }
 afterEach(() => vi.unstubAllGlobals());
 describe('isolated synthetic finalized state checks, no network', () => {
-    it('reports native Gwei, exact wei and nonce with evidence', async () => { const f = stub(); const r = await handleOnchainMetric({ address, block: '100' }); expect(r.balance_gwei).toBe(1e9); expect(r.balance_wei).toBe('1000000000000000000'); expect(r.tx_count).toBe(3); expect(r.block_hash).toBe(hash); expect(f).toHaveBeenCalledTimes(12); });
+    it('reports native Gwei, exact wei and nonce with evidence', async () => { const f = stub(); const r = await handleOnchainMetric({ address, block: '100' }); expect(answerDiagnostics("ONCHAIN_METRIC_VERIFY_GENERAL",r).answerClass).toEqual({metric_kind:"balance",result:"value"}); expect(r.balance_gwei).toBe(1e9); expect(r.balance_wei).toBe('1000000000000000000'); expect(r.tx_count).toBe(3); expect(r.block_hash).toBe(hash); expect(f).toHaveBeenCalledTimes(12); });
     it('validates before network', async () => { const f = stub(); for (const q of [{ address: 'not-address', block: '100' }, { address, block: '-1' }, { address, block: '100', chain: 'sepolia' }, { address, block: '100', metric: 'received' }])
         await expect(handleOnchainMetric(q)).rejects.toMatchObject({ status: 400 }); expect(f).not.toHaveBeenCalled(); });
     it('requires same hash, balance AND nonce, not just a balance', async () => { let i = 0; const ids = new Map<string, number>(); stub((u, m, r) => { if (!ids.has(u))

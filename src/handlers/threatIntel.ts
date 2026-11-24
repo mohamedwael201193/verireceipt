@@ -1,3 +1,4 @@
+import {withAnswerClass} from "../core/answerClass";
 // THREAT_INTELLIGENCE_INDICATOR — GET /v1/threat-indicator?indicator=<ip|domain|url>
 //
 // Zero-LLM. Checks an IP, domain or URL against keyless public
@@ -315,7 +316,7 @@ export async function handleThreatIndicator(query: Record<string, string | undef
     : `${indicator} is NOT listed in the ${checkedDesc} as of ${asOf}. ` +
       `That is NOT a clearance: blocklists are not safelists, and these feeds cover only what they have seen.`;
   const answer = coreAnswer + degradedThreatDisclosure(view) + ` Supplemental listed_by: ${listedBy.join(", ") || "none"}. ${context.tor_context ?? ""} ${context.context_scope}.`;
-  return envelope(INTENT, {
+  return withAnswerClass(envelope(INTENT, {
     ...context, listed_by: listedBy, indicator_type: type,
     malicious,
     indicator,
@@ -328,5 +329,5 @@ export async function handleThreatIndicator(query: Record<string, string | undef
       ? `Listed by ${matches.length} of ${states.length} blocklists checked.`
       : `Not listed in any of the ${states.length} blocklists checked; not a clearance.`,
   }, receipt, { answer, verdict: "verified", confidence: view.unavailable.length ? 0.65 : 0.9,
-    source: states.map((s) => `${s.feed.name} ${s.feed.url} (fetched ${s.fetchedAt}, published ${s.published}, sha256 ${s.sha256.slice(0, 12)}…)`).join("; ") });
+    source: states.map((s) => `${s.feed.name} ${s.feed.url} (fetched ${s.fetchedAt}, published ${s.published}, sha256 ${s.sha256.slice(0, 12)}…)`).join("; ") }),INTENT,{indicator_type:type,verdict:view.unavailable.length?"partial_feeds":malicious?"malicious":"not_listed",feeds_available:applicable.length,feeds_applicable:FEEDS.filter(feed=>ipHost?feed.kind==="ip"||feed.kind==="cidr"||(type==="url"&&feed.kind==="url"):feed.kind==="domain"||feed.kind==="wildcard-domain"||(type==="url"&&feed.kind==="url")).length});
 }

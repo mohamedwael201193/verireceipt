@@ -39,3 +39,4 @@ describe('same-date independent-origin window on captured real quotes',()=>{
  });
 
 });
+it('FX diagnostic metadata records the rule and fixed source set without changing response JSON',async()=>{const {answerDiagnostics}=await import('../src/core/answerClass');stub();const out=await handleFxNow({currency:'EUR'});const d=answerDiagnostics('FX_NOW_EUR',out);expect(d.answerClass).toMatchObject({currency:'EUR',serving_rule:'anchor_cluster'});expect((d.answerClass!.source_set as string[]).length).toBeGreaterThan(1);expect(JSON.stringify(out)).not.toContain('answer_class');});

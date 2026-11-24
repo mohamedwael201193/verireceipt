@@ -1,3 +1,4 @@
+import {answerDiagnostics} from "./core/answerClass";
 import { refreshSourceReachability, sourceReachabilitySnapshot } from "./core/sourceReachability";
 import { handleFraudDetection } from './handlers/fraudDetection';
 // VeriReceipt — Fastify server entrypoint.
@@ -175,6 +176,11 @@ export function buildServer(): FastifyInstance {
   const app = Fastify({ logger: false });
   const requestStart = new WeakMap<object, bigint>();
   const requestErrors = new WeakMap<object, string>();
+  const requestAnswers = new WeakMap<object, {receiptId?:string;answerClass?:Record<string,unknown>}>();
+  app.addHook("preSerialization",async(request,reply,payload)=>{
+    try { if(reply.statusCode===200){const intent=payload && typeof payload==='object' ? Object.getOwnPropertyDescriptor(Object.getOwnPropertyDescriptor(payload,'receipt')?.value??{},'intent')?.value : undefined;
+      if(typeof intent==='string')requestAnswers.set(request,answerDiagnostics(intent,payload));} }catch{}return payload;
+  });
   app.addHook("onRequest", async (request) => {
     requestStart.set(request, process.hrtime.bigint());
     recordRequestArrival(request.routeOptions.url, request.query);
@@ -182,7 +188,7 @@ export function buildServer(): FastifyInstance {
   app.addHook("onResponse", async (request, reply) => {
     const started = requestStart.get(request);
     const elapsedMs = started === undefined ? 0 : Number(process.hrtime.bigint() - started) / 1e6;
-    recordRequestCompletion(request.routeOptions.url, reply.statusCode, elapsedMs, { query: request.query, errorCode: requestErrors.get(request) });
+    recordRequestCompletion(request.routeOptions.url, reply.statusCode, elapsedMs, { query: request.query, errorCode: requestErrors.get(request), ...requestAnswers.get(request) });
   });
 
   // Initialise storage (creates tables on first run). Handlers rely on it
