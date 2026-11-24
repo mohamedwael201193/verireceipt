@@ -479,7 +479,7 @@ export default function StatusDocs({
       </div>
       {activeDoc === "yaml" && (
         <div className="note-line" style={{ marginTop: 10 }}>
-          Verbatim from the repo-root miner.yaml (a test enforces byte equality) — re-sync this tab if miner.yaml changes.
+          Verbatim from the repo-root miner.yaml (a test enforces byte equality) — re-sync this tab if miner.yaml changes. This is the declared set: registration 6188 currently registers 54 of the 56 declared intents; the remaining declared intents are wired and live but not yet registered.
         </div>
       )}
       {activeDoc === "cast" && (

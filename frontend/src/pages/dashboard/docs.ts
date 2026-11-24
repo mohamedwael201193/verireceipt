@@ -263,6 +263,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - SERVER_UPTIME_MONITOR_GENERAL\n' +
     '    - SECURITY_REVIEW_GENERAL\n' +
     '    - WEATHER_FORECAST_VERIFY_GENERAL\n' +
+    '    - RETURN_POLICY_VERIFY_GENERAL\n' +
     '  signal_mapping:\n' +
     '    confidence_field: confidence\n' +
     '    label_field: answer\n' +
@@ -1372,6 +1373,25 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          - WEATHER_FORECAST_VERIFY_GENERAL\n' +
     '          description: \'Explicit past YYYY-MM-DD calendar date, not today or a future date.\'\n' +
     '\n' +
+    '  - path: /v1/return-policy\n' +
+    '    external_path: /v1/return-policy\n' +
+    '    method: GET\n' +
+    '    description: \'Live official Apple US or Walmart US standard return policy only. Returns the standard\n' +
+    '      window in days with current holiday and category exceptions disclosed in conditions. Not item or\n' +
+    '      order eligibility. Exact reviewed policy section must match; changed, expired or unavailable\n' +
+    '      policies are refused, never replaced by remembered or stale values. Interpretation reviewed\n' +
+    '      through December 1, 2026 UTC. No country or retailer substitution.\'\n' +
+    '    intents:\n' +
+    '    - RETURN_POLICY_VERIFY_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: retailer\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - RETURN_POLICY_VERIFY_GENERAL\n' +
+    '          description: \'Exact Apple US or Walmart US. Plain Apple and Walmart explicitly mean US only.\'\n' +
+    '\n' +
     'intent_mapping:\n' +
     '  ONCHAIN_TX_LOOKUP_GENERAL:\n' +
     '    endpoint: /v1/tx\n' +
@@ -2260,6 +2280,24 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '        path: precipitation_mm\n' +
     '        unit: "mm"\n' +
     '      condition:\n' +
-    '        path: condition\n',
+    '        path: condition\n' +
+    '\n' +
+    '  RETURN_POLICY_VERIFY_GENERAL:\n' +
+    '    endpoint: /v1/return-policy\n' +
+    '    input:\n' +
+    '      retailer:\n' +
+    '        from: retailer\n' +
+    '    output:\n' +
+    '      retailer:\n' +
+    '        path: retailer\n' +
+    '      return_window_days:\n' +
+    '        path: return_window_days\n' +
+    '        unit: "days"\n' +
+    '      conditions:\n' +
+    '        path: conditions\n' +
+    '      verified:\n' +
+    '        path: verified\n' +
+    '      sources:\n' +
+    '        path: sources\n',
   cast: REGISTRATION_CAST_SNIPPET,
 };
