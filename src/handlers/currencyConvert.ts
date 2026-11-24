@@ -139,8 +139,9 @@ interface SourceQuote {
 async function quoteFrankfurter(from: string, to: string): Promise<SourceQuote | null> {
   const url = `https://api.frankfurter.dev/v1/latest?base=${from}&symbols=${to}`;
   const rawBody = await fetchText(url, SOURCE_TIMEOUT_MS);
-  const parsed = JSON.parse(rawBody) as { base?: unknown; date?: unknown; rates?: Record<string, unknown> };
+  const parsed = JSON.parse(rawBody) as { amount?: unknown; base?: unknown; date?: unknown; rates?: Record<string, unknown> };
   if (parsed.base !== from) throw new Error("FX base identity mismatch");
+  if (parsed.amount !== 1) throw new Error("FX quote amount must be one base unit");
   const rate = parsed.rates?.[to];
   if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
   return { source: "Frankfurter (ECB reference rates)", url, rawBody, rate, rateDate: String(parsed.date ?? "unknown") };

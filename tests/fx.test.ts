@@ -423,7 +423,7 @@ describe("handleFx answers (stubbed sources)", () => {
 
   it("sources answering without the pair -> 422 NO_DATA with coverage named (review 35)", async () => {
     stubFxSources({
-      frankfurter: JSON.stringify({ base: "USD", date: "2026-11-21", rates: { GBP: 0.79 } }),
+      frankfurter: JSON.stringify({ amount: 1, base: "USD", date: "2026-11-21", rates: { GBP: 0.79 } }),
       openEr: JSON.stringify({ result: "success", base_code: "USD", time_last_update_utc: "Sat, 22 Nov 2026 00:02:32 +0000", rates: { GBP: 0.79 } }),
       fawaz: JSON.stringify({ date: "2026-11-21", usd: { gbp: 0.79 } }),
       vatcomply: JSON.stringify({ base: "USD", date: "2026-11-21", rates: { GBP: 0.79 } }),

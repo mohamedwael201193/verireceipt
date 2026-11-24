@@ -29,7 +29,7 @@ const holderBody = JSON.stringify({ address_hash: "0xA0b86991c6218b36c1d19D4a2e9
 function fetchFixture(input: unknown): Promise<Response> {
   const url = String(input), date = new Date().toISOString().slice(0, 10);
   let body: unknown;
-  if (url.includes("frankfurter")) body = { base: "USD", date, rates: { EUR: 0.91 } };
+  if (url.includes("frankfurter")) body = { amount: 1, base: "USD", date, rates: { EUR: 0.91 } };
   else if (url.includes("open.er-api")) body = { result: "success", base_code: "USD", time_last_update_utc: new Date().toUTCString(), rates: { EUR: 0.91 } };
   else if (url.includes("jsdelivr")) body = { date, usd: { eur: 0.91 } };
   else if (url.includes("dns.google") || url.includes("cloudflare-dns.com") || url.includes("adguard")) {

@@ -30,3 +30,9 @@ describe('FX response base identity, accepted actual source bodies',()=>{
   vi.stubGlobal('fetch',async()=>new Response(originals.openEr));const q=await quoteExchangeRateApi('USD','EUR','synthetic-key');expect(q?.rate).toBe(JSON.parse(originals.openEr).rates.EUR);
  });
 });
+
+describe('Frankfurter per-unit boundary',()=>{
+ it.each([100,0,-1,1.1,'1',null,undefined])('refuses non-unit/missing amount %s on both shared routes',async amount=>{
+  const j=JSON.parse(originals.frankfurter);j.amount=amount;stub('frankfurter',JSON.stringify(j));await expect(handleFx({from_currency:'USD',to_currency:'EUR'})).rejects.toMatchObject({status:502,code:'FX_SOURCES_DOWN'});await expect(handleFxNow({currency:'EUR'})).rejects.toMatchObject({status:502,code:'FX_SOURCES_DOWN'});
+ });
+});
