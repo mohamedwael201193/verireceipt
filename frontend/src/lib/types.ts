@@ -103,6 +103,36 @@ export interface StockPriceResponse extends ReceiptedResponse {
   verdict?: string;
 }
 
+export interface TokenHoldersResponse extends ReceiptedResponse {
+  token?: string;
+  chain?: string;
+  holders_count?: number;
+  token_symbol?: string;
+  as_of?: string;
+  stale?: boolean;
+  stale_reason?: string;
+  verdict?: string;
+}
+
+export interface PoolLiquidityResponse extends ReceiptedResponse {
+  pool?: string;
+  chain?: string;
+  liquidity_usd?: number;
+  verdict?: string;
+  confidence?: number;
+  source?: string;
+  checked_at?: string;
+}
+
+export interface TokenSupplyResponse extends ReceiptedResponse {
+  total_supply?: number;
+  total_supply_scope?: string;
+  token_symbol?: string;
+  chain?: string;
+  as_of?: string;
+  verdict?: string;
+}
+
 export interface TvlResponse extends ReceiptedResponse {
   protocol_or_chain: string;
   tvl_usd: number;

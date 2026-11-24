@@ -19,11 +19,11 @@
 //   are the repo's own test fixtures (tests/tx.test.ts).
 // - grid zone TH_NP15_GEN-APND + a 2h-ago interval returns live CAISO LMP.
 
-import { getCorporateRegistry, getFilings, getGridPrice, getRoute, getSanctionsScreen, getStockPrice, getTvl, getTx } from "../../lib/api";
-import type { CorporateRegistryResponse, FilingsResponse, GridPriceResponse, LiveReceipt, ProbeOutcome, RouteResponse, SanctionsScreenResponse, StockPriceResponse, TvlResponse, TxResponse } from "./types";
+import { getCorporateRegistry, getFilings, getGridPrice, getPoolLiquidity, getRoute, getSanctionsScreen, getStockPrice, getTokenHolders, getTokenSupply, getTvl, getTx } from "../../lib/api";
+import type { CorporateRegistryResponse, FilingsResponse, GridPriceResponse, LiveReceipt, PoolLiquidityResponse, ProbeOutcome, RouteResponse, SanctionsScreenResponse, StockPriceResponse, TokenHoldersResponse, TokenSupplyResponse, TvlResponse, TxResponse } from "./types";
 import { formatUsd, formatUsdPrecise, isVerified, probe, recentGridInterval } from "./utils";
 
-export type MissionId = "m13" | "m12" | "m03" | "m04";
+export type MissionId = "m13" | "m12" | "m03" | "m04" | "m01";
 /**
  * APPROVE / REJECT / HOLD: a decision against a rule the scenario states.
  * VERIFIED: the data was retrieved and receipted, but no decision rule
@@ -969,6 +969,115 @@ export const DESK_PRESETS: DeskPreset[] = [
         headline: refused
           ? "Malformed parameter refused cleanly with HTTP 4xx — $0.00 billed."
           : "Malformed hash was answered instead of refused — investigate.",
+        why,
+      };
+    },
+  },
+  {
+    id: "m01-listing",
+    mission: "m01",
+    tag: "M01 · EXCHANGE",
+    title: "Token Listing-Risk Screen",
+    sub: "Holder breadth + pool liquidity + supply context, receipted — live",
+    // Declared analyst floors, identical to the desk's template E
+    // assumptions. Screen thresholds, never market forecasts or advice.
+    inputs: {
+      entity: "UNI",
+      ref: "0x1d42064Fc4Beb5F8aAF85F4617AE8b3b5B8Bd801",
+      scope: "ethereum",
+    },
+    buildChecks: (inputs) => {
+      // entity = token symbol; ref = DEX pool address; scope = chain.
+      // No silent defaults: a cleared input runs empty and the lib refuses it.
+      const symbol = inputs.entity.trim();
+      const pool = inputs.ref.trim();
+      const chain = inputs.scope.trim();
+      return [
+        {
+          label: "Token holders",
+          intent: "TOKEN_HOLDER_COUNT_GENERAL",
+          query: `token=${symbol} · chain=${chain}`,
+          requestUrl: direct("/v1/token-holders", { token: symbol, chain }),
+          run: (signal) => probe((s) => getTokenHolders({ token: symbol, chain }, s), signal),
+        },
+        {
+          label: "Pool liquidity",
+          intent: "LIQUIDITY_DEPTH_VERIFY_GENERAL",
+          query: `pool=${pool} · chain=${chain}`,
+          requestUrl: direct("/v1/liquidity", { pool, chain }),
+          run: (signal) => probe((s) => getPoolLiquidity({ pool, chain }, s), signal),
+        },
+        {
+          label: "Token supply",
+          intent: "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL",
+          query: `token=${symbol} on ${chain}`,
+          requestUrl: direct("/v1/token-supply", { token: `${symbol} on ${chain}` }),
+          run: (signal) => probe((s) => getTokenSupply({ token: `${symbol} on ${chain}` }, s), signal),
+        },
+      ];
+    },
+    evaluate: (results) => {
+      const [holders, liquidity, supply] = results;
+      const HOLDERS_FLOOR = 100_000;
+      const LIQUIDITY_FLOOR_USD = 5_000_000;
+      const hBody = holders ? bodyOf<TokenHoldersResponse>(holders) : null;
+      const holdersOk = !!holders && isVerified(holders.receipt) && typeof hBody?.holders_count === "number" && hBody.stale !== true;
+      const hCount = holdersOk ? hBody!.holders_count! : null;
+      const lBody = liquidity ? bodyOf<PoolLiquidityResponse>(liquidity) : null;
+      const liquidityOk = !!liquidity && isVerified(liquidity.receipt) && typeof lBody?.liquidity_usd === "number";
+      const lUsd = liquidityOk ? lBody!.liquidity_usd! : null;
+      const spBody = supply ? bodyOf<TokenSupplyResponse>(supply) : null;
+      const supplyOk = !!supply && isVerified(supply.receipt) && typeof spBody?.total_supply === "number";
+      const spTotal = supplyOk ? spBody!.total_supply! : null;
+      const holdersPass = holdersOk && hCount! >= HOLDERS_FLOOR;
+      const liquidityPass = liquidityOk && lUsd! >= LIQUIDITY_FLOOR_USD;
+      const why: WhyCard[] = [
+        {
+          k: "Token Holders",
+          v: !holdersOk
+            ? "not verified"
+            : `${hCount!.toLocaleString("en-US")} distinct holder addresses${hBody?.token_symbol ? ` · ${hBody.token_symbol}` : ""}${hBody?.as_of ? ` · as of ${hBody.as_of}` : ""} — declared floor ${HOLDERS_FLOOR.toLocaleString("en-US")}`,
+          ok: holdersPass,
+        },
+        {
+          k: "Pool Liquidity",
+          v: !liquidityOk
+            ? "not verified"
+            : `${formatUsdPrecise(lUsd)} total pool reserves · ${lBody?.pool ?? "pool"} · ${lBody?.chain ?? "?"} — declared floor ${formatUsdPrecise(LIQUIDITY_FLOOR_USD)}`,
+          ok: liquidityPass,
+        },
+        {
+          // Context, never a gate: supply breadth informs the screen but
+          // no floor applies to it.
+          k: "Total Supply (context)",
+          v: !supplyOk
+            ? "not verified"
+            : `${spTotal!.toLocaleString("en-US")}${spBody?.token_symbol ? ` ${spBody.token_symbol}` : ""}${spBody?.chain ? ` · ${spBody.chain}` : ""} — context only, no floor applies`,
+          ok: supplyOk ? "na" : false,
+        },
+      ];
+      if (!holdersOk || !liquidityOk || !supplyOk) {
+        return {
+          verdict: "HOLD",
+          score: scoreOf((holdersOk ? 1 : 0) + (liquidityOk ? 1 : 0) + (supplyOk ? 1 : 0), 3),
+          headline: "Evidence did not verify — review the rows before relying on this mark.",
+          why,
+        };
+      }
+      if (holdersPass && liquidityPass) {
+        return {
+          verdict: "APPROVE",
+          score: 100,
+          headline: `Listing-risk screen passed: ${hCount!.toLocaleString("en-US")} holders and ${formatUsdPrecise(lUsd)} pool reserves both clear the declared floors. A screen pass is not an endorsement or investment advice.`,
+          why,
+        };
+      }
+      return {
+        verdict: "HOLD",
+        // All three checks verified; the HOLD is the rule outcome (a
+        // declared floor failed), not a failed check.
+        score: scoreOf(2, 2),
+        headline: `NEEDS REVIEW: ${[!holdersPass ? `holders ${hCount!.toLocaleString("en-US")} below declared floor ${HOLDERS_FLOOR.toLocaleString("en-US")}` : "", !liquidityPass ? `pool reserves ${formatUsdPrecise(lUsd)} below declared floor ${formatUsdPrecise(LIQUIDITY_FLOOR_USD)}` : ""].filter(Boolean).join("; ")}. A screen outcome is not an endorsement or investment advice.`,
         why,
       };
     },

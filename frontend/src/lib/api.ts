@@ -10,8 +10,11 @@ import type {
   HealthResponse,
   CorporateRegistryResponse,
   RouteResponse,
+  PoolLiquidityResponse,
   SanctionsScreenResponse,
   StockPriceResponse,
+  TokenHoldersResponse,
+  TokenSupplyResponse,
   TvlResponse,
   TxResponse,
   ValidatorResponse,
@@ -682,6 +685,44 @@ export async function getValidator(
   assertValidParam(params.validator_index, "validator_index");
   return fetchJson<ValidatorResponse>(
     buildUrl("/v1/validator", { validator_index: params.validator_index }),
+    { expectReceipt: true, signal },
+  );
+}
+
+export async function getTokenHolders(
+  params: { token: string; chain: string },
+  signal?: AbortSignal,
+): Promise<TokenHoldersResponse> {
+  assertValidParamsObject(params, "getTokenHolders");
+  assertValidParam(params.token, "token");
+  assertValidParam(params.chain, "chain");
+  return fetchJson<TokenHoldersResponse>(
+    buildUrl("/v1/token-holders", { token: params.token, chain: params.chain }),
+    { expectReceipt: true, signal },
+  );
+}
+
+export async function getPoolLiquidity(
+  params: { pool: string; chain: string },
+  signal?: AbortSignal,
+): Promise<PoolLiquidityResponse> {
+  assertValidParamsObject(params, "getPoolLiquidity");
+  assertValidParam(params.pool, "pool");
+  assertValidParam(params.chain, "chain");
+  return fetchJson<PoolLiquidityResponse>(
+    buildUrl("/v1/liquidity", { pool: params.pool, chain: params.chain }),
+    { expectReceipt: true, signal },
+  );
+}
+
+export async function getTokenSupply(
+  params: { token: string },
+  signal?: AbortSignal,
+): Promise<TokenSupplyResponse> {
+  assertValidParamsObject(params, "getTokenSupply");
+  assertValidParam(params.token, "token");
+  return fetchJson<TokenSupplyResponse>(
+    buildUrl("/v1/token-supply", { token: params.token }),
     { expectReceipt: true, signal },
   );
 }
