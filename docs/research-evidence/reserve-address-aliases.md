@@ -1,0 +1,5 @@
+# Existing reserve feed address aliases
+
+24 November2026. Exact Ethereum token addresses already used by the existing supply-read bindings now also resolve input asset to the existing WBTC/cbBTC/TUSD feed. Case-insensitive symbols and addresses, no prefix matching or chain guessing. Existing numeric conversion,2-of-N quorum, observed timestamps, heartbeat disclosure and out-of-range refusal unchanged. No new feed source or proxy enabled.
+
+New FBTC/LBTC/USDW/BGBTC feed work remains separate. Current directory lists FBTC8dec/86400s, LBTC8dec/86400s, USDW6dec/43200s. BGBTC metadata conflicts between Ethereum page/directory and nested blockchainName=Arbitrum, so is not enabled. Terms read https://chain.link/terms in client-rendered browser, Foundation v6 effective18Aug2026; automation, competitive-use and redistribution restrictions are not a commercial redistribution grant. Existing source risk acceptance is not rewritten into a clean licence assertion. No new-feed onchain values are claimed, no fabricated fixture or mainnet transaction.

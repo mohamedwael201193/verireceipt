@@ -115,7 +115,9 @@ export function parseRoundData(hex: string): RoundData {
 export async function handleReserveAttestation(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const assetRaw = query.asset?.trim();
   if (!assetRaw) throw badRequest("MISSING_PARAM", `asset is required, one of: ${Object.values(POR_FEEDS).map((f) => f.asset).join(", ")}`);
-  const key = assetRaw.toUpperCase();
+  // Exact Ethereum issuance-address aliases only; never prefixes or cross-chain guesses.
+  const addressKey = Object.entries(ETHEREUM_TOKENS).find(([,token]) => token.address === assetRaw.toLowerCase())?.[0];
+  const key = addressKey ?? assetRaw.toUpperCase();
   const feed = Object.hasOwn(POR_FEEDS, key) ? POR_FEEDS[key] : undefined;
   if (!feed) {
     return { answer: `No probed-live Chainlink PoR feed is enabled for "${assetRaw.slice(0, 80)}". Covered assets: ${Object.values(POR_FEEDS).map(f => f.asset).join(", ")}. No reserve is asserted; this coverage-only response is outside the scored numeric attestation contract.`,

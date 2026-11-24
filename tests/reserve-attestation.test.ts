@@ -127,3 +127,9 @@ describe("all enabled token bindings from two live RPC captures", () => {
     expect(out.collateral_ratio_pct).toBeNull();
   });
 });
+describe('existing-feed exact address and case aliases',()=>{
+ const assets=[['WBTC','0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599'],['cbBTC','0xcBb7C0000aB88B473b1f5afd9ef808440eed33bf'],['TUSD','0x0000000000085d4780B73119b644AE5ecd22b376']];
+ it.each(assets)('%s exact Ethereum token address resolves to the existing feed without changing the numeric result',async(asset,address)=>{stub();const symbol=await handleReserveAttestation({asset});const byAddress=await handleReserveAttestation({asset:address});expect(byAddress.asset).toBe(asset);expect(byAddress.attested_reserve).toBe(symbol.attested_reserve);expect(String(byAddress.source_feed).split("; fetched")[0]).toBe(String(symbol.source_feed).split("; fetched")[0]);});
+ it.each(['wBtC','cBbTc','tUsD'])('%s mixed symbol case resolves',async asset=>{stub();expect((await handleReserveAttestation({asset})).attested_reserve).not.toBeNull();});
+ it.each(['0x2260fac5','0x2260fac5e5542a773aa44fbcfedf7c193bc2c590','ethereum:0x2260fac5e5542a773aa44fbcfedf7c193bc2c599','0x0000000000000000000000000000000000000000'])('unsupported/prefix address never aliases %s',async asset=>{const fn=vi.fn(()=>{throw new Error('must not fetch');});vi.stubGlobal('fetch',fn);expect((await handleReserveAttestation({asset})).attested_reserve).toBeNull();expect(fn).not.toHaveBeenCalled();});
+});
