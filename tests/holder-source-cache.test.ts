@@ -124,3 +124,12 @@ it("invalid replacement falls back only to the original validated observation",a
  const first=await settle(cachedHolderBody("x",load,validate));await vi.advanceTimersByTimeAsync(300001);invalid=true;
  const stale=await settle(cachedHolderBody("x",load,validate));expect(stale.body).toBe(first.body);expect(stale.fetchedAt).toBe(first.fetchedAt);expect(stale.staleReason).toContain("invalid response");
 });
+it("revalidates provider age during fallback even with a six-minute acquisition age",async()=>{
+ const sourceUpdated=Date.now()-86400000+350000;
+ let fail=false;const load=vi.fn(async()=>{if(fail)throw new Error("503");return "original";});
+ const validate=vi.fn(()=>{if(Date.now()-sourceUpdated>86400000)throw new Error("provider exceeds 24h");});
+ await settle(cachedHolderBody("provider-age",load,validate));
+ await vi.advanceTimersByTimeAsync(360000);fail=true;
+ const checked=expect(cachedHolderBody("provider-age",load,validate)).rejects.toThrow("503");await settle(checked);
+ expect(load).toHaveBeenCalledTimes(2);expect(validate).toHaveBeenCalledTimes(2);
+});
