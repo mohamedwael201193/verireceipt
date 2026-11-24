@@ -19,11 +19,11 @@
 //   are the repo's own test fixtures (tests/tx.test.ts).
 // - grid zone TH_NP15_GEN-APND + a 2h-ago interval returns live CAISO LMP.
 
-import { getFilings, getGridPrice, getRoute, getTvl, getTx } from "../../lib/api";
-import type { FilingsResponse, GridPriceResponse, LiveReceipt, ProbeOutcome, RouteResponse, TvlResponse, TxResponse } from "./types";
+import { getFilings, getGridPrice, getRoute, getStockPrice, getTvl, getTx } from "../../lib/api";
+import type { FilingsResponse, GridPriceResponse, LiveReceipt, ProbeOutcome, RouteResponse, StockPriceResponse, TvlResponse, TxResponse } from "./types";
 import { formatUsd, formatUsdPrecise, isVerified, probe, recentGridInterval } from "./utils";
 
-export type MissionId = "m13" | "m12";
+export type MissionId = "m13" | "m12" | "m03";
 /**
  * APPROVE / REJECT / HOLD: a decision against a rule the scenario states.
  * VERIFIED: the data was retrieved and receipted, but no decision rule
@@ -472,6 +472,138 @@ export const DESK_PRESETS: DeskPreset[] = [
             verdict: "HOLD",
             score: scoreOf(2, 3),
             headline: `NEEDS REVIEW: no Form 10-K filed in the last 12 months (evaluated ${evaluatedOn} UTC).`,
+            why,
+          };
+    },
+  },
+  {
+    id: "m03-mark",
+    mission: "m03",
+    tag: "M03 · INSTITUTIONAL",
+    title: "Defensible Mark Evidence Check",
+    sub: "Is a 10-Q on EDGAR within 12 months, with a live verified share price? — live",
+    inputs: {
+      entity: "ARCC",
+      ref: "10-Q",
+      scope: "last 12 months · SEC EDGAR + Yahoo Finance",
+    },
+    buildChecks: (inputs) => {
+      // No silent defaults (see m13-defi / m13-sec): the form field IS
+      // the request's form_type; a cleared period or form runs empty.
+      const period = splitSegments(inputs.scope)[0] ?? "";
+      const form = inputs.ref.trim();
+      return [
+        {
+          label: "SEC filing",
+          intent: "REGULATORY_FILING_MONITOR_GENERAL",
+          query: `${inputs.entity} · ${form} · ${period}`,
+          requestUrl: direct("/v1/filings", { entity: inputs.entity, period, form_type: form }),
+          run: (signal) => probe((s) => getFilings({ entity: inputs.entity, period, form_type: form }, s), signal),
+        },
+        {
+          label: "Share price",
+          intent: "STOCK_PRICE_US_EQUITY",
+          query: `ticker=${inputs.entity}`,
+          requestUrl: direct("/v1/stock-price", { ticker: inputs.entity }),
+          run: (signal) => probe((s) => getStockPrice({ ticker: inputs.entity }, s), signal),
+        },
+      ];
+    },
+    evaluate: (results) => {
+      const [filings, price] = results;
+      const evaluatedOn = new Date().toISOString().slice(0, 10);
+      const filingsBody = filings ? bodyOf<FilingsResponse>(filings) : null;
+      const verified = !!filings && isVerified(filings.receipt) && typeof filingsBody?.filing_count === "number";
+      const asked = filingsFormOf(filings);
+      const period = filingsPeriodOf(filings);
+      const detail = Array.isArray(filingsBody?.filings_detail) ? filingsBody.filings_detail : [];
+      const formMatches =
+        verified &&
+        asked !== "" &&
+        filingsBody?.form_type === asked &&
+        detail.length === filingsBody.filing_count &&
+        detail.every((f) => f && f.form === asked);
+      const dates = detail
+        .map((f) => (typeof f?.filing_date === "string" ? f.filing_date : ""))
+        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+        .sort();
+      const latest = dates.length > 0 ? dates[dates.length - 1] : null;
+      const priceBody = price ? bodyOf<StockPriceResponse>(price) : null;
+      const priceOk =
+        !!price &&
+        isVerified(price.receipt) &&
+        typeof priceBody?.price_usd === "number" &&
+        Number.isFinite(priceBody.price_usd) &&
+        priceBody.price_usd > 0;
+      // The ONE evidence rule this scenario implements: a quarterly
+      // report (Form 10-Q) within the last 12 months plus a live
+      // verified share price. Any other window or form is a data
+      // retrieval — VERIFIED, never an evidence-complete verdict.
+      const rollingWindow = /^last 12 months$/i.test(period.trim());
+      const ruleApplies = asked === "10-Q" && rollingWindow;
+      const count = verified ? filingsBody!.filing_count : null;
+      const why: WhyCard[] = [
+        {
+          k: "Official EDGAR",
+          v: verified && typeof filingsBody?.entity === "string"
+            ? `${count} Form ${asked || "?"} filing(s) for ${filingsBody.entity}${period ? ` in ${period}` : ""}${latest ? ` · latest filed ${latest}` : ""}`
+            : "no live filings returned",
+          ok: verified,
+        },
+        {
+          k: "Form Filter",
+          v: !verified
+            ? "not verified"
+            : formMatches
+              ? `request and answer both form_type=${asked}`
+              : `answer does not match the requested form_type=${asked || "(empty)"}`,
+          ok: verified && formMatches,
+        },
+        {
+          k: "Share Price (live)",
+          v:
+            priceOk && typeof priceBody?.exchange === "string" && priceBody.exchange !== ""
+              ? `${formatUsdPrecise(priceBody.price_usd)} · ${priceBody.exchange}${typeof priceBody.market_time === "string" && priceBody.market_time !== "" ? ` · as of ${priceBody.market_time}` : ""}`
+              : "no live verified price returned",
+          ok: priceOk,
+        },
+        {
+          k: "Evidence Rule",
+          v: ruleApplies
+            ? `at least one Form 10-Q filed in the last 12 months plus a live verified share price (evaluated ${evaluatedOn} UTC).`
+            : `not applied — the rule covers form 10-Q over "last 12 months" plus a verified price; this run is a data retrieval for ${period || "the given period"}.`,
+          ok: ruleApplies ? verified && formMatches && priceOk && (count ?? 0) > 0 : "na",
+        },
+      ];
+      if (!verified || !formMatches || !priceOk) {
+        return {
+          verdict: "HOLD",
+          score: scoreOf((verified && formMatches ? 1 : 0) + (priceOk ? 1 : 0), 2),
+          headline: "Evidence did not verify — review the rows before relying on this mark.",
+          why,
+        };
+      }
+      if (!ruleApplies) {
+        return {
+          verdict: "VERIFIED",
+          score: 100,
+          headline: `Data verified: ${count} Form ${asked} filing(s) in ${period} plus a live share price. No evidence-complete verdict is derived for this window.`,
+          why,
+        };
+      }
+      return (count ?? 0) > 0
+        ? {
+            verdict: "APPROVE",
+            score: 100,
+            headline: `Evidence complete: latest Form 10-Q filed ${latest ?? "?"}, within the last 12 months, plus a live verified share price (evaluated ${evaluatedOn} UTC).`,
+            why,
+          }
+        : {
+            verdict: "HOLD",
+            // Two live checks, both verified; the HOLD is the rule
+            // outcome (no 10-Q in the window), not a failed check.
+            score: scoreOf(2, 2),
+            headline: `NEEDS REVIEW: no Form 10-Q filed in the last 12 months (evaluated ${evaluatedOn} UTC).`,
             why,
           };
     },

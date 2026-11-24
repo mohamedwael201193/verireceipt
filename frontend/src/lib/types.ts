@@ -55,6 +55,20 @@ export interface FilingsResponse extends ReceiptedResponse {
   urls: string[];
 }
 
+export interface StockPriceResponse extends ReceiptedResponse {
+  ticker: string;
+  price_usd: number;
+  currency: string;
+  exchange: string;
+  /** Yahoo's own exchange timestamp for the quote. */
+  market_time?: string;
+  /** When the miner acquired the quote. */
+  as_of?: string;
+  stale?: boolean;
+  quote_age_seconds?: number;
+  verdict?: string;
+}
+
 export interface TvlResponse extends ReceiptedResponse {
   protocol_or_chain: string;
   tvl_usd: number;

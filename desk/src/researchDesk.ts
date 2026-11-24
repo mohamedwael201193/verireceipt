@@ -14,7 +14,7 @@ export interface FactSpec {
 export interface Assumption { id: string; value: string; unit: string; rationale: string }
 export interface Calculation { id: string; op: 'multiply' | 'divide' | 'subtract'; left: string; right: string; unit: string }
 export interface ThesisSpec {
-  version: typeof VERSION; network: typeof NETWORK; template: 'onchain-valuation' | 'issuer-macro';
+  version: typeof VERSION; network: typeof NETWORK; template: 'onchain-valuation' | 'issuer-macro' | 'private-mark';
   question: string; frozen_at: string; facts: FactSpec[]; assumptions: Assumption[]; calculations: Calculation[];
   budget_uusdc: string; max_call_uusdc: '10000'; max_escalations: 1;
 }
@@ -44,7 +44,7 @@ export function decimal(s: string): Rational {
 const encoded = (r: Rational) => ({ numerator:r.n.toString(), denominator:r.d.toString() });
 export function validateSpec(spec: ThesisSpec): void {
   invariant(spec.version===VERSION && spec.network===NETWORK,'version/network mismatch: testnet only');
-  invariant(['onchain-valuation','issuer-macro'].includes(spec.template),'unknown template');
+  invariant(['onchain-valuation','issuer-macro','private-mark'].includes(spec.template),'unknown template');
   invariant(typeof spec.question==='string' && spec.question.trim() && timestamp(spec.frozen_at),'missing question/frozen timestamp');
   invariant(uint(spec.budget_uusdc) && BigInt(spec.budget_uusdc)>0n,'invalid budget');
   invariant(spec.max_call_uusdc==='10000' && spec.max_escalations===1,'fixed call/escalation policy');
@@ -65,7 +65,7 @@ export function validateSpec(spec: ThesisSpec): void {
     add(f.id,f.unit);
   }
   const intents=spec.facts.map(f=>f.intent);
-  const required=spec.template==='onchain-valuation'?['CRYPTO_PRICE_USD','TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL']:['STOCK_PRICE_US_EQUITY','REGULATORY_FILING_MONITOR_GENERAL','MACRO_ECONOMIC_INDICATOR_GENERAL'];
+  const required=spec.template==='onchain-valuation'?['CRYPTO_PRICE_USD','TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL']:['STOCK_PRICE_US_EQUITY','REGULATORY_FILING_MONITOR_GENERAL','MACRO_ECONOMIC_INDICATOR_GENERAL']; // private-mark shares the issuer-macro observation set
   invariant(required.every(i=>intents.includes(i)),'template missing required observations');
   for(const a of spec.assumptions){decimal(a.value);invariant(typeof a.rationale==='string'&&a.rationale.trim(),'assumption rationale required');add(a.id,a.unit);}
   for(const c of spec.calculations){

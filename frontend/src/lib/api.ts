@@ -9,6 +9,7 @@ import type {
   GridPriceResponse,
   HealthResponse,
   RouteResponse,
+  StockPriceResponse,
   TvlResponse,
   TxResponse,
   ValidatorResponse,
@@ -585,6 +586,18 @@ export async function getFilings(
     query.form_type = params.form_type;
   }
   return fetchJson<FilingsResponse>(buildUrl("/v1/filings", query), { expectReceipt: true, signal });
+}
+
+export async function getStockPrice(
+  params: { ticker: string },
+  signal?: AbortSignal,
+): Promise<StockPriceResponse> {
+  assertValidParamsObject(params, "getStockPrice");
+  assertValidParam(params.ticker, "ticker");
+  return fetchJson<StockPriceResponse>(buildUrl("/v1/stock-price", { ticker: params.ticker }), {
+    expectReceipt: true,
+    signal,
+  });
 }
 
 export async function getTvl(

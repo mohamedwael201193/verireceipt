@@ -11,6 +11,7 @@ import type {
   HealthResponse,
   Receipt,
   RouteResponse,
+  StockPriceResponse,
   TvlResponse,
   TxResponse,
 } from "../../lib/types";
@@ -21,6 +22,7 @@ export type {
   HealthResponse,
   Receipt,
   RouteResponse,
+  StockPriceResponse,
   TvlResponse,
   TxResponse,
 };
