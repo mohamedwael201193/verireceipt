@@ -17,6 +17,7 @@
 // asks for a country or region's published statistic and the scored
 // reference is a country series; an aggregate input is 422. No fuzzy
 // substring matching: an unmatched country is 422 COUNTRY_NOT_FOUND.
+import {withAnswerClass} from "../core/answerClass";
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -209,10 +210,10 @@ export async function handleMacro(
   }
   const indicator = indicatorRaw === SUPPORTED_INDICATOR ? SUPPORTED_INDICATOR : normalizeIndicator(indicatorRaw);
   if (indicator === null) {
-    throw unprocessable(
+    throw withAnswerClass(unprocessable(
       "UNSUPPORTED_INDICATOR",
       `unsupported indicator: ${query.indicator}; no default is substituted. Supported endpoint indicators: ${Object.keys(SERIES).join(", ")}`,
-    );
+    ), INTENT, {alias_known:false});
   }
   const series = SERIES[indicator];
   const indicatorNormalized = indicatorInput !== undefined && indicatorInput !== SUPPORTED_INDICATOR;
@@ -300,10 +301,10 @@ export async function handleMacro(
     );
   }
 
-  return envelope(INTENT, fields, receiptDoc, {
+  return withAnswerClass(envelope(INTENT, fields, receiptDoc, {
     answer: `${indicatorNormalized ? `"${indicatorInput}" read as "${indicator}". ` : ""}Mapping: ${indicator} -> World Bank ${series.id}. ${country.name}${requestedYear === undefined ? " latest published observation" : ""}${year === undefined ? "" : ` in ${year}`}: ${hasValue ? `${value} ${series.unit}.${ratePct === null ? " rate_pct is null: this observation is outside the scored 0..100 percent field or is not a percentage." : ""}` : "no data published for the requested observation; rate_pct is null, not zero."}`,
     verdict: hasValue ? "verified" : "no_data",
     confidence: hasValue ? 1.0 : 0,
     source: "World Bank API (api.worldbank.org, authoritative publisher)",
-  });
+  }), INTENT, {alias_known:true});
 }
