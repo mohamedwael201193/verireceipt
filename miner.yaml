@@ -115,6 +115,7 @@ semantics:
     - SERVER_UPTIME_MONITOR_GENERAL
     - SECURITY_REVIEW_GENERAL
     - WEATHER_FORECAST_VERIFY_GENERAL
+    - RETURN_POLICY_VERIFY_GENERAL
   signal_mapping:
     confidence_field: confidence
     label_field: answer
@@ -1224,6 +1225,25 @@ endpoints:
           - WEATHER_FORECAST_VERIFY_GENERAL
           description: 'Explicit past YYYY-MM-DD calendar date, not today or a future date.'
 
+  - path: /v1/return-policy
+    external_path: /v1/return-policy
+    method: GET
+    description: 'Live official Apple US or Walmart US standard return policy only. Returns the standard
+      window in days with current holiday and category exceptions disclosed in conditions. Not item or
+      order eligibility. Exact reviewed policy section must match; changed, expired or unavailable
+      policies are refused, never replaced by remembered or stale values. Interpretation reviewed
+      through December 1, 2026 UTC. No country or retailer substitution.'
+    intents:
+    - RETURN_POLICY_VERIFY_GENERAL
+    params:
+      query:
+        required:
+        - name: retailer
+          type: string
+          intents:
+          - RETURN_POLICY_VERIFY_GENERAL
+          description: 'Exact Apple US or Walmart US. Plain Apple and Walmart explicitly mean US only.'
+
 intent_mapping:
   ONCHAIN_TX_LOOKUP_GENERAL:
     endpoint: /v1/tx
@@ -2113,3 +2133,21 @@ intent_mapping:
         unit: "mm"
       condition:
         path: condition
+
+  RETURN_POLICY_VERIFY_GENERAL:
+    endpoint: /v1/return-policy
+    input:
+      retailer:
+        from: retailer
+    output:
+      retailer:
+        path: retailer
+      return_window_days:
+        path: return_window_days
+        unit: "days"
+      conditions:
+        path: conditions
+      verified:
+        path: verified
+      sources:
+        path: sources

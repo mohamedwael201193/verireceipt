@@ -1,3 +1,4 @@
+import {handleReturnPolicy} from './handlers/returnPolicy';
 import {answerDiagnostics} from "./core/answerClass";
 import { refreshSourceReachability, sourceReachabilitySnapshot } from "./core/sourceReachability";
 import { handleFraudDetection } from './handlers/fraudDetection';
@@ -357,6 +358,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/url-scan", async (request) => trackIntent("url-scan", () => handleUrlScan(asQuery(request.query))));
   app.get("/v1/weather-forecast", async (request) => trackIntent("weather-forecast", () => handleWeatherForecast(asQuery(request.query))));
   app.get("/v1/vendor-verify", async (request) => trackIntent("vendor-verify", () => handleVendorVerify(asQuery(request.query))));
+  app.get("/v1/return-policy", async (request) => trackIntent("return-policy", () => handleReturnPolicy(asQuery(request.query))));
   app.get("/v1/payment-method", async (request) => trackIntent("payment-method", () => handlePaymentMethod(asQuery(request.query))));
   app.get("/v1/url-safe", async (request) => trackIntent("url-safe", () => handleUrlSafe(asQuery(request.query))));
   app.get("/v1/malware-hash", async (request) => trackIntent("malware-hash", () => handleMalwareHash(asQuery(request.query))));

@@ -3,6 +3,7 @@ import {sanitizeAnswerClass} from "./answerClass";
 // Never retain free text, URL/query strings, bodies, headers, IPs or user ids.
 import { EDGAR_FORM_TYPES } from "../handlers/edgarFormTypes";
 const ROUTE_INTENTS: Record<string, string> = {
+  "/v1/return-policy":"RETURN_POLICY_VERIFY_GENERAL",
   "/v1/security-review": "SECURITY_REVIEW_GENERAL",
   "/v1/onchain-metric": "ONCHAIN_METRIC_VERIFY_GENERAL",
   "/v1/tx": "ONCHAIN_TX_LOOKUP_GENERAL", "/v1/tvl": "TVL_LOOKUP_GENERAL",
@@ -42,7 +43,7 @@ const ROUTE_INTENTS: Record<string, string> = {
 // Only known parameter NAMES are emitted, including rejected aliases. Never values
 // or unknown names: callers can put a credential into an arbitrary query key.
 const KNOWN_QUERY_KEYS = [
-  "address", "asset", "amount", "base", "bin", "block", "block_height", "chain", "chains", "country", "cve", "domain",
+  "retailer", "address", "asset", "amount", "base", "bin", "block", "block_height", "chain", "chains", "country", "cve", "domain",
   "company", "entity", "event", "form_type", "form", "cik", "patch", "from", "game", "jurisdiction", "destination", "host", "indicator", "lat", "location", "lon", "window_hours", "ip", "interval_start", "node_or_zone",
   "metric", "origin", "pair", "period", "symbol", "protocol", "query", "question", "quote", "record_type", "reference", "route_or_flight",
   "target", "ticker", "to", "token", "topic", "url", "transaction", "tx_hash", "validator_index", "year",
