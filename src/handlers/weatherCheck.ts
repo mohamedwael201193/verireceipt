@@ -41,18 +41,26 @@ const UA = "VeriReceipt/2.0 weather-check observer (+https://verireceipt.vercel.
 
 export const INTENT = "WEATHER_CHECK_TEMPERATURE";
 
-async function fetchText(url: string): Promise<string> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.text();
-  } catch {
-    throw upstreamUnavailable("UPSTREAM_UNREACHABLE", `an upstream weather source could not be reached (${url.split("?")[0]})`);
-  } finally {
-    clearTimeout(timer);
-  }
+// Per-origin ownership survives a caller timeout. No queue or duplicate hung reads.
+const activeWeatherSources = new Map<string,number>();
+export function resetWeatherSourcesForTests() { activeWeatherSources.clear(); }
+async function readWeatherText(url: string, deadline: number): Promise<string> {
+  const host=new URL(url).origin;
+  if(Date.now()>=deadline || (activeWeatherSources.get(host)??0)>=4) throw upstreamUnavailable("UPSTREAM_UNREACHABLE","weather source unavailable within budget");
+  activeWeatherSources.set(host,(activeWeatherSources.get(host)??0)+1);
+  const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
+  const io=(async()=>{
+    try {
+      const res=await fetch(url,{redirect:"error",signal:controller.signal,headers:{"User-Agent":UA,Accept:"application/json"}});
+      if(!res.ok||!res.body)throw Error("weather source unavailable");
+      const reader=res.body.getReader();const parts:Uint8Array[]=[];let size=0;
+      while(true){const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>2097152){void reader.cancel().catch(()=>{});throw Error("weather body limit");}parts.push(part.value);}
+      return Buffer.concat(parts).toString("utf8");
+    }finally{const left=(activeWeatherSources.get(host)??1)-1;if(left)activeWeatherSources.set(host,left);else activeWeatherSources.delete(host);}
+  })();
+  try {return await Promise.race([io,new Promise<never>((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error("weather source deadline"));},Math.max(0,Math.min(SOURCE_TIMEOUT_MS,deadline-Date.now())));})]);}
+  catch {throw upstreamUnavailable("UPSTREAM_UNREACHABLE","weather source unavailable within budget");}
+  finally{clearTimeout(timer);}
 }
 
 const LATLON_RE = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/;
@@ -86,6 +94,8 @@ export function nearestMetarStations(body: string, lat: number, lon: number, lim
 export async function handleWeatherCheck(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const rawLocation = query.location?.trim();
   if (!rawLocation) throw badRequest("MISSING_PARAM", "location is required: an ICAO station code, \"lat,lon\", or a place name");
+  const sourceDeadline=Date.now()+9000;
+  const fetchText=(url:string)=>readWeatherText(url,sourceDeadline);
   const locationText: string = rawLocation;
   let station = "";
   let candidates: { icaoId: string; distanceKm: number }[] = [];
