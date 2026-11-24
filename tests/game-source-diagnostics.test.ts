@@ -17,7 +17,7 @@ it('all failed leagues retain same public refusal and attach exact safe HTTP cla
 it.each(['status-getter','proxy','primitive'])('arbitrary thrown %s is not inspected or substituted',async mode=>{
  let inspected=0;const original=mode==='status-getter'?Object.defineProperty(Error('PRIVATE'), 'status',{get(){inspected++;throw Error('REPLACEMENT');}}):mode==='proxy'?new Proxy({},{get(){inspected++;throw Error('REPLACEMENT');},getOwnPropertyDescriptor(){inspected++;throw Error('REPLACEMENT');}}):'PRIVATE';
  const f=vi.fn(async()=>{throw original;});vi.stubGlobal('fetch',f);
- const e=await handleGameResult(input).catch(e=>e);expect(e.code).toBe('ESPN_UNREACHABLE');expect(inspected).toBe(0);expect(f).toHaveBeenCalledTimes(4);
+ const e=await handleGameResult(input).catch(e=>e);expect(e.code).toBe('ESPN_UNREACHABLE');expect(inspected).toBe(0);expect(f).toHaveBeenCalledTimes(5);
  expect(diagnostic(e)).toEqual(Object.fromEntries(['nfl','nba','mlb','nhl'].map(l=>['espn_'+l+'_failure',mode==='primitive'?'unknown':'transport'])));
 });
 it('body-read failures are separate and never log source text',async()=>{

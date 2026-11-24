@@ -21,6 +21,9 @@
 // matches is 422 GAME_NOT_FOUND, several is 422 AMBIGUOUS_GAME with the
 // candidates named. Team-name matching is name matching, not identity
 // resolution — the answer always names the exact teams ESPN carried.
+import {teamNameMatches,norm} from './gameTeams';
+export {teamNameMatches} from './gameTeams';
+import {observeMlbFinal,isMlbPersistenceFailure} from './mlbFinal';
 import {withAnswerClass} from "../core/answerClass";
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
@@ -59,21 +62,6 @@ async function fetchText(url: string): Promise<string> {
   } finally {
     clearTimeout(timer);
   }
-}
-
-function norm(s: string): string {
-  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
-export function teamNameMatches(asked: string, carried: string): boolean {
-  const a = norm(asked);
-  const b = norm(carried);
-  if (!a || !b) return false;
-  if (b.includes(a) || a.includes(b)) return true;
-  const ta = a.split(" ");
-  const tb = new Set(b.split(" "));
-  const inter = ta.filter((t) => tb.has(t)).length;
-  return (2 * inter) / (ta.length + tb.size) >= 0.6;
 }
 
 export function parseGameInput(raw: string): { date: string; dates: string; teamA: string; teamB: string } {
@@ -136,6 +124,7 @@ export async function handleGameResult(query: Record<string, string | undefined>
   if (raw.length > 200) throw badRequest("GAME_TOO_LONG", "game must be at most 200 characters");
   const { date, dates, teamA, teamB } = parseGameInput(raw);
   const urls = LEAGUES.map(([label, path]) => ({ label, url: `https://site.api.espn.com/apis/site/v2/sports/${path}/scoreboard?dates=${dates}` }));
+  const requestStarted=Date.now();
   const fetchedAt = new Date().toISOString();
   const settled = await Promise.allSettled(urls.map((u) => fetchText(u.url)));
   const bodies = new Map<string, string>();
@@ -145,6 +134,17 @@ export async function handleGameResult(query: Record<string, string | undefined>
     else failed.push(urls[i].label);
   });
   if (bodies.size === 0) {
+    try {
+      const remainingMs=SOURCE_TIMEOUT_MS-(Date.now()-requestStarted);
+      if(remainingMs<=0||settled.some(r=>r.status==='rejected'&&failureClass(r.reason)==='timeout'))throw Error('source budget exhausted');
+      return await observeMlbFinal(date,teamA,teamB,Math.min(1500,remainingMs));
+    }
+    catch (error) {
+      if (isMlbPersistenceFailure(error)) throw error;
+      // Preserve the original closed refusal and diagnostics when no independent
+      // final is available. A failed source never becomes a coverage-only score.
+    }
+
     const error=upstreamUnavailable("ESPN_UNREACHABLE", `ESPN scoreboards failed for every covered league (${failed.join(", ")})`);
     try {
       const diagnostic:Record<string,unknown>={};
