@@ -3,6 +3,7 @@ import {sanitizeAnswerClass} from "./answerClass";
 // Never retain free text, URL/query strings, bodies, headers, IPs or user ids.
 import { EDGAR_FORM_TYPES } from "../handlers/edgarFormTypes";
 const ROUTE_INTENTS: Record<string, string> = {
+  "/v1/weather-history":"WEATHER_FORECAST_VERIFY_GENERAL",
   "/v1/return-policy":"RETURN_POLICY_VERIFY_GENERAL",
   "/v1/security-review": "SECURITY_REVIEW_GENERAL",
   "/v1/onchain-metric": "ONCHAIN_METRIC_VERIFY_GENERAL",
@@ -43,13 +44,15 @@ const ROUTE_INTENTS: Record<string, string> = {
 // Only known parameter NAMES are emitted, including rejected aliases. Never values
 // or unknown names: callers can put a credential into an arbitrary query key.
 const KNOWN_QUERY_KEYS = [
-  "retailer", "address", "asset", "amount", "base", "bin", "block", "block_height", "chain", "chains", "country", "cve", "domain",
+  "vendor", "vat_number", "date", "retailer", "address", "asset", "amount", "base", "bin", "block", "block_height", "chain", "chains", "country", "cve", "domain",
   "company", "entity", "event", "form_type", "form", "cik", "patch", "from", "game", "jurisdiction", "destination", "host", "indicator", "lat", "location", "lon", "window_hours", "ip", "interval_start", "node_or_zone",
   "service", "metric", "origin", "pair", "period", "symbol", "protocol", "query", "question", "quote", "record_type", "reference", "route_or_flight",
   "target", "ticker", "to", "token", "topic", "url", "transaction", "tx_hash", "validator_index", "year",
 ] as const;
 // Fixed internal categories only. A regex alone could admit a secret-looking code.
 const DIAGNOSTIC_ERROR_CODES = new Set([
+  "AMBIGUOUS_VAT", "INVALID_VENDOR", "INVALID_VAT", "VIES_SCOPE", "VIES_UNREACHABLE", "VIES_MALFORMED", "VIES_ERROR",
+  "INVALID_LOCATION", "INVALID_DATE", "APPROVED_SOURCES_UNAVAILABLE",
   "ALL_QUOTERS_FAILED",
   "EVENT_NOT_FOUND", "AMBIGUOUS_EVENT", "NON_BINARY_MARKET", "EVENT_NOT_RESOLVED",
   "UNCLEAN_RESOLUTION", "POLYMARKET_UNREACHABLE", "EVENT_TOO_LONG",

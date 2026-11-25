@@ -97,3 +97,19 @@ it('cross-chain completion recognizes only reference and chains names without ge
 it.each([['/v1/sla-compliance?service=PRIVATE_SERVICE&period=PRIVATE_PERIOD',200,['service','period'],{sla_service_input_class:'unbound',sla_period_input_class:'unsupported',service_bound:false,alias_name:'none'}],['/v1/sla-compliance?period=30d',400,['period'],{sla_service_input_class:'missing',sla_period_input_class:'rolling_days'}],['/v1/travel-disruption?route_or_flight=UA123',200,['route_or_flight'],{travel_input_class:'flight_number'}]])('zero diagnostic route logs only fixed classes %s',async(url,status,param_keys,answer_class)=>{
  const log=vi.spyOn(console,'info').mockImplementation(()=>{}),app=buildServer();try{const res=await app.inject({method:'GET',url});expect(res.statusCode).toBe(status);const row=JSON.parse(String(log.mock.calls.at(-1)![0]));expect(row).toMatchObject({param_keys,answer_class});expect(JSON.stringify(log.mock.calls)).not.toMatch(/PRIVATE_SERVICE|PRIVATE_PERIOD|UA123/);expect(res.body).not.toMatch(/sla_service_input_class|travel_input_class/);}finally{await app.close();}
 });
+
+it.each([
+ ['/v1/vendor-verify?vendor=PRIVATE_VENDOR&vat_number=PRIVATE_VAT',400,'INVALID_VAT','VENDOR_VERIFY_GENERAL',['vendor','vat_number']],
+ ['/v1/weather-history?location=PRIVATE_LOCATION&date=PRIVATE_DATE',400,'INVALID_DATE','WEATHER_FORECAST_VERIFY_GENERAL',['date','location']],
+])('actual priority HTTP route emits private-safe diagnostics %s',async(url,status,code,intent,param_keys)=>{
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{}),app=buildServer();
+ try{const response=await app.inject({method:'GET',url});expect(response.statusCode).toBe(status);expect(response.json().code).toBe(code);
+ const rows=log.mock.calls.map(c=>JSON.parse(String(c[0]))).filter(row=>['request_start','request_complete'].includes(row.event));
+ expect(rows).toHaveLength(2);for(const row of rows)expect(row).toMatchObject({intent,param_keys});expect(rows[1].error_code).toBe(code);expect(JSON.stringify(rows)).not.toContain('PRIVATE');
+ }finally{await app.close();}
+});
+it('priority key names never cause getters or arbitrary labels to be logged',()=>{
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{});const query=Object.defineProperties({PRIVATE_KEY:'PRIVATE_VALUE'},Object.fromEntries(['vendor','vat_number','date'].map(key=>[key,{enumerable:true,get(){throw Error('PRIVATE_GETTER');}}])));
+ recordRequestCompletion('/v1/vendor-verify',400,1,{query,errorCode:'INVALID_VAT'});recordRequestCompletion('/v1/weather-history',502,1,{query,errorCode:'APPROVED_SOURCES_UNAVAILABLE'});
+ expect(log).toHaveBeenCalledTimes(2);expect(JSON.parse(log.mock.calls[0][0]).param_keys).toEqual(['vendor','vat_number','date']);expect(JSON.parse(log.mock.calls[1][0]).error_code).toBe('APPROVED_SOURCES_UNAVAILABLE');expect(JSON.stringify(log.mock.calls)).not.toContain('PRIVATE');
+});
