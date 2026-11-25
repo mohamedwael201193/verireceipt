@@ -416,11 +416,34 @@ function refillChainSafeBucket(now: number): void {
   }
 }
 
+export const VALIDATOR_SLOW_HOST_MS=3000;
+export const VALIDATOR_SLOW_HOST_COOLDOWN_MS=60000;
+const activeValidatorHosts=new Set<string>();
+const slowCooldownUntil=new Map<string,number>();
+function slowHostEligible(base:string):boolean{return !activeValidatorHosts.has(base);}
+export function noteSourceSlow(base:string,nowMs=Date.now()):void{
+ slowCooldownUntil.set(base,nowMs+VALIDATOR_SLOW_HOST_COOLDOWN_MS);
+ console.warn(JSON.stringify({event:"validator_source_cooldown",host:new URL(base).hostname,reason:"slow"}));
+}
+/** Own the complete root-bound workflow until its underlying IO settles.
+ * The timer only changes eligibility of later requests. It never shortens
+ * the current request's dissent/absence decision window.
+ * This is general slow-source exclusion: even a valid in-budget dissenter
+ * taking>=3s is skipped for60s on later requests, not only hung sources.
+ * Recovery never bypasses active IO or429, and never lowers two-source quorum. */
+export async function ownValidatorHost<T>(base:string,work:()=>Promise<T>):Promise<T>{
+ if(!slowHostEligible(base))throw Error('validator host cooling down or active');
+ activeValidatorHosts.add(base);const start=Date.now();
+ const timer=setTimeout(()=>noteSourceSlow(base),VALIDATOR_SLOW_HOST_MS);
+ try{return await work();}catch(error){if(error instanceof Error&&error.name==='AbortError')noteSourceSlow(base);throw error;}finally{clearTimeout(timer);activeValidatorHosts.delete(base);if(Date.now()-start>=VALIDATOR_SLOW_HOST_MS)noteSourceSlow(base);}
+}
+
 /** Test-only: empty caches, refill the ChainSafe bucket, clear cooldowns. */
 export function resetValidatorCachesForTests(nowMs: number = Date.now()): void {
   verifiedCache.clear();
   finalizedRootCache = undefined;
   hostCooldownUntilMs.clear();
+  activeValidatorHosts.clear();slowCooldownUntil.clear();
   chainsafeBucket = {
     tokens: CHAINSAFE_BUCKET_CAPACITY,
     lastRefillMs: nowMs,
@@ -483,12 +506,13 @@ export function chainsafeOn429(retryAfterMs: number | undefined, nowMs: number =
 
 export function noteSource429(base: string, retryAfterMs: number | undefined, nowMs: number = Date.now()): void {
   const wait = Math.min(Math.max(retryAfterMs ?? CHAINSAFE_BUCKET_REFILL_MS, 500), 10_000);
-  hostCooldownUntilMs.set(base, nowMs + wait);
+  hostCooldownUntilMs.set(base, Math.max(hostCooldownUntilMs.get(base)??0,nowMs + wait));
   if (isChainSafeBase(base)) chainsafeOn429(retryAfterMs, nowMs);
 }
 
 export function canStartSource(cap: BeaconSourceCap, nowMs: number = Date.now()): boolean {
-  const until = hostCooldownUntilMs.get(cap.base) ?? 0;
+  if(!slowHostEligible(cap.base))return false;
+  const until = Math.max(hostCooldownUntilMs.get(cap.base) ?? 0,slowCooldownUntil.get(cap.base)??0);
   if (nowMs < until) return false;
   if (cap.paced) return chainsafeCanStart(nowMs);
   return true;
@@ -811,7 +835,9 @@ async function resolveFinalizedRoot(
   const rootBudget = Math.min(ROOT_RESOLVE_BUDGET_MS, Math.max(50, timeoutMs - reservedForLegs));
   const rootDeadlineAt = Math.min(deadlineAt, Date.now() + rootBudget);
 
-  const rootSources = BEACON_SOURCE_CAPS.filter((cap) => !cap.paced);
+  const rootCandidates=BEACON_SOURCE_CAPS.filter(cap=>!cap.paced&&slowHostEligible(cap.base));
+  const eligibleRoots=rootCandidates.filter(cap=>canStartSource(cap,nowMs));
+  const rootSources=eligibleRoots.length>=VALIDATOR_MIN_AGREEING?eligibleRoots:rootCandidates.filter(cap=>nowMs>=(hostCooldownUntilMs.get(cap.base)??0));
   type RootVote =
     | { base: string; root: string; optimistic: boolean }
     | { base: string; error: unknown };
@@ -821,7 +847,7 @@ async function resolveFinalizedRoot(
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const got = await Promise.race([
-          fetchStateRoot(cap.base, "finalized", fetchImpl, timeoutMs, rootDeadlineAt),
+          ownValidatorHost(cap.base,()=>fetchStateRoot(cap.base, "finalized", fetchImpl, timeoutMs, rootDeadlineAt)),
           new Promise<never>((_, reject) => {
             timer = setTimeout(() => {
               const err = new Error(`beacon source ${cap.base} state root timed out`);
@@ -1346,10 +1372,15 @@ async function handleValidatorObserved(
       const notFoundPossible = arrival.length === 0 && n404 + pending >= VALIDATOR_MIN_AGREEING;
       if (!pairPossible && !notFoundPossible) finish();
     };
+    const initiallyStartable=BEACON_SOURCE_CAPS.filter(c=>canStartSource(c,nowFn())).length;
     BEACON_SOURCE_CAPS.forEach((cap, i) => {
       const base = cap.base;
       const now = nowFn();
-      if (!canStartSource(cap, now)) {
+      // Cooldown may be bypassed only to retain a possible two-source
+      // quorum. Active IO is never bypassed (no same-host pile-up).
+      const startable=initiallyStartable;
+      const quorumRecovery=startable<VALIDATOR_MIN_AGREEING&&cap.rootPin&&!activeValidatorHosts.has(base)&&now>=(hostCooldownUntilMs.get(base)??0)&&(!cap.paced||chainsafeCanStart(now));
+      if (!canStartSource(cap, now)&&!quorumRecovery) {
         legFailure[i] = "skipped (rate-limited)";
         legSettled[i] = true;
         check();
@@ -1361,11 +1392,10 @@ async function handleValidatorObserved(
         check();
         return;
       }
-      fetchValidatorFromSource(base, index, fetchImpl, timeoutMs, deadlineAt, requestDone, (reason, retryAt) => {
-        legFailure[i] = reason;
-        legRetryAt[i] = retryAt;
-        check();
-      }, { expectedRoot: agreedRoot, cap }).then(
+      const runLeg=()=>fetchValidatorFromSource(base,index,fetchImpl,timeoutMs,deadlineAt,requestDone,(reason,retryAt)=>{
+        legFailure[i]=reason;legRetryAt[i]=retryAt;check();
+      },{expectedRoot:agreedRoot,cap});
+      (cap.rootPin?ownValidatorHost(base,runLeg):runLeg()).then(
         (leg) => {
           if (finished) return; // arrived after the decision: not counted
           legResults[i] = leg;
