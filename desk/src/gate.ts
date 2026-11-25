@@ -383,10 +383,12 @@ export async function verifyNodeLevel(
   const receiptMiner = input.receipt.miner;
   const knownVeriReceipt = VERIRECEIPT_ONCHAIN_MINER_IDS.includes(receiptMiner);
   const slugIsVeriReceipt = minerSlug === "verireceipt";
+  // Details name the numeric registration only: check text ends up in
+  // published replay packets, and provider names must never ship there.
   add("serving miner identity present", receiptMiner !== "" && minerSlug !== null,
-    `registration=${receiptMiner || "missing"} slug=${minerSlug ?? "missing"}`);
+    `registration=${receiptMiner || "missing"}`);
   add("serving identity consistent with the receipt registration", minerSlug !== null && knownVeriReceipt === slugIsVeriReceipt,
-    `registration ${receiptMiner} ${knownVeriReceipt ? "is" : "is not"} a known VeriReceipt id; slug ${JSON.stringify(minerSlug)}`);
+    `registration ${receiptMiner} ${knownVeriReceipt ? "is" : "is not"} a known VeriReceipt id`);
 
   // Freshness: the signal must belong to THIS purchase, not a replayed one.
   const sigMs = parseTimeMs(sig.payload?.timestamp);
