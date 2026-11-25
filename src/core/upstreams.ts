@@ -185,7 +185,7 @@ export function recordUpstreamError(name: string, errorCode?: string): void {
  * nothing when the receipt is missing either field (fail-open). Never
  * throws.
  */
-export function recordUpstreamOkFromReceipt(receipt: unknown): void {
+export function recordUpstreamOkFromReceipt(receipt: unknown, serviceOverride?: string): void {
   try {
     if (receipt === null || typeof receipt !== "object") return;
     if (String((receipt as { quorum_votes?: unknown }).quorum_votes ?? "").includes("STALE DISCLOSED")) return;
@@ -194,7 +194,7 @@ export function recordUpstreamOkFromReceipt(receipt: unknown): void {
       fetched_at?: unknown;
     };
     if (typeof upstream_url !== "string" || !upstream_url) return;
-    const name = upstreamNameForUrl(upstream_url);
+    const name = serviceOverride ?? upstreamNameForUrl(upstream_url);
     if (!name) return;
     recordUpstreamOk(name, typeof fetched_at === "string" ? fetched_at : undefined);
   } catch {

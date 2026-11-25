@@ -145,3 +145,9 @@ export function createWiredFinanceHandlers(env: NodeJS.ProcessEnv = process.env)
         yieldSourceNames: yieldSources.map(s => s.name),
     };
 }
+
+/** Health attribution only: same reviewed exact binding and normalization as source.
+ * Unsupported input is a local refusal, not evidence that any RPC service failed. */
+export function isBoundYieldQuery(q:Record<string,string|undefined>):boolean{
+ return AAVE_V3_RESERVES.filter(b=>b.project.toLowerCase()===q.project?.trim().toLowerCase()&&b.symbol.toUpperCase()===q.symbol?.trim().toUpperCase()&&b.chain.toLowerCase()===q.chain?.trim().toLowerCase()).length===1;
+}

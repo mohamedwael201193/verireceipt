@@ -68,7 +68,7 @@ import { handleMacro } from "./handlers/macroEconomic";
 import { handleTokenHolders, holderUpstreamForQuery } from "./handlers/tokenHolders";
 import {handleBuoySensor} from "./handlers/buoyWired";
 import {handleVesselPosition} from "./handlers/vesselWired";
-import { createWiredFinanceHandlers } from "./handlers/financeWired";
+import { createWiredFinanceHandlers, isBoundYieldQuery } from "./handlers/financeWired";
 import { createWiredWeatherHandlers } from "./handlers/weatherWired";
 import { ApiError, badRequest, errorBody } from "./core/errors";
 import { getDb } from "./core/db";
@@ -124,12 +124,14 @@ async function trackIntent<T>(
   intent: string,
   fn: () => Promise<T>,
   primaryOverride?: string,
+  trackFailure = true,
 ): Promise<T> {
   try {
     const result = await fn();
     try {
       recordUpstreamOkFromReceipt(
         (result as Record<string, unknown> | null | undefined)?.receipt,
+        intent === "yield" ? INTENT_PRIMARY_UPSTREAM.yield : undefined,
       );
     } catch {
       // Registry is fail-open; ignore tracking failures.
@@ -140,7 +142,7 @@ async function trackIntent<T>(
       // Non-ApiError throwables are mapped to 502 by the error handler,
       // so they count as upstream failures too.
       const isUpstreamFailure = err instanceof ApiError ? err.status >= 500 : true;
-      if (isUpstreamFailure) {
+      if (isUpstreamFailure && trackFailure) {
         const primary = primaryOverride ?? INTENT_PRIMARY_UPSTREAM[intent];
         if (primary) {
           recordUpstreamError(primary, err instanceof ApiError ? err.code : "INTERNAL");
@@ -414,7 +416,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/sensor-telemetry",async(request)=>trackIntent("sensor-telemetry",()=>handleBuoySensor(asQuery(request.query))));
   app.get("/v1/vessel-telemetry", async(request)=>trackIntent("vessel-telemetry",()=>handleVesselPosition(asQuery(request.query))));
   app.get("/v1/yield", async (request) =>
-    trackIntent("yield", () => wiredFinance.yield(asQuery(request.query))),
+    trackIntent("yield", () => wiredFinance.yield(asQuery(request.query)), undefined, isBoundYieldQuery(asQuery(request.query))),
   );
   // Wired measured-weather observations (expansion): NOAA station
   // observations only, exact reviewed station spellings, no forecast or
