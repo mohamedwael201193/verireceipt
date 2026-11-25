@@ -66,8 +66,10 @@ export async function cachedHolderBody(url: string, load: (remainingMs: number) 
         try{retryAfterMs=(e as any)?.retryAfterMs;}catch{}
         const error={status:typeof status==='number'?status:undefined,retryAfterMs:typeof retryAfterMs==='number'?retryAfterMs:undefined};
         if (error.status === 429) {
-          const wait = Math.max(SPACING_MS, error.retryAfterMs ?? 5_000);
-          rateLimitedUntil = Math.max(rateLimitedUntil, Date.now() + Math.max(wait, 60_000));
+          // Brief process-local cooldown, never a minute-long outage.
+          const retry = Number.isFinite(error.retryAfterMs) ? error.retryAfterMs! : 5_000;
+          const wait = Math.min(5_000, Math.max(SPACING_MS, retry));
+          rateLimitedUntil = Math.max(rateLimitedUntil, Date.now() + wait);
           nextAllowed = Math.max(nextAllowed, Date.now() + wait);
         }
         const prior = staleFallback(error.status === 429 ? "GeckoTerminal HTTP 429" : "GeckoTerminal request failed");

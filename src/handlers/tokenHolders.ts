@@ -52,32 +52,57 @@ export function setTokenHoldersFetchForTests(impl: FetchText | null): void {
   resetHolderCacheForTests();
 }
 
+// Caller deadlines do not release ownership of an abort-ignoring fetch/body.
+// Bound the retained flights, including timed-out I/O, to avoid a leak.
+const activeHolderIO = new Map<string, Promise<string>>();
 async function fetchText(url: string, timeoutMs = HTTP_TIMEOUT_MS): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    if (fetchImpl) return await Promise.race([fetchImpl(url), new Promise<never>((_r, reject) => controller.signal.addEventListener("abort", () => reject(new Error("holder HTTP budget exceeded")), { once: true }))]);
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { accept: "application/json" },
-    });
-    if (!res.ok) {
-      const error = Object.assign(new Error(`HTTP ${res.status} from ${url}`), { status: res.status, retryAfterMs: undefined as number | undefined });
-      const retry = res.headers.get("retry-after");
-      if (retry) {
-        const millis = /^\d+$/.test(retry.trim()) ? Number(retry) * 1000 : Date.parse(retry) - Date.now();
-        if (Number.isFinite(millis) && millis >= 0) error.retryAfterMs = millis;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let io = activeHolderIO.get(url);
+  if (!io) {
+    if (activeHolderIO.size >= 8) throw new Error("holder I/O capacity exhausted");
+    io = (async () => {
+      try {
+        if (fetchImpl) return await fetchImpl(url);
+        const res = await fetch(url, { signal: controller.signal, headers: { accept: "application/json" } });
+        if (!res.ok) {
+          const error = Object.assign(new Error("holder HTTP failure"), { status: res.status, retryAfterMs: undefined as number | undefined });
+          const retry = res.headers.get("retry-after");
+          if (retry) {
+            const ms = /^\d+$/.test(retry.trim()) ? Number(retry) * 1000 : Date.parse(retry) - Date.now();
+            if (Number.isFinite(ms) && ms >= 0) error.retryAfterMs = ms;
+          }
+          markFailure(error, res.status === 429 ? "rate_limited" : "unreachable");
+          // The request owns its response body until it is canceled too.
+          try { await res.body?.cancel(); } catch { /* Preserve the HTTP failure. */ }
+          throw error;
+        }
+        return await res.text();
+      } catch (error) {
+        if (failureKind(error) === "unknown") markFailure(error, "unreachable");
+        throw error;
       }
-      markFailure(error,res.status===429?'rate_limited':'unreachable');
-      throw error;
-    }
-    return await res.text();
-  } catch(error) {
-    if(failureKind(error)==='unknown')markFailure(error,'unreachable');
-    throw error;
-  } finally {
-    clearTimeout(timer);
+    })();
+    activeHolderIO.set(url, io);
+    const owned = io;
+    const release = () => { if (activeHolderIO.get(url) === owned) activeHolderIO.delete(url); };
+    void io.then(release, release);
   }
+  try {
+    return await Promise.race([io, new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        const error = new Error("holder HTTP budget exceeded");
+        markFailure(error, "unreachable");
+        reject(error);
+      }, Math.max(1, timeoutMs));
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
+function holderFailureClass(error:unknown,token:string):Record<string,unknown>{
+ let status:unknown;try{const d=error&&typeof error==='object'?Object.getOwnPropertyDescriptor(error,'status'):undefined;status=d&&'value'in d?d.value:undefined;}catch{}
+ return{token_class:ADDRESS_RE.test(token)?'address':'symbol',...(typeof status==='number'&&Number.isInteger(status)&&status>=100&&status<=599?{upstream_http_status:status}:{})};
 }
 
 interface IndexerTokenInfo {
@@ -219,13 +244,13 @@ export async function handleTokenHolders(
         info=parseGecko(observation.body,'eth',contract);bodyFetchedAt=observation.fetchedAt;staleReason=observation.staleReason;
         url=fallbackUrl;sourceName='GeckoTerminal (Ethereum fallback after Blockscout unavailable)';
       }catch(fallbackError){
-        throw withAnswerClass(upstreamUnavailable('INDEXER_UNREACHABLE','Blockscout and GeckoTerminal Ethereum holder indexes unavailable; no count invented'),INTENT,{upstream_name:'geckoterminal',upstream_failure:failureKind(fallbackError)});
+        throw withAnswerClass(upstreamUnavailable('INDEXER_UNREACHABLE','Blockscout and GeckoTerminal Ethereum holder indexes unavailable; no count invented'),INTENT,{upstream_name:'geckoterminal',upstream_failure:failureKind(fallbackError),...holderFailureClass(fallbackError,tokenRaw)});
       }
     }else{
       throw withAnswerClass(upstreamUnavailable(
         "INDEXER_UNREACHABLE",
         `${sourceName} holder-count indexer failed for ${chain}: ${err instanceof Error ? err.message : String(err)}`,
-      ),INTENT,{upstream_name:network?'geckoterminal':'blockscout',upstream_failure:failureKind(err)});
+      ),INTENT,{upstream_name:network?'geckoterminal':'blockscout',upstream_failure:failureKind(err),...holderFailureClass(err,tokenRaw)});
     }
   }
 

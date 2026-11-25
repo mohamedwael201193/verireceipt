@@ -247,9 +247,11 @@ it("deduplicated Gecko requests each persist the original body with provider as_
 
 it("bounds a hung source by the reduced HTTP budget instead of waiting beyond 8s", async()=>{
  vi.useFakeTimers();vi.setSystemTime(new Date("2026-11-23T13:00:00Z"));
- setTokenHoldersFetchForTests(async()=>new Promise<string>(()=>{}));
+ let release!:(s:string)=>void;
+ setTokenHoldersFetchForTests(async()=>new Promise<string>(r=>{release=r;}));
  const checked=expect(handleTokenHolders({token:"USDC",chain:"base"})).rejects.toMatchObject({status:502,code:"INDEXER_UNREACHABLE"});
  await vi.advanceTimersByTimeAsync(4001);await checked;
+ release("{}");await vi.advanceTimersByTimeAsync(0);
 });
 
 

@@ -34,16 +34,16 @@ describe("holder source bounded cache and pacing", () => {
   const failed=expect(cachedHolderBody("base",load,accept)).rejects.toThrow("limited");await settle(failed);
   expect(load).toHaveBeenCalledTimes(1);
  });
- it("respects a long Retry-After without an early second request",async()=>{
+ it("caps a long Retry-After at five seconds without an early second request",async()=>{
   const load=vi.fn(async()=>{throw Object.assign(new Error("limited"),{status:429,retryAfterMs:60000});});
   const failed=expect(cachedHolderBody("a",load,accept)).rejects.toThrow("limited");await settle(failed);
   expect(load).toHaveBeenCalledTimes(1);
   const starts:number[]=[];
   const blocked=expect(cachedHolderBody("b",async()=>{starts.push(Date.now());return "raw";},accept)).rejects.toThrow("429 cooldown");
   await settle(blocked);expect(starts).toHaveLength(0);
-  await vi.advanceTimersByTimeAsync(60000);
+  await vi.advanceTimersByTimeAsync(5000);
   await settle(cachedHolderBody("b",async()=>{starts.push(Date.now());return "raw";},accept));
-  expect(starts[0]).toBeGreaterThanOrEqual(Date.parse("2026-11-23T13:01:00Z"));
+  expect(starts[0]).toBe(Date.parse("2026-11-23T13:00:05Z"));
  });
  it("revalidates staleness on cache hits, and never caches invalid replacements",async()=>{
   const updated=Date.now()-86400000+500;
