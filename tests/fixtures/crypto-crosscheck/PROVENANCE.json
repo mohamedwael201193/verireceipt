@@ -1,0 +1,23 @@
+[
+  {
+    "name": "kraken-btc",
+    "url": "https://api.kraken.com/0/public/Ticker?pair=XBTUSD&assetVersion=1",
+    "status": 200,
+    "at": "2026-11-25T19:52:29.103207+00:00",
+    "sha256": "6afbc76ff1229342f9ddcdd05eb382cf7b8c2e8929f31cabe07f6ba49b3003d8"
+  },
+  {
+    "name": "kraken-eth",
+    "url": "https://api.kraken.com/0/public/Ticker?pair=ETHUSD&assetVersion=1",
+    "status": 200,
+    "at": "2026-11-25T19:52:29.205909+00:00",
+    "sha256": "fbd079fd2cfac2b847d3d07bf2f86bff12eaedd24da577da411c18f64c2913e7"
+  },
+  {
+    "name": "coinbase-btc",
+    "url": "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+    "status": 200,
+    "at": "2026-11-25T19:52:29.304658+00:00",
+    "sha256": "991715bf467e66799797b55308a057f6532a85016fce1c5cc177ec0937ab162e"
+  }
+]

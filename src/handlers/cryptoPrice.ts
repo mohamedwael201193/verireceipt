@@ -31,6 +31,13 @@ export function parseCryptoSpot(raw:string,symbol:string):number {
  if(typeof d.amount!=='string'||!/^\d+(?:\.\d+)?$/.test(d.amount))throw upstreamUnavailable('COINBASE_BAD_BODY','Coinbase amount must be an explicit positive decimal string');
  const price=Number(d.amount);if(!Number.isFinite(price)||price<0.0001||price>10000000)throw unprocessable('OUT_OF_CONTRACT_RANGE','Coinbase amount outside supported price range');return price;
 }
+/** Display-name result keys bind the requested base and USD quote exactly. */
+export function parseKrakenSpot(raw:string,symbol:string):number{
+ const j=JSON.parse(raw),key=symbol+'/USD';
+ if(!Array.isArray(j?.error)||j.error.length||!j.result||typeof j.result!=='object'||Object.keys(j.result).length!==1||!Object.hasOwn(j.result,key))throw Error('Kraken identity/error');
+ const value=j.result[key]?.c?.[0];if(typeof value!=='string'||!/^\d+(?:\.\d+)?$/.test(value))throw Error('Kraken price');
+ const n=Number(value);if(!Number.isFinite(n)||n<0.0001||n>10000000)throw Error('Kraken range');return n;
+}
 /** One deadline covers headers AND bounded body consumption, even if abort is ignored. */
 async function readSpot(url:string):Promise<{status:number;body:string}> {
  const controller=new AbortController();let timer:ReturnType<typeof setTimeout>;let reader:ReadableStreamDefaultReader<Uint8Array>|undefined;
@@ -50,18 +57,29 @@ export async function handleCryptoPrice(query: Record<string, string | undefined
   if (!symbol) throw badRequest("MISSING_PARAM", "symbol is required (e.g. BTC, ETH)");
   if (!/^[A-Z0-9]{2,12}$/.test(symbol)) throw badRequest("BAD_SYMBOL", "symbol must be 2-12 letters or digits");
   const url = `https://api.coinbase.com/v2/prices/${symbol}-USD/spot`;
-  const fetchedAt = new Date().toISOString();
-  let spot:{status:number;body:string};
-  try{spot=await readSpot(url);}catch{throw upstreamUnavailable('COINBASE_UNREACHABLE','Coinbase spot headers/body unavailable within bounded read');}
+  const crossUrl=`https://api.kraken.com/0/public/Ticker?pair=${encodeURIComponent((symbol==='BTC'?'XBT':symbol)+'USD')}&assetVersion=1`;
+  const [spotResult,crossResult]=await Promise.allSettled([readSpot(url),readSpot(crossUrl)]);
+  if(spotResult.status!=='fulfilled')throw upstreamUnavailable('COINBASE_UNREACHABLE','Coinbase spot headers/body unavailable within bounded read');
+  const spot=spotResult.value;
   if(spot.status===404)throw unprocessable('SYMBOL_NOT_LISTED',`Coinbase spot does not list ${symbol}-USD; no price guessed`);
   if(spot.status!==200)throw upstreamUnavailable('COINBASE_UNREACHABLE',`Coinbase spot answered HTTP ${spot.status}`);
-  const body=spot.body;
-  const price=parseCryptoSpot(body,symbol);
-  const asOf = new Date().toISOString();
+  const fetchedAt=new Date().toISOString(),body=spot.body;
+  const primaryPrice=parseCryptoSpot(body,symbol);
+  let crossPrice:number|undefined,crossBody:string|undefined;
+  let crossStatus='unavailable';
+  if(crossResult.status==='fulfilled'&&crossResult.value.status===200){
+    crossBody=crossResult.value.body;
+    try{crossPrice=parseKrakenSpot(crossBody,symbol);crossStatus='available';}catch{crossStatus='invalid_or_unlisted';}
+  }
+  const deviationBps=crossPrice===undefined?null:Math.abs(crossPrice-primaryPrice)/primaryPrice*10000;
+  if(deviationBps!==null&&deviationBps>20)throw upstreamUnavailable('SPOT_PRICE_CONFLICT','Coinbase and Kraken spot differ by more than20basispoints; no price certified');
+  const price=crossPrice===undefined?primaryPrice:(primaryPrice+crossPrice)/2;
+  const policy=crossPrice===undefined?'Coinbase single-source spot; independent Kraken cross-check unavailable; no median calculated, not an index or VWAP':'Coinbase spot and Kraken last trade agree within20bps; two-price median (midpoint), not a market-wide index';
+  const asOf = fetchedAt;
   const evidence = JSON.stringify({ symbol, as_of: asOf, price,
-    source_policy: "Coinbase public spot API, single named source; one exchange's last spot quote, not an index or VWAP",
-    raw_bodies: { spot: body }, fetched_at: fetchedAt });
-  const receipt = makeReceipt(INTENT, url, evidence, "Coinbase public spot, single source honestly named");
+    source_policy:policy,crosscheck_status:crossStatus,coinbase_price:primaryPrice,kraken_price:crossPrice??null,deviation_bps:deviationBps,source_quote_timestamp:null,
+    raw_bodies: { spot: body,...(crossBody?{kraken:crossBody}:{}) }, fetched_at: fetchedAt });
+  const receipt = makeReceipt(INTENT, crossPrice===undefined?url:url+" + "+crossUrl, evidence,policy);
   receipt.fetched_at = fetchedAt;
   try {
     await saveReceipt(receipt, evidence);
@@ -69,10 +87,9 @@ export async function handleCryptoPrice(query: Record<string, string | undefined
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
   const answer =
-    `${symbol}/USD spot ${price} on Coinbase, fetched ${fetchedAt}. ` +
-    `This is one named exchange's public spot quote, not an index or VWAP; symbols the source does not list are refused.`;
+    `${symbol}/USD spot ${price}, acquired ${fetchedAt}. ${policy}. Source quote timestamps are unavailable, so acquisition time is not proof of last-trade freshness; symbols Coinbase does not list are refused.`;
   return envelope(INTENT, {
-    symbol, price_usd: price, quote_currency: "USD",
+    symbol, price_usd: price, quote_currency: "USD", as_of:asOf,fetched_at:fetchedAt,acquisition_age_seconds:Math.floor((Date.now()-Date.parse(fetchedAt))/1000),source_quote_timestamp:null,crosscheck_status:crossStatus,deviation_bps:deviationBps,price_method:crossPrice===undefined?"coinbase_spot":"two_source_median",
   }, receipt, { answer, verdict: "verified", confidence: 0.85,
-    source: `${url}; Coinbase public spot single source; fetched ${fetchedAt}` });
+    source: `${url}${crossPrice===undefined?'':' + '+crossUrl}; ${policy}; acquired ${fetchedAt}` });
 }
