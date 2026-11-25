@@ -466,8 +466,8 @@ describe("G10 r2 m1: evidence budget with page-only receipts", () => {
       return r;
     });
     const big = makeReceipt("REGULATORY_FILING_MONITOR_GENERAL", "https://data.sec.gov/big.json", "main-not-stored", "1/1");
-    const p0 = randomBytes(26 * MB);
-    const p1 = randomBytes(26 * MB);
+    const p0 = randomBytes(Math.ceil(MAX_EVIDENCE_TOTAL_BYTES * 0.52));
+    const p1 = randomBytes(Math.ceil(MAX_EVIDENCE_TOTAL_BYTES * 0.52));
     saveReceipt(big, undefined, [
       { url: "https://data.sec.gov/p0.json", body: p0 },
       { url: "https://data.sec.gov/p1.json", body: p1 },
@@ -495,16 +495,16 @@ describe("G10 r2 m1: evidence budget with page-only receipts", () => {
     clearAllEvidence();
     const pageOnly = makeReceipt("REGULATORY_FILING_MONITOR_GENERAL", "https://data.sec.gov/old.json", "x", "1/1");
     pageOnly.fetched_at = "2026-11-21T00:00:00.000Z"; // oldest
-    saveReceipt(pageOnly, undefined, [{ url: "https://data.sec.gov/old-p0.json", body: randomBytes(18 * MB) }]);
+    saveReceipt(pageOnly, undefined, [{ url: "https://data.sec.gov/old-p0.json", body: randomBytes(Math.floor(MAX_EVIDENCE_TOTAL_BYTES * 0.36)) }]);
     expect(getReceiptPages(pageOnly.receipt_id)[0].evidence_available).toBe(true);
     const later = [1, 2].map((i) => {
-      const body = randomBytes(18 * MB);
+      const body = randomBytes(Math.floor(MAX_EVIDENCE_TOTAL_BYTES * 0.36));
       const r = makeReceipt("TVL_LOOKUP_GENERAL", "https://u.example/l" + i, body, "1/1");
       r.fetched_at = `2026-11-21T00:00:0${i}.000Z`;
       saveReceipt(r, body);
       return r;
     });
-    // 3 x 18 MB > 50 MB -> the OLDEST (the page-only receipt) is pruned
+    // 3 x 36% exceeds the configured budget, so the oldest page-only receipt is pruned
     expect(getReceiptPages(pageOnly.receipt_id)[0].evidence_available).toBe(false);
     for (const r of later) expect(hasMain(r.receipt_id)).toBe(true);
     expect(totalEvidenceGzip()).toBeLessThanOrEqual(MAX_EVIDENCE_TOTAL_BYTES);

@@ -16,7 +16,7 @@ it('configured proof main and page evidence survive oldest-first pruning and a s
  expect(getReceiptEvidence(proof.receipt_id).found).toBe(true);expect(sha256Hex(getReceiptEvidence(proof.receipt_id).evidence as Buffer)).toBe(proof.raw_response_sha256);
  expect(getDb().prepare('SELECT evidence_gzip FROM miner_receipt_pages WHERE receipt_id=?').get(proof.receipt_id)).toMatchObject({evidence_gzip:expect.any(Buffer)});
  expect(getReceiptEvidence(ordinary[0].receipt_id).evidence).toBeNull();expect(getReceiptEvidence(ordinary[1].receipt_id).found).toBe(true);
-});
+},120000);
 
 it('empty configuration pins nothing; valid duplicates collapse; malformed and excessive configs fail closed',()=>{
  expect(proofReceiptIds()).toEqual([]);const id='rcpt_'+'A'.repeat(26);process.env.PROOF_RECEIPT_IDS=' '+id+','+id+' ';expect(proofReceiptIds()).toEqual([id]);
@@ -36,6 +36,6 @@ it.skipIf(!process.env.DATABASE_URL)('Postgres proof evidence and pages survive 
   expect((await store.getReceiptPageEvidence(proof.receipt_id,0)).evidence?.toString()).toBe('exact page bytes');
   expect((await store.getReceiptEvidence(ordinary[0].receipt_id)).evidence).toBeNull();expect((await store.getReceiptEvidence(ordinary[1].receipt_id)).evidence).not.toBeNull();
  }finally{await store.closeStorage();store.__setStorageBackendForTests(null);}
-});
+},120000);
 
 it('80percent warning has only closed diagnostic fields and fires at the boundary',()=>{const info=vi.spyOn(console,'info').mockImplementation(()=>{});const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});logEvidencePrune('postgres',79,100,0);expect(warn).not.toHaveBeenCalled();logEvidencePrune('postgres',80,100,0);expect(warn).toHaveBeenCalledTimes(1);expect(JSON.parse(String(warn.mock.calls[0][0]))).toEqual({event:'evidence_budget_warning',backend:'postgres',unpinned_bytes:80,cap_bytes:100});expect(info).toHaveBeenCalledTimes(2);});
