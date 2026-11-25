@@ -30,6 +30,7 @@ describe('bounded AIS position event parser, controls are not live data',()=>{
   ['changed licence',e=>e.license='unverified'],['GeoJSON snapshot',e=>e.type='Feature'],
  ];
  for(const[name,fn]of controls)it('refuses '+name,()=>expect(()=>parse(changed(fn),vessel,now)).toThrow());
+ it('refuses invalid calendar day even when normalized date would be fresh',()=>expect(()=>parse(changed(e=>e.time='2026-11-31T01:44:57Z'),vessel,Date.parse('2026-12-01T01:45:00Z'))).toThrow());
  it('accepts exactly five minutes but not a millisecond older',()=>{const t=Date.parse(JSON.parse(raw).time);expect(()=>parse(raw,vessel,t+300000)).not.toThrow();expect(()=>parse(raw,vessel,t+300001)).toThrow();});
  it('refuses otherwise-valid oversized event with irrelevant padding',()=>{const oversized=changed(e=>e.padding='x'.repeat(32768));expect(()=>parse(oversized,vessel,now)).toThrow();});
  it('refuses nonfinite clock and oversized body',()=>{expect(()=>parse(raw,vessel,NaN)).toThrow();expect(()=>parse(' '.repeat(32769),vessel,now)).toThrow();});
