@@ -94,6 +94,14 @@ function parsePeriod(raw: string | undefined): { days: number } | null {
   return { days };
 }
 
+// Calendar description only, never an observation window for uptime arithmetic.
+export function slaCalendarDays(raw:string|undefined):number|null {
+ const match=/^Q([1-4])\s+(\d{4})$/i.exec(raw?.trim()??'');if(!match)return null;
+ const year=Number(match[2]);if(year<1000||year>9999)return null;
+ const month=(Number(match[1])-1)*3;
+ return (Date.UTC(year,month+3,1)-Date.UTC(year,month,1))/86400000;
+}
+
 async function fetchPage(host: string, page: number): Promise<{ body: string; fetchedAt:string; incidents: Incident[] }> {
   const url = `https://${host}/api/v2/incidents.json?per_page=100&page=${page}`;
   let got;try{got=await readSlaBody(url,host,UA,SOURCE_TIMEOUT_MS);}catch{throw upstreamUnavailable('STATUSPAGE_UNREACHABLE','statuspage incident source could not be read; no uptime asserted');}
@@ -146,16 +154,18 @@ async function handleSlaComplianceInternal(query: Record<string, string | undefi
   const host=resolveSlaHost(service);
   const aliasName=Object.entries(STATUSPAGES).find(([,h])=>h===host)?.[0]??'none';
   if (!host || days === undefined) {
+    const calendarDays=slaCalendarDays(query.period);
+    const periodDays=days??calendarDays;
     const at=new Date().toISOString();
     const status=!host?'not_found':'unknown';
-    const reason=!host?'No verified statuspage binding; no guessed hostname or external lookup':
-      'Period is not a supported rolling 1-90 day window. Calendar months and other free text are accepted, but no complete calendar-period source window was established; no arithmetic performed';
+    const reason=!host?'No verified statuspage binding; no guessed hostname or external lookup'+(calendarDays!==null?'; calendar period length only, not measured uptime':''):
+      'Period is not a supported rolling 1-90 day observation window. No complete calendar-period source window was established; no uptime arithmetic performed'+(calendarDays!==null?'; calendar period length only':'');
     const period=days===undefined?query.period!.trim():`${days}d`;
-    const evidence=JSON.stringify({service,period,period_days:days??null,status,source_resolution:reason,checked_at:at});
+    const evidence=JSON.stringify({service,period,period_days:periodDays??null,status,source_resolution:reason,checked_at:at});
     const receipt=makeReceipt(INTENT,'local:verified-statuspage-bindings',evidence,'No supported observation window; no uptime observation');receipt.fetched_at=at;
     try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
     const answer=`${service}: ${reason}. Uptime, SLA target and compliance are unknown, not zero or fully operational.`;
-    return withAnswerClass(envelope(INTENT,{service,period,status,uptime_pct:null,sla_target_pct:null,compliant:null,summary:answer},receipt,{answer,verdict:'unverified',confidence:0,source:'Verified statuspage binding list only; no provider observation'}),INTENT,{service_bound:!!host,alias_name:aliasName});
+    return withAnswerClass(envelope(INTENT,{service,period,period_days:periodDays??null,status,uptime_pct:null,sla_target_pct:null,compliant:null,summary:answer},receipt,{answer,verdict:'unverified',confidence:0,source:'Verified statuspage binding list only; no provider observation'}),INTENT,{service_bound:!!host,alias_name:aliasName});
   }
   const summaryUrl=`https://${host}/api/v2/summary.json`;
   let summaryBody:string,summaryFetchedAt:string, summary:any;
@@ -251,7 +261,7 @@ export async function handleSlaCompliance(q:Record<string,string|undefined>):Pro
  const service=q.service?.trim().toLowerCase(),period=q.period?.trim();
  const serviceClass=!service?'missing':service.length>64?'invalid':/^https?:\/\//i.test(service)?'url':resolveSlaHost(service)?'bound':'unbound';
  let periodClass='missing';
- if(period){const m=/^(?:(?:the\s+)?(?:last|past)\s+)?(\d{1,3})\s*(?:d|days?)$/i.exec(period);periodClass=m&&Number(m[1])>=1&&Number(m[1])<=90?'rolling_days':/\b(?:january|february|march|april|may|june|july|august|september|october|november|december|month|quarter|year)\b|^\d{4}-\d{2}$/i.test(period)?'calendar':'unsupported';}
+ if(period){const m=/^(?:(?:the\s+)?(?:last|past)\s+)?(\d{1,3})\s*(?:d|days?)$/i.exec(period);periodClass=m&&Number(m[1])>=1&&Number(m[1])<=90?'rolling_days':/^Q[1-4]\s+\d{4}$|\b(?:january|february|march|april|may|june|july|august|september|october|november|december|month|quarter|year)\b|^\d{4}-\d{2}$/i.test(period)?'calendar':'unsupported';}
  const cls={sla_service_input_class:serviceClass,sla_period_input_class:periodClass};
  try{const out=await handleSlaComplianceInternal(q);return withAnswerClass(out,INTENT,{...answerDiagnostics(INTENT,out).answerClass,...cls});}
  catch(error){if(error!==null&&typeof error==='object')withAnswerClass(error,INTENT,{...answerDiagnostics(INTENT,error).answerClass,...cls});throw error;}
