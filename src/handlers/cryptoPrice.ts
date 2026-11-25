@@ -35,8 +35,16 @@ export function parseCryptoSpot(raw:string,symbol:string):number {
 export function parseKrakenSpot(raw:string,symbol:string):number{
  const j=JSON.parse(raw),key=symbol+'/USD';
  if(!Array.isArray(j?.error)||j.error.length||!j.result||typeof j.result!=='object'||Object.keys(j.result).length!==1||!Object.hasOwn(j.result,key))throw Error('Kraken identity/error');
- const value=j.result[key]?.c?.[0];if(typeof value!=='string'||!/^\d+(?:\.\d+)?$/.test(value))throw Error('Kraken price');
+ const entry=j.result[key];if(!entry||typeof entry!=='object'||Array.isArray(entry)||!Array.isArray(entry.c))throw Error('Kraken container');
+ const value=entry.c[0];if(typeof value!=='string'||!/^\d+(?:\.\d+)?$/.test(value))throw Error('Kraken price');
  const n=Number(value);if(!Number.isFinite(n)||n<0.0001||n>10000000)throw Error('Kraken range');return n;
+}
+/** Decimal-safe inclusive threshold relative to the primary spot price. */
+export function withinTwentyBps(primary:string,secondary:string):boolean{
+ const places=Math.max(primary.split('.')[1]?.length??0,secondary.split('.')[1]?.length??0);
+ const scaled=(v:string)=>BigInt(v.replace('.','')+'0'.repeat(places-(v.split('.')[1]?.length??0)));
+ const a=scaled(primary),b=scaled(secondary),difference=a>b?a-b:b-a;
+ return difference*10000n<=a*20n;
 }
 /** One deadline covers headers AND bounded body consumption, even if abort is ignored. */
 async function readSpot(url:string):Promise<{status:number;body:string}> {
@@ -58,12 +66,13 @@ export async function handleCryptoPrice(query: Record<string, string | undefined
   if (!/^[A-Z0-9]{2,12}$/.test(symbol)) throw badRequest("BAD_SYMBOL", "symbol must be 2-12 letters or digits");
   const url = `https://api.coinbase.com/v2/prices/${symbol}-USD/spot`;
   const crossUrl=`https://api.kraken.com/0/public/Ticker?pair=${encodeURIComponent((symbol==='BTC'?'XBT':symbol)+'USD')}&assetVersion=1`;
-  const [spotResult,crossResult]=await Promise.allSettled([readSpot(url),readSpot(crossUrl)]);
+  const observe=async(u:string)=>{const value=await readSpot(u);return{...value,completedAt:new Date().toISOString()};};
+  const [spotResult,crossResult]=await Promise.allSettled([observe(url),observe(crossUrl)]);
   if(spotResult.status!=='fulfilled')throw upstreamUnavailable('COINBASE_UNREACHABLE','Coinbase spot headers/body unavailable within bounded read');
   const spot=spotResult.value;
   if(spot.status===404)throw unprocessable('SYMBOL_NOT_LISTED',`Coinbase spot does not list ${symbol}-USD; no price guessed`);
   if(spot.status!==200)throw upstreamUnavailable('COINBASE_UNREACHABLE',`Coinbase spot answered HTTP ${spot.status}`);
-  const fetchedAt=new Date().toISOString(),body=spot.body;
+  const body=spot.body;
   const primaryPrice=parseCryptoSpot(body,symbol);
   let crossPrice:number|undefined,crossBody:string|undefined;
   let crossStatus='unavailable';
@@ -72,12 +81,13 @@ export async function handleCryptoPrice(query: Record<string, string | undefined
     try{crossPrice=parseKrakenSpot(crossBody,symbol);crossStatus='available';}catch{crossStatus='invalid_or_unlisted';}
   }
   const deviationBps=crossPrice===undefined?null:Math.abs(crossPrice-primaryPrice)/primaryPrice*10000;
-  if(deviationBps!==null&&deviationBps>20)throw upstreamUnavailable('SPOT_PRICE_CONFLICT','Coinbase and Kraken spot differ by more than20basispoints; no price certified');
+  if(crossPrice!==undefined&&!withinTwentyBps(JSON.parse(body).data.amount,JSON.parse(crossBody!).result[symbol+'/USD'].c[0]))throw upstreamUnavailable('SPOT_PRICE_CONFLICT','Coinbase and Kraken spot differ by more than20basispoints; no price certified');
   const price=crossPrice===undefined?primaryPrice:(primaryPrice+crossPrice)/2;
   const policy=crossPrice===undefined?'Coinbase single-source spot; independent Kraken cross-check unavailable; no median calculated, not an index or VWAP':'Coinbase spot and Kraken last trade agree within20bps; two-price median (midpoint), not a market-wide index';
+  const fetchedAt=crossPrice===undefined?spot.completedAt:[spot.completedAt,(crossResult as PromiseFulfilledResult<{completedAt:string}>).value.completedAt].sort()[0];
   const asOf = fetchedAt;
   const evidence = JSON.stringify({ symbol, as_of: asOf, price,
-    source_policy:policy,crosscheck_status:crossStatus,coinbase_price:primaryPrice,kraken_price:crossPrice??null,deviation_bps:deviationBps,source_quote_timestamp:null,
+    source_policy:policy,crosscheck_status:crossStatus,coinbase_price:primaryPrice,kraken_price:crossPrice??null,deviation_bps:deviationBps,source_quote_timestamp:null,source_acquired_at:{coinbase:spot.completedAt,kraken:crossResult.status==='fulfilled'?crossResult.value.completedAt:null},
     raw_bodies: { spot: body,...(crossBody?{kraken:crossBody}:{}) }, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, crossPrice===undefined?url:url+" + "+crossUrl, evidence,policy);
   receipt.fetched_at = fetchedAt;
