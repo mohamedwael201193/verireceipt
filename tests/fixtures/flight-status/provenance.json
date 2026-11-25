@@ -1,0 +1,47 @@
+[
+  {
+    "fixture": "MS985.json",
+    "url": "https://www.flightstats.com/v2/flight-tracker/MS/985",
+    "page_sha256": "7437dcbcab5d0e219b68cf7cd9142fad0e0ffc77f05bc017970b3c225c3287d7",
+    "extracted_sha256": "e5a612a5c39c00ac6cc638ea22da11ec0ebe12b90448c94516350825a1cd4262",
+    "extraction": "literal __NEXT_DATA__ JSON substring",
+    "retrieved_date": "2026-11-26"
+  },
+  {
+    "fixture": "BA117.json",
+    "url": "https://www.flightstats.com/v2/flight-tracker/BA/117",
+    "page_sha256": "26cab889716ab2dbfdcd8a5981fddfa4fa976eca5c42e47e9c4f6fbe5d4192db",
+    "extracted_sha256": "0fdfda751fd2f79b241af11385e132b3130d605fb4a889f4cfa921e75d3f4469",
+    "extraction": "literal __NEXT_DATA__ JSON substring",
+    "retrieved_date": "2026-11-26"
+  },
+  {
+    "fixture": "AA100.json",
+    "url": "https://www.flightstats.com/v2/flight-tracker/AA/100",
+    "page_sha256": "1bfc9f537d5fbc1a3b261447b31d98372a30196dba2c553bf09c994b97efc671",
+    "extracted_sha256": "9b5789f3bd50cafa356516ddc65aaf0f816d50fe302621fdea0a7eafa5fe2613",
+    "extraction": "literal __NEXT_DATA__ JSON substring",
+    "retrieved_date": "2026-11-26"
+  },
+  {
+    "fixture": "route-AAL100.json",
+    "url": "https://api.adsbdb.com/v0/callsign/AAL100",
+    "sha256": "d05b410061fb375bface3e403d2cfe86ed9fb5036b7907a7b5cb8f8863b4ed5e",
+    "extraction": "exact source JSON body",
+    "retrieved_date": "2026-11-26"
+  },
+  {
+    "fixture": "route-BAW117.json",
+    "url": "https://api.adsbdb.com/v0/callsign/BAW117",
+    "sha256": "b5fb80d2d5cc3f948bcc593b11c13e51eab35d352ee9b73c508f7eba5105afa3",
+    "extraction": "exact source JSON body",
+    "retrieved_date": "2026-11-26"
+  },
+  {
+    "fixture": "route-MS985.json",
+    "url": "https://api.adsbdb.com/v0/callsign/MS985",
+    "sha256": "395d7d3b432574481b3cc1dcbb8f46d50f8f1dce70dbbbde2485c311737dea1c",
+    "extraction": "exact source JSON body",
+    "retrieved_date": "2026-11-26"
+  }
+]

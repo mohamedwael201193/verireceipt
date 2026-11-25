@@ -1,3 +1,4 @@
+import {observeFlight} from './flightStatus';
 import {travelEndpoint,travelMetro} from '../data/travelMetros';
 // TRAVEL_DISRUPTION_GENERAL — GET /v1/travel-disruption?route_or_flight=<IATA>
 //
@@ -14,7 +15,8 @@ import {travelEndpoint,travelMetro} from '../data/travelMetros';
 //
 // HONEST SCOPE: this is AIRPORT-LEVEL FAA NAS status — ground delay
 // programs, ground stops, general arrival/departure delays, closures —
-// NEVER flight-level tracking; this slice has no verified flight-origin source.
+// Airport observations never stand in for flight-level status. Bare flight
+// numbers use the separately evidenced FlightStats path and route fallback.
 // Every answer says so, and the receipt discloses the input narrowing
 // (route_or_flight accepts a 3-letter FAA/IATA airport code or a name
 // from the bundled US airport list, disclosed when resolved), or a
@@ -106,7 +108,7 @@ async function handleTravelDisruptionInternal(query: Record<string, string | und
   const rawInput = query.route_or_flight?.trim();
   if (!rawInput) throw badRequest("MISSING_PARAM", "route_or_flight is required as a 3-letter airport code, e.g. LGA, or a US airport name");
   if (rawInput.length > 200 || /[\x00-\x1f]/.test(rawInput)) throw badRequest('INVALID_ROUTE','route_or_flight must be at most 200 printable characters');
-  if(/^[A-Za-z]{2,3}\s*\d{1,4}[A-Za-z]?$/.test(rawInput))return travelUnknown(rawInput,'flight_status_unavailable');
+  if(/^[A-Za-z]{2,3}\s*\d{1,4}[A-Za-z]?$/.test(rawInput))return observeFlight(rawInput,airport=>handleTravelDisruptionInternal({route_or_flight:airport}));
   // A supplied airport route is context, never a dated flight-to-airport lookup.
   const suppliedFlight = /^([A-Za-z]{2,3}\s*\d{1,4}[A-Za-z]?)\s+(.+)$/i.exec(rawInput);
   const routeInput = suppliedFlight ? suppliedFlight[2].trim() : rawInput;
@@ -176,17 +178,18 @@ async function handleTravelDisruptionInternal(query: Record<string, string | und
     : `${namePrefix}${airport}: no active FAA-listed disruption (no ground delay program, ground stop, arrival/departure delay or closure) in the NAS status as of ${updateTime}. ` +
       `This is airport-level FAA status, not flight-level tracking; an unlisted airport or unlisted condition is not claimed normal.`;
   return envelope(INTENT, {
-    disrupted,
+    disrupted:flightContext?null:disrupted,
+    ...(flightContext?{airport_disrupted:disrupted,airport_delay_minutes:maxDelay,airport_reason:reason||null}:{}),
     route_or_flight: resolvedRoute,
     flight_context: flightContext,
     disruption_scope: "FAA airport-level only, not the flight",
     airport_statuses: airportStatuses,
     status,
-    delay_minutes: maxDelay,
+    delay_minutes: flightContext?null:maxDelay,
     delay_semantics: "maximum reported airport average, not route or flight delay",
-    reason: reason || null,
+    reason: flightContext?null:reason || null,
     closure_policy: "Only active dated airport-wide closures count; restricted non-scheduled transient GA notices are disclosed separately and are not flight status",
-  }, receipt, { answer:answer+(flightContext ? " Flight-level data not available. The caller supplied this airport route; it is not a verified route for the flight number. disrupted describes only the supplied airports, not this flight." : "")+(excludedCount ? ` ${excludedCount} restricted or out-of-window closure notice(s) excluded from airport-wide disruption; full details retained per airport.` : ""), verdict: "verified", confidence: 0.9,
+  }, receipt, { answer:answer+(flightContext ? " Flight-level data not available. The caller supplied this airport route; it is not a verified route for the flight number. airport_disrupted describes only the supplied airports; flight-level disrupted is null." : "")+(excludedCount ? ` ${excludedCount} restricted or out-of-window closure notice(s) excluded from airport-wide disruption; full details retained per airport.` : ""), verdict: flightContext?"unverified":"verified", confidence: flightContext?0:0.9,
     source: `${NAS_URL}; FAA NAS status snapshot, airport-level only; feed updated ${updateTime}; fetched ${fetchedAt}` });
 }
 
