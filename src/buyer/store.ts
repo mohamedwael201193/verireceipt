@@ -24,6 +24,11 @@ CREATE INDEX IF NOT EXISTS buyer_jobs_created ON buyer_jobs(created_at);
 CREATE TABLE IF NOT EXISTS buyer_lifetime(id INTEGER PRIMARY KEY CHECK(id=1),reservation_history TEXT NOT NULL CHECK(reservation_history IN ('never_reserved','reserved','unknown')));
 CREATE TABLE IF NOT EXISTS buyer_followups(job_id TEXT NOT NULL REFERENCES buyer_jobs(id) ON DELETE CASCADE,observed_at INTEGER NOT NULL,data TEXT NOT NULL);
 `;
+function proofJobIds():string[]{
+ const ids=[...new Set((process.env.BUYER_PROOF_JOB_IDS??'').split(',').map(x=>x.trim()).filter(Boolean))];
+ if(ids.length>64||ids.some(id=>! /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)))throw Error('Invalid BUYER_PROOF_JOB_IDS operator configuration');
+ return ids;
+}
 const DAY=86400000,PER_JOB_STORAGE=BUYER.maxResultBytes+2100000+16000+320000+4096;
 const dayStart=(ms:number)=>Math.floor(ms/DAY)*DAY;
 export class BuyerStore {
@@ -163,7 +168,8 @@ export class BuyerStore {
  read(id:string,owner:string):{id:string;state:BuyerState;plan:BuyerPlan;expires_at:string;result:unknown;followups:unknown[]}|null {
   let row:Row;try{row=this.row(id,owner);}catch(error){if(error instanceof BuyerStoreError)return null;throw error;}
   const now=this.clock(),expires=row.reserved_at===null?row.expires_at:row.reserved_at+BUYER.payloadHours*3600000;
-  if(!row.plan||row.state==='expired'||now>=expires)return null;
+  const proof=row.state==='complete'&&proofJobIds().includes(id);
+  if(!row.plan||row.state==='expired'||(!proof&&now>=expires))return null;
   const payer=this.db.prepare('SELECT active_job,blocked_until FROM buyer_payer WHERE id=1').get() as {active_job:string;blocked_until:number};
   const stale=['reserved','signing'].includes(row.state)&&(payer.active_job!==id||payer.blocked_until<=now);
   const followups=this.db.prepare('SELECT data FROM buyer_followups WHERE job_id=? ORDER BY observed_at DESC LIMIT 10').all(id) as {data:string}[];
@@ -190,9 +196,10 @@ export class BuyerStore {
   this.db.prepare('DELETE FROM buyer_operator_sessions WHERE expires_at<=?').run(now);
   // Keep only the permanent spent/disarmed bit after normal 48-hour retention.
   this.db.prepare("UPDATE buyer_one_shot SET plan_id=NULL,plan_hash=NULL,owner_hash=NULL WHERE state IN ('consumed','disarmed') AND coalesce(consumed_at,arm_expires,access_expires)<=?").run(now-BUYER.tombstoneHours*3600000);
-  this.db.prepare("DELETE FROM buyer_jobs WHERE (state='planned' AND expires_at<=?) OR coalesce(signed_at,reserved_at,created_at)<=?").run(now,now-BUYER.tombstoneHours*3600000);
-  this.db.prepare('DELETE FROM buyer_followups WHERE job_id IN (SELECT id FROM buyer_jobs WHERE reserved_at<=?)').run(now-BUYER.payloadHours*3600000);
-  this.db.prepare("UPDATE buyer_jobs SET owner_hash='',network_hash='',plan=NULL,headers=NULL,paid_body=NULL,result=NULL,state='expired' WHERE reserved_at<=? AND state!='expired'").run(now-BUYER.payloadHours*3600000);
+  const pins=JSON.stringify((this.db.prepare("SELECT id FROM buyer_jobs WHERE state='complete' AND id IN (SELECT value FROM json_each(?))").all(JSON.stringify(proofJobIds())) as {id:string}[]).map(r=>r.id));
+  this.db.prepare("DELETE FROM buyer_jobs WHERE id NOT IN (SELECT value FROM json_each(?)) AND ((state='planned' AND expires_at<=?) OR coalesce(signed_at,reserved_at,created_at)<=?)").run(pins,now,now-BUYER.tombstoneHours*3600000);
+  this.db.prepare('DELETE FROM buyer_followups WHERE job_id IN (SELECT id FROM buyer_jobs WHERE reserved_at<=? AND id NOT IN (SELECT value FROM json_each(?)))').run(now-BUYER.payloadHours*3600000,pins);
+  this.db.prepare("UPDATE buyer_jobs SET owner_hash='',network_hash='',plan=NULL,headers=NULL,paid_body=NULL,result=NULL,state='expired' WHERE reserved_at<=? AND state!='expired' AND id NOT IN (SELECT value FROM json_each(?))").run(now-BUYER.payloadHours*3600000,pins);
  }
  purge():void {this.immediate(()=>this.purgeInside(this.clock()));}
  close():void {this.db.close();}

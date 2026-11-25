@@ -1,0 +1,5 @@
+# Operator-designated buyer proof retention
+
+BUYER_PROOF_JOB_IDS is a deployment-only comma-separated list of up to64complete lowercase UUID job ids. Keep it across restarts. Only completed jobs are exempt from normal payload expiry and tombstone deletion; planned/signing/uncertain jobs do not gain retention. Private proof response/header/result/followup evidence remains owner-bound, never made viewable to everyone. No public setter is added. Removing a designation restores normal expiry; it cannot recover already-erased payloads. Ordinary session expiry, spending limits, one-shot state and no-retry signing rules remain.
+
+This is the hosted buyer SQLite store, not the desk ledger and not PROOF_RECEIPT_IDS for miner evidence. The env keys must be set separately using actual full ids. Long-lived private records use disk and must remain a small explicitly designated proof set. Existing ordinary24hpayload and48htombstone behavior remains tested. No production designation, signing or purchase in this commit.

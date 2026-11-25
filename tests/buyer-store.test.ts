@@ -16,6 +16,18 @@ function mint(s:BuyerStore,now:number){return s.create(plan(now),owner,network);
 function checkpoint(p:BuyerPlan,now:number){return {plan_hash:p.plan_hash,amount_uusdc:BUYER.callUusdc,nonce:randomUUID(),payer,valid_before:Math.floor(now/1000)+120};}
 afterEach(()=>{for(const s of stores.splice(0))s.close();for(const t of temps.splice(0))rmSync(t,{recursive:true,force:true});});
 describe('single-host durable SQLite buyer authority (real local DB, no network or signing)',()=>{
+ it('proof designation rejects invalid config and does not preserve uncompleted jobs',()=>{
+  let now=Date.parse('2026-11-22T18:00:00Z');const f=fixture(),s=open(f,()=>now),p=mint(s,now);s.start(p.id,owner,p.plan_hash);s.uncertain(p.id);process.env.BUYER_PROOF_JOB_IDS=p.id;
+  try{now+=3*86400000;s.purge();expect(s.read(p.id,owner)).toBeNull();const check=new Database(f,{readonly:true});expect(check.prepare('SELECT id FROM buyer_jobs WHERE id=?').get(p.id)).toBeUndefined();check.close();process.env.BUYER_PROOF_JOB_IDS='not-a-job';expect(()=>s.purge()).toThrow('configuration');process.env.BUYER_PROOF_JOB_IDS=Array.from({length:65},()=>randomUUID()).join(',');expect(()=>s.purge()).toThrow('configuration');}finally{delete process.env.BUYER_PROOF_JOB_IDS;}
+ });
+
+ it('operator-designated completed proof payload survives retention and restart without extending ordinary jobs',()=>{
+  let now=Date.parse('2026-11-22T18:00:00Z');const f=fixture(),s=open(f,()=>now),proof=mint(s,now);s.start(proof.id,owner,proof.plan_hash);s.beforeSign(proof.id,checkpoint(proof,now));s.recordHeaders(proof.id,{status:200,receipt_header:null});s.recordPaidBody(proof.id,{status:200,receipt_header:null,body_text:'exact held proof response'});s.complete(proof.id,{plan_hash:proof.plan_hash,proof:true});s.addFollowup(proof.id,owner,{check:'retained'});
+  process.env.BUYER_PROOF_JOB_IDS=proof.id;
+  try{now+=180001;const ordinary=mint(s,now);s.start(ordinary.id,owner,ordinary.plan_hash);s.complete(ordinary.id,{plan_hash:ordinary.plan_hash});now+=3*86400000;s.purge();const restarted=open(f,()=>now);expect(restarted.read(proof.id,owner)?.result).toEqual({plan_hash:proof.plan_hash,proof:true});expect((restarted.evidence(proof.id,owner) as any).paid_response.body_text).toBe('exact held proof response');expect(restarted.read(proof.id,owner)?.followups).toEqual([{check:'retained'}]);expect(restarted.read(proof.id,other)).toBeNull();expect(restarted.read(ordinary.id,owner)).toBeNull();expect(()=>restarted.start(proof.id,owner,proof.plan_hash)).toThrow();}
+  finally{delete process.env.BUYER_PROOF_JOB_IDS;}
+ });
+
  it('owner-binds server-created plan IDs, freezes hashes, and makes start idempotent across two connections',()=>{
   const file=fixture(),a=open(file),b=open(file),p=mint(a,Date.parse('2026-11-22T18:00:00Z'));
   expect(b.read(p.id,other)).toBeNull();expect(()=>b.start(p.id,other,p.plan_hash)).toThrow('NOT_FOUND');
