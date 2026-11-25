@@ -133,12 +133,12 @@
             {
               "name": "serving miner identity present",
               "ok": true,
-              "detail": "registration=5311 slug=a1-preflight"
+              "detail": "registration=5311"
             },
             {
               "name": "serving identity consistent with the receipt registration",
               "ok": true,
-              "detail": "registration 5311 is not a known VeriReceipt id; slug \"a1-preflight\""
+              "detail": "registration 5311 is not a known VeriReceipt id"
             },
             {
               "name": "signal timestamp present",
@@ -299,12 +299,12 @@
             {
               "name": "serving miner identity present",
               "ok": true,
-              "detail": "registration=5311 slug=a1-preflight"
+              "detail": "registration=5311"
             },
             {
               "name": "serving identity consistent with the receipt registration",
               "ok": true,
-              "detail": "registration 5311 is not a known VeriReceipt id; slug \"a1-preflight\""
+              "detail": "registration 5311 is not a known VeriReceipt id"
             },
             {
               "name": "signal timestamp present",
@@ -470,12 +470,12 @@
             {
               "name": "serving miner identity present",
               "ok": true,
-              "detail": "registration=4991 slug=metricwire-macro-economic-indicator"
+              "detail": "registration=4991"
             },
             {
               "name": "serving identity consistent with the receipt registration",
               "ok": true,
-              "detail": "registration 4991 is not a known VeriReceipt id; slug \"metricwire-macro-economic-indicator\""
+              "detail": "registration 4991 is not a known VeriReceipt id"
             },
             {
               "name": "signal timestamp present",
@@ -648,5 +648,5 @@
     },
     "reused_acquisition_cost_uusdc": "0"
   },
-  "packet_hash": "9798ae8ee97fe5ab7218f0af60c6a4b426e9fffc1f6214aa4f449597764ed416"
+  "packet_hash": "5879a863edd69d32c566a8136b783fee006dbe7529ca88ec0bc097626fd96aa5"
 }
