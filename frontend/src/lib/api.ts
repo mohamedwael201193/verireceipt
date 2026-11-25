@@ -11,6 +11,7 @@ import type {
   CorporateRegistryResponse,
   RouteResponse,
   PoolLiquidityResponse,
+  ReserveAttestationResponse,
   SanctionsScreenResponse,
   StockPriceResponse,
   TokenHoldersResponse,
@@ -600,6 +601,18 @@ export async function getSanctionsScreen(
   assertValidParamsObject(params, "getSanctionsScreen");
   assertValidParam(params.name, "name");
   return fetchJson<SanctionsScreenResponse>(buildUrl("/v1/sanctions-screen", { name: params.name }), {
+    expectReceipt: true,
+    signal,
+  });
+}
+
+export async function getReserveAttestation(
+  params: { asset: string },
+  signal?: AbortSignal,
+): Promise<ReserveAttestationResponse> {
+  assertValidParamsObject(params, "getReserveAttestation");
+  assertValidParam(params.asset, "asset");
+  return fetchJson<ReserveAttestationResponse>(buildUrl("/v1/reserve-attestation", { asset: params.asset }), {
     expectReceipt: true,
     signal,
   });

@@ -19,11 +19,11 @@
 //   are the repo's own test fixtures (tests/tx.test.ts).
 // - grid zone TH_NP15_GEN-APND + a 2h-ago interval returns live CAISO LMP.
 
-import { getCorporateRegistry, getFilings, getGridPrice, getPoolLiquidity, getRoute, getSanctionsScreen, getStockPrice, getTokenHolders, getTokenSupply, getTvl, getTx } from "../../lib/api";
-import type { CorporateRegistryResponse, FilingsResponse, GridPriceResponse, LiveReceipt, PoolLiquidityResponse, ProbeOutcome, RouteResponse, SanctionsScreenResponse, StockPriceResponse, TokenHoldersResponse, TokenSupplyResponse, TvlResponse, TxResponse } from "./types";
+import { getCorporateRegistry, getFilings, getGridPrice, getPoolLiquidity, getReserveAttestation, getRoute, getSanctionsScreen, getStockPrice, getTokenHolders, getTokenSupply, getTvl, getTx } from "../../lib/api";
+import type { CorporateRegistryResponse, FilingsResponse, GridPriceResponse, LiveReceipt, PoolLiquidityResponse, ProbeOutcome, ReserveAttestationResponse, RouteResponse, SanctionsScreenResponse, StockPriceResponse, TokenHoldersResponse, TokenSupplyResponse, TvlResponse, TxResponse } from "./types";
 import { formatUsd, formatUsdPrecise, isVerified, probe, recentGridInterval } from "./utils";
 
-export type MissionId = "m13" | "m12" | "m03" | "m04" | "m01";
+export type MissionId = "m13" | "m12" | "m03" | "m04" | "m01" | "m02";
 /**
  * APPROVE / REJECT / HOLD: a decision against a rule the scenario states.
  * VERIFIED: the data was retrieved and receipted, but no decision rule
@@ -1078,6 +1078,124 @@ export const DESK_PRESETS: DeskPreset[] = [
         // declared floor failed), not a failed check.
         score: scoreOf(2, 2),
         headline: `NEEDS REVIEW: ${[!holdersPass ? `holders ${hCount!.toLocaleString("en-US")} below declared floor ${HOLDERS_FLOOR.toLocaleString("en-US")}` : "", !liquidityPass ? `pool reserves ${formatUsdPrecise(lUsd)} below declared floor ${formatUsdPrecise(LIQUIDITY_FLOOR_USD)}` : ""].filter(Boolean).join("; ")}. A screen outcome is not an endorsement or investment advice.`,
+        why,
+      };
+    },
+  },
+  {
+    id: "m02-settlement",
+    mission: "m02",
+    tag: "M02 · STABLECOIN",
+    title: "Pre-Settlement Compliance Screen",
+    sub: "Sanctions screen + attested reserve floor before a simulated transfer, receipted — live",
+    // Declared analyst thresholds, identical to the desk's template F
+    // assumptions. Screen thresholds, never legal clearance or advice.
+    inputs: {
+      entity: "Ares Capital Corporation",
+      ref: "TUSD",
+      scope: "simulated testnet settlement · no funds move",
+    },
+    buildChecks: (inputs) => {
+      // entity = payee name screened; ref = reserve asset symbol. The scope
+      // line is display-only: the settlement itself is always simulated and
+      // no wallet, signing or transfer exists in this page.
+      const payee = inputs.entity.trim();
+      const asset = inputs.ref.trim();
+      return [
+        {
+          label: "Sanctions screen",
+          intent: "SANCTIONS_SCREENING_MATCH_GENERAL",
+          query: `name=${payee}`,
+          requestUrl: direct("/v1/sanctions-screen", { name: payee }),
+          run: (signal) => probe((s) => getSanctionsScreen({ name: payee }, s), signal),
+        },
+        {
+          label: "Reserve attestation",
+          intent: "ASSET_RESERVE_ATTESTATION_GENERAL",
+          query: `asset=${asset}`,
+          requestUrl: direct("/v1/reserve-attestation", { asset }),
+          run: (signal) => probe((s) => getReserveAttestation({ asset }, s), signal),
+        },
+      ];
+    },
+    evaluate: (results) => {
+      const [sanctions, reserve] = results;
+      const SANCTIONS_THRESHOLD = 0.85;
+      const RESERVE_FLOOR_MICRO = 100_000_000_000_000; // 100,000,000 whole units
+      const sBody = sanctions ? bodyOf<SanctionsScreenResponse>(sanctions) : null;
+      const sanctionsOk = !!sanctions && isVerified(sanctions.receipt) && typeof sBody?.match_score === "number";
+      const sScore = sanctionsOk ? sBody!.match_score! : null;
+      const rBody = reserve ? bodyOf<ReserveAttestationResponse>(reserve) : null;
+      const reserveOk = !!reserve && isVerified(reserve.receipt) && typeof rBody?.attested_reserve === "number";
+      const rMicro = reserveOk ? rBody!.attested_reserve! : null;
+      const sanctionsHit = sanctionsOk && sScore! >= SANCTIONS_THRESHOLD;
+      const stale =
+        reserveOk &&
+        typeof rBody?.feed_age_seconds === "number" &&
+        typeof rBody?.heartbeat_seconds === "number" &&
+        rBody!.feed_age_seconds! > rBody!.heartbeat_seconds!;
+      const sanctionsPass = sanctionsOk && !sanctionsHit;
+      const reservePass = reserveOk && !stale && rMicro! >= RESERVE_FLOOR_MICRO;
+      const why: WhyCard[] = [
+        {
+          k: "Sanctions Screen",
+          v: !sanctionsOk
+            ? "not verified"
+            : sanctionsHit
+              ? `MATCH at or above threshold (best ${sScore})${sBody?.checked_at ? ` · as of ${sBody.checked_at}` : ""} — a fuzzy match is not identity confirmation, but it blocks an automatic pass`
+              : `best match score ${sScore} · ${sBody?.lists?.length ? `${sBody.lists.length} lists` : "OFAC + UN lists"}${sBody?.checked_at ? ` · as of ${sBody.checked_at}` : ""} — declared threshold ${SANCTIONS_THRESHOLD}; a non-match is not legal clearance`,
+          ok: sanctionsPass,
+        },
+        {
+          k: "Attested Reserve",
+          v: !reserveOk
+            ? "not verified"
+            : `${Math.floor(rMicro! / 1e6).toLocaleString("en-US")} whole ${rBody?.asset ?? "units"} attested${rBody?.updated_at ? ` · feed attested ${rBody.updated_at}` : ""} — declared floor ${(RESERVE_FLOOR_MICRO / 1e6).toLocaleString("en-US")} whole units; attested, not audited${stale ? ` · feed age ${rBody!.feed_age_seconds}s exceeds the ${rBody!.heartbeat_seconds}s heartbeat` : ""}`,
+          ok: reservePass,
+        },
+      ];
+      if (!sanctionsOk || !reserveOk) {
+        return {
+          verdict: "HOLD",
+          score: scoreOf((sanctionsOk ? 1 : 0) + (reserveOk ? 1 : 0), 2),
+          headline: "Evidence did not verify — the simulated settlement is not authorized. Review the rows before relying on this screen.",
+          why,
+        };
+      }
+      if (sanctionsHit) {
+        // A fuzzy name match is never a REJECT against a named payee: it is
+        // a review trigger, so the outcome is HOLD whether or not the
+        // reserve floor also failed.
+        return {
+          verdict: "HOLD",
+          score: scoreOf(1, 2),
+          headline: `NEEDS REVIEW: payee sanctions score ${sScore} meets the declared ${SANCTIONS_THRESHOLD} threshold — a fuzzy match is not identity confirmation. The simulated settlement is blocked pending review; no funds move.`,
+          why,
+        };
+      }
+      if (stale) {
+        // A feed older than its heartbeat cannot gate a settlement screen.
+        return {
+          verdict: "HOLD",
+          score: scoreOf(1, 2),
+          headline: `NEEDS REVIEW: the reserve attestation is older than its heartbeat (feed age ${rBody!.feed_age_seconds}s > ${rBody!.heartbeat_seconds}s). The figure is attested, not audited; the simulated settlement is not authorized on a stale feed.`,
+          why,
+        };
+      }
+      if (sanctionsPass && reservePass) {
+        return {
+          verdict: "APPROVE",
+          score: 100,
+          headline: `Simulated settlement authorized: payee screens below the declared ${SANCTIONS_THRESHOLD} sanctions threshold and the reserve clears the declared floor (attested, not audited). No funds move; a screen pass is not legal clearance or investment advice.`,
+          why,
+        };
+      }
+      return {
+        verdict: "REJECT",
+        // Both checks verified and only the declared reserve floor failed:
+        // the REJECT is the rule outcome, not a failed check. Fail closed.
+        score: scoreOf(2, 2),
+        headline: `Simulated settlement blocked: attested reserve ${Math.floor(rMicro! / 1e6).toLocaleString("en-US")} whole units below the declared floor ${(RESERVE_FLOOR_MICRO / 1e6).toLocaleString("en-US")}. This is the declared rule outcome — a floor screen, not a solvency opinion; no funds move.`,
         why,
       };
     },
