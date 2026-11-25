@@ -16,8 +16,8 @@ import {withAnswerClass} from '../core/answerClass';
 // value_eth contract (verified live behaviour): value_eth is the tx's value
 // whenever a tx exists — pending, confirmed and reverted all return the
 // attempted value. value_eth is null ONLY when no tx exists (not_found).
-// block_number is null for pending (even if an RPC returns a blockNumber
-// alongside a null receipt) and for not_found.
+// block_number is null for truly pending and not_found. An observed block
+// without an execution receipt is re-polled once, then refused with evidence.
 // Split votes (some legs return the tx, others null — e.g. propagation lag
 // on a just-mined tx) are NEVER answered as a confident not_found: the null
 // legs are re-polled once after 800 ms; if a non-empty pair agrees after
@@ -488,10 +488,9 @@ export function receiptStatusNumber(receipt: RpcReceipt): number {
  * tx from, tx to, receipt status, receipt blockNumber, receipt from and
  * receipt to, AND the tx-vs-receipt blockNumber within each leg is already
  * consistent (checked in fetchFromRpc). tx blockNumber is compared
- * numerically ("0x193a989" == "0x0193a989", F6) EXCEPT when both legs are
- * pending (receipt null on both sides): the answer forces block_number
- * null for pending, so a pending-only blockNumber difference is not a
- * disagreement (R5 Finding 3). l1Fee is compared only when `l1FeeApplies`
+ * numerically ("0x193a989" == "0x0193a989", F6), including when both
+ * receipts are null. A claimed inclusion block cannot agree with a null
+ * block or a different block. l1Fee is compared only when `l1FeeApplies`
  * (OP-stack chains): there missing-vs-present is a disagreement (the
  * receipt should carry it) and present-vs-present must match numerically;
  * on other chains l1Fee is ignored entirely (non-OP receipts may or may
@@ -503,14 +502,8 @@ function outcomesEqual(a: RpcOutcome, b: RpcOutcome, l1FeeApplies: boolean): boo
   if ((a.receipt === null) !== (b.receipt === null)) return false;
   if (a.tx !== null && b.tx !== null) {
     if (a.tx.hash.toLowerCase() !== b.tx.hash.toLowerCase()) return false;
-    // R5 Finding 3: tx.blockNumber is ignored when BOTH legs are pending
-    // (receipt null on both sides) — the answer forces block_number null
-    // for pending, so a pending-only blockNumber difference is not a
-    // disagreement. (Pending-vs-final already returned false above via
-    // the receipt-null mismatch, so reaching here with one receipt null
-    // is impossible.) Confirmed legs still compare blockNumber
-    // numerically; the intra-leg tx-vs-receipt rule is unchanged.
-    if (a.receipt !== null) {
+    // Inclusion claims must agree even when no receipt is served.
+    if (a.tx !== null) {
       if (a.tx.blockNumber === null || b.tx.blockNumber === null) {
         if (a.tx.blockNumber !== b.tx.blockNumber) return false;
       } else if (hexToNumber(a.tx.blockNumber) !== hexToNumber(b.tx.blockNumber)) {
@@ -915,6 +908,7 @@ export async function handleTx(
     let value2: RpcOutcome;
     let votes2: string;
     const needsRepoll =
+      successes.some(o=>o.receipt===null&&o.tx?.blockNumber!=null) ||
       isSplitVote(successes) ||
       isFinalitySplit(successes) ||
       (successes.every(isEmptyOutcome) && errored.length > 0);
@@ -986,6 +980,16 @@ export async function handleTx(
 
   const tx = value.tx;
   const receipt = value.receipt;
+  if (tx !== null && tx.blockNumber !== null && receipt === null) {
+    const observedBlock = hexToNumber(tx.blockNumber);
+    const evidence = buildTxEvidence(value.txResult, value.receiptResult);
+    const document = makeReceipt(INTENT, value.rpcUrl, evidence, votes);
+    try { await saveReceipt(document,evidence); }
+    catch { throw new ApiError(502,"RECEIPT_PERSIST_FAILED","receipt evidence could not be stored; answer unavailable"); }
+    const error = new ApiError(502,"RECEIPT_UNAVAILABLE",`Transaction was observed in block ${observedBlock}, but no agreeing execution receipt was served after one re-poll; execution status is unknown`);
+    error.responseBody = {error:"receipt_unavailable",code:error.code,message:error.message,observed_block_number:observedBlock,status:null,receipt:document};
+    throw error;
+  }
   const enrichment = extractTxEnrichment(value.txResult, value.receiptResult);
   // Detail sentences built only from evidence-backed fields, each clause
   // omitted (never invented) when its data is absent.

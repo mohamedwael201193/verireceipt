@@ -374,10 +374,9 @@ describe("handleTx stubbed quorum (fetch stubbed, no network)", () => {
   });
 
   it("pending: tx present + receipt null → pending, block_number null, value_eth from tx, confidence 0.9 (J1a + F8)", async () => {
-    // The stubbed tx carries a non-null blockNumber alongside a null
-    // receipt: the handler must still report block_number null, because a
-    // pending tx is by definition not in a block.
-    installStub(() => ({ tx: stubTx({ blockNumber: "0x193a989" }), receipt: null }));
+    // Both tx.blockNumber and the receipt are null: no inclusion has
+    // been observed, so pending is the supported result.
+    installStub(() => ({ tx: stubTx({ blockNumber: null }), receipt: null }));
     const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "ethereum" });
     expect(out.status).toBe("pending");
     expect(out.verdict).toBe("pending");
@@ -1174,7 +1173,7 @@ const VALUE_2_ETH = "0x1bc16d674ec80000";
 const VALUE_3_ETH = "0x29a2241af62c0000";
 const OTHER_TO = "0x1111111111111111111111111111111111111111";
 const OTHER_FROM = "0x2222222222222222222222222222222222222222";
-const PENDING_LEG: StubLeg = { tx: stubTx(), receipt: null };
+const PENDING_LEG: StubLeg = { tx: stubTx({blockNumber:null}), receipt: null };
 
 describe("handleTx stubbed R4: BLOCKER A — quorum votes on value/from/to/l1Fee", () => {
   afterEach(() => {
@@ -1823,29 +1822,9 @@ describe("handleTx stubbed R5: receipt.to null + receipt from/to + pending block
     );
   });
 
-  it("R5-F3: 2-leg pending on polygon, tx.blockNumber differs (0x193a989 vs null), everything else agrees → pending 0.9, not 502", async () => {
-    // block_number is forced null in the answer for pending, so a
-    // blockNumber difference between two pending legs is not a
-    // disagreement. Before the fix this 502d QUORUM_DISAGREEMENT.
-    installStub(
-      tableBehavior(
-        [
-          [
-            { tx: stubTx({ blockNumber: "0x193a989" }), receipt: null },
-            { tx: stubTx({ blockNumber: null }), receipt: null },
-          ],
-        ],
-        "polygon",
-      ),
-    );
-    const out = await handleTx({ tx_hash: CONFIRMED_TX, chain: "polygon" });
-    expect(out.status).toBe("pending");
-    expect(out.verdict).toBe("pending");
-    expect(out.confidence).toBe(0.9);
-    expect(out.block_number).toBeNull();
-    expect(out.value_eth).toBe(1);
-    const rc = out.receipt as Record<string, unknown>;
-    expect(rc.quorum_votes).toBe("2/2 sources agreed");
+  it("missing receipt with conflicting tx inclusion cannot be voted as pending",async()=>{
+    installStub(tableBehavior([[{tx:stubTx({blockNumber:"0x193a989"}),receipt:null},{tx:stubTx({blockNumber:null}),receipt:null}]],"polygon"));
+    await expectApiError(handleTx({tx_hash:CONFIRMED_TX,chain:"polygon"}),502,"QUORUM_DISAGREEMENT");
   });
 
   it("R5-F3-guard: confirmed legs still 502 when tx blockNumbers all disagree (pending normalization must not leak)", async () => {
@@ -2227,7 +2206,7 @@ describe("handleTx winning-leg enrichment (stubbed, no network)", () => {
   it("pending: value and method from the tx, no receipt-only fields, present-tense prose", async () => {
     installStub(() => ({
       tx: stubTx({
-        blockNumber: "0x193a989",
+        blockNumber: null,
         input: "0xa9059cbb0000000000000000000000000000000000000000000000000000000000000001",
       }),
       receipt: null,
@@ -2278,4 +2257,21 @@ describe("handleTx winning-leg enrichment (stubbed, no network)", () => {
     expect(out.l1_fee_eth).toBe(3.1337e-14);
     expect(String(out.answer)).toContain("The L1 data fee was 0.000000000000031337 ETH.");
   });
+});
+
+
+describe('tx observed inclusion without an execution receipt',()=>{
+ afterEach(()=>vi.unstubAllGlobals());
+ it('re-polls once, refuses pending claim, and preserves exact observed block evidence',async()=>{
+  const {requests}=installStub(()=>({tx:stubTx(),receipt:null}));
+  let error:any;try{await handleTx({tx_hash:CONFIRMED_TX,chain:'ethereum'});}catch(e){error=e;}
+  expect(error).toMatchObject({status:502,code:'RECEIPT_UNAVAILABLE',responseBody:{observed_block_number:26454409,status:null}});
+  expect(error.message).not.toContain('is pending');
+  expect(requests.filter(r=>Array.isArray(r.body))).toHaveLength(6);
+  const doc=error.responseBody.receipt;const saved=await getReceiptEvidence(doc.receipt_id);expect(sha256Hex(saved.evidence!)).toBe(doc.raw_response_sha256);expect(JSON.parse(Buffer.from(saved.evidence!).toString()).tx.blockNumber).toBe('0x193a989');
+ });
+ it('uses recovered agreeing receipts after one re-poll',async()=>{
+  installStub((_url,round)=>round===0?{tx:stubTx(),receipt:null}:CONFIRMED_LEG);
+  expect(await handleTx({tx_hash:CONFIRMED_TX,chain:'ethereum'})).toMatchObject({status:'confirmed',block_number:26454409});
+ });
 });
