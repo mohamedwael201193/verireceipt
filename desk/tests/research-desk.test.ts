@@ -26,6 +26,29 @@ describe('Research Desk pure packet core, unit fixtures only',()=>{
   const p2=buildPacket(spec,makeObs('0.000000001'),expenses,claims,at);
   expect(p2.claim_results.balance_matches_declared).toBe('NOT_SUPPORTED');
  });
+ it('template H margin claim evaluates end to end through buildPacket',async()=>{
+  const {researchTemplate}=await import('../src/researchTemplates.js');
+  const {spec,claims}=researchTemplate('H',at,'977460');
+  const makeObs=(hashprice:string):Observation[]=>{const values:Record<string,string>={hashprice,btc:'97000'};return spec.facts.map((f,i)=>{const value=values[f.id];const layer={status:'passed' as const,checks:[{name:'UNIT FIXTURE',ok:true,detail:'not live verification'}]};const raw=JSON.stringify({fixture:true,value});return {fact_id:f.id,request_hash:factHash(f),value,unit:f.unit,as_of:at,acquired_at:at,receipt_hash:String(i+1).repeat(64),signal_hash:'0x'+'a'.repeat(64),serving_registration:'UNIT_FIXTURE_ONLY',supply:'external',acquisition_cost_uusdc:'10000',integrity_level:'L1_SIGNAL_ONLY',reuse:'fresh-purchase',layers:{schema:layer,receipt:layer,semantics:layer,primary:layer},source:{url:'https://example.invalid/unit-fixture',content_sha256:createHash('sha256').update(raw).digest('hex'),raw_text:raw,observed_at:at,scope_hash:factHash(f),value,parser:'unit-fixture-only'}};});};
+  const observations=makeObs('43542.84');
+  const expenses:Expense[]=observations.map((o,i)=>({fact_id:o.fact_id,attempt:0,nonce:`unit-h-${i}`,reserved_uusdc:'10000',reported_charge_uusdc:'10000',settled_uusdc:null,status:'receipted-unsettled',receipt_hash:o.receipt_hash,useful:true}));
+  const p=buildPacket(spec,observations,expenses,claims,at);
+  expect(p.outcome).toBe('READY');
+  // 43542.84 * 97000 / 1e8 = 42.2365548 gross; 25 * 0.024 * 60 = 36 power; margin 6.2365548.
+  expect(p.calculations.margin).toEqual({numerator:'15591387',denominator:'2500000',unit:'USD/PH/day'});
+  expect(p.claim_results.margin_above_floor).toBe('SUPPORTED');
+  expect(p.claim_results.revenue_context).toBe('SUPPORTED');
+  const p2=buildPacket(spec,makeObs('30000'),expenses,claims,at);
+  expect(p2.claim_results.margin_above_floor).toBe('NOT_SUPPORTED');
+ });
+ it('hashprice calculations outside the named table stay refused',async()=>{
+  const {researchTemplate}=await import('../src/researchTemplates.js');
+  const {spec}=researchTemplate('H',at,'977460');
+  const renamed={...spec,calculations:spec.calculations.map(c=>c.id==='gross_revenue_sats_usd'?{...c,id:'revenue'}:c)};
+  expect(()=>validateSpec(renamed)).toThrow('gross_revenue_sats_usd');
+  const reordered={...spec,calculations:[...spec.calculations].reverse()};
+  expect(()=>validateSpec(reordered)).toThrow();
+ });
  it('exact calculation and supported threshold',()=>{const p=packet();expect(p.outcome).toBe('READY');expect(p.calculations.implied_fdv).toEqual({numerator:'150',denominator:'1',unit:'USD'});expect(p.claim_results.valuation_test).toBe('SUPPORTED');expect(replayPacket(p).ok).toBe(true);});
  it('changed source invalidates replay',()=>{const p=packet();p.observations[0].source!.raw_text+='x';expect(replayPacket(p).ok).toBe(false);expect(buildPacket(p.spec,p.observations,p.expenses,p.claims,at).outcome).toBe('HOLD');});
  it('unavailable observation does not invent zero',()=>{const f=fixture();f.observations[0].value=null;const p=buildPacket(f.spec,f.observations,f.expenses,f.claims,at);expect(p.outcome).toBe('HOLD');expect(p.calculations.implied_fdv).toBeUndefined();expect(p.claim_results.valuation_test).toBe('UNKNOWN');});

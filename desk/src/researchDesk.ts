@@ -14,7 +14,7 @@ export interface FactSpec {
 export interface Assumption { id: string; value: string; unit: string; rationale: string }
 export interface Calculation { id: string; op: 'multiply' | 'divide' | 'subtract'; left: string; right: string; unit: string }
 export interface ThesisSpec {
-  version: typeof VERSION; network: typeof NETWORK; template: 'onchain-valuation' | 'issuer-macro' | 'private-mark' | 'diligence-pack' | 'listing-risk' | 'settlement-screen' | 'token-preflight';
+  version: typeof VERSION; network: typeof NETWORK; template: 'onchain-valuation' | 'issuer-macro' | 'private-mark' | 'diligence-pack' | 'listing-risk' | 'settlement-screen' | 'token-preflight' | 'hashrate-margin';
   question: string; frozen_at: string; facts: FactSpec[]; assumptions: Assumption[]; calculations: Calculation[];
   budget_uusdc: string; max_call_uusdc: '10000'; max_escalations: 1;
 }
@@ -31,6 +31,7 @@ const CONTRACTS: Record<string, { field: string; unit: string; required: string[
   TOKEN_HOLDER_COUNT_GENERAL: {field:'holders_count',unit:'addresses',required:['token','chain']},
   ASSET_RESERVE_ATTESTATION_GENERAL: {field:'attested_reserve',unit:'micro-units of the underlying asset',required:['asset']},
   ONCHAIN_METRIC_VERIFY_GENERAL: {field:'balance_gwei',unit:'gwei',required:['address','block'],optional:['chain','metric']},
+  MINING_HASHPRICE_VERIFY_GENERAL: {field:'hashprice_sats_per_ph_day',unit:'sats/PH/day',required:['block_height']},
 };
 // Required observations per template. A template with no entry is rejected.
 const REQUIRED: Record<string, string[]> = {
@@ -41,6 +42,7 @@ const REQUIRED: Record<string, string[]> = {
   'listing-risk':['TOKEN_HOLDER_COUNT_GENERAL','LIQUIDITY_DEPTH_VERIFY_GENERAL','TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL'],
   'settlement-screen':['SANCTIONS_SCREENING_MATCH_GENERAL','ASSET_RESERVE_ATTESTATION_GENERAL'],
   'token-preflight':['TOKEN_HOLDER_COUNT_GENERAL','LIQUIDITY_DEPTH_VERIFY_GENERAL','TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL','ONCHAIN_METRIC_VERIFY_GENERAL'],
+  'hashrate-margin':['MINING_HASHPRICE_VERIFY_GENERAL','CRYPTO_PRICE_USD'],
 };
 function invariant(ok: unknown, message: string): asserts ok { if (!ok) throw new Error(message); }
 const uint = (s: unknown): s is string => typeof s === 'string' && /^(0|[1-9]\d*)$/.test(s);
@@ -76,6 +78,9 @@ export function validateSpec(spec: ThesisSpec): void {
       invariant(f.params.year===undefined || /^(19[6-9]\d|20\d\d|2100)$/.test(f.params.year),'invalid macro year');
     }
     if(f.intent==='TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL') invariant(/(?:ethereum|polygon|arbitrum|base|optimism|chain[:=])/i.test(f.params.token),'total supply needs explicit chain');
+    if(f.intent==='MINING_HASHPRICE_VERIFY_GENERAL'){
+      invariant(uint(f.params.block_height) && BigInt(f.params.block_height)>0n && BigInt(f.params.block_height)<=100000000n,'hashprice needs an explicit pinned Bitcoin block height within the live schema range');
+    }
     if(f.intent==='ONCHAIN_METRIC_VERIFY_GENERAL'){
       invariant(/^0x[0-9a-fA-F]{40}$/.test(f.params.address),'onchain metric needs an explicit 0x address');
       invariant(uint(f.params.block) && BigInt(f.params.block)>0n,'onchain metric needs an explicit pinned block');
@@ -93,6 +98,14 @@ export function validateSpec(spec: ThesisSpec): void {
     let unit: string|undefined;
     if(c.op==='multiply' && ((l==='USD/token'&&r==='token')||(r==='USD/token'&&l==='token'))) {
       invariant(c.id==='implied_fdv','price times total supply must be named implied_fdv');unit='USD';
+    } else if(c.op==='multiply'&&l==='sats/PH/day'&&r==='USD/token') {
+      invariant(c.id==='gross_revenue_sats_usd','hashprice times BTC spot must be named gross_revenue_sats_usd');unit='sats USD/PH/day/token';
+    } else if(c.op==='divide'&&l==='sats USD/PH/day/token'&&r==='sats/BTC') {
+      invariant(c.id==='gross_revenue','hashprice revenue conversion must be named gross_revenue');unit='USD/PH/day';
+    } else if(c.op==='multiply'&&l==='J/TH'&&r==='MWh/PH/day per J/TH') {
+      invariant(c.id==='energy_mwh','fleet efficiency times energy conversion must be named energy_mwh');unit='MWh/PH/day';
+    } else if(c.op==='multiply'&&l==='MWh/PH/day'&&r==='USD/MWh') {
+      invariant(c.id==='power_cost','energy times power price must be named power_cost');unit='USD/PH/day';
     } else if(c.op==='divide'&&l==='USD'&&r==='USD') unit='ratio';
     else if(c.op==='subtract'&&l===r && l!=='percent' && l!=='bps') unit=l;
     invariant(unit && unit===c.unit,'unsupported or dimensionally unsafe calculation');add(c.id,c.unit);

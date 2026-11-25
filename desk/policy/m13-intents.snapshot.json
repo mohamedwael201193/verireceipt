@@ -1060,6 +1060,86 @@
       "our_registered_supply": true,
       "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/SANCTIONS_SCREENING_MATCH_GENERAL",
       "source_sha256": "8a2e65b92fc25647b152189839a424380f97f290392fe6ead87105207f540faf"
+    },
+    {
+      "intent_name": "MINING_HASHPRICE_VERIFY_GENERAL",
+      "lifecycle_state": "active",
+      "detail_state": "active",
+      "request": {
+        "params": [
+          {
+            "name": "block_height",
+            "type": "integer",
+            "required": true,
+            "description": "Bitcoin block height",
+            "min": 0,
+            "max": 100000000
+          }
+        ],
+        "schema_version": 3,
+        "served_by": "MINING_HASHPRICE_VERIFY"
+      },
+      "response": {
+        "fields": [
+          {
+            "name": "hashprice_sats_per_ph_day",
+            "description": "Bitcoin hashprice at block height {key}, in satoshis per PH/s per day",
+            "type": "number",
+            "unit": "sats per PH/s per day",
+            "unit_aliases": {
+              "BTC per PH/s per day": 100000000
+            },
+            "range": [
+              1,
+              1000000000
+            ],
+            "user_description": "Bitcoin hashprice that answers this request, in satoshis per PH/s per day: {query}",
+            "scored": true,
+            "decimals": 6
+          },
+          {
+            "name": "block_height",
+            "description": "The block height the hashprice is computed at",
+            "type": "integer",
+            "range": [
+              0,
+              100000000
+            ],
+            "off_chain": true
+          },
+          {
+            "name": "hashrate_eh_s",
+            "description": "Implied network hashrate, EH/s",
+            "type": "number",
+            "unit": "EH/s",
+            "range": [
+              0,
+              10000000
+            ],
+            "decimals": 6,
+            "off_chain": true
+          },
+          {
+            "name": "hashprice_usd_per_ph_day",
+            "description": "Hashprice in US dollars per PH/s per day, when given",
+            "type": "number",
+            "unit": "USD per PH/s per day",
+            "range": [
+              0,
+              10000000
+            ],
+            "decimals": 6,
+            "off_chain": true
+          }
+        ],
+        "format_version": 3,
+        "served_by": "MINING_HASHPRICE_VERIFY"
+      },
+      "onchain_ready": true,
+      "onchain_reason": null,
+      "our_registered_supply": false,
+      "source_url": "https://devnode.telegraphprotocol.com/engine/v1/intents/MINING_HASHPRICE_VERIFY_GENERAL",
+      "source_sha256": "35b0c66d4837e8e1791f177530e35562f7ff05d7dc7c2e3a134159dd505a0695"
     }
   ],
   "limits": [

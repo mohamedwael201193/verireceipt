@@ -5,6 +5,8 @@
 // origin directly, so it does not depend on CORS.
 
 import type {
+  CryptoPriceResponse,
+  MiningHashpriceResponse,
   FilingsResponse,
   GridPriceResponse,
   HealthResponse,
@@ -703,6 +705,27 @@ export async function getGridPrice(
     }),
     { expectReceipt: true, signal },
   );
+}
+
+export async function getMiningHashprice(signal?: AbortSignal): Promise<MiningHashpriceResponse> {
+  // No request params: the live route serves the current tip's weekly
+  // measured basis. A trailing "?" on an empty query is harmless.
+  return fetchJson<MiningHashpriceResponse>(buildUrl("/v1/mining-hashprice", {}), {
+    expectReceipt: true,
+    signal,
+  });
+}
+
+export async function getCryptoPrice(
+  params: { symbol: string },
+  signal?: AbortSignal,
+): Promise<CryptoPriceResponse> {
+  assertValidParamsObject(params, "getCryptoPrice");
+  assertValidParam(params.symbol, "symbol");
+  return fetchJson<CryptoPriceResponse>(buildUrl("/v1/crypto-price", { symbol: params.symbol }), {
+    expectReceipt: true,
+    signal,
+  });
 }
 
 export async function getValidator(
