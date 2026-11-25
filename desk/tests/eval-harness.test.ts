@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { costPerCorrect, evalSetDefect, loadEvalSet, runEvalHarness, RATINGS, type EvalCase, type EvalSet } from "../src/evalHarness";
+import { costPerCorrect, evalSetDefect, loadEvalSet, resolveRegistry, runEvalHarness, RATINGS, type EvalCase, type EvalSet } from "../src/evalHarness";
 import type { SpendLedger } from "../src/gate";
 import { paramsEqual, type verifyPurchase } from "../src/verify";
 
@@ -255,6 +255,72 @@ describe("runEvalHarness", () => {
     await runEvalHarness(makePayer(), SET, ["111"], { spend: w.spend, outDir: w.outDir, f: n.f, verify: verifyStub(correctPlan, n.sent), now: () => NOW });
     expect(existsSync(join(w.outDir, "eval-report.json"))).toBe(true);
     expect(readFileSync(join(w.outDir, "eval-verdicts.jsonl"), "utf8").trim().split("\n")).toHaveLength(3);
+  });
+});
+
+describe("provider registry records", () => {
+  it("passes the serving provider's slug and evidence base URL to the verifier", async () => {
+    const w = workspace();
+    const n = node(correctPlan);
+    const seen: Array<{ minerSlug: string; minerBaseUrl?: string }> = [];
+    const spy = vi.fn(async (input: { minerSlug: string; minerBaseUrl?: string }) => {
+      seen.push({ minerSlug: input.minerSlug, minerBaseUrl: input.minerBaseUrl });
+      return {
+        verified: true, checks: [{ name: "stub", ok: true, detail: "spy" }], minerReceipt: null, rawSha256: null, rawBytes: null,
+        payloadValue: "Excellent", intentId: "LLM_OUTPUT_EVALUATION_GENERAL", request: null,
+        requestParams: { task: SET.cases[0].task, output: SET.cases[0].output },
+        signalTimestamp: "2026-11-25T08:00:00Z", fields: { rating: { value: "Excellent" } }, payloadResponse: null,
+      };
+    }) as unknown as typeof verifyPurchase;
+    await runEvalHarness(makePayer(), { ...SET, cases: [SET.cases[0]] }, ["111"], { spend: w.spend, outDir: w.outDir, f: n.f, verify: spy, now: () => NOW, registry: { "111": { slug: "provider-one-slug", baseUrl: "https://miner-a.example" } } });
+    expect(seen).toEqual([{ minerSlug: "provider-one-slug", minerBaseUrl: "https://miner-a.example" }]);
+  });
+  it.each([
+    ["an invalid base URL", { "111": { slug: "s", baseUrl: "http://miner-a.example" } }, /scheme must be https/],
+    ["a missing provider entry", {}, /no registry entry for provider 111/],
+    ["a missing slug", { "111": { slug: "", baseUrl: "https://miner-a.example" } }, /registry slug must match/],
+    ["an uppercase slug", { "111": { slug: "Bad-Slug", baseUrl: "https://miner-a.example" } }, /registry slug must match/],
+    ["a slug with an underscore", { "111": { slug: "bad_slug", baseUrl: "https://miner-a.example" } }, /registry slug must match/],
+    ["a slug with a leading dash", { "111": { slug: "-bad", baseUrl: "https://miner-a.example" } }, /registry slug must match/],
+  ])("rejects %s before any spend", async (_label, registry, re) => {
+    const w = workspace();
+    const payer = makePayer();
+    const n = node(correctPlan);
+    await expect(runEvalHarness(payer, SET, ["111"], { spend: w.spend, outDir: w.outDir, f: n.f, verify: verifyStub(correctPlan, n.sent), now: () => NOW, registry })).rejects.toThrow(re);
+    expect(payer.signMessage).not.toHaveBeenCalled();
+    expect(n.f).not.toHaveBeenCalled();
+  });
+
+  it("requires the registry when the production verifier is used (no silent slug fallback)", async () => {
+    const w = workspace();
+    const payer = makePayer();
+    const n = node(correctPlan);
+    await expect(runEvalHarness(payer, SET, ["111"], { spend: w.spend, outDir: w.outDir, f: n.f, now: () => NOW })).rejects.toThrow(/provider registry is required/);
+    expect(payer.signMessage).not.toHaveBeenCalled();
+    expect(n.f).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveRegistry", () => {
+  const miners = [
+    { id: "7441", slug: "provider-one", base_url: "https://miner-a.example" },
+    { id: 9002, slug: "provider-two", base_url: "https://miner-b.example" },
+  ];
+  it("resolves slug and base_url, comparing catalogue ids as strings", () => {
+    expect(resolveRegistry({ miners }, ["7441", "9002"])).toEqual({
+      "7441": { slug: "provider-one", baseUrl: "https://miner-a.example" },
+      "9002": { slug: "provider-two", baseUrl: "https://miner-b.example" },
+    });
+  });
+  it.each([
+    ["miners not an array", { miners: {} }, ["7441"], /no miners list/],
+    ["provider missing", { miners }, ["999"], /999 is not in the intent registry/],
+    ["no slug", { miners: [{ id: "7441", base_url: "https://miner-a.example" }] }, ["7441"], /registry slug must match/],
+    ["bad slug", { miners: [{ id: "7441", slug: "Bad_Slug", base_url: "https://miner-a.example" }] }, ["7441"], /registry slug must match/],
+    ["no base_url", { miners: [{ id: "7441", slug: "provider-one" }] }, ["7441"], /no base_url/],
+    ["invalid base_url", { miners: [{ id: "7441", slug: "provider-one", base_url: "http://miner-a.example" }] }, ["7441"], /scheme must be https/],
+  ])("rejects %s", (_label, json, providers, re) => {
+    expect(() => resolveRegistry(json, providers)).toThrow(re);
   });
 });
 

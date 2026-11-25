@@ -61,6 +61,50 @@ export function canonicalPayloadJson(payload: unknown): string {
     .replace(/>/g, "\\u003e");
 }
 
+export const EVIDENCE_RAW_MAX_BYTES = 1_048_576;
+export const EVIDENCE_FETCH_TIMEOUT_MS = 20_000;
+
+/** Evidence-fetch base guard. A string check over the parsed URL: https only,
+ * port 443 only, no credentials, no query or fragment; after stripping one
+ * trailing dot the host must be a DNS name of at least two labels and not a
+ * local name (localhost, .localhost, .local, .internal, .localdomain), and no
+ * IP literal (WHATWG parsing normalizes hex/decimal IPv4 forms to dotted
+ * decimal and keeps IPv6 bracketed, so both are caught). This guard does NOT
+ * resolve DNS: a public-looking name that resolves to a private address is
+ * not caught. Returns the defect or null. */
+export function evidenceBaseUrlDefect(base: unknown): string | null {
+  if (typeof base !== "string" || !base) return "evidence base URL must be a non-empty string";
+  let u: URL;
+  try {
+    u = new URL(base);
+  } catch {
+    return `evidence base URL ${JSON.stringify(base)} is not a URL`;
+  }
+  if (u.protocol !== "https:") return `evidence base URL scheme must be https, got ${u.protocol}`;
+  if (u.username || u.password) return "evidence base URL must not carry credentials";
+  if (u.port && u.port !== "443") return `evidence base URL port must be 443, got ${u.port}`;
+  if (u.search || u.hash) return "evidence base URL must not carry a query or fragment";
+  let h = u.hostname.toLowerCase();
+  if (h.endsWith(".")) h = h.slice(0, -1);
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal") || h.endsWith(".localdomain")) {
+    return `evidence base URL host ${h} is a local name`;
+  }
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(h) || h.includes(":")) return "evidence base URL host must be a DNS name, not an IP literal";
+  if (!h.includes(".")) return `evidence base URL host ${h} must have at least two labels`;
+  return null;
+}
+
+/** origin + normalized path (no trailing slash), so joining adds exactly one slash. */
+export function evidenceBaseJoin(base: string): string {
+  const u = new URL(base);
+  return `${u.origin}${u.pathname.replace(/\/+$/, "")}`;
+}
+
+/** Fetch init for evidence bytes: never follow redirects, bounded wait. */
+function evidenceInit(): RequestInit {
+  return { redirect: "error", signal: AbortSignal.timeout(EVIDENCE_FETCH_TIMEOUT_MS) };
+}
+
 export function signalHashOf(payload: unknown): string {
   return keccak256(toBytes(canonicalPayloadJson(payload)));
 }
@@ -85,6 +129,8 @@ export interface Check {
 export interface VerifyInput {
   payer: string;
   minerSlug: string;
+  /** Where the serving miner's evidence bytes live (registry base_url). Defaults to MINER_BASE_URL (our own miner). */
+  minerBaseUrl?: string;
   signalHash: string;
   /** The intent field the Desk decides on (e.g. lmp_usd_per_mwh, tvl_usd). */
   valueField: string;
@@ -470,14 +516,41 @@ export async function verifyPurchase(input: VerifyInput, f: Fetch = fetch): Prom
   minerReceipt = { receipt_id: r.receipt_id, raw_response_sha256: r.raw_response_sha256, upstream_url: r.upstream_url, intent: r.intent };
   add("miner receipt present", true, r.receipt_id);
 
-  const meta = await f(`${MINER_BASE_URL}/receipts/${r.receipt_id}`);
+  const evidenceBase = input.minerBaseUrl ?? MINER_BASE_URL;
+  const baseDefect = evidenceBaseUrlDefect(evidenceBase);
+  // Recorded only on failure: the happy-path check list stays stable so
+  // previously committed ledger rows still agree with a live re-derivation.
+  if (baseDefect) {
+    add("evidence base URL", false, baseDefect);
+    return empty();
+  }
+  const evidenceBaseJoined = evidenceBaseJoin(evidenceBase);
+  let meta: Response;
+  try {
+    meta = await f(`${evidenceBaseJoined}/receipts/${r.receipt_id}`, evidenceInit());
+  } catch (e) {
+    add("stored receipt metadata agrees", false, `fetch failed: ${(e as Error).message}`);
+    return empty();
+  }
   const metaJson = meta.ok ? ((await meta.json()) as { raw_response_sha256?: string }) : null;
   add("stored receipt metadata agrees", metaJson?.raw_response_sha256 === r.raw_response_sha256,
     meta.ok ? String(metaJson?.raw_response_sha256) : `HTTP ${meta.status}`);
 
-  const raw = await f(`${MINER_BASE_URL}/receipts/${r.receipt_id}/raw`);
+  let raw: Response;
+  try {
+    raw = await f(`${evidenceBaseJoined}/receipts/${r.receipt_id}/raw`, evidenceInit());
+  } catch (e) {
+    add("sha256(stored raw bytes) = raw_response_sha256", false, `fetch failed: ${(e as Error).message}`);
+    return empty();
+  }
   if (raw.ok) {
     const bytes = new Uint8Array(await raw.arrayBuffer());
+    // Failure-only check, like the base-URL guard: a happy-path addition
+    // would break agreement with previously committed ledger rows.
+    if (bytes.byteLength > EVIDENCE_RAW_MAX_BYTES) {
+      add("stored raw bytes within size cap", false, `${bytes.byteLength} exceeds ${EVIDENCE_RAW_MAX_BYTES}`);
+      return empty();
+    }
     rawBytes = bytes.byteLength;
     rawSha256 = sha256Hex(bytes);
   }

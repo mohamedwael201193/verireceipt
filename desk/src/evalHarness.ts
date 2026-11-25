@@ -11,11 +11,13 @@ import { ONE_CALL_UUSDC } from "./constants.js";
 import { escrowAskMiner, type Fetch, type Payer } from "./client.js";
 import { EscrowRefusal } from "./escrow.js";
 import { committedExposureUusdc, reserveSpend, type SpendLedger } from "./gate.js";
-import { paramsEqual, verifyPurchase } from "./verify.js";
+import { evidenceBaseUrlDefect, paramsEqual, verifyPurchase } from "./verify.js";
 import type { FieldStatus } from "../../src/core/shapedFields.js";
 import type { MemoReceipt } from "./personalAgent.js";
 
 export const EVAL_INTENT = "LLM_OUTPUT_EVALUATION_GENERAL";
+/** Registry slug shape (e.g. "assistwire-llm-output-evaluation"). */
+export const SLUG = /^[a-z0-9][a-z0-9-]*$/;
 /** The harness's default daily budget, its conservative share of the shared
  * desk-wide cap: at most 10 flat calls per UTC day (one provider of the
  * shipped 6-case set is 60,000). Other desk spend that day reduces it. */
@@ -113,6 +115,10 @@ export interface EvalOptions {
   dailyCapUusdc?: bigint;
   /** Every id the node may use for a provider in receipts; defaults to the called id. */
   minerIds?: Record<string, readonly string[]>;
+  /** Serving provider's registry record: its slug (the on-chain signal names
+   * the slug, not the catalogue id) and its evidence base URL. Omitted entries
+   * fall back to the called id as the slug and our own miner's evidence base. */
+  registry?: Record<string, { slug: string; baseUrl: string }>;
   now?: () => Date;
   f?: Fetch;
   /** Injected verifier for unit tests; production uses the real end-to-end verifier. */
@@ -156,6 +162,22 @@ export async function runEvalHarness(payer: Payer, set: EvalSet, providers: stri
   if (defect) throw new Error(`eval set: ${defect}`);
   if (!providers.length) throw new Error("at least one provider id is required");
   if (new Set(providers).size !== providers.length) throw new Error(`duplicate provider ids: ${providers.join(", ")}`);
+  // The registry is mandatory with the production verifier: the on-chain
+  // signal names the provider's slug, never its catalogue id, so without the
+  // registry record there is no honest slug to bind. Only an injected test
+  // verifier may run without it.
+  if (!opts.registry && !opts.verify) throw new Error("a provider registry is required when the production verifier is used");
+  // Validate every registry record before any spend: a bad base URL or a
+  // bad slug must never cost a purchase.
+  if (opts.registry) {
+    for (const p of providers) {
+      const rec = opts.registry[p];
+      if (!rec) throw new Error(`no registry entry for provider ${p}`);
+      if (typeof rec.slug !== "string" || !SLUG.test(rec.slug)) throw new Error(`provider ${p}: registry slug must match ${SLUG}`);
+      const defect = evidenceBaseUrlDefect(rec.baseUrl);
+      if (defect) throw new Error(`provider ${p}: ${defect}`);
+    }
+  }
   const now = (opts.now ?? (() => new Date()))();
   const log = opts.log ?? (() => {});
   const cap = opts.dailyCapUusdc ?? EVAL_DAILY_CAP_UUSDC;
@@ -205,7 +227,7 @@ export async function runEvalHarness(payer: Payer, set: EvalSet, providers: stri
       }
       const verify = opts.verify ?? verifyPurchase;
       const v = await verify(
-        { payer: paid.authorization.from, minerSlug: provider, signalHash, valueField: "rating", engineResult: body.result ?? {}, intent: EVAL_INTENT, fieldStatus: body.field_status },
+        { payer: paid.authorization.from, minerSlug: opts.registry?.[provider]?.slug ?? provider, signalHash, valueField: "rating", engineResult: body.result ?? {}, intent: EVAL_INTENT, fieldStatus: body.field_status, minerBaseUrl: opts.registry?.[provider]?.baseUrl },
         opts.f,
       );
       if (!v.verified) {
@@ -276,6 +298,26 @@ export async function runEvalHarness(payer: Payer, set: EvalSet, providers: stri
   writeFileSync(join(opts.outDir, "eval-report.json"), JSON.stringify(report, null, 2) + "\n", { mode: 0o600 });
   appendFileSync(join(opts.outDir, "eval-verdicts.jsonl"), verdicts.map((r) => JSON.stringify(r)).join("\n") + "\n", { mode: 0o600 });
   return report;
+}
+
+/** Resolve providers to their registry {slug, baseUrl} records from a live
+ * intent record (GET /engine/v1/intents/{id}). Pure: the CLI fetches, tests
+ * pass fixtures. Catalogue ids compare as strings (the registry may carry
+ * numeric ids). Throws on any defect so a bad registry never costs a purchase. */
+export function resolveRegistry(intentJson: unknown, providers: string[]): Record<string, { slug: string; baseUrl: string }> {
+  const miners = (intentJson as { miners?: unknown } | null)?.miners;
+  if (!Array.isArray(miners)) throw new Error("intent registry carries no miners list");
+  const out: Record<string, { slug: string; baseUrl: string }> = {};
+  for (const p of providers) {
+    const m = miners.find((x) => String((x as { id?: unknown })?.id) === p) as { slug?: unknown; base_url?: unknown } | undefined;
+    if (!m) throw new Error(`provider ${p} is not in the intent registry`);
+    if (typeof m.slug !== "string" || !SLUG.test(m.slug)) throw new Error(`provider ${p}: registry slug must match ${SLUG}`);
+    if (typeof m.base_url !== "string" || !m.base_url) throw new Error(`provider ${p} has no base_url in the registry`);
+    const defect = evidenceBaseUrlDefect(m.base_url);
+    if (defect) throw new Error(`provider ${p}: ${defect}`);
+    out[p] = { slug: m.slug, baseUrl: m.base_url };
+  }
+  return out;
 }
 
 /** Load and validate a cases file (the CLI's entry point shares this). */

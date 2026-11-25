@@ -12,8 +12,8 @@ import {privateKeyToAccount} from 'viem/accounts';
 import {privateDirectory,privateFile} from '../src/privateEvidence.js';
 import {normalizePrivateKey,readSecret} from '../src/secrets.js';
 import {committedExposureUusdc,spendLedgerFromFiles} from '../src/gate.js';
-import {DESK_DAILY_CAP_UUSDC,ONE_CALL_UUSDC} from '../src/constants.js';
-import {EVAL_DAILY_CAP_UUSDC,loadEvalSet,runEvalHarness} from '../src/evalHarness.js';
+import {DESK_DAILY_CAP_UUSDC,ENGINE_URL,ONE_CALL_UUSDC} from '../src/constants.js';
+import {EVAL_DAILY_CAP_UUSDC,EVAL_INTENT,loadEvalSet,resolveRegistry,runEvalHarness} from '../src/evalHarness.js';
 const [casesFile,out,...providers]=process.argv.slice(2);
 if(!casesFile||!out||!providers.length)throw new Error('Usage: run-eval-harness.ts CASES_JSON OUT_DIR PROVIDER_ID [PROVIDER_ID...]');
 for(const p of providers)if(!/^\d+$/.test(p))throw new Error(`provider id ${p} must be numeric`);
@@ -38,6 +38,13 @@ const secrets=process.env.DESK_SECRETS_FILE;if(!secrets)throw new Error('DESK_SE
 const expected=process.env.DESK_PAYER_ADDRESS?.toLowerCase();if(!expected||!/^0x[0-9a-f]{40}$/.test(expected))throw new Error('explicit DESK_PAYER_ADDRESS required');
 const account=privateKeyToAccount(normalizePrivateKey(readSecret(secrets,'private_key')));if(account.address.toLowerCase()!==expected)throw new Error('payer binding mismatch');
 const payer={address:account.address,signMessage:(message:string)=>account.signMessage({message})};
-const report=await runEvalHarness(payer,set,providers,{spend,outDir:dir,dailyCapUusdc:cap,log:(l)=>console.log(l)});
+// Resolve each provider's slug and evidence base URL from the live intent
+// registry (read-only): the on-chain signal names the slug, not the
+// catalogue id, and the evidence bytes live on the serving miner's host.
+const intentRes=await fetch(`${ENGINE_URL}/v1/intents/${EVAL_INTENT}`,{redirect:'error',signal:AbortSignal.timeout(20000)});
+if(!intentRes.ok)throw new Error(`intent registry HTTP ${intentRes.status}`);
+const registry=resolveRegistry(await intentRes.json(),providers);
+
+const report=await runEvalHarness(payer,set,providers,{spend,outDir:dir,dailyCapUusdc:cap,registry,log:(l)=>console.log(l)});
 for(const p of report.providers)console.log(`${p.provider}: ${p.correct}/${p.cases_run} correct, ${p.unusable} unusable, ${p.skipped_budget} not run (budget), spend ${p.spend_uusdc} μUSDC (reserved ${p.reserved_uusdc}), cost per verified correct verdict ${p.cost_per_correct_uusdc??'n/a (no correct verdicts)'}`);
 console.log(`total spend ${report.totals.spend_uusdc} μUSDC, reserved ${report.totals.reserved_uusdc} μUSDC (testnet)`);

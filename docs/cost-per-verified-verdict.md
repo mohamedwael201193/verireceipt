@@ -63,7 +63,19 @@ available. The paid answer is verified end to end
 field reconciliation) and bound to the question: the signal's recorded
 request params must equal the `{task, output}` sent (compared key-order
 independently; extra or missing keys fail), else the case is
-`failed-verification`. Only a verified, in-enum rating is classified. A
+`failed-verification`. The CLI resolves each provider's slug (the on-chain
+signal names the slug, not the catalogue id) and evidence base URL from the
+live intent registry; the stored-bytes checks fetch from that base URL,
+with the hash checks unchanged. The base URL guard is a string check over
+the parsed URL: https only, port 443 only, no credentials, no query or
+fragment, at least two DNS labels, no IP literals, and no local names
+(localhost, .localhost, .local, .internal, .localdomain). It does not
+resolve DNS: a public-looking name that resolves to a private address is
+not caught. Evidence fetches never follow redirects, wait at most 20
+seconds, and cap raw evidence at 1 MiB. Without a registry record the fetch
+defaults to our own miner's evidence base; with the production verifier the
+registry is mandatory, since the on-chain signal names the provider's slug,
+never its catalogue id. Only a verified, in-enum rating is classified. A
 missing or non-enum rating is `unusable`, the unknown bucket, and is never
 counted as incorrect. Failed payments and failed verifications are recorded
 with their receipts; a charge that stands is reported as spend.
