@@ -89,7 +89,7 @@ export async function handleStockPrice(query: Record<string, string | undefined>
   // Yahoo spells class shares with a dash (BRK-B); accept both, serve Yahoo's spelling.
   const ticker = rawTicker.toUpperCase().replace(".", "-");
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
-  const observation = await cachedEquityQuote(ticker, () => fetchText(url), body => { parseYahooChart(body, ticker); }).catch((err: unknown) => {
+  const observation = await cachedEquityQuote(ticker, () => fetchText(url), body => { parseYahooChart(body, ticker); },{freshMs:55_000,maxAgeMs:60_000}).catch((err: unknown) => {
     if (err instanceof Error && "code" in err) throw err;
     throw upstreamUnavailable("YAHOO_UNREACHABLE", `Yahoo chart fetch failed: ${err instanceof Error ? err.message : "unknown error"}`);
   });
@@ -97,7 +97,9 @@ export async function handleStockPrice(query: Record<string, string | undefined>
   const quote = parseYahooChart(raw, ticker);
   const asOf = fetchedAt;
   const stale = Boolean(staleReason), ageSeconds = Math.floor((Date.now()-Date.parse(fetchedAt))/1000);
-  const evidence = JSON.stringify({ ticker, as_of: asOf, quote, stale, stale_reason: staleReason, quote_age_seconds: ageSeconds,
+  if(!Number.isFinite(ageSeconds)||ageSeconds<0||ageSeconds>=60)throw upstreamUnavailable('QUOTE_OBSERVATION_TOO_OLD','Yahoo acquisition age must be under60seconds');
+  const marketAgeSeconds=Math.max(0,Math.floor((Date.now()-Date.parse(quote.marketTime))/1000));
+  const evidence = JSON.stringify({ ticker, as_of: asOf, quote, stale, stale_reason: staleReason, quote_age_seconds: ageSeconds, acquisition_age_seconds:ageSeconds, source_market_age_seconds:marketAgeSeconds,
     source_policy: "Yahoo Finance chart API, keyless unauthenticated; single source, honestly named; quote is Yahoo's latest regular-market price, may be delayed, never presented as real-time",
     raw_body: raw, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, url, evidence, "Yahoo chart API single source; the quote is Yahoo's own, with Yahoo's exchange timestamp");
@@ -108,9 +110,9 @@ export async function handleStockPrice(query: Record<string, string | undefined>
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
   return envelope(INTENT, { ticker: quote.symbol, price_usd: quote.price, currency: "USD",
-    exchange: quote.exchange, market_time: quote.marketTime, as_of: asOf, fetched_at: fetchedAt, stale, quote_age_seconds: ageSeconds, ...(stale ? {stale_reason:staleReason} : {}) }, receipt, {
+    exchange: quote.exchange, market_time: quote.marketTime, as_of: asOf, fetched_at: fetchedAt, stale, quote_age_seconds: ageSeconds, acquisition_age_seconds:ageSeconds, source_market_age_seconds:marketAgeSeconds, ...(stale ? {stale_reason:staleReason} : {}) }, receipt, {
     answer: `${stale ? "STALE CACHED QUOTE, not current market data. " : ""}${quote.symbol}: $${quote.price} USD on ${quote.exchange}, Yahoo Finance quote timestamped ${quote.marketTime}. ` +
-      `This is Yahoo's latest regular-market price and may be delayed (Yahoo serves delayed data for many listings); it is NOT a guaranteed real-time quote. Single source: Yahoo Finance chart API. Original quote acquired ${fetchedAt}, age ${ageSeconds}s. ${stale ? staleReason + "; exact original observation retained, no price or timestamp updated." : "Quote may be cached up to5minutes."}`,
+      `This is Yahoo's latest regular-market price and may be delayed (Yahoo serves delayed data for many listings); it is NOT a guaranteed real-time quote. Single source: Yahoo Finance chart API. Original quote acquired ${fetchedAt}, age ${ageSeconds}s. ${stale ? staleReason + "; exact original observation retained, no price or timestamp updated." : "Acquisition/cache age under60seconds; source timestamp may be older, including the last market close."}`,
     verdict: stale ? "stale" : "verified",
     confidence: stale ? 0.5 : 0.9,
     source: `${url}; Yahoo Finance chart API single source, quote may be delayed, never presented as real-time; exchange timestamp ${quote.marketTime}; fetched ${fetchedAt}`,
