@@ -1,13 +1,14 @@
 // The personal-agent heartbeat (mission #197): fresh answers are reused
 // inside their declared window, stale ones re-bought, spend reserved before
 // signing against the shared daily cap, failed payments and conflicting
-// provider answers HOLD instead of serving an invented answer.
+// provider answers HOLD instead of serving an invented answer, and
+// misconfigured watches are refused before any payment.
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { compareDecimals, diffBps, runHeartbeat, type Memo, type Watch } from "../src/personalAgent";
+import { compareDecimals, definitionHash, diffBps, exceedsTolerance, runHeartbeat, watchDefect, type Memo, type Watch } from "../src/personalAgent";
 import type { SpendLedger } from "../src/gate";
 import type { verifyPurchase } from "../src/verify";
 
@@ -95,12 +96,13 @@ const priorMemo = (over: Partial<Memo> = {}): Memo => ({
   rule: { op: "lte", value: "100" }, rule_outcome: "inside", reason: null,
   receipts: [{ miner_id: "774921", nonce: "n0", receipt_hash: "0x" + "ab".repeat(32), charge_uusdc: "10000" }],
   day_cost_uusdc: "10000",
+  definition_hash: definitionHash(watch()),
   ...over,
 });
 const memos = (w: ReturnType<typeof workspace>): Memo[] =>
   readFileSync(w.memosFile, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Memo);
 
-describe("compareDecimals / diffBps", () => {
+describe("compareDecimals / diffBps / exceedsTolerance", () => {
   it("compares exact decimals with mixed precision and signs", () => {
     expect(compareDecimals("61.50", "61.5")).toBe(0);
     expect(compareDecimals("61.4", "61.5")).toBe(-1);
@@ -113,6 +115,36 @@ describe("compareDecimals / diffBps", () => {
     expect(diffBps("61.5", "61.5")).toBe(0);
     expect(diffBps("100", "100.5")).toBe(49); // 0.5/100.5 = 49.75 bps, floor
     expect(diffBps("0", "0")).toBe(0);
+  });
+  it("exceedsTolerance is exact BigInt at the boundary and just over it", () => {
+    // diff 25, mag 125: 25*10000 = 250000; tol 2000 -> 2000*125 = 250000 exactly, NOT over.
+    expect(exceedsTolerance("125", "100", 2000)).toBe(false);
+    // tol 1999 -> 249875 < 250000, over.
+    expect(exceedsTolerance("125", "100", 1999)).toBe(true);
+    expect(exceedsTolerance("61.5", "61.5", 0)).toBe(false);
+    expect(exceedsTolerance("0", "0", 0)).toBe(false);
+    expect(exceedsTolerance("1e3", "1000", 100)).toBeNull();
+  });
+});
+
+describe("watchDefect upfront validation", () => {
+  it("the shipped example parses and every watch carries only the labelled placeholder defect", () => {
+    const example = JSON.parse(readFileSync(join(__dirname, "..", "examples", "heartbeat-watches.example.json"), "utf8")) as Watch[];
+    expect(example).toHaveLength(2);
+    expect(watchDefect(example[0])).toMatch(/placeholder/);
+    expect(watchDefect(example[1])).toBeNull();
+  });
+  it.each([
+    [{ rule: { op: "gt", value: "100" } }, /rule.op/],
+    [{ rule: { op: "gte", value: "1e3" } }, /rule.value/],
+    [{ rule: { op: "gte", value: "abc" } }, /rule.value/],
+    [{ params: { node_or_zone: 5 } }, /params/],
+  ])("rejects unusable watch config %j before any money moves", (over, re) => {
+    expect(watchDefect(watch(over as Partial<Watch>))).toMatch(re);
+  });
+  it("accepts the reference watch", () => {
+    expect(watchDefect(watch())).toBeNull();
+    expect(watchDefect(watch({ cross_check: { miner_id: "774999", tolerance_bps: 0 } }))).toBeNull();
   });
 });
 
@@ -130,6 +162,7 @@ describe("runHeartbeat", () => {
     expect(m.receipts[0].charge_uusdc).toBe("10000");
     expect(m.day_cost_uusdc).toBe("10000");
     expect(m.source).toContain("verified end to end");
+    expect(m.definition_hash).toBe(definitionHash(watch()));
     expect(payer.signMessage).toHaveBeenCalledOnce();
     const r = JSON.parse(readFileSync(w.spend.reservationsFile, "utf8").trim());
     expect(r.kind).toBe("heartbeat");
@@ -157,6 +190,56 @@ describe("runHeartbeat", () => {
     expect(out[0].day_cost_uusdc).toBe("20000");
     expect(payer.signMessage).toHaveBeenCalledOnce();
   });
+  it("re-buys when the cached memo is future-dated (clock skew never counts as fresh)", async () => {
+    const w = workspace();
+    appendFileSync(w.memosFile, JSON.stringify(priorMemo({ at: "2026-11-25T07:00:00.000Z" })) + "\n");
+    const payer = makePayer();
+    const out = await runHeartbeat(payer, [watch()], opts(w));
+    expect(out[0].status).toBe("PASS");
+    expect(payer.signMessage).toHaveBeenCalledOnce();
+  });
+  it("re-buys when the watch definition changed under the same id", async () => {
+    const w = workspace();
+    appendFileSync(w.memosFile, JSON.stringify(priorMemo({ definition_hash: definitionHash(watch({ params: { node_or_zone: "ZONE_J" } })) })) + "\n");
+    const payer = makePayer();
+    const out = await runHeartbeat(payer, [watch()], opts(w));
+    expect(out[0].status).toBe("PASS");
+    expect(out[0].result).toBe("61.5");
+    expect(payer.signMessage).toHaveBeenCalledOnce();
+  });
+  it("refuses a watch whose intent is not on the allowlist, before any payment", async () => {
+    const w = workspace();
+    const payer = makePayer();
+    const out = await runHeartbeat(payer, [watch({ intent: "WEB_SEARCH" })], opts(w));
+    expect(out[0].status).toBe("HOLD");
+    expect(out[0].reason).toMatch(/allowlist/);
+    expect(out[0].receipts).toEqual([]);
+    expect(payer.signMessage).not.toHaveBeenCalled();
+  });
+  it("refuses a cross-check against the same provider as the primary, before any payment", async () => {
+    const w = workspace();
+    const payer = makePayer();
+    const out = await runHeartbeat(payer, [watch({ cross_check: { miner_id: "774921", tolerance_bps: 50 } })], opts(w));
+    expect(out[0].status).toBe("HOLD");
+    expect(out[0].reason).toMatch(/must differ/);
+    expect(payer.signMessage).not.toHaveBeenCalled();
+  });
+  it.each([NaN, -1, 1.5])("refuses an invalid tolerance_bps (%s) before any payment", async (t) => {
+    const w = workspace();
+    const payer = makePayer();
+    const out = await runHeartbeat(payer, [watch({ cross_check: { miner_id: "774999", tolerance_bps: t } })], opts(w));
+    expect(out[0].status).toBe("HOLD");
+    expect(out[0].reason).toMatch(/tolerance_bps/);
+    expect(payer.signMessage).not.toHaveBeenCalled();
+  });
+  it.each([0, -5, 1.5])("refuses an invalid max_age_seconds (%s) before any payment", async (age) => {
+    const w = workspace();
+    const payer = makePayer();
+    const out = await runHeartbeat(payer, [watch({ max_age_seconds: age })], opts(w));
+    expect(out[0].status).toBe("HOLD");
+    expect(out[0].reason).toMatch(/max_age_seconds/);
+    expect(payer.signMessage).not.toHaveBeenCalled();
+  });
   it("SKIPs with a logged reason when the daily cap is already consumed, and never signs", async () => {
     const w = workspace();
     writeFileSync(w.spend.reservationsFile, JSON.stringify({ kind: "gate", nonce: "gate-run", amount_uusdc: "2000000", reserved_at: NOW.toISOString() }) + "\n");
@@ -167,6 +250,24 @@ describe("runHeartbeat", () => {
     expect(out[0].result).toBeNull();
     expect(out[0].receipts).toEqual([]);
     expect(payer.signMessage).not.toHaveBeenCalled();
+  });
+  it("HOLDs (not SKIPs) when the cap refuses the cross-check leg after the primary was paid", async () => {
+    const w = workspace();
+    const payer = makePayer();
+    const out = await runHeartbeat(
+      payer,
+      [watch({ cross_check: { miner_id: "774999", tolerance_bps: 500 } })],
+      opts(w, {
+        dailyCapUusdc: 10000n,
+        f: node({ "774921": { value: "61.5", hash: H1 }, "774999": { value: "61.4", hash: H2 } }).f,
+        verify: verifyStub({ [H1]: "61.5", [H2]: "61.4" }),
+      }),
+    );
+    expect(out[0].status).toBe("HOLD");
+    expect(out[0].reason).toMatch(/cross-check unavailable/);
+    expect(out[0].reason).toMatch(/daily cap/);
+    expect(out[0].receipts).toHaveLength(1);
+    expect(out[0].day_cost_uusdc).toBe("10000");
   });
   it("HOLDs a failed payment and serves no invented answer", async () => {
     const w = workspace();
@@ -188,6 +289,13 @@ describe("runHeartbeat", () => {
     expect(out[0].reason).toMatch(/failed end-to-end verification/);
     expect(out[0].receipts).toHaveLength(1);
   });
+  it("HOLDs a verified value the rule cannot evaluate (scientific notation)", async () => {
+    const w = workspace();
+    const out = await runHeartbeat(makePayer(), [watch()], opts(w, { verify: verifyStub({ [H1]: "1e3" }) }));
+    expect(out[0].status).toBe("HOLD");
+    expect(out[0].reason).toMatch(/rule not evaluable/);
+    expect(out[0].result).toBeNull();
+  });
   it("HOLDs conflicting provider answers with both receipts and no served value", async () => {
     const w = workspace();
     const payer = makePayer();
@@ -205,18 +313,31 @@ describe("runHeartbeat", () => {
     expect(out[0].receipts).toHaveLength(2);
     expect(out[0].day_cost_uusdc).toBe("20000");
   });
-  it("PASSes a cross-check within tolerance and says so in the source line", async () => {
+  it("PASSes a cross-check exactly at the tolerance boundary (BigInt, not float)", async () => {
     const w = workspace();
     const out = await runHeartbeat(
       makePayer(),
-      [watch({ cross_check: { miner_id: "774999", tolerance_bps: 100 } })],
+      [watch({ cross_check: { miner_id: "774999", tolerance_bps: 2000 } })],
       opts(w, {
-        f: node({ "774921": { value: "61.5", hash: H1 }, "774999": { value: "61.45", hash: H2 } }).f,
-        verify: verifyStub({ [H1]: "61.5", [H2]: "61.45" }),
+        f: node({ "774921": { value: "125", hash: H1 }, "774999": { value: "100", hash: H2 } }).f,
+        verify: verifyStub({ [H1]: "125", [H2]: "100" }),
       }),
     );
     expect(out[0].status).toBe("PASS");
     expect(out[0].source).toContain("cross-checked against miner 774999");
     expect(out[0].receipts).toHaveLength(2);
+  });
+  it("HOLDs a cross-check one tolerance unit over the boundary", async () => {
+    const w = workspace();
+    const out = await runHeartbeat(
+      makePayer(),
+      [watch({ cross_check: { miner_id: "774999", tolerance_bps: 1999 } })],
+      opts(w, {
+        f: node({ "774921": { value: "125", hash: H1 }, "774999": { value: "100", hash: H2 } }).f,
+        verify: verifyStub({ [H1]: "125", [H2]: "100" }),
+      }),
+    );
+    expect(out[0].status).toBe("HOLD");
+    expect(out[0].reason).toMatch(/conflicting provider answers/);
   });
 });

@@ -14,7 +14,7 @@ import {privateKeyToAccount} from 'viem/accounts';
 import {privateDirectory,privateFile} from '../src/privateEvidence.js';
 import {normalizePrivateKey,readSecret} from '../src/secrets.js';
 import {spendLedgerFromFiles} from '../src/gate.js';
-import {runHeartbeat,type Watch} from '../src/personalAgent.js';
+import {runHeartbeat,watchDefect,type Watch} from '../src/personalAgent.js';
 const [watchesArg,out,...extra]=process.argv.slice(2);
 if(!watchesArg||!out||extra.length)throw new Error('Usage: run-heartbeat.ts WATCHES_JSON OUT_DIR');
 const watches=JSON.parse(readFileSync(watchesArg,'utf8')) as Watch[];
@@ -22,7 +22,7 @@ if(!Array.isArray(watches)||!watches.length)throw new Error('watches file must h
 for(const w of watches){
  if(!w.id||!w.intent||!w.params||!w.field||!w.rule||!w.max_age_seconds||!w.rationale)throw new Error(`watch ${w.id??'?'} is missing a required field`);
  if(!['gte','lte','eq'].includes(w.rule.op))throw new Error(`watch ${w.id}: rule.op must be gte|lte|eq`);
- if(w.cross_check&&w.cross_check.miner_id===w.miner_id)throw new Error(`watch ${w.id}: cross-check must buy from a different provider`);
+ const defect=watchDefect(w);if(defect)throw new Error(`watch ${w.id}: ${defect}`);
 }
 const secrets=process.env.DESK_SECRETS_FILE;if(!secrets)throw new Error('DESK_SECRETS_FILE is required');
 const expected=process.env.DESK_PAYER_ADDRESS?.toLowerCase();if(!expected||!/^0x[0-9a-f]{40}$/.test(expected))throw new Error('explicit DESK_PAYER_ADDRESS required');

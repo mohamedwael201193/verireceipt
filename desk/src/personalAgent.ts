@@ -7,7 +7,12 @@
 // Local CLI only: hosted spend and retention stay OFF, the payer key comes
 // from a local secrets file and every purchase is testnet. The loop never
 // acts on the world; the memo is the deliverable and any external effect is
-// the user's own explicit decision.
+// the user's own explicit decision. Ticks are not mutually locked: run the
+// loop under one scheduler. The shared spend journal keeps the daily cap
+// exact under overlap (reservations are written under the file lock before
+// any signature); the worst case of two overlapping ticks is a duplicate
+// purchase, both verified and recorded in the memos.
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { DESK_DAILY_CAP_UUSDC, VERIRECEIPT_MINER_ID } from "./constants.js";
@@ -44,6 +49,61 @@ export interface Watch {
   rationale: string;
 }
 
+/** The only intents the heartbeat may buy; anything else is refused before any payment. */
+export const ALLOWED_INTENTS: readonly string[] = [
+  "GRID_POWER_PRICE_GENERAL",
+  "CRYPTO_PRICE_USD",
+  "TVL_LOOKUP_GENERAL",
+  "MINING_HASHPRICE_VERIFY_GENERAL",
+];
+
+/** The documentation placeholder in examples/heartbeat-watches.example.json; never a real provider. */
+const PLACEHOLDER_MINER_ID = "OTHER_MINER_ENGINE_ID";
+
+/** Stable hash of the watch definition fields that change what an answer means. */
+export function definitionHash(w: Watch): string {
+  const params = Object.keys(w.params ?? {}).sort().map((k) => [k, w.params[k]]);
+  return createHash("sha256")
+    .update(JSON.stringify({ intent: w.intent, params, field: w.field, miner_id: w.miner_id ?? VERIRECEIPT_MINER_ID, cross_check: w.cross_check ?? null }))
+    .digest("hex");
+}
+
+/** Config validation shared by the CLI and the loop. Returns the defect or null. */
+export function watchDefect(w: Watch): string | null {
+  if (!["gte", "lte", "eq"].includes(w.rule?.op)) return "rule.op must be gte|lte|eq";
+  if (typeof w.rule?.value !== "string" || !/^-?\d+(?:\.\d+)?$/.test(w.rule.value)) return "rule.value must be an exact decimal string";
+  if (!w.params || typeof w.params !== "object" || Object.values(w.params).some((v) => typeof v !== "string")) return "params values must be strings";
+  if (!Number.isInteger(w.max_age_seconds) || w.max_age_seconds <= 0) return "max_age_seconds must be a positive integer";
+  if (!ALLOWED_INTENTS.includes(w.intent)) return `intent ${w.intent} is not on the heartbeat allowlist`;
+  const primary = w.miner_id ?? VERIRECEIPT_MINER_ID;
+  if (primary === PLACEHOLDER_MINER_ID || w.cross_check?.miner_id === PLACEHOLDER_MINER_ID) return `miner id ${PLACEHOLDER_MINER_ID} is the documentation placeholder; set a real engine miner id`;
+  if (w.cross_check) {
+    if (w.cross_check.miner_id === primary) return "cross-check miner_id must differ from the primary provider";
+    if (!Number.isInteger(w.cross_check.tolerance_bps) || w.cross_check.tolerance_bps < 0) return "cross-check tolerance_bps must be an integer >= 0";
+  }
+  return null;
+}
+
+/** Exact tolerance check: |a-b|*10000 > tolerance_bps*max(|a|,|b|), all BigInt. Null when either side is not an exact decimal. */
+export function exceedsTolerance(a: string, b: string, toleranceBps: number): boolean | null {
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(a);
+  const n = /^(-?)(\d+)(?:\.(\d+))?$/.exec(b);
+  if (!m || !n) return null;
+  const scale = Math.max((m[3] ?? "").length, (n[3] ?? "").length);
+  const toInt = (g: RegExpExecArray): bigint => {
+    const v = BigInt(g[2] + (g[3] ?? "").padEnd(scale, "0"));
+    return g[1] === "-" ? -v : v;
+  };
+  const x = toInt(m);
+  const y = toInt(n);
+  const ax = x < 0n ? -x : x;
+  const ay = y < 0n ? -y : y;
+  const mag = ax > ay ? ax : ay;
+  if (mag === 0n) return x === y ? false : null;
+  const diff = x > y ? x - y : y - x;
+  return diff * 10000n > BigInt(toleranceBps) * mag;
+}
+
 export interface MemoReceipt {
   miner_id: string;
   nonce: string;
@@ -64,8 +124,10 @@ export interface Memo {
   rule_outcome: "inside" | "outside" | null;
   reason: string | null;
   receipts: MemoReceipt[];
-  /** This agent's settled+reserved purchases on this UTC day after this memo. */
+  /** Charges recorded in this memos file on this UTC day, including this memo. */
   day_cost_uusdc: string;
+  /** Hash of the watch definition; a changed definition never reuses a cached answer. */
+  definition_hash: string;
 }
 
 function readMemos(file: string): Memo[] {
@@ -172,9 +234,20 @@ export async function runHeartbeat(payer: Payer, watches: Watch[], opts: Heartbe
   const out: Memo[] = [];
   for (const w of watches) {
     const prior = readMemos(opts.memosFile);
+    const defect = watchDefect(w);
+    if (defect) {
+      const memo = holdMemo(w, now, prior, [], `watch misconfigured: ${defect}`);
+      appendMemo(opts.memosFile, memo);
+      out.push(memo);
+      continue;
+    }
+    const defHash = definitionHash(w);
     const fresh = prior
-      .filter((m) => m.watch_id === w.id && m.status === "PASS" && m.result !== null)
-      .filter((m) => now.getTime() - new Date(m.at).getTime() <= w.max_age_seconds * 1000)
+      .filter((m) => m.watch_id === w.id && m.status === "PASS" && m.result !== null && m.definition_hash === defHash)
+      .filter((m) => {
+        const age = now.getTime() - new Date(m.at).getTime();
+        return age >= 0 && age <= w.max_age_seconds * 1000;
+      })
       .sort((a, b) => b.at.localeCompare(a.at))[0];
     if (fresh) {
       log(`${w.id}: fresh verified answer from ${fresh.at}, no new purchase`);
@@ -191,6 +264,7 @@ export async function runHeartbeat(payer: Payer, watches: Watch[], opts: Heartbe
         reason: null,
         receipts: [],
         day_cost_uusdc: dayCostUusdc(prior, [], now),
+        definition_hash: defHash,
       };
       appendMemo(opts.memosFile, memo);
       out.push(memo);
@@ -216,8 +290,9 @@ export async function runHeartbeat(payer: Payer, watches: Watch[], opts: Heartbe
         out.push(memo);
         continue;
       }
+      const over = exceedsTolerance(value, other.value!, w.cross_check.tolerance_bps);
       const bps = diffBps(value, other.value!);
-      if (bps === null || bps > w.cross_check.tolerance_bps) {
+      if (over === null || over) {
         const memo = holdMemo(
           w,
           now,
@@ -233,6 +308,12 @@ export async function runHeartbeat(payer: Payer, watches: Watch[], opts: Heartbe
       source += ` · cross-checked against miner ${w.cross_check.miner_id} (${bps} bps apart, within ${w.cross_check.tolerance_bps} bps)`;
     }
     const outcome = ruleOutcome(w.rule, value);
+    if (outcome === null) {
+      const memo = holdMemo(w, now, prior, receipts, `rule not evaluable: ${JSON.stringify(value)} is not an exact decimal string; no answer is served`);
+      appendMemo(opts.memosFile, memo);
+      out.push(memo);
+      continue;
+    }
     const memo: Memo = {
       version: 1,
       watch_id: w.id,
@@ -246,6 +327,7 @@ export async function runHeartbeat(payer: Payer, watches: Watch[], opts: Heartbe
       reason: null,
       receipts,
       day_cost_uusdc: dayCostUusdc(prior, receipts, now),
+      definition_hash: defHash,
     };
     appendMemo(opts.memosFile, memo);
     out.push(memo);
@@ -255,7 +337,10 @@ export async function runHeartbeat(payer: Payer, watches: Watch[], opts: Heartbe
 }
 
 function holdMemo(w: Watch, now: Date, prior: Memo[], receipts: MemoReceipt[], reason: string): Memo {
-  const status = /daily cap/.test(reason) ? "SKIP" : "HOLD";
+  // SKIP is reserved for a budget refusal with nothing paid; any recorded
+  // receipt (including a cap refusal on the cross-check leg after the
+  // primary was paid) and every other failure is a HOLD.
+  const status = /daily cap/.test(reason) && receipts.length === 0 ? "SKIP" : "HOLD";
   return {
     version: 1,
     watch_id: w.id,
@@ -269,6 +354,7 @@ function holdMemo(w: Watch, now: Date, prior: Memo[], receipts: MemoReceipt[], r
     reason,
     receipts,
     day_cost_uusdc: dayCostUusdc(prior, receipts, now),
+    definition_hash: definitionHash(w),
   };
 }
 

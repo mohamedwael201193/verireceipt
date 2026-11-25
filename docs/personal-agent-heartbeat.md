@@ -71,9 +71,10 @@ Each call is a flat 10,000 micro-USDC (0.01 test USDC). A watch bought at
 the edge of a 30-minute window costs at most 48 calls, 0.48 test USDC per
 UTC day; reuse and wider windows reduce that linearly. A cross-checked
 watch costs two calls per buy. The shared daily cap (default 100,000
-micro-USDC) bounds every agent that joins the ledger directory, and the
-memo's `day_cost_uusdc` field reports this agent's own running total so the
-cost per useful outcome is visible per tick, not reconstructed later.
+micro-USDC, ten calls) bounds every agent that joins the ledger directory.
+The memo's `day_cost_uusdc` field is the charges recorded in this memos file
+on this UTC day, so the cost per useful outcome is visible per tick, not
+reconstructed later.
 
 ## Failure cases
 
@@ -88,6 +89,14 @@ cost per useful outcome is visible per tick, not reconstructed later.
 
 Every HOLD and SKIP is a memo with receipts and day cost, so the log is a
 complete account of what the agent spent and why it said what it said.
+
+## Overlapping ticks
+
+Ticks are not mutually locked; run the loop under a single scheduler (cron,
+a systemd timer, one orchestrator). The daily cap stays exact even if two
+ticks overlap, because every quote is reserved in the shared journal under
+the file lock before any signature. The worst case of overlap is a duplicate
+purchase of the same watch, both verified and recorded in the memos.
 
 ## What it never does
 
