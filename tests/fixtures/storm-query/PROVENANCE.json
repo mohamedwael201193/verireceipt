@@ -1,0 +1,30 @@
+[
+  {
+    "url": "https://geocoding-api.open-meteo.com/v1/search?name=Miami%2C+Florida&count=10&language=en&format=json",
+    "file": "miami-florida.json",
+    "status": 200,
+    "sha256": "d8dce8b8171d42c6404c491807ebdcee416f8caff085bb5317922ea3c0881b98",
+    "captured_at": "2026-11-25T16:12:58.073291+00:00"
+  },
+  {
+    "url": "https://geocoding-api.open-meteo.com/v1/search?name=Miami&count=10&language=en&format=json",
+    "file": "miami.json",
+    "status": 200,
+    "sha256": "2de3e3da12d2290ab68b5a82d6ba04fe0d681044eaa4a42596389eb8f9887de2",
+    "captured_at": "2026-11-25T16:12:58.850550+00:00"
+  },
+  {
+    "url": "https://api.weather.gov/points/25.77427,-80.19366",
+    "file": "miami-points.json",
+    "status": 200,
+    "sha256": "e906e3a492ecfbc3ca5b70919ef0e30dcd481f5660bd60b5cd4eb212206b66e0",
+    "captured_at": "2026-11-25T16:13:36.734099+00:00"
+  },
+  {
+    "url": "https://api.weather.gov/alerts/active?point=25.77427,-80.19366",
+    "file": "miami-alerts.json",
+    "status": 200,
+    "sha256": "fc44b92b6b91c27515cbadccd63d60f1775aa8e54be3fe82bf393e8a5a0b1159",
+    "captured_at": "2026-11-25T16:13:36.936695+00:00"
+  }
+]

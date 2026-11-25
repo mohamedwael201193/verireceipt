@@ -66,42 +66,64 @@ export function parseLocation(raw: string | undefined): { lat: number; lon: numb
   return { lat, lon };
 }
 
-async function fetchText(url: string, outerSignal?: AbortSignal): Promise<{ status: number; body: string }> {
+async function fetchText(url: string, outerSignal?: AbortSignal, deadline?:number): Promise<{ status: number; body: string }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
+  const remaining=deadline===undefined?SOURCE_TIMEOUT_MS:Math.max(1,deadline-Date.now());
+  let timer:ReturnType<typeof setTimeout>;
   try {
-    const res = await fetch(url, { signal: outerSignal ? AbortSignal.any([controller.signal,outerSignal]) : controller.signal, headers: { "User-Agent": UA, Accept: "application/geo+json" } });
-    return { status: res.status, body: await res.text() };
+    const io=(async()=>{const res = await fetch(url, { signal: outerSignal ? AbortSignal.any([controller.signal,outerSignal]) : controller.signal, headers: { "User-Agent": UA, Accept: "application/geo+json" } });
+    return { status: res.status, body: await res.text() };})();
+    return await Promise.race([io,new Promise<never>((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error("storm source deadline"));},remaining);})]);
   } finally {
-    clearTimeout(timer);
+    clearTimeout(timer!);
   }
+}
+
+// Query prose is not a declared location. Keep the whole text as the final
+// geocoder candidate, and do not reinterpret an explicitly supplied location.
+export function stormQueryLocations(text:string):string[]{
+ const coordinates=/(?:^|[^\d.])(-?\d{1,2}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?)(?=$|[^\d.])/.exec(text);
+ if(coordinates)return [coordinates[1]];
+ const stop=(s:string)=>s.split(/\b(?:right now|today|tonight|currently)\b|[.?!;:]/i)[0].replace(/\.+$/,'').trim();
+ const extracted=/\b(?:in|for|near|around|at|over|of)\s+(.+)/i.exec(text)?.[1];
+ const stripped=stop(text).replace(/\b(?:storm|alert|alerts|warning|weather|any|are|there|is|what|current)\b/gi,' ').replace(/\s+/g,' ').trim();
+ return [...new Set([extracted?stop(extracted):'',stripped,text.trim()].filter(Boolean))];
 }
 
 export const INTENT = "STORM_ALERT_GENERAL";
 
 export async function handleStormAlert(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
-  query=queryFallback(query,"location",text=>text);
+  const fromQuery=query.location===undefined&&query.query!==undefined;
+  const candidates=fromQuery?stormQueryLocations(query.query!.trim()):[];
+  query=queryFallback(query,"location",text=>candidates[0]??text);
   // S1: "lat,lon" as before, or a place name through the geocoder (the
   // contract's "The place"). The resolved label is used in the answer.
   const rawLocation = query.location?.trim();
-  let lat: number, lon: number, placeLabel: string;
+  let lat!: number, lon!: number, placeLabel!: string;
   let geocoder: { url: string; body: string; selection: string } | null = null;
   if (rawLocation && !/^\s*-?\d{1,2}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?\s*$/.test(rawLocation)) {
-    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(rawLocation)}&count=10&language=en&format=json`;
-    let g: { status: number; body: string };
-    try {
-      g = await fetchText(geoUrl);
-      if (g.status >= 400) throw new Error(`geocoder HTTP ${g.status}`);
-    } catch {
-      throw upstreamUnavailable("GEOCODER_UNREACHABLE", "the Open-Meteo geocoder could not be reached; pass \"lat,lon\" to skip geocoding");
+    let selected=false;
+    const geocoderDeadline=Date.now()+SOURCE_TIMEOUT_MS;
+    for(const candidate of fromQuery?candidates:[rawLocation]){
+      if(Date.now()>=geocoderDeadline)throw upstreamUnavailable("GEOCODER_UNREACHABLE","shared geocoder deadline reached; no guessed location");
+      const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(candidate)}&count=10&language=en&format=json`;
+      let g: { status: number; body: string };
+      try {
+        g = await fetchText(geoUrl,undefined,geocoderDeadline);
+        if (g.status >= 400) throw new Error(`geocoder HTTP ${g.status}`);
+      } catch {
+        throw upstreamUnavailable("GEOCODER_UNREACHABLE", "the Open-Meteo geocoder could not be reached; pass \"lat,lon\" to skip geocoding");
+      }
+      let hit;
+      try { hit = parseRankedLocation(g.body, "Open-Meteo"); }
+      catch { throw upstreamUnavailable("GEOCODER_UNREACHABLE", "invalid top geocoder result; no guessed location"); }
+      if(!hit)continue;
+      lat = hit.latitude; lon = hit.longitude;
+      placeLabel = `${hit.label} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+      geocoder = { url: geoUrl, body: g.body, selection: `chose ${hit.label} at ${lat},${lon} of ${hit.count} matches returned (rank 1, provider order; not confirmed unique)` };
+      selected=true;break;
     }
-    let hit;
-    try { hit = parseRankedLocation(g.body, "Open-Meteo"); }
-    catch { throw upstreamUnavailable("GEOCODER_UNREACHABLE", "invalid top geocoder result; no guessed location"); }
-    if (!hit) throw unprocessable("PLACE_NOT_FOUND", "city geocoder returned no location; pass lat,lon");
-    lat = hit.latitude; lon = hit.longitude;
-    placeLabel = `${hit.label} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
-    geocoder = { url: geoUrl, body: g.body, selection: `chose ${hit.label} at ${lat},${lon} of ${hit.count} matches returned (rank 1, provider order; not confirmed unique)` };
+    if(!selected)throw unprocessable("PLACE_NOT_FOUND", "city geocoder returned no location; pass lat,lon");
   } else {
     ({ lat, lon } = parseLocation(query.location));
     placeLabel = `${lat},${lon}`;
