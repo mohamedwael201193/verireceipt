@@ -1,0 +1,32 @@
+{
+  "kind": "recovered exact-byte copies",
+  "proofs": [
+    {
+      "receipt_id": "rcpt_COU5RNZ6QEOSTT9C796BO1U5IH",
+      "path": "docs/proofs/recovered/rcpt_COU5RNZ6QEOSTT9C796BO1U5IH.bin",
+      "source_path": "frontend/tests/fixtures/tesla-stored-sec-20261121.json",
+      "sha256": "62f75fb4293280aef09dc4a5190976f3ca39ca6ad2f7fa1600b0057b708e4150",
+      "bytes": 162971,
+      "scope": "SEC submissions response",
+      "status": "historical held copy, hash verified; live restoration not yet verified"
+    },
+    {
+      "receipt_id": "rcpt_PBVNBHI2WVK4H93ZZUH3XCKB2A",
+      "path": "docs/proofs/recovered/rcpt_PBVNBHI2WVK4H93ZZUH3XCKB2A.bin",
+      "source_path": "tests/fixtures/onchain-metric/finalized-evidence.json",
+      "sha256": "41012da4fbf1733bebec56a0653b61c27cf584ef025618f063f3f7ba9f1541fd",
+      "bytes": 57906,
+      "scope": "finalized onchain metric evidence",
+      "status": "historical held copy, hash verified; live restoration not yet verified"
+    },
+    {
+      "receipt_id": "rcpt_PDY2JQEJJ1F6K6HJKKMPSH5XYR",
+      "path": "docs/proofs/recovered/rcpt_PDY2JQEJJ1F6K6HJKKMPSH5XYR.bin",
+      "source_path": "desk/tests/fixtures/raw-rcpt_PDY2JQEJJ1F6K6HJKKMPSH5XYR.bin",
+      "sha256": "62230fed54863f2269ee9d0ccd7e1967261e657680345706354d81c6aec9f978",
+      "bytes": 123,
+      "scope": "CAISO provisional at purchase",
+      "status": "historical held copy, hash verified; live restoration not yet verified"
+    }
+  ]
+}
