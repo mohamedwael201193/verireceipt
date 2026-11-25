@@ -43,6 +43,12 @@ export interface DailyObservation {
     attributes: Record<string, string>;
     reportingPeriod: 'station-labelled climate day, not necessarily local midnight';
 }
+export interface DailyNoRecord {
+    noRecord: true;
+    station: string;
+    date: string;
+}
+export type DailyArchiveResult = DailyObservation | DailyNoRecord;
 function realDate(s: string): boolean { return /^\d{4}-\d{2}-\d{2}$/.test(s) && Number.isFinite(Date.parse(s + 'T00:00:00Z')) && new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) === s; }
 /** Input must be requested with units=metric, includeAttributes=true. */
 export function parseNoaaDaily(raw: string, station: string, date: string): DailyObservation {

@@ -32,6 +32,8 @@ export interface ObservationPolicy<Q, T> {
     validate(value: T): void;
     fields(value: T): Record<string, unknown>;
     answer(value: T): string;
+    /** Explicit empty-source result, never inferred from an error. */
+    noData?(value:T): boolean;
     maxAgeMs: number;
     sourceTimeoutMs: number;
     /** Optional shared network budget across primary and fallback legs. */
@@ -87,12 +89,12 @@ export async function observeFromSources<Q, T>(query: Q, sources: readonly Obser
             clearTimeout(timer);
             timer = undefined;
             const evidence = JSON.stringify({ identity, provider: source.name, source_url: observation.sourceUrl, observed_at: observation.observedAt, fetched_at: observation.fetchedAt, raw_body: observation.rawBody, value: observation.value, source_scope: policy.scope, prior_sources: failed, terms: { url: source.approval.termsUrl, checked_at: source.approval.checkedAt, commercial_use_confirmed:source.approval.commercialUse, redistribution_confirmed:source.approval.redistribution, owner_terms_risk_accepted:!!source.approval.ownerRiskAcceptance } });
-            const receipt = makeReceipt(policy.intent, observation.sourceUrl, evidence, '1/1 named observation; primary/fallback, not cross-source consensus');
+            const receipt = makeReceipt(policy.intent, observation.sourceUrl, evidence, policy.noData?.(observation.value) ? '1/1 named source returned no record; not an observed weather value' : '1/1 named observation; primary/fallback, not cross-source consensus');
             receipt.fetched_at = observation.fetchedAt;
             // Once persistence starts, errors propagate. Do not retry another source
             // after an uncertain/failed save, which could create a second receipt.
             await saveReceipt(receipt, evidence);
-            return envelope(policy.intent, policy.fields(observation.value), receipt, { answer: policy.answer(observation.value) + ` Source observed ${observation.observedAt}. ${policy.scope}`, verdict: 'verified', confidence: failed.length ? .85 : .95, source: `${source.name}: ${observation.sourceUrl}; observed ${observation.observedAt}; fetched ${observation.fetchedAt}; ${failed.length ? 'fallback' : 'primary'}; no averaging.` });
+            return envelope(policy.intent, policy.fields(observation.value), receipt, { answer: policy.answer(observation.value) + ` Source observed ${observation.observedAt}. ${policy.scope}`, verdict: policy.noData?.(observation.value) ? 'no_data' : 'verified', confidence: policy.noData?.(observation.value) ? 0 : failed.length ? .85 : .95, source: `${source.name}: ${observation.sourceUrl}; observed ${observation.observedAt}; fetched ${observation.fetchedAt}; ${failed.length ? 'fallback' : 'primary'}; no averaging.` });
         }
         catch (error) {
             if (timer === undefined)
