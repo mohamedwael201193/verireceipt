@@ -27,8 +27,11 @@ export async function validateLiveFact(fact:FactSpec,f:Fetch=fetch):Promise<Sche
   }
  }
  const field=Array.isArray(fields)?fields.find((x:any)=>x.name===fact.field):null;
- add('numeric response contract',field?.type==='number'&&field.scored===true,'numeric scored field required');
+ add('numeric response contract',field?.type==='number'&&(field.scored===true||field.off_chain===true),'declared numeric scored or off-chain field required');
  const frozen=snapshot.schemas.find(s=>s.intent_name===fact.intent);
+ const scored=Array.isArray(fields)?fields.filter((x:any)=>x.scored===true):[];
+ const frozenScored=frozen?.response.fields.filter((x:any)=>x.scored===true)??[];
+ add('scored response contract unchanged',scored.length>0&&hash(scored)===hash(frozenScored),'preserve the fields the live schema actually scores');
  add('response contract unchanged',!!frozen&&hash(field??null)===hash(frozen.response.fields.find(x=>x.name===fact.field)??null),'fail closed on field/unit/range revision');
  add('request contract unchanged',!!frozen&&hash(j.request)===hash(frozen.request),'fail closed on parameter/selector revision');
  return {ok:checks.every(c=>c.ok),checks,schema_hash:hash(j)};
