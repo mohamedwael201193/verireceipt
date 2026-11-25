@@ -1,0 +1,44 @@
+[
+  {
+    "url": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+    "status": 200,
+    "file": "science_and_environment.xml",
+    "sha256": "1c7ff1dc98b65e6b696671edbd47219e07ef5752805c0644f48d71f913177f00",
+    "captured_at": "2026-11-25T15:35:27Z"
+  },
+  {
+    "url": "https://feeds.bbci.co.uk/news/technology/rss.xml",
+    "status": 200,
+    "file": "technology.xml",
+    "sha256": "f7f48912d8751fc54e2281dc818996f5a4b09109c07db0f9f00045cfd4a5fa00",
+    "captured_at": "2026-11-25T15:35:27Z"
+  },
+  {
+    "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "status": 200,
+    "file": "world.xml",
+    "sha256": "a2d89fa0252ae0c703ee6ba23fb6e2a8d6b1179379c223abe8ce0acdbb68ad18",
+    "captured_at": "2026-11-25T15:35:27Z"
+  },
+  {
+    "url": "https://feeds.bbci.co.uk/news/business/rss.xml",
+    "status": 200,
+    "file": "business.xml",
+    "sha256": "fd91617d80e11b9c4ec3cbb5387c9f9e6dc769c424b734852dd7c2ea1a960da3",
+    "captured_at": "2026-11-25T15:35:27Z"
+  },
+  {
+    "url": "https://feeds.bbci.co.uk/news/health/rss.xml",
+    "status": 200,
+    "file": "health.xml",
+    "sha256": "651d903c95aa238f340b0cd5012cf1d85a6ceacb19c06633f074cf62a94dc559",
+    "captured_at": "2026-11-25T15:35:28Z"
+  },
+  {
+    "url": "https://hn.algolia.com/api/v1/search_by_date?query=NASA+mars&tags=story&hitsPerPage=1&numericFilters=created_at_i%3E1795016128&restrictSearchableAttributes=title&typoTolerance=false",
+    "status": 200,
+    "file": "hn-mars-7d.json",
+    "sha256": "54ac4a74de91d2165672763312803d16eb6b9788505eac963f72c45a60bacec9",
+    "captured_at": "2026-11-25T15:42:40Z"
+  }
+]

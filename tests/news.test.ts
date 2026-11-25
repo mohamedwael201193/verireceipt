@@ -4,7 +4,8 @@ import { join } from "node:path";
 const scratch = mkdtempSync("/tmp/news-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); resetNewsCircuitForTests(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); resetNewsCircuitForTests(); resetHeadlineFeedsForTests(); });
+import { resetHeadlineFeedsForTests } from "../src/handlers/newsHeadlineFeeds";
 import { handleNewsHeadlines } from "../src/handlers/newsHeadlines";
 import { handleNewsSearch, buildBrief } from "../src/handlers/newsSearch";
 import { resetNewsCircuitForTests, parseHn, parseBbcRss, parseGnewsRss, parseGdelt, gdeltSeendateToIso, topicMatches, HN_INDEX, BBC_INDEX, GNEWS_INDEX, GDELT_INDEX, NewsItem, rankRecent } from "../src/handlers/newsSources";
@@ -99,10 +100,11 @@ describe("NEWS_HEADLINES_GENERAL", () => {
     const ev = JSON.parse(stored.evidence.toString("utf8"));
     expect(ev.raw_bodies.hn).toBe(hn);
     expect(ev.raw_bodies.gnews).toBe(gnews);
-    expect(ev.raw_bodies.gdelt).toBe(gdelt);
+    expect(ev.raw_bodies.gdelt).toBe("");
+    expect(ev.omitted_indexes[0]).toContain("GDELT omitted");
     expect(ev.raw_bodies.bbc).toBe(bbc);
   });
-  it("a topic with no HN match tops the most recent item across the other sources", async () => {
+  it("a topic with no HN match uses Google News when GDELT is omitted", async () => {
     vi.useFakeTimers(); vi.setSystemTime(FROZEN);
     // Synthetic small bodies: HN empty; Google News and GDELT carry matches
     // at different times; the more recent GDELT item must win.
@@ -117,12 +119,12 @@ describe("NEWS_HEADLINES_GENERAL", () => {
     const bbcEmpty = `<?xml version="1.0"?><rss version="2.0"><channel></channel></rss>`;
     stub({ hn: hnEmpty, gnews: gnewsOne, gdelt: gdeltTwo, bbc: bbcEmpty });
     const result = await handleNewsHeadlines({ topic: "acme robotics", window_hours: "72" });
-    expect(result.top_headline).toBe("Acme Robotics raises a large round");
+    expect(result.top_headline).toBe("Acme Robotics unveils warehouse arm - Example News");
     expect((result.headlines as string[])[0]).toBe(result.top_headline);
-    expect((result.urls as string[])[0]).toBe(JSON.parse(gdeltTwo).articles[0].url);
+    expect((result.urls as string[])[0]).toBe("https://news.google.com/rss/articles/x1");
     const headlines = result.headlines as string[];
     expect(headlines).toContain("Acme Robotics unveils warehouse arm - Example News");
-    expect(headlines).toContain("Acme Robotics expands to Cairo");
+    expect(headlines).not.toContain("Acme Robotics expands to Cairo");
   });
   it("a topic with no in-window matches anywhere is an honest 200 with a null top_headline", async () => {
     vi.useFakeTimers(); vi.setSystemTime(FROZEN);
@@ -138,7 +140,7 @@ describe("NEWS_HEADLINES_GENERAL", () => {
     expect(ans).toContain("Google News");
     expect(result.confidence).toBe(0.5);
   });
-  it("a GDELT rate-limit notice degrades honestly while other sources answer", async () => {
+  it("GDELT is omitted from headlines while other sources answer", async () => {
     vi.useFakeTimers(); vi.setSystemTime(FROZEN);
     stub({ gdelt: "Please limit requests to one every 5 seconds" });
     const result = await handleNewsHeadlines({ topic: "openai", window_hours: "168" });
@@ -146,7 +148,7 @@ describe("NEWS_HEADLINES_GENERAL", () => {
     expect((result.headlines as string[])[0]).toBe(result.top_headline);
     expect((result.urls as string[])[0]).toBe(parseHn(hn).find(h=>h.title===result.top_headline)!.url);
     expect(String(result.answer)).toContain("Degraded");
-    expect(String(result.answer)).toContain(GDELT_INDEX);
+    expect(String(result.answer)).not.toContain(GDELT_INDEX);
   });
   it("degrades honestly when one index is down, 502 when all are", async () => {
     vi.useFakeTimers(); vi.setSystemTime(FROZEN);
@@ -156,7 +158,7 @@ describe("NEWS_HEADLINES_GENERAL", () => {
     expect((result.headlines as string[])[0]).toBe(result.top_headline);
     expect((result.urls as string[])[0]).toBe(parseHn(hn).find(h=>h.title===result.top_headline)!.url);
     expect(String(result.answer)).toContain("Degraded");
-    vi.unstubAllGlobals();
+    vi.unstubAllGlobals(); resetHeadlineFeedsForTests();
     stub({ hn: "ERR", gnews: "ERR", gdelt: "ERR", bbc: "ERR" });
     await expect(handleNewsHeadlines({ topic: "openai" }))
       .rejects.toMatchObject({ status: 502, code: "NEWS_INDEXES_UNREACHABLE" });
@@ -280,9 +282,10 @@ describe("news valid-search gate", () => {
       const bodies = { hn: "{}", gnews: "<html>blocked</html>", gdelt: "rate limited", bbc: "<rss>" };
       bodies[source] = source === "hn" ? '{"hits":[]}' : source === "gdelt" ? '{"articles":[]}' : emptyRss;
       stub(bodies);
-      const h = await handleNewsHeadlines({ topic: "openai" });
+      if(source==="gdelt"){await expect(handleNewsHeadlines({topic:"openai"})).rejects.toMatchObject({code:"NEWS_INDEXES_UNREACHABLE"});}
+      else {const h = await handleNewsHeadlines({ topic: "openai" });
       expect(h.headlines).toEqual([]);
-      expect(String(h.answer)).toContain("Degraded");
+      expect(String(h.answer)).toContain("Degraded");}
       const r = await handleNewsSearch({ query: "openai" });
       expect(r.result_count).toBe(0);
       expect(String(r.answer)).toContain("Degraded");
@@ -365,9 +368,9 @@ it('topical feed excludes future and expired items in exact answer and evidence'
 });
 it('empty sole topical feed remains searched and reachable, mapped failure is degraded',async()=>{
  vi.stubGlobal('fetch',async(u:any)=>{if(String(u).includes('/technology/'))return new Response('<rss><channel></channel></rss>');throw Error('down');});const out=await handleNewsHeadlines({topic:'technology'});expect(out.top_headline).toBeNull();expect(out.answer).toContain('BBC technology current RSS');expect(out.source).not.toContain('no source reachable');let st=await getReceiptEvidence((out.receipt as any).receipt_id);expect(JSON.parse(Buffer.from(st.evidence!).toString()).indexes).toContain('BBC technology current RSS');
- stub();const failed=await handleNewsHeadlines({topic:'technology'});expect(failed.answer).toContain('Degraded: BBC technology current RSS');expect(failed.answer).toContain('unavailable');st=await getReceiptEvidence((failed.receipt as any).receipt_id);expect(JSON.parse(Buffer.from(st.evidence!).toString()).unavailable_indexes).toContain('BBC technology current RSS');
+ resetHeadlineFeedsForTests();stub();const failed=await handleNewsHeadlines({topic:'technology'});expect(failed.answer).toContain('Degraded: BBC technology current RSS');expect(failed.answer).toContain('unavailable');st=await getReceiptEvidence((failed.receipt as any).receipt_id);expect(JSON.parse(Buffer.from(st.evidence!).toString()).unavailable_indexes).toContain('BBC technology current RSS');
 });
-it.each(['search','headlines'])('%s shared deadline survives abort-ignoring slow sources and opens both breakers',async mode=>{vi.useFakeTimers();vi.setSystemTime(FROZEN);const calls:string[]=[];vi.stubGlobal('fetch',async(u:any)=>{const url=String(u);calls.push(url);if(url.includes('google')||url.includes('gdelt'))return new Promise<Response>(()=>{});return new Response(url.includes('algolia')?hn:bbc);});const start=Date.now();const run=()=>mode==='search'?handleNewsSearch({query:'openai'}):handleNewsHeadlines({topic:'openai',window:'24h'});const p=run();await vi.advanceTimersByTimeAsync(2500);const out=await p;expect(Date.now()-start).toBe(2500);expect(out.answer).toContain('Google News RSS search');expect(out.answer).toContain('GDELT');const n=calls.filter(u=>u.includes('google')||u.includes('gdelt')).length;expect(n).toBe(2);await run();expect(calls.filter(u=>u.includes('google')||u.includes('gdelt'))).toHaveLength(2);});
+it.each(['search','headlines'])('%s shared deadline survives abort-ignoring slow sources and opens both breakers',async mode=>{vi.useFakeTimers();vi.setSystemTime(FROZEN);const calls:string[]=[];vi.stubGlobal('fetch',async(u:any)=>{const url=String(u);calls.push(url);if(url.includes('google')||url.includes('gdelt'))return new Promise<Response>(()=>{});return new Response(url.includes('algolia')?hn:bbc);});const start=Date.now();const run=()=>mode==='search'?handleNewsSearch({query:'openai'}):handleNewsHeadlines({topic:'openai',window:'24h'});const p=run();await vi.advanceTimersByTimeAsync(2500);const out=await p;expect(Date.now()-start).toBe(2500);expect(out.answer).toContain('Google News RSS search');if(mode==='search')expect(out.answer).toContain('GDELT');const n=calls.filter(u=>u.includes('google')||u.includes('gdelt')).length;expect(n).toBe(mode==='search'?2:1);await run();expect(calls.filter(u=>u.includes('google')||u.includes('gdelt'))).toHaveLength(n);});
 it('HN widening uses only remaining shared deadline, never a second full source budget',async()=>{vi.useFakeTimers();vi.setSystemTime(FROZEN);let hnCalls=0;vi.stubGlobal('fetch',async(u:any)=>{if(String(u).includes('algolia')){hnCalls++;if(hnCalls===1){await new Promise(r=>setTimeout(r,2000));return new Response('{"hits":[]}');}return new Promise<Response>(()=>{});}return new Response(String(u).includes('google')?gnews:String(u).includes('gdelt')?gdelt:bbc);});const start=Date.now();const p=handleNewsSearch({query:'openai'});await vi.advanceTimersByTimeAsync(2500);expect((await p).verdict).toBe('verified');expect(Date.now()-start).toBe(2500);expect(hnCalls).toBe(2);});
 it.each(['fetch','body'])('slow-host ownership survives breaker expiry until abort-ignoring %s settles',async stage=>{vi.useFakeTimers();const {fetchIndex}=await import('../src/handlers/newsSources');let release:any;const f=vi.fn(async()=>stage==='fetch'?new Promise<Response>(r=>release=()=>r(new Response(gnews))):({ok:true,status:200,redirected:false,text:()=>new Promise<string>(r=>release=()=>r(gnews))} as Response));vi.stubGlobal('fetch',f);const p=fetchIndex('https://news.google.com/rss/search?q=test');await vi.advanceTimersByTimeAsync(2500);await p;await vi.advanceTimersByTimeAsync(60001);expect((await fetchIndex('https://news.google.com/rss/search?q=other')).failure_reason).toBe('circuit_open');expect(f).toHaveBeenCalledTimes(1);release();await vi.advanceTimersByTimeAsync(1);f.mockImplementation(async()=>new Response(gnews));expect((await fetchIndex('https://news.google.com/rss/search?q=other')).ok).toBe(true);expect(f).toHaveBeenCalledTimes(2);});
 it('post-source persistence helper fails within remaining total budget',async()=>{vi.useFakeTimers();const {withinNewsDeadline}=await import('../src/handlers/newsSources');const p=withinNewsDeadline(new Promise(()=>{}),Date.now()+450).catch(e=>e);await vi.advanceTimersByTimeAsync(450);expect((await p).message).toContain('persistence deadline');});
