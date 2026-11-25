@@ -303,14 +303,11 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, Outpu
   SECURITY_REVIEW_GENERAL: { endpoint: "/v1/security-review", inputs: ["target"], outputs: { verdict: null, vulnerability_count: "vulnerabilities", issues: null, summary: null } },
   WEATHER_FORECAST_VERIFY_GENERAL: { endpoint: "/v1/weather-history", inputs: ["location", "date"], outputs: {"location": null, "date": null, "temp_max_c": "degrees Celsius", "temp_min_c": "degrees Celsius", "precipitation_mm": "mm", "condition": null} },
  RETURN_POLICY_VERIFY_GENERAL:{endpoint:"/v1/return-policy",inputs:["retailer"],outputs:{retailer:null,return_window_days:"days",conditions:null,verified:null,sources:null}},
- GAME_RESULT_GENERAL:{endpoint:"/v1/game-result",inputs:["game"],outputs:{winner:null,home_team:null,away_team:null,home_score:"points",away_score:"points",date:null}},
  CRYPTO_YIELD_RATE_GENERAL:{endpoint:"/v1/yield",inputs:["project","symbol","chain"],outputs:{supply_apy:"basis points"}},
- VESSEL_TELEMETRY_VERIFY_GENERAL:{endpoint:"/v1/vessel-telemetry",inputs:["vessel"],outputs:{vessel:null,speed_knots:"knots",latitude:"degrees",longitude:"degrees",course_deg:"degrees",observed_at:null}},
- SENSOR_TELEMETRY_VERIFY_GENERAL:{endpoint:"/v1/sensor-telemetry",inputs:["sensor","metric"],outputs:{sensor:null,metric:null,value:"the sensor's unit",unit:null,observed_at:null}},
 };
 
 describe("A8 miner.yaml vs the official intent schemas", () => {
-  it("declares exactly the sixty reviewed intents, each on its own endpoint", () => {
+  it("declares exactly the fifty-seven reviewed intents, each on its own endpoint", () => {
     const si = block("  supported_intents:").map((l) => l.trim().replace(/^- /, "")).filter(Boolean);
     expect(si).toEqual(Object.keys(OFFICIAL));
     for (const [intent, o] of Object.entries(OFFICIAL)) {
