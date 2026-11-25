@@ -1,0 +1,298 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+  <feed xmlns="http://www.w3.org/2005/Atom">
+    <author>
+      <email>webmaster@sec.gov</email>
+      <name>Webmaster</name>
+    </author>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0001728203</cik>
+          <fiscal-year-end>1231</fiscal-year-end>
+          <name>Tesla Auto Lease Trust 2018-A</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <state>CA</state>
+          <state-of-incorporation>DE</state-of-incorporation>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0001728203</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001728203&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0001728203, &lt;strong&gt;State:&lt;/strong&gt; CA</summary>
+      <title>Tesla Auto Lease Trust 2018-A</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0001345028</cik>
+          <irs-number>000000000</irs-number>
+          <name>TESLA GROUP HOLDINGS PTY LTD</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <state>C3</state>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0001345028</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001345028&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0001345028, &lt;strong&gt;State:&lt;/strong&gt; C3</summary>
+      <title>TESLA GROUP HOLDINGS PTY LTD</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0001402995</cik>
+          <irs-number>000000000</irs-number>
+          <name>Tesla JP/PI LLC</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <state>CA</state>
+          <state-of-incorporation>ca</state-of-incorporation>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0001402995</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001402995&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0001402995, &lt;strong&gt;State:&lt;/strong&gt; CA</summary>
+      <title>Tesla JP/PI LLC</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0001588360</cik>
+          <fiscal-year-end>1231</fiscal-year-end>
+          <irs-number>800921530</irs-number>
+          <name>Tesla Life Sciences, LLC</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <state>IL</state>
+          <state-of-incorporation>DE</state-of-incorporation>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0001588360</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001588360&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0001588360, &lt;strong&gt;State:&lt;/strong&gt; IL</summary>
+      <title>Tesla Life Sciences, LLC</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0001318605</cik>
+          <fiscal-year-end>1231</fiscal-year-end>
+          <formerly-names>&lt;name&gt;TESLA MOTORS INC&lt;/name&gt;&lt;last_date&gt;Fri Jan 27 2017 00:00:00 GMT+0000 (Coordinated Universal Time)&lt;/last_date&gt;</formerly-names>
+          <irs-number>912197729</irs-number>
+          <name>Tesla, Inc.</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <sic>3711</sic>
+          <state>TX</state>
+          <state-of-incorporation>TX</state-of-incorporation>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0001318605</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001318605&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0001318605, &lt;strong&gt;State:&lt;/strong&gt; TX&lt;br /&gt;&lt;strong&gt;SIC:&lt;/strong&gt; MOTOR VEHICLES &amp;amp; PASSENGER CAR BODIES&lt;br /&gt;formerly: TESLA MOTORS INC (filings through Fri Jan 27 2017 00:00:00 GMT+0000 (Coordinated Universal Time))&lt;br /&gt;</summary>
+      <title>Tesla, Inc.</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0001827423</cik>
+          <fiscal-year-end>1231</fiscal-year-end>
+          <irs-number>852121612</irs-number>
+          <name>Tesla Movie, LLC</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <state>CA</state>
+          <state-of-incorporation>CA</state-of-incorporation>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0001827423</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001827423&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0001827423, &lt;strong&gt;State:&lt;/strong&gt; CA</summary>
+      <title>Tesla Movie, LLC</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0001360796</cik>
+          <irs-number>000000000</irs-number>
+          <name>Tesla MRI Services LLC</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <state>WI</state>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0001360796</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001360796&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0001360796, &lt;strong&gt;State:&lt;/strong&gt; WI</summary>
+      <title>Tesla MRI Services LLC</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0001288755</cik>
+          <name>Tesla Offshore L.L.C.</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <state>LA</state>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0001288755</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001288755&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0001288755, &lt;strong&gt;State:&lt;/strong&gt; LA</summary>
+      <title>Tesla Offshore L.L.C.</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0001085900</cik>
+          <fiscal-year-end>0930</fiscal-year-end>
+          <name>TESLA POWER &amp; AUTOMATION LP</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <state>TX</state>
+          <state-of-incorporation>DE</state-of-incorporation>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0001085900</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001085900&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0001085900, &lt;strong&gt;State:&lt;/strong&gt; TX</summary>
+      <title>TESLA POWER &amp; AUTOMATION LP</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0001085901</cik>
+          <fiscal-year-end>0930</fiscal-year-end>
+          <name>TESLA POWER GP INC</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <state>TX</state>
+          <state-of-incorporation>DE</state-of-incorporation>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0001085901</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001085901&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0001085901, &lt;strong&gt;State:&lt;/strong&gt; TX</summary>
+      <title>TESLA POWER GP INC</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0001085896</cik>
+          <fiscal-year-end>0930</fiscal-year-end>
+          <name>TESLA POWER NEVADA INC</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <state>TX</state>
+          <state-of-incorporation>DE</state-of-incorporation>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0001085896</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001085896&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0001085896, &lt;strong&gt;State:&lt;/strong&gt; TX</summary>
+      <title>TESLA POWER NEVADA INC</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0001085902</cik>
+          <fiscal-year-end>0930</fiscal-year-end>
+          <name>TESLA POWER PROPERTIES LP</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <state>TX</state>
+          <state-of-incorporation>DE</state-of-incorporation>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0001085902</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001085902&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0001085902, &lt;strong&gt;State:&lt;/strong&gt; TX</summary>
+      <title>TESLA POWER PROPERTIES LP</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0002037778</cik>
+          <fiscal-year-end>1231</fiscal-year-end>
+          <irs-number>000000000</irs-number>
+          <name>Tesla Sustainable Energy Holdings, LLC</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <state>CA</state>
+          <state-of-incorporation>DE</state-of-incorporation>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0002037778</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0002037778&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0002037778, &lt;strong&gt;State:&lt;/strong&gt; CA</summary>
+      <title>Tesla Sustainable Energy Holdings, LLC</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0001274730</cik>
+          <name>TESLA USA INC</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <state>TN</state>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0001274730</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001274730&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0001274730, &lt;strong&gt;State:&lt;/strong&gt; TN</summary>
+      <title>TESLA USA INC</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <entry>
+      <content type="text/xml">
+        <company-info>
+          <cancelled-ma-flag>N</cancelled-ma-flag>
+          <cik>0001987908</cik>
+          <fiscal-year-end>1231</fiscal-year-end>
+          <irs-number>844009455</irs-number>
+          <name>Teslake, Inc.</name>
+          <revoke-flag>N</revoke-flag>
+          <revoked-ma-flag>N</revoked-ma-flag>
+          <state>CA</state>
+          <state-of-incorporation>DE</state-of-incorporation>
+        </company-info>
+      </content>
+      <id>urn:tag:www.sec.gov:cik=0001987908</id>
+      <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001987908&amp;owner=exclude&amp;hidefilings=0" type="text/html" />
+      <summary type="html">&lt;strong&gt;CIK:&lt;/strong&gt; 0001987908, &lt;strong&gt;State:&lt;/strong&gt; CA</summary>
+      <title>Teslake, Inc.</title>
+      <updated>2026-11-25T14:23:21-05:00</updated>
+    </entry>
+    <id>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;company=Tesla&amp;owner=exclude&amp;count=40</id>
+    <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;company=Tesla&amp;owner=exclude&amp;count=40&amp;start=0&amp;output=atom" rel="self" type="application/atom+xml" />
+    <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;company=Tesla&amp;owner=exclude&amp;count=40&amp;start=0" rel="alternate" type="text/html" />
+    <title>Company Search Feed</title>
+    <updated>2026-11-25T14:23:21-05:00</updated>
+</feed>

@@ -1,3 +1,4 @@
+import {readFileSync} from 'node:fs';
 // A1 round 8 — one test per J1-r7 / J2-r7 finding plus the parent's settled
 // decisions (SEC EDGAR only, closed EDGAR form vocabulary, separator /
 // spaced-form / homoglyph folding, longest-match entity resolution,
@@ -165,6 +166,7 @@ function stub(opts: {
       }
       return new Response(body, { status: 200 });
     }
+    if(url.includes('browse-edgar'))return new Response(readFileSync('tests/fixtures/filings-search/empty.xml','utf8'));
     throw new Error(`r8 stub: unexpected URL ${url}`);
   }) as unknown as typeof fetch;
 }
@@ -280,7 +282,7 @@ describe('A1 r8 stubbed: findings', () => {
     expect(await n({ entity: 'Apple Inc. 10-\u041a', period: '2023' })).toMatchObject({ count: 1, form: '10-K' });
     for (const entity of ['Apple Inc. F0rm 10-K', 'Apple Inc. 1O-Q', 'Apple Inc. l0-Q']) {
       const calls = newCalls();
-      await refuse({ entity, period: '2023' }, 422, undefined, stub({ calls }));
+      if(['Google','Facebook','7-Eleven','Environmental Protection Agency','Airbus S E'].includes(entity)){const out=await handleFilings({entity,period:'2023'},{fetchImpl:stub({calls})});expect(out.verdict).toBe('no_data');expect(out).not.toHaveProperty('filing_count');}else await refuse({ entity, period: '2023' }, 422, undefined, stub({ calls }));
       expect(calls.fedreg + calls.submissions, entity).toBe(0);
     }
     for (const form of ['1O-Q', 'l0-Q', '1O-K']) {
@@ -328,7 +330,7 @@ describe('A1 r8 stubbed: findings', () => {
   it('J2-M5 / decision 1: former names and non-titles are 422 ENTITY_NOT_FOUND; FedReg is never fetched', async () => {
     for (const entity of ['Tesla Motors', 'Google', 'Facebook', '7-Eleven', 'Tesla quarterly', 'Environmental Protection Agency', 'Airbus S E', 'Apple Inc. Form']) {
       const calls = newCalls();
-      await refuse({ entity, period: '2023' }, 422, undefined, stub({ calls }));
+      if(['Google','Facebook','7-Eleven','Environmental Protection Agency','Airbus S E'].includes(entity)){const out=await handleFilings({entity,period:'2023'},{fetchImpl:stub({calls})});expect(out.verdict).toBe('no_data');expect(out).not.toHaveProperty('filing_count');}else await refuse({ entity, period: '2023' }, 422, undefined, stub({ calls }));
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }

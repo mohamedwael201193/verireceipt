@@ -56,6 +56,7 @@ export type SpanResult =
       /** Longest span whose complement is valid (the unresolved name), when one exists. */
       name: { entity: string; comp: Complement } | null;
       error: ApiError;
+      searchEligible: boolean;
     };
 
 interface Tok {
@@ -330,6 +331,7 @@ export function resolveEntitySpans(
       const { comp, bad } = complementOf(i, j);
       if (!comp) {
         if (bad && bad.formShaped && !anchoredBad) anchoredBad = { span: sliceName(i, j), bad };
+        if(bad&&!anchoredBad){try{if(deps.resolveName(sliceRaw(i,j)))anchoredBad={span:sliceName(i,j),bad};}catch{/* Existing ambiguous resolution below remains authoritative. */}}
         continue;
       }
       const name = sliceRaw(i, j);
@@ -377,5 +379,5 @@ export function resolveEntitySpans(
       `No SEC EDGAR entry found for entity "${text.trim()}"; use a ticker, CIK, or exact company name (Federal Register fallback is not used)`,
     );
   }
-  return { kind: 'none', name: longestValidName, error };
+  return { kind: 'none', name: longestValidName, error, searchEligible: !ambiguous && !anchoredBad };
 }

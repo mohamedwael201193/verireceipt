@@ -5,17 +5,12 @@
 // the raw main document; each history page carries its own sha256 in
 // upstream_pages[] and is stored with the receipt.
 //
-// SEC EDGAR ONLY (A1 round 8). The intent counts filings "on SEC EDGAR"
-// (reference template "How many {key} are on SEC EDGAR?"). The former
-// Federal Register fallback — a full-text term search whose hits are never
-// attributed to the entity — was REMOVED from the count path: it served
-// "verified" counts for "AAPL X", "Tesla Motors", "Google" and
-// "Apple Inc.—10-K" that were not filings of anyone. An entity that does
-// not resolve to exactly one SEC filer is a 422 (ENTITY_NOT_FOUND /
-// AMBIGUOUS_ENTITY); EDGAR being down is a 502/504, never a substitute.
-// Tickers payloads are shape-validated before caching: a parseable but
-// wrong-shape payload (null, [], {}, {"0":null}) is a 502 SEC_UNAVAILABLE,
-// never cached, never trusted.
+// SEC EDGAR only. Tickers and normalized legal names resolve first. A clean
+// unresolved company name may use company-search Atom for identity discovery,
+// then the submissions API for actual counts. Search hits are never counted as
+// filings. No SEC record returns disclosed no-data without filing_count; source
+// failures and ambiguous/form/CIK/residue guards remain fail-closed errors.
+// No keyed registry or Federal Register count fallback is used.
 //
 // Quorum note: quorum_votes is "1/1 primary source" — a single authoritative
 // source (SEC EDGAR). There is exactly one authoritative registry per
@@ -24,6 +19,7 @@
 import { ApiError, badRequest, unprocessable, upstreamUnavailable } from '../core/errors';
 import { envelope, makeReceipt, sha256Hex } from '../core/receipt';
 import { saveReceipt } from '../core/storage';
+import {parseSecCompanyAtom,matchSecCompany} from './filingsSearch';
 import { resolveEntitySpans } from './filingsEntity';
 import {
   assertNoUnconsumedFormTokens,
@@ -2283,6 +2279,8 @@ export async function handleFilings(
   let cikNameMustMatch: string | null = null;
   let entityForms: string[] = [];
   let phraseForm = false;
+  let matchedLegalName: string | null = null;
+  let searchEvidence: {url:string;body:string} | null = null;
   if (entityIsBareCik) {
     const n = Number(entityFolded.trim());
     if (n > 0) cikMatch = { cik: n, cik10: padCik(n), matchKind: 'cik' };
@@ -2314,7 +2312,11 @@ export async function handleFilings(
     const spans = resolveEntitySpans(blanked.text, periodYear, {
       normalize: normalizeCompanyName,
       canonicalTicker,
-      resolveName: (s) => resolveCikFromTickers(s, tickers),
+      resolveName: (s) => {
+        const original=resolveCikFromTickers(s,tickers);if(original)return original;
+        const match=matchSecCompany(Object.values(tickers).flatMap(e=>{const cik=tickerEntryCik(e);return cik?[{cik,name:e.title}]:[]}),s);
+        return match?{cik:match.cik,cik10:padCik(match.cik),matchKind:'name' as const}:null;
+      },
       resolvePair: (s) => resolveNameTickerPair(s, tickers),
       entries: () => Object.values(tickers).map((e) => ({ ticker: e.ticker, title: e.title, cik: tickerEntryCik(e) })),
     }, tickers, { cikClaimed: cikClaims.length > 0 || blanked.ciks.length > 0 });
@@ -2348,12 +2350,27 @@ export async function handleFilings(
       // No SEC filer in the entity. A named CIK may still answer it, but
       // only when the leftover name equals the EDGAR name of that CIK.
       const hasClaim = cikClaims.length > 0 || (spans.name?.comp.ciks.length ?? 0) > 0;
-      if (!hasClaim || !spans.name) throw spans.error;
+      if (!hasClaim && spans.searchEligible && spans.name) {
+        entity=spans.name.entity;entityForms=spans.name.comp.forms;phraseForm=spans.name.comp.phraseForm;
+        const url='https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company='+encodeURIComponent(entity)+'&owner=exclude&count=100&output=atom';
+        let response: Awaited<ReturnType<typeof fetchTextWithTimeout>>;
+        try{response=await fetchTextWithTimeout(fetchImpl,url,{headers:{'User-Agent':userAgent,Accept:'application/atom+xml'}},timeouts);}catch(error){if(error instanceof ApiError)throw error;throw upstreamUnavailable('SEC_UNAVAILABLE','SEC company search is unavailable');}
+        const {res,body}=response;
+        if(!res.ok||body===null)throw upstreamUnavailable('SEC_UNAVAILABLE','SEC company search is unavailable');
+        const companies=parseSecCompanyAtom(body);
+        searchEvidence={url,body:JSON.stringify({evidence_kind:'filtered SEC company-search identity excerpt',omitted_fields:'addresses, phones, contacts, filing entries and other non-identity metadata',companies})};
+        const match=matchSecCompany(companies,entity);
+        if(/<link\b[^>]*rel=["']next["']/i.test(body))throw unprocessable('AMBIGUOUS_ENTITY','SEC company search is truncated; supply the exact legal name or CIK');
+        console.log(JSON.stringify({event:'filings_entity_resolution',entity_sha256:sha256Hex(entityNfc),entity_length:entityNfc.length,source:'sec_company_search',outcome:match?'matched':'no_data'}));
+        if(match){cikMatch={cik:match.cik,cik10:padCik(match.cik),matchKind:'name'};matchedLegalName=match.name;cikNameMustMatch=match.name;}
+      } else if (!hasClaim || !spans.name) throw spans.error;
+      if(hasClaim && spans.name){
       entity = spans.name.entity;
       cikNameMustMatch = spans.name.entity;
       entityForms = spans.name.comp.forms;
       phraseForm = spans.name.comp.phraseForm;
       for (const c of spans.name.comp.ciks) cikClaims.push({ field: 'entity', cik: c });
+      }
     }
   }
 
@@ -2396,6 +2413,11 @@ export async function handleFilings(
       if (entity === '') entity = String(namedCik);
     }
   }
+  if(!cikMatch&&searchEvidence){
+    const receipt=makeReceipt(INTENT,searchEvidence.url,searchEvidence.body,'Filtered SEC company-search identity excerpt: no matching legal identity, not a filing count');
+    try{await(deps.saveReceiptImpl??saveReceipt)(receipt,searchEvidence.body);}catch{throw new ApiError(500,'RECEIPT_STORE_FAILED','The receipt could not be stored');}
+    return envelope(INTENT,{entity,data_status:'no_data',filings:[],urls:[],resolution_scope:'SEC EDGAR company search only; not a worldwide registry'},receipt,{answer:'No matching SEC EDGAR legal entity was found. No filing count is asserted; this is not evidence that the entity has no regulatory filings elsewhere.',verdict:'no_data',confidence:0,source:'SEC EDGAR company-search Atom'});
+  }
   if (!cikMatch) {
     throw unprocessable('ENTITY_NOT_FOUND', `No SEC EDGAR entry found for entity "${entityNfc}"`);
   }
@@ -2405,7 +2427,14 @@ export async function handleFilings(
 
   // --- SEC EDGAR Submissions API (the only source). Fail CLOSED. ---
   const upstreamUrl = EDGAR_SUBMISSIONS_URL(cikMatch.cik10);
-  const rawBody = await fetchEdgarJsonText(upstreamUrl, userAgent, fetchImpl, entity, true, timeouts);
+  let rawBody:string;
+  try{rawBody=await fetchEdgarJsonText(upstreamUrl,userAgent,fetchImpl,entity,true,timeouts);}catch(error){
+    if(!(error instanceof ApiError)||error.code!=='ENTITY_NOT_FOUND')throw error;
+    const evidence=JSON.stringify({source_url:upstreamUrl,http_status:404,requested_cik:cikMatch.cik,observation:'SEC submissions returned not found; no filing count asserted'});
+    const receipt=makeReceipt(INTENT,upstreamUrl,evidence,'SEC submissions HTTP 404; no filing count');
+    try{await(deps.saveReceiptImpl??saveReceipt)(receipt,evidence);}catch{throw new ApiError(500,'RECEIPT_STORE_FAILED','The receipt could not be stored');}
+    return envelope(INTENT,{entity,data_status:'no_data',filings:[],urls:[]},receipt,{answer:'SEC EDGAR returned no submissions record for the requested CIK. No filing count is asserted.',verdict:'no_data',confidence:0,source:'SEC EDGAR Submissions API (HTTP 404)'});
+  }
   let payload: EdgarSubmissions;
   try {
     payload = JSON.parse(rawBody) as EdgarSubmissions;
@@ -2422,6 +2451,7 @@ export async function handleFilings(
       );
     }
   }
+  matchedLegalName=typeof payload.name==='string'&&payload.name.trim()?payload.name:matchedLegalName;
   const older = await fetchOlderSubmissionPages(payload, cikMatch, period, userAgent, fetchImpl, timeouts);
   const seen = new Set<string>();
   const all: Filing[] = [];
@@ -2446,11 +2476,11 @@ export async function handleFilings(
     await (deps.saveReceiptImpl ?? saveReceipt)(
       receipt,
       rawBody,
-      older.pages.map((p, i) => ({ url: p.url, raw_response_sha256: p.raw_response_sha256, body: older.bodies[i] })),
+      [...older.pages.map((p, i) => ({ url: p.url, raw_response_sha256: p.raw_response_sha256, body: older.bodies[i] })),...(searchEvidence?[{url:searchEvidence.url,raw_response_sha256:sha256Hex(searchEvidence.body),body:searchEvidence.body}]:[])],
     );
   } catch (err) {
     console.warn(
-      `verireceipt: failed to persist FILINGS receipt ${receipt.receipt_id}: ${err instanceof Error ? err.message : String(err)}`,
+      JSON.stringify({event:'filings_receipt_failure',reason:'store_failed',entity_sha256:sha256Hex(entityNfc),entity_length:entityNfc.length}),
     );
     throw new ApiError(500, 'RECEIPT_STORE_FAILED', 'The receipt could not be stored, so no verified answer is served');
   }
@@ -2460,6 +2490,8 @@ export async function handleFilings(
   const reason = filingReason(filings, entity, period.label);
   const fields: Record<string, unknown> = {
     entity,
+    ...(matchedLegalName?{matched_legal_name:matchedLegalName}:{}),
+    ...(searchEvidence?{resolution_source:searchEvidence.url,resolution_evidence_page:older.pages.length,resolution_sha256:sha256Hex(searchEvidence.body),resolution_evidence_kind:'filtered SEC company-search identity excerpt (legal name and CIK only)'}:{}),
     form_type: formLabel,
     ...(multiForm ? { requested_forms: selectedForms, form_filter_mode: "union of unique accessions; amendments separate" } : {}),
     filing_count: filings.length,
@@ -2488,7 +2520,7 @@ export async function handleFilings(
     );
   }
   return envelope(INTENT, fields, receipt, {
-    answer: reason.sentence + ` Found ${filings.length} ${what}${filings.length === 1 ? '' : 's'} for ${entity} in ${period.label}${
+    answer: (matchedLegalName?`Matched SEC legal name: ${matchedLegalName}. `:'') + reason.sentence + ` Found ${filings.length} ${what}${filings.length === 1 ? '' : 's'} for ${entity} in ${period.label}${
       family.length > 1
         ? ` (${multiForm ? 'union; amendments separate; counting' : 'counting'} ${family.map((f) => `${f} ${fields.form_counts ? (fields.form_counts as Record<string, number>)[f] : 0}`).join(' + ')}${multiForm ? '' : ': EDGAR renamed this form in Release 24.4'})`
         : ''

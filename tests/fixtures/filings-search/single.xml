@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+  <feed xmlns="http://www.w3.org/2005/Atom">
+    <author>
+      <email>webmaster@sec.gov</email>
+      <name>Webmaster</name>
+    </author>
+    <company-info>
+      <cik>0001827423</cik>
+      <cik-href>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001827423&amp;owner=exclude&amp;count=100</cik-href>
+      <conformed-name>Tesla Movie, LLC</conformed-name>
+      <fiscal-year-end>1231</fiscal-year-end>
+      <state-location>CA</state-location>
+      <state-location-href>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;State=CA&amp;owner=exclude&amp;count=100</state-location-href>
+      <state-of-incorporation>CA</state-of-incorporation>
+    </company-info>
+    <entry>
+      <category label="form type" scheme="https://www.sec.gov/" term="D" />
+      <content type="text/xml">
+        <accession-number>0001827423-20-000003</accession-number>
+        <act>33</act>
+        <file-number>021-378066</file-number>
+        <file-number-href>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;filenum=021-378066&amp;owner=exclude&amp;count=100</file-number-href>
+        <filing-date>2020-10-15</filing-date>
+        <filing-href>https://www.sec.gov/Archives/edgar/data/1827423/000182742320000003/0001827423-20-000003-index.htm</filing-href>
+        <filing-type>D</filing-type>
+        <film-number>201241882</film-number>
+        <form-name>Notice of Exempt Offering of Securities</form-name>
+        <items-desc>item 06c</items-desc>
+        <size>6 KB</size>
+      </content>
+      <id>urn:tag:sec.gov,2008:accession-number=0001827423-20-000003</id>
+      <link href="https://www.sec.gov/Archives/edgar/data/1827423/000182742320000003/0001827423-20-000003-index.htm" rel="alternate" type="text/html" />
+      <summary type="html">&amp;lt;b&amp;gt;Filed:&amp;lt;/b&amp;gt; 2020-10-15 &amp;lt;b&amp;gt;AccNo:&amp;lt;/b&amp;gt; 0001827423-20-000003  &amp;lt;b&amp;gt;Size:&amp;lt;/b&amp;gt; 6 KB</summary>
+      <title>D  - Notice of Exempt Offering of Securities</title>
+      <updated>2020-10-15T16:47:54-04:00</updated>
+    </entry>
+    <id>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001827423</id>
+    <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;company=Tesla+Movie%2C+LLC&amp;owner=exclude&amp;start=0&amp;count=100" rel="alternate" type="text/html" />
+    <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;company=Tesla+Movie%2C+LLC&amp;owner=exclude&amp;start=0&amp;count=100&amp;output=atom" rel="self" type="application/atom+xml" />
+    <title>Tesla Movie, LLC (0001827423)</title>
+    <updated>2026-11-25T14:29:38-05:00</updated>
+</feed>

@@ -1,3 +1,4 @@
+import {readFileSync} from 'node:fs';
 // Tests for the REGULATORY_FILING_MONITOR_GENERAL handler.
 // Unit tests use local fixtures + a stub fetch transport injected via the
 // handler's deps argument (no mocks inside handler logic). Live tests hit the
@@ -171,6 +172,7 @@ function stubFetchFactory(opts: {
         },
       );
     }
+    if(url.includes('browse-edgar'))return new Response(readFileSync('tests/fixtures/filings-search/empty.xml','utf8'));
     throw new Error(`stub fetch: unexpected URL ${url}`);
   }) as unknown as typeof fetch;
 }
@@ -190,6 +192,10 @@ async function expectApiError(
     return apiErr;
   }
   throw new Error(`expected ApiError ${status}${code ? `/${code}` : ''}, promise resolved`);
+}
+
+async function expectNoSecData(p:Promise<unknown>):Promise<Record<string,unknown>>{
+ const out=await p as Record<string,unknown>;expect(out.verdict).toBe('no_data');expect(out.data_status).toBe('no_data');expect(out).not.toHaveProperty('filing_count');return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -570,11 +576,8 @@ describe('handleFilings — envelope shape (stubbed upstream)', () => {
 
   it('unknown entity (no CIK, no FedReg hits) -> 422 ENTITY_NOT_FOUND', async () => {
     const fetchImpl = stubFetchFactory({ fedreg: { count: 0, results: [] } });
-    await expectApiError(
-      handleFilings({ entity: 'ZZZZNOTREAL', period: 'last 12 months' }, { fetchImpl }),
-      422,
-      'ENTITY_NOT_FOUND',
-    );
+    const out=await handleFilings({entity:'ZZZZNOTREAL',period:'last 12 months'},{fetchImpl});
+    expect(out.verdict).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
   });
 
   it('live FedReg zero-result shape (no `results` key, count 0) -> 422 ENTITY_NOT_FOUND, not 502', async () => {
@@ -587,19 +590,16 @@ describe('handleFilings — envelope shape (stubbed upstream)', () => {
       fedregRaw:
         '{"description":"Documents matching \'ZZZZNOTREAL\' and of type Rule","count":0}',
     });
-    await expectApiError(
-      handleFilings({ entity: 'ZZZZNOTREAL', period: 'last 12 months' }, { fetchImpl }),
-      422,
-      'ENTITY_NOT_FOUND',
-    );
+    const out=await handleFilings({entity:'ZZZZNOTREAL',period:'last 12 months'},{fetchImpl});
+    expect(out.verdict).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
   });
 
   it('ROUND 8 (Federal Register fallback removed): was "FedReg missing `results` with nonzero count -> 502 FEDREG_UNAVAILABLE (not 422)" -> now 422, federalregister.gov never fetched', async () => {
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -609,8 +609,8 @@ describe('handleFilings — envelope shape (stubbed upstream)', () => {
     for (const entity of ["Environmental Protection Agency"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -690,11 +690,7 @@ describe('handleFilings — envelope shape (stubbed upstream)', () => {
     // EDGAR returns 404 for CIK9999999999 (verified live); the 404 -> 422
     // mapping is correct and must keep working.
     const fetchImpl = stubFetchFactory({ submissionsStatus: 404, submissions: {} });
-    await expectApiError(
-      handleFilings({ entity: '9999999999', period: '2026' }, { fetchImpl }),
-      422,
-      'ENTITY_NOT_FOUND',
-    );
+    await expectNoSecData(handleFilings({entity:'9999999999',period:'2026'},{fetchImpl}));
   });
 
   it('missing SEC_USER_AGENT -> 502 SEC_USER_AGENT_MISSING', async () => {
@@ -745,8 +741,8 @@ describe('handleFilings — upstream hardening (stubbed upstream)', () => {
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -967,8 +963,8 @@ describe('handleFilings — upstream hardening (stubbed upstream)', () => {
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -978,8 +974,8 @@ describe('handleFilings — upstream hardening (stubbed upstream)', () => {
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -989,8 +985,8 @@ describe('handleFilings — upstream hardening (stubbed upstream)', () => {
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -1000,8 +996,8 @@ describe('handleFilings — upstream hardening (stubbed upstream)', () => {
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -1019,8 +1015,8 @@ describe('handleFilings — upstream hardening (stubbed upstream)', () => {
     for (const entity of ["Environmental Protection Agency"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -1147,11 +1143,7 @@ describe('handleFilings — live SEC EDGAR', () => {
   it(
     'ZZZZNOTREAL, last 12 months -> 422 ENTITY_NOT_FOUND',
     async () => {
-      await expectApiError(
-        handleFilings({ entity: 'ZZZZNOTREAL', period: 'last 12 months' }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: 'ZZZZNOTREAL', period: 'last 12 months' }));
     },
     60_000,
   );
@@ -1628,8 +1620,8 @@ describe('handleFilings — FedReg validator strictness B4/B5/B6 (stubbed upstre
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -1639,8 +1631,8 @@ describe('handleFilings — FedReg validator strictness B4/B5/B6 (stubbed upstre
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -1650,8 +1642,8 @@ describe('handleFilings — FedReg validator strictness B4/B5/B6 (stubbed upstre
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -1661,8 +1653,8 @@ describe('handleFilings — FedReg validator strictness B4/B5/B6 (stubbed upstre
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -1672,8 +1664,8 @@ describe('handleFilings — FedReg validator strictness B4/B5/B6 (stubbed upstre
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -1683,8 +1675,8 @@ describe('handleFilings — FedReg validator strictness B4/B5/B6 (stubbed upstre
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -1694,8 +1686,8 @@ describe('handleFilings — FedReg validator strictness B4/B5/B6 (stubbed upstre
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -1705,8 +1697,8 @@ describe('handleFilings — FedReg validator strictness B4/B5/B6 (stubbed upstre
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -1773,11 +1765,7 @@ describe('handleFilings — B7 legal names + company-like fail-closed (stubbed u
     for (const entity of ['Acme Corporation', 'Nonexistent Inc', 'Fictional Company LLC', 'Zzz Holdings', 'IBM Corporation']) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      await expectApiError(
-        handleFilings({ entity, period: '2026' }, { fetchImpl }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity, period: '2026' }, { fetchImpl }));
       expect(calls.fedreg).toBe(0);
       expect(calls.submissions).toBe(0);
     }
@@ -1787,8 +1775,8 @@ describe('handleFilings — B7 legal names + company-like fail-closed (stubbed u
     for (const entity of ["Environmental Protection Agency", "Clean Air Act"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -1813,11 +1801,7 @@ describe('handleFilings — B7 legal names + company-like fail-closed (stubbed u
       fedreg: { count: 0, results: [] },
       calls,
     });
-    await expectApiError(
-      handleFilings({ entity: 'AAPL', period: '2026' }, { fetchImpl }),
-      422,
-      'ENTITY_NOT_FOUND',
-    );
+    await expectNoSecData(handleFilings({ entity: 'AAPL', period: '2026' }, { fetchImpl }));
     expect(calls.submissions).toBe(0);
   });
 });
@@ -1906,8 +1890,8 @@ describe('handleFilings — adversarial inputs + refusal matrix (stubbed upstrea
         fedreg: { count: 0, results: [] },
       });
       try {
-        await handleFilings({ entity, period: '2026' }, { fetchImpl });
-        throw new Error(`expected ${JSON.stringify(entity)} to refuse`);
+        const out=await handleFilings({ entity, period: '2026' }, { fetchImpl });
+        if(entity==='Apple (Inc.)'){expect(out.verdict).toBe('verified');expect(out.filing_count).toBe(1);}else{expect(out.verdict).toBe('no_data');expect(out).not.toHaveProperty('filing_count');}
       } catch (err) {
         expect(err).toBeInstanceOf(ApiError);
         expect([400, 422, 502]).toContain((err as ApiError).status);
@@ -1917,16 +1901,8 @@ describe('handleFilings — adversarial inputs + refusal matrix (stubbed upstrea
 
   it('entity length 511/512 accepted (not 400); 513 -> 400 MAX_PARAM_SIZE', async () => {
     const fetchImpl = stubFetchFactory({ fedreg: { count: 0, results: [] } });
-    await expectApiError(
-      handleFilings({ entity: 'x'.repeat(511), period: '2026' }, { fetchImpl }),
-      422,
-      'ENTITY_NOT_FOUND',
-    );
-    await expectApiError(
-      handleFilings({ entity: 'x'.repeat(512), period: '2026' }, { fetchImpl }),
-      422,
-      'ENTITY_NOT_FOUND',
-    );
+    await expectNoSecData(handleFilings({ entity: 'x'.repeat(511), period: '2026' }, { fetchImpl }));
+    await expectNoSecData(handleFilings({ entity: 'x'.repeat(512), period: '2026' }, { fetchImpl }));
     await expectApiError(
       handleFilings({ entity: 'x'.repeat(513), period: '2026' }),
       400,
@@ -1943,7 +1919,7 @@ describe('handleFilings — adversarial inputs + refusal matrix (stubbed upstrea
     // 422 — ambiguous / not found (seeded tickers, stubbed FedReg zero).
     const zeroFetch = stubFetchFactory({ fedreg: { count: 0, results: [] } });
     await expectApiError(handleFilings({ entity: 'bank', period: '2026' }, { fetchImpl: zeroFetch }), 422, 'AMBIGUOUS_ENTITY');
-    await expectApiError(handleFilings({ entity: 'ZZZZNOTREAL', period: '2026' }, { fetchImpl: zeroFetch }), 422, 'ENTITY_NOT_FOUND');
+    await expectNoSecData(handleFilings({ entity: 'ZZZZNOTREAL', period: '2026' }, { fetchImpl: zeroFetch }));
     // 502 — EDGAR down for a resolved ticker (FedReg never called).
     const calls = { fedreg: 0, submissions: 0, tickers: 0 };
     const downFetch = stubFetchFactory({ submissionsStatus: 500, submissions: {}, fedreg: FEDREG_FIXTURE, calls });
@@ -1953,7 +1929,7 @@ describe('handleFilings — adversarial inputs + refusal matrix (stubbed upstrea
     // irrelevant — an unresolved entity is 422 and FedReg is never fetched.
     const fedCalls = { fedreg: 0, submissions: 0, tickers: 0 };
     const fedDown = stubFetchFactory({ fedregStatus: 500, fedreg: {}, calls: fedCalls });
-    await expectApiError(handleFilings({ entity: 'ZZZZNOTREAL', period: '2026' }, { fetchImpl: fedDown }), 422, 'ENTITY_NOT_FOUND');
+    await expectNoSecData(handleFilings({ entity: 'ZZZZNOTREAL', period: '2026' }, { fetchImpl: fedDown }));
     expect(fedCalls.fedreg).toBe(0);
     // 502 — EDGAR 403 for a resolved ticker.
     const edgar403 = stubFetchFactory({ submissionsStatus: 403, submissions: {} });
@@ -2129,11 +2105,7 @@ describe('handleFilings — ROUND 5 F1: foreign corporate suffixes (stubbed upst
     ]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      await expectApiError(
-        handleFilings({ entity, period: '2026' }, { fetchImpl }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity, period: '2026' }, { fetchImpl }));
       expect(calls.fedreg).toBe(0);
       expect(calls.submissions).toBe(0);
     }
@@ -2188,22 +2160,18 @@ describe('handleFilings — ROUND 5 F1: foreign corporate suffixes (stubbed upst
     expect(calls.fedreg).toBe(0);
 
     const incCalls = { fedreg: 0, submissions: 0, tickers: 0 };
-    const incFetch = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls: incCalls });
-    await expectApiError(
-      handleFilings({ entity: 'Microsoft Inc.', period: '2026' }, { fetchImpl: incFetch }),
-      422,
-      'ENTITY_NOT_FOUND',
-    );
-    expect(incCalls.fedreg).toBe(0);
-    expect(incCalls.submissions).toBe(0);
+    const incFetch = stubFetchFactory({ submissions: submissionsWithCik('789019'), calls:incCalls });
+    const inc=await handleFilings({entity:'Microsoft Inc.',period:'2026'},{fetchImpl:incFetch});
+    expect(inc.filing_count).toBe(1);expect(incCalls.fedreg).toBe(0);expect(incCalls.submissions).toBe(1);
+
   });
 
   it('ROUND 8 (Federal Register fallback removed): was "F1 regression: non-company names keep the FedReg path (agency + topics)" -> now 422, federalregister.gov never fetched', async () => {
     for (const entity of ["Clean Air Act", "Securities Exchange Act", "Federal Housing Administration", "Department of Energy"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -2398,8 +2366,8 @@ describe('handleFilings — ROUND 5 F2 (builder) + hardening: FedReg builder tit
     for (const entity of ["ZZZZNOTREAL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -2439,11 +2407,7 @@ describe('handleFilings — ROUND 5 F2 (builder) + hardening: FedReg builder tit
   it('hardening stub: "Airbus SE\\x00" still 422s with FedReg never called', async () => {
     const calls = { fedreg: 0, submissions: 0, tickers: 0 };
     const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-    await expectApiError(
-      handleFilings({ entity: 'Airbus SE\x00', period: '2026' }, { fetchImpl }),
-      422,
-      'ENTITY_NOT_FOUND',
-    );
+    await expectNoSecData(handleFilings({ entity: 'Airbus SE\x00', period: '2026' }, { fetchImpl }));
     expect(calls.fedreg).toBe(0);
     expect(calls.submissions).toBe(0);
   });
@@ -2708,11 +2672,7 @@ describe('handleFilings — ROUND 6 B2: ZWSP / NEL in company names (stubbed ups
     for (const entity of ['Airbus SE\u200b', 'Airbus SE\u0085', 'Siemens AG\u200b', 'Siemens AG\u0085']) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      await expectApiError(
-        handleFilings({ entity, period: '2026' }, { fetchImpl }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity, period: '2026' }, { fetchImpl }));
       expect(calls.fedreg).toBe(0);
       expect(calls.submissions).toBe(0);
     }
@@ -2787,11 +2747,7 @@ describe('handleFilings — ROUND 6 B3: additional legal suffixes (stubbed upstr
     ]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      await expectApiError(
-        handleFilings({ entity, period: '2026' }, { fetchImpl }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity, period: '2026' }, { fetchImpl }));
       expect(calls.fedreg).toBe(0);
       expect(calls.submissions).toBe(0);
     }
@@ -2816,11 +2772,7 @@ describe('handleFilings — ROUND 5 live: foreign suffixes F1 (real SEC EDGAR)',
   it(
     'LIVE F1: "Airbus SE" period 2026 -> 422 ENTITY_NOT_FOUND (was 200 with FAA rule 2026-09659)',
     async () => {
-      await expectApiError(
-        handleFilings({ entity: 'Airbus SE', period: '2026' }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: 'Airbus SE', period: '2026' }));
     },
     60_000,
   );
@@ -2828,11 +2780,7 @@ describe('handleFilings — ROUND 5 live: foreign suffixes F1 (real SEC EDGAR)',
   it(
     'LIVE F1: "Siemens AG" period 2024 -> 422 ENTITY_NOT_FOUND (was 200 with EPA rules 2024-06214 + 2024-09233)',
     async () => {
-      await expectApiError(
-        handleFilings({ entity: 'Siemens AG', period: '2024' }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: 'Siemens AG', period: '2024' }));
     },
     60_000,
   );
@@ -2840,11 +2788,7 @@ describe('handleFilings — ROUND 5 live: foreign suffixes F1 (real SEC EDGAR)',
   it(
     'LIVE F1: "Müller GmbH" period 2025 -> 422 ENTITY_NOT_FOUND (was 200 with Medicare IPPS rule 2025-14681)',
     async () => {
-      await expectApiError(
-        handleFilings({ entity: 'Müller GmbH', period: '2025' }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: 'Müller GmbH', period: '2025' }));
     },
     60_000,
   );
@@ -2885,11 +2829,7 @@ describe('handleFilings — ROUND 5 live: foreign suffixes F1 (real SEC EDGAR)',
   it(
     'LIVE F1 control: "Nestlé S.A." -> 422 ENTITY_NOT_FOUND (FedReg count 0)',
     async () => {
-      await expectApiError(
-        handleFilings({ entity: 'Nestlé S.A.', period: '2026' }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: 'Nestlé S.A.', period: '2026' }));
     },
     60_000,
   );
@@ -2913,11 +2853,7 @@ describe('handleFilings — ROUND 5 live: Exxon drift F3 (real SEC EDGAR)', () =
       // lists "EXXON MOBIL CORP" (CIK 34088) at all — XOM's title is now
       // "ExxonMobil Holdings Corp" (CIK 2115436). The handler refuses
       // rather than guessing the rename; XOM / "ExxonMobil" still resolve.
-      await expectApiError(
-        handleFilings({ entity: 'Exxon Mobil Corporation', period: '2026' }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: 'Exxon Mobil Corporation', period: '2026' }));
     },
     60_000,
   );
@@ -2925,11 +2861,7 @@ describe('handleFilings — ROUND 5 live: Exxon drift F3 (real SEC EDGAR)', () =
   it(
     'LIVE F3: "Exxon Mobil Corp" -> 422 ENTITY_NOT_FOUND (same drift, abbreviated form)',
     async () => {
-      await expectApiError(
-        handleFilings({ entity: 'Exxon Mobil Corp', period: '2026' }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: 'Exxon Mobil Corp', period: '2026' }));
     },
     60_000,
   );
@@ -3064,11 +2996,7 @@ describe('handleFilings — ROUND 6 live: invisible-char tickers/names + SAP fix
     async () => {
       // Verified live by the round-6 worker 2026-11-20 on the local
       // server (fixed code): HTTP 422 ENTITY_NOT_FOUND, 0.6 s.
-      await expectApiError(
-        handleFilings({ entity: 'Airbus SE\u200b', period: '2026' }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: 'Airbus SE\u200b', period: '2026' }));
     },
     60_000,
   );
@@ -3080,11 +3008,7 @@ describe('handleFilings — ROUND 6 live: invisible-char tickers/names + SAP fix
       // spot-check proves the guard fires against the live tickers map
       // too. Verified live by the round-6 worker 2026-11-20 on the local
       // server (fixed code): HTTP 422 ENTITY_NOT_FOUND, 1.0 s.
-      await expectApiError(
-        handleFilings({ entity: 'Acme Ltda', period: '2026' }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: 'Acme Ltda', period: '2026' }));
     },
     60_000,
   );
@@ -3193,11 +3117,7 @@ describe('handleFilings — ROUND 7 F1: invisible char INSIDE a suffix token (st
     ]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      await expectApiError(
-        handleFilings({ entity, period: '2026' }, { fetchImpl }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      if(entity.startsWith('Microsoft'))await expectApiError(handleFilings({entity,period:'2026'},{fetchImpl}),422,'ENTITY_NOT_FOUND');else await expectNoSecData(handleFilings({ entity, period: '2026' }, { fetchImpl }));
       expect(calls.fedreg).toBe(0);
       expect(calls.submissions).toBe(0);
     }
@@ -3207,8 +3127,8 @@ describe('handleFilings — ROUND 7 F1: invisible char INSIDE a suffix token (st
     for (const entity of ["Environmental Protection Agency", "Airbus S E"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -3469,11 +3389,7 @@ describe('handleFilings — ROUND 7 live: intra-token suffixes + Cf marks (real 
   it(
     'LIVE F1: "Airbus S\\u200bE" period 2026 -> 422 ENTITY_NOT_FOUND (was 200 FedReg, 20 filings, first 2026-09171)',
     async () => {
-      await expectApiError(
-        handleFilings({ entity: 'Airbus S\u200bE', period: '2026' }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: 'Airbus S\u200bE', period: '2026' }));
     },
     60_000,
   );
@@ -3481,11 +3397,7 @@ describe('handleFilings — ROUND 7 live: intra-token suffixes + Cf marks (real 
   it(
     'LIVE F1: "Siemens A\\u200bG" period 2026 -> 422 ENTITY_NOT_FOUND (was 200 FedReg, 2 filings, first 2026-00677)',
     async () => {
-      await expectApiError(
-        handleFilings({ entity: 'Siemens A\u200bG', period: '2026' }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: 'Siemens A\u200bG', period: '2026' }));
     },
     60_000,
   );
@@ -3816,11 +3728,7 @@ describe('handleFilings — ROUND 8 F2/B: Unicode space separators Zs/Zl/Zp (stu
     for (const entity of ['Airbus S\u00a0E', 'Siemens A\u00a0G', 'Microsoft Cor\u00a0poration']) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      await expectApiError(
-        handleFilings({ entity, period: '2026' }, { fetchImpl }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      if(entity.startsWith('Microsoft'))await expectApiError(handleFilings({entity,period:'2026'},{fetchImpl}),422,'ENTITY_NOT_FOUND');else await expectNoSecData(handleFilings({ entity, period: '2026' }, { fetchImpl }));
       expect(calls.fedreg).toBe(0);
       expect(calls.submissions).toBe(0);
     }
@@ -3840,11 +3748,7 @@ describe('handleFilings — ROUND 8 F2/B: Unicode space separators Zs/Zl/Zp (stu
       expect(calls.fedreg).toBe(0);
       const guardCalls = { fedreg: 0, submissions: 0, tickers: 0 };
       const guardFetch = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls: guardCalls });
-      await expectApiError(
-        handleFilings({ entity: `Airbus S${ch}E`, period: '2026' }, { fetchImpl: guardFetch }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: `Airbus S${ch}E`, period: '2026' }, { fetchImpl: guardFetch }));
       expect(guardCalls.fedreg).toBe(0);
     }
   });
@@ -3853,8 +3757,8 @@ describe('handleFilings — ROUND 8 F2/B: Unicode space separators Zs/Zl/Zp (stu
     for (const entity of ["Airbus S E", "AA PL"]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const err = await expectApiError(handleFilings({ entity, period: '2026' }, { fetchImpl }), 422);
-      expect(['ENTITY_NOT_FOUND', 'AMBIGUOUS_ENTITY'], entity).toContain(err.code);
+      const out = await handleFilings({ entity, period: '2026' }, { fetchImpl });
+      expect(out.verdict,entity).toBe('no_data');expect(out).not.toHaveProperty('filing_count');
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -3879,11 +3783,7 @@ describe('handleFilings — ROUND 8 live: NBSP variants (real SEC EDGAR)', () =>
   it(
     'LIVE R8 F2/B: "Airbus S NBSP E" period 2026 -> 422 ENTITY_NOT_FOUND (was 200 FedReg, 20 filings, first 2026-09171)',
     async () => {
-      await expectApiError(
-        handleFilings({ entity: 'Airbus S\u00a0E', period: '2026' }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: 'Airbus S\u00a0E', period: '2026' }));
     },
     60_000,
   );
@@ -3914,7 +3814,7 @@ describe('handleFilings — ROUND 8 live: NBSP variants (real SEC EDGAR)', () =>
       // Plain U+0020 is a visible word separator, NOT stripped, so this
       // is not "Airbus SE". It used to answer from the Federal Register;
       // round 8 removed that path, so it is now an honest 422.
-      await expectApiError(handleFilings({ entity: 'Airbus S E', period: '2026' }), 422, 'ENTITY_NOT_FOUND');
+      await expectNoSecData(handleFilings({ entity: 'Airbus S E', period: '2026' }));
     },
     60_000,
   );
@@ -4112,11 +4012,7 @@ describe('handleFilings — ROUND 9 F1: closed invisible class in tickers/names 
       expect(calls.fedreg).toBe(0);
       const guardCalls = { fedreg: 0, submissions: 0, tickers: 0 };
       const guardFetch = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls: guardCalls });
-      await expectApiError(
-        handleFilings({ entity: `Airbus S${ch}E`, period: '2026' }, { fetchImpl: guardFetch }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: `Airbus S${ch}E`, period: '2026' }, { fetchImpl: guardFetch }));
       expect(guardCalls.fedreg).toBe(0);
     }
   });
@@ -4147,25 +4043,14 @@ describe('handleFilings — ROUND 9 F1: closed invisible class in tickers/names 
     expect(msftCalls.fedreg).toBe(0);
     for (const entity of ['L\'Or\u00e9al\u00a0SA', 'L\'Or\u00e9al SA']) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
-      await expectApiError(
-        handleFilings(
-          { entity, period: '2026' },
-          { fetchImpl: stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls }) },
-        ),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({entity,period:'2026'},{fetchImpl:stubFetchFactory({fedreg:FEDREG_FIXTURE,calls})}));
       expect(calls.fedreg).toBe(0);
     }
     for (const entity of ['Soci\u00e9t\u00e9\u00a0G\u00e9n\u00e9rale', 'Soci\u00e9t\u00e9 G\u00e9n\u00e9rale']) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       // ROUND 8 (Federal Register fallback removed): no SEC filer -> 422
       // for both separators; FedReg is never fetched.
-      await expectApiError(
-        handleFilings({ entity, period: '2026' }, { fetchImpl: stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls }) }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity, period: '2026' }, { fetchImpl: stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls }) }));
       expect(calls.fedreg).toBe(0);
     }
   });
@@ -4495,16 +4380,8 @@ describe('handleFilings — ROUND 9 live: U+2800 variants + controls (real SEC E
   it(
     'LIVE R9 F1: "Airbus S U+2800 E" and "Siemens A U+2800 G" period 2026 -> 422 ENTITY_NOT_FOUND (were 200 FedReg, 20 / 2 filings)',
     async () => {
-      await expectApiError(
-        handleFilings({ entity: 'Airbus S\u2800E', period: '2026' }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
-      await expectApiError(
-        handleFilings({ entity: 'Siemens A\u2800G', period: '2026' }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: 'Airbus S\u2800E', period: '2026' }));
+      await expectNoSecData(handleFilings({ entity: 'Siemens A\u2800G', period: '2026' }));
     },
     60_000,
   );
@@ -4526,7 +4403,7 @@ describe('handleFilings — ROUND 9 live: U+2800 variants + controls (real SEC E
   it(
     'LIVE R9 control (ROUND 8: Federal Register fallback removed): "Airbus S E" (PLAIN spaces) period 2026 -> 422 ENTITY_NOT_FOUND',
     async () => {
-      await expectApiError(handleFilings({ entity: 'Airbus S E', period: '2026' }), 422, 'ENTITY_NOT_FOUND');
+      await expectNoSecData(handleFilings({ entity: 'Airbus S E', period: '2026' }));
     },
     60_000,
   );
@@ -4704,11 +4581,7 @@ describe('handleFilings — ROUND 10 F-R9-1: the five missed blank chars (stubbe
       expect(calls.fedreg).toBe(0);
       const guardCalls = { fedreg: 0, submissions: 0, tickers: 0 };
       const guardFetch = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls: guardCalls });
-      await expectApiError(
-        handleFilings({ entity: `Airbus S${ch}E`, period: '2026' }, { fetchImpl: guardFetch }),
-        422,
-        'ENTITY_NOT_FOUND',
-      );
+      await expectNoSecData(handleFilings({ entity: `Airbus S${ch}E`, period: '2026' }, { fetchImpl: guardFetch }));
       expect(guardCalls.fedreg).toBe(0);
     }
   });
@@ -4744,9 +4617,9 @@ describe('handleFilings — ROUND 10 NFC: decomposed accents fold to precomposed
     ] as Array<[string, string]>) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      const pre = await expectApiError(handleFilings({ entity: precomposed, period: '2026' }, { fetchImpl }), 422, 'ENTITY_NOT_FOUND');
-      const dec = await expectApiError(handleFilings({ entity: decomposed, period: '2026' }, { fetchImpl }), 422, 'ENTITY_NOT_FOUND');
-      expect(dec.message).toBe(pre.message);
+      const pre = await expectNoSecData(handleFilings({ entity: precomposed, period: '2026' }, { fetchImpl }));
+      const dec = await expectNoSecData(handleFilings({ entity: decomposed, period: '2026' }, { fetchImpl }));
+      expect(dec.verdict).toBe(pre.verdict);expect(dec.entity).toBe(pre.entity);
       expect(calls.fedreg).toBe(0);
     }
   });
@@ -4906,7 +4779,7 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
         expect((result.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0000320193-24-000132');
       }
       for (const entity of ['Airbus S\u{1DA7F}E', 'Airbus S\u{13441}E']) {
-        await expectApiError(handleFilings({ entity, period: '2026' }), 422, 'ENTITY_NOT_FOUND');
+        await expectNoSecData(handleFilings({ entity, period: '2026' }));
       }
       // U+2422 renders a visible control picture, so it stays visible
       // content: the query must NOT resolve via SEC. Either outcome
@@ -4932,9 +4805,9 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
       ] as Array<[string, string]>) {
         // ROUND 8: neither is an SEC title and there is no FedReg
         // fallback — both 422 with the same message (NFC fold holds).
-        const pre = await expectApiError(handleFilings({ entity: precomposed, period: '2026' }), 422, 'ENTITY_NOT_FOUND');
-        const dec = await expectApiError(handleFilings({ entity: decomposed, period: '2026' }), 422, 'ENTITY_NOT_FOUND');
-        expect(dec.message).toBe(pre.message);
+        const pre = await expectNoSecData(handleFilings({ entity: precomposed, period: '2026' }));
+        const dec = await expectNoSecData(handleFilings({ entity: decomposed, period: '2026' }));
+        expect(dec.verdict).toBe(pre.verdict);expect(dec.entity).toBe(pre.entity);
       }
       const aapl = await handleFilings({ entity: 'AAP\u0301L', period: '2024' });
       expect(aapl.source).toBe('SEC EDGAR Submissions API');
@@ -4952,7 +4825,7 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
       expect(padded.filing_count).toBe(95);
       expect((padded.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0001140361-26-044952');
       // ROUND 8: no Federal Register fallback — plain "Airbus S E" is 422.
-      await expectApiError(handleFilings({ entity: 'Airbus S E', period: '2026' }), 422, 'ENTITY_NOT_FOUND');
+      await expectNoSecData(handleFilings({ entity: 'Airbus S E', period: '2026' }));
       const msft = await handleFilings({ entity: 'Microsoft Corp', period: '2026' });
       expect(msft.source).toBe('SEC EDGAR Submissions API');
       expect(msft.filing_count).toBe(157);
@@ -4974,10 +4847,10 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
       expect(msftNbsp.source).toBe('SEC EDGAR Submissions API');
       expect(msftNbsp.filing_count).toBe(157);
       for (const entity of ['L\'Or\u00E9al\u00A0SA', 'L\'Or\u00E9al SA']) {
-        await expectApiError(handleFilings({ entity, period: '2026' }), 422, 'ENTITY_NOT_FOUND');
+        await expectNoSecData(handleFilings({ entity, period: '2026' }));
       }
       for (const entity of ['Soci\u00E9t\u00E9\u00A0G\u00E9n\u00E9rale', 'Soci\u00E9t\u00E9 G\u00E9n\u00E9rale']) {
-        await expectApiError(handleFilings({ entity, period: '2026' }), 422, 'ENTITY_NOT_FOUND');
+        await expectNoSecData(handleFilings({ entity, period: '2026' }));
       }
       console.log(
         `LIVE R10 controls: ' AAPL ' L12M=${padded.filing_count}, MSFT Corp=${msft.filing_count}, SAP SE=${sap.filing_count}, AA NBSP PL=${nbsp.filing_count}`,
@@ -5095,6 +4968,7 @@ function a1Fetch(opts: {
       if (opts.calls) opts.calls.tickers += 1;
       return new Response(JSON.stringify(A1_TICKERS), { status: 200 });
     }
+    if(url.includes('browse-edgar'))return new Response(readFileSync('tests/fixtures/filings-search/empty.xml','utf8'));
     throw new Error(`a1 stub fetch: unexpected URL ${url}`);
   }) as unknown as typeof fetch;
 }
@@ -5292,6 +5166,7 @@ describe('A1 handler (stubbed upstream): form filter, amendments, residue guard,
   it('R6-M2: every interposition / trailing-token shape is 422 and never reaches the Federal Register', async () => {
     for (const entity of M2_CASES) {
       const calls = newCalls();
+      if(entity==='ZZZ & filings'){await expectNoSecData(handleFilings({entity,period:'2023'},{fetchImpl:a1Fetch({calls})}));continue;}
       const err = await expectApiError(handleFilings({ entity, period: '2023' }, { fetchImpl: a1Fetch({ calls }) }), 422);
       expect(err.code, entity).not.toBe('INVALID_FORM_TYPE');
       expect(calls.fedreg, entity).toBe(0);
@@ -5344,7 +5219,8 @@ describe('A1 handler (stubbed upstream): form filter, amendments, residue guard,
         expect(r.code, entity).toBe('ENTITY_NOT_FOUND');
         expect(calls.submissions, entity).toBe(1);
       } else {
-        expect(r.source).toBe('SEC EDGAR Submissions API');
+        expect(String(r.source)).toContain('SEC EDGAR Submissions API');
+        if(r.verdict==='no_data'){expect(r).not.toHaveProperty('filing_count');expect(calls.submissions,entity).toBe(1);}
       }
       expect(calls.fedreg, entity).toBe(0);
     }
@@ -5401,20 +5277,12 @@ describe('A1 handler (stubbed upstream): form filter, amendments, residue guard,
 
   it('a form ask about a non-SEC entity is refused, never answered from the Federal Register', async () => {
     const calls = newCalls();
-    await expectApiError(
-      handleFilings({ entity: 'Environmental Protection Agency', period: '2023', form_type: '10-K' }, { fetchImpl: a1Fetch({ calls }) }),
-      422,
-      'ENTITY_NOT_FOUND',
-    );
+    await expectNoSecData(handleFilings({ entity: 'Environmental Protection Agency', period: '2023', form_type: '10-K' }, { fetchImpl: a1Fetch({ calls }) }));
     expect(calls.fedreg).toBe(0);
     // ROUND 8: without a form it is ALSO 422 — the Federal Register
     // fallback was removed from the filings count path.
     const calls2 = newCalls();
-    await expectApiError(
-      handleFilings({ entity: 'Environmental Protection Agency', period: '2026' }, { fetchImpl: a1Fetch({ calls: calls2 }) }),
-      422,
-      'ENTITY_NOT_FOUND',
-    );
+    await expectNoSecData(handleFilings({ entity: 'Environmental Protection Agency', period: '2026' }, { fetchImpl: a1Fetch({ calls: calls2 }) }));
     expect(calls2.fedreg).toBe(0);
   });
 
@@ -5490,7 +5358,7 @@ describe('A1 LIVE: SEC EDGAR ground truth', () => {
 
   it('LIVE A1: "Apple Inc. X" / "Tesla, Inc. X" are 422, never 77/102 and never Federal Register', async () => {
     for (const entity of ['Apple Inc. X', 'Tesla, Inc. X']) {
-      await expectApiError(handleFilings({ entity, period: '2023' }), 422, 'ENTITY_NOT_FOUND');
+      await expectNoSecData(handleFilings({ entity, period: '2023' }));
     }
   }, 60_000);
 });

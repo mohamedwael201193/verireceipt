@@ -1,0 +1,32 @@
+{
+  "scope": "Actual SEC Atom responses, privacy-minimized by removing address/phone elements. Not full original bodies. Discovery identity only, not filing counts.",
+  "captures": [
+    {
+      "file": "known.xml",
+      "url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=Tesla&owner=exclude&count=40&output=atom",
+      "captured_date": "2026-11-25",
+      "status": 200,
+      "original_sha256": "cf70f3d74f839b5bc203109e6e468a62aa37f8ef6b7a3a1c458d09294ff9c6cb",
+      "sha256": "1a32d2670ce2e09279bbd88d049c7348b739774350a45eb80278f7d90972636a",
+      "transformation": "Removed address and phone elements; other Atom structure retained."
+    },
+    {
+      "file": "empty.xml",
+      "url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=ZZZZNOTREAL&owner=exclude&count=40&output=atom",
+      "captured_date": "2026-11-25",
+      "status": 200,
+      "original_sha256": "4a544b5261bc2a1be93836ee7af8d51d43e0eeb1dfaa7c6871fc2a86cc384f6f",
+      "sha256": "4a544b5261bc2a1be93836ee7af8d51d43e0eeb1dfaa7c6871fc2a86cc384f6f",
+      "transformation": "Removed address and phone elements; other Atom structure retained."
+    },
+    {
+      "file": "single.xml",
+      "url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=Tesla%20Movie%2C%20LLC&owner=exclude&count=100&output=atom",
+      "captured_date": "2026-11-25",
+      "status": 200,
+      "original_sha256": "e2c2f3ec47894e6b8d258af370147384bebc072d989603c5d7a52800fd61ff44",
+      "sha256": "266044120a41a8faeb538c7ddfbba47e4ca15805c3c619385251a71cd10bb229",
+      "transformation": "Removed address and phone elements; other Atom structure retained."
+    }
+  ]
+}
