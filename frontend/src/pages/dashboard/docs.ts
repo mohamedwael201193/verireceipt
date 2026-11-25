@@ -265,6 +265,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - WEATHER_FORECAST_VERIFY_GENERAL\n' +
     '    - RETURN_POLICY_VERIFY_GENERAL\n' +
     '    - GAME_RESULT_GENERAL\n' +
+    '    - CRYPTO_YIELD_RATE_GENERAL\n' +
     '  signal_mapping:\n' +
     '    confidence_field: confidence\n' +
     '    label_field: answer\n' +
@@ -1411,6 +1412,36 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          - GAME_RESULT_GENERAL\n' +
     '          description: \'Two competitor names and exact YYYY-MM-DD date, at most 200 characters.\'\n' +
     '\n' +
+    '\n' +
+    '  - path: /v1/yield\n' +
+    '    external_path: /v1/yield\n' +
+    '    method: GET\n' +
+    '    description: \'Current on-chain Aave v3 supply APY for USDC, USDT, DAI or WETH on Ethereum only.\n' +
+    '      Two RPC services must agree on exact safe-head block and reserve state. Safe-head is not\n' +
+    '      finalized and reorganization remains possible. Observation must be within 15 minutes.\n' +
+    '      Supply rate only, excluding rewards, incentives and token appreciation. No other protocols,\n' +
+    '      assets or chains are substituted; unavailable or conflicting observations are refused.\'\n' +
+    '    intents:\n' +
+    '    - CRYPTO_YIELD_RATE_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: project\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - CRYPTO_YIELD_RATE_GENERAL\n' +
+    '          description: \'Exact aave-v3, case-insensitive. No protocol substitution.\'\n' +
+    '        - name: symbol\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - CRYPTO_YIELD_RATE_GENERAL\n' +
+    '          description: \'USDC, USDT, DAI or WETH. Native ETH is not substituted for WETH.\'\n' +
+    '        - name: chain\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - CRYPTO_YIELD_RATE_GENERAL\n' +
+    '          description: \'Exact ethereum, case-insensitive. No chain substitution.\'\n' +
+    '\n' +
     'intent_mapping:\n' +
     '  ONCHAIN_TX_LOOKUP_GENERAL:\n' +
     '    endpoint: /v1/tx\n' +
@@ -2338,7 +2369,21 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '        path: away_score\n' +
     '        unit: "points"\n' +
     '      date:\n' +
-    '        path: date\n',
+    '        path: date\n' +
+    '\n' +
+    '  CRYPTO_YIELD_RATE_GENERAL:\n' +
+    '    endpoint: /v1/yield\n' +
+    '    input:\n' +
+    '      project:\n' +
+    '        from: project\n' +
+    '      symbol:\n' +
+    '        from: symbol\n' +
+    '      chain:\n' +
+    '        from: chain\n' +
+    '    output:\n' +
+    '      supply_apy:\n' +
+    '        path: supply_apy\n' +
+    '        unit: "basis points"\n',
 
   cast: REGISTRATION_CAST_SNIPPET,
 };

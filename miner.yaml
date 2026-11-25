@@ -117,6 +117,7 @@ semantics:
     - WEATHER_FORECAST_VERIFY_GENERAL
     - RETURN_POLICY_VERIFY_GENERAL
     - GAME_RESULT_GENERAL
+    - CRYPTO_YIELD_RATE_GENERAL
   signal_mapping:
     confidence_field: confidence
     label_field: answer
@@ -1263,6 +1264,36 @@ endpoints:
           - GAME_RESULT_GENERAL
           description: 'Two competitor names and exact YYYY-MM-DD date, at most 200 characters.'
 
+
+  - path: /v1/yield
+    external_path: /v1/yield
+    method: GET
+    description: 'Current on-chain Aave v3 supply APY for USDC, USDT, DAI or WETH on Ethereum only.
+      Two RPC services must agree on exact safe-head block and reserve state. Safe-head is not
+      finalized and reorganization remains possible. Observation must be within 15 minutes.
+      Supply rate only, excluding rewards, incentives and token appreciation. No other protocols,
+      assets or chains are substituted; unavailable or conflicting observations are refused.'
+    intents:
+    - CRYPTO_YIELD_RATE_GENERAL
+    params:
+      query:
+        required:
+        - name: project
+          type: string
+          intents:
+          - CRYPTO_YIELD_RATE_GENERAL
+          description: 'Exact aave-v3, case-insensitive. No protocol substitution.'
+        - name: symbol
+          type: string
+          intents:
+          - CRYPTO_YIELD_RATE_GENERAL
+          description: 'USDC, USDT, DAI or WETH. Native ETH is not substituted for WETH.'
+        - name: chain
+          type: string
+          intents:
+          - CRYPTO_YIELD_RATE_GENERAL
+          description: 'Exact ethereum, case-insensitive. No chain substitution.'
+
 intent_mapping:
   ONCHAIN_TX_LOOKUP_GENERAL:
     endpoint: /v1/tx
@@ -2191,3 +2222,17 @@ intent_mapping:
         unit: "points"
       date:
         path: date
+
+  CRYPTO_YIELD_RATE_GENERAL:
+    endpoint: /v1/yield
+    input:
+      project:
+        from: project
+      symbol:
+        from: symbol
+      chain:
+        from: chain
+    output:
+      supply_apy:
+        path: supply_apy
+        unit: "basis points"
