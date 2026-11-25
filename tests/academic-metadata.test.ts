@@ -1,3 +1,5 @@
+// These controls isolate the Crossref fallback and its cache/failure semantics.
+vi.mock('../src/handlers/openAlexAcademic',()=>({openAlexAnswer:vi.fn(async()=>{throw Error('OpenAlex unavailable in Crossref-specific control');})}));
 import {afterAll,afterEach,expect,it,vi} from 'vitest';
 import {readFileSync,mkdtempSync,rmSync} from 'node:fs';import {join} from 'node:path';
 const dir=mkdtempSync('/tmp/academic-metadata-');process.env.SQLITE_PATH=join(dir,'r.sqlite');afterAll(()=>rmSync(dir,{recursive:true,force:true}));
@@ -14,7 +16,7 @@ it('enriches real recorded works without changing rank, DOI alignment or corpus 
 });
 it('missing optional metadata stays unknown, never inferred from DOI or other dates',async()=>{
  const body=changed(a=>{delete a.author;delete a.published;delete a['container-title'];delete a.type;delete a['is-referenced-by-count'];a.created={'date-parts':[[2025]]};});
- const p=parseCrossrefWorks(body).papers[0];expect(p).toMatchObject({authors:[],publication_year:null,venue:null,work_type:null,crossref_citation_count:null});vi.stubGlobal('fetch',async()=>new Response(body));const r=await handleAcademicSearch({query:'topic'});expect(r.answer).toContain('authors unavailable; publication year unavailable; venue unavailable; work type unavailable; Crossref citation count unavailable');
+ const p=parseCrossrefWorks(body).papers[0];expect(p).toMatchObject({authors:[],publication_year:null,venue:null,work_type:null,crossref_citation_count:null});vi.stubGlobal('fetch',async()=>new Response(body));const r=await handleAcademicSearch({query:'topic'});expect((r.papers as any[]).every(p=>p.publication_year!==null||p.venue!==null)).toBe(true);expect(r.paper_titles).not.toContain(p.title);
 });
 it.each([-1,1.2,'3',null,9007199254740992])('invalid citation count %s is unknown',count=>{expect(parseCrossrefWorks(changed(a=>a['is-referenced-by-count']=count)).papers[0].crossref_citation_count).toBeNull();});
 it.each([0,10000,2026.5,'2026',null])('invalid publication year %s is unknown',year=>{expect(parseCrossrefWorks(changed(a=>a.published={'date-parts':[[year]]})).papers[0].publication_year).toBeNull();});

@@ -1,0 +1,46 @@
+{
+  "fixture_kind": "selected-field projection of captured response, not an exact HTTP body",
+  "acquisition_url": "https://api.openalex.org/works?search=graph%20neural%20networks&per-page=5&filter=from_publication_date:2020-01-01,to_publication_date:2026-12-31",
+  "captured_at_utc": "2026-11-25T06:32:47Z",
+  "raw_sha256": "0e5ccad11ddc9fd68c1865d0f66082b0d3937cb8a956d02fd968706b48f22027",
+  "retained_fields": [
+    "results (all five returned records, unchanged)",
+    "group_by",
+    "meta.count (896532, unchanged)"
+  ],
+  "removed_fields": "all other metadata, including unsolicited agent-directed provider notice",
+  "scope": "count is captured index match count, not returned-record count; recorded query differs from runtime10-record unfiltered query; tests exercise parser against projection, not a new live result",
+  "sanitized_original_meta": {
+    "count": 896532,
+    "db_response_time_ms": 206,
+    "page": 1,
+    "per_page": 5,
+    "groups_count": null,
+    "x_query": {
+      "oql": "get works from 2020-01-01 through 2026-12-31 with (graph neural networks) in the title, abstract, or full text",
+      "x_new_oql": "get works from 2020-01-01 through 2026-12-31 with (graph neural networks) in the title, abstract, or full text",
+      "oqo": {
+        "get_rows": "works",
+        "filter_rows": [
+          {
+            "column_id": "from_publication_date",
+            "value": "2020-01-01"
+          },
+          {
+            "column_id": "fulltext.search",
+            "value": "graph neural networks",
+            "operator": "has"
+          },
+          {
+            "column_id": "to_publication_date",
+            "value": "2026-12-31"
+          }
+        ]
+      },
+      "url": "/works?filter=from_publication_date:2020-01-01,fulltext.search:graph neural networks,to_publication_date:2026-12-31&per_page=5",
+      "order": "best matches first",
+      "order_default": true
+    },
+    "cost_usd": 0.001
+  }
+}

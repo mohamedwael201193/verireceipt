@@ -1,32 +1,9 @@
-// ACADEMIC_SEARCH_GENERAL — GET /v1/academic-search?query=<topic>
-//
-// Zero-LLM. Searches the Crossref scholarly index for works matching a
-// topic and returns the top titles with their DOIs, with a SHA-256
-// receipt over the exact upstream response body. Same receipt model,
-// same envelope, same honesty language as every other intent.
-//
-// Intent contract (https://devnode.telegraphprotocol.com/engine/v1/intents/ACADEMIC_SEARCH_GENERAL,
-// read 2026-11-22): request query (string, required, onchain slot caps
-// at 256 bytes); response answer, paper_titles (list), dois (list, same
-// order), total_matches (integer [0, 1e8]), brief (<= 80 chars).
-//
-// SOURCE: Crossref REST API (api.crossref.org) — keyless, public,
-// free; used from the public pool with a project User-Agent, no mailto
-// (maintainer decision 2026-11-23: no personal address in a public
-// repo or third-party logs). Probed live 2026-11-23. OpenAlex was evaluated
-// first and rejected for now: its anonymous search was rate-limited
-// cluster-wide (HTTP 429 "search cluster under elevated load") at probe
-// time, so it cannot be the dependable primary.
-//
-// DOCTRINE: single source, honestly named. A second search engine
-// (Semantic Scholar, OpenAlex) indexes a different corpus with a
-// different ranking, so two rankings can neither agree nor be averaged
-// — the served list is Crossref's own relevance order and says so.
-// total_matches is Crossref's index match count, not "all scholarly
-// papers on the topic". Items without a title or a DOI are skipped
-// (the contract aligns paper_titles with dois) and the skip count is
-// recorded in the evidence. Zero matches is a real 200 answer with
-// empty lists, never an error. No title, DOI or count is ever invented.
+import {openAlexAnswer} from './openAlexAcademic';
+// ACADEMIC_SEARCH_GENERAL: DOI-bearing scholarly metadata.
+// OpenAlex primary, Crossref fallback. Each answer names exactly one index;
+// rankings, corpus counts and citation counts are never combined across indexes.
+// Both publication year and venue cannot be absent from a returned record.
+// Metadata is not proof of quality or peer review. No personal contact is sent.
 import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -111,14 +88,18 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
   if (Buffer.byteLength(q, "utf8") > MAX_QUERY_BYTES) {
     throw badRequest("QUERY_TOO_LONG", `query must fit the onchain 256-byte request slot (got ${Buffer.byteLength(q, "utf8")} bytes)`);
   }
-  const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(normalizeAcademicQuery(q))}&rows=${ROWS}`;
-  const observation = await cachedAcademicBody(q,url,UA,body=>{parseCrossrefWorks(body);}).catch((err: unknown) => {
-    if(err && typeof err === "object" && "code" in err)throw err;
-    throw upstreamUnavailable("CROSSREF_UNREACHABLE", `Crossref search failed: ${err instanceof Error ? err.message : "unknown error"}`);
+  let year:number|undefined;
+  if(query.year!==undefined){year=Number(query.year);if(!/^\d{4}$/.test(query.year)||!Number.isInteger(year)||year<1000||year>new Date().getUTCFullYear())throw badRequest('INVALID_YEAR','year must be a four-digit publication year, not in the future');}
+  try{return await openAlexAnswer(q,year);}catch(error){if((error as any)?.code==='RECEIPT_PERSIST_FAILED')throw error;}
+  const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(normalizeAcademicQuery(q))}&rows=${ROWS}${year?`&filter=from-pub-date:${year}-01-01,until-pub-date:${year}-12-31`:""}`;
+  const observation = await cachedAcademicBody(year?`${q} year:${year}`:q,url,UA,body=>{parseCrossrefWorks(body);}).catch((err:unknown)=>{
+    if(err&&typeof err==='object'&&'code' in err)throw err;
+    throw upstreamUnavailable('CROSSREF_UNREACHABLE','Both scholarly sources unavailable');
   });
   const {body:raw,fetchedAt,staleReason}=observation;
   const ageSeconds=Math.floor((Date.now()-Date.parse(fetchedAt))/1000),stale=Boolean(staleReason);
-  const { total, papers, skipped } = parseCrossrefWorks(raw);
+  const parsedWorks=parseCrossrefWorks(raw);
+  const total=parsedWorks.total,papers=parsedWorks.papers.filter(p=>(p.publication_year!==null||p.venue!==null)&&(year===undefined||p.publication_year===year)),skipped=parsedWorks.skipped+parsedWorks.papers.length-papers.length;
   const asOf = fetchedAt;
   const titles = papers.map((p) => p.title);
   const dois = papers.map((p) => p.doi);
@@ -160,9 +141,9 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
   }, receipt, {
     answer: (stale ? `STALE CACHED SEARCH, not a current index query. ${staleReason}; exact result acquired ${fetchedAt}, age ${ageSeconds}s, no titles or counts updated. ` : `Crossref observation acquired ${fetchedAt}, age ${ageSeconds}s; may be cached up to15minutes. `) + (papers.length
       ? `Crossref index: ${total} works match "${q}". Top ${papers.length} by Crossref relevance: ${listing}. ` +
-        (skipped ? `${skipped} returned item(s) lacked a title or DOI and were skipped. ` : "") +
+        (skipped ? `${skipped} returned item(s) lacked title/DOI or both publication year and venue, or did not meet the year filter, and were skipped. ` : "") +
         "The ranking is Crossref's own relevance order, not a quality judgment; the count is Crossref's index match count, not all scholarly papers on the topic. Metadata is as deposited; work type is not proof of peer review, and citation counts are Crossref-only."
-      : `Crossref index: no works match "${q}" (0 matches). The Crossref corpus is large but not exhaustive; absence here is not proof no paper exists.`),
+      : `Crossref index: ${total} query matches, but no eligible DOI-bearing records in the returned sample${year?` for ${year}`:""}. Records missing both publication year and venue are omitted. Absence in this sample is not proof no paper exists.`),
     verdict: stale ? "stale" : "verified",
     confidence: stale ? 0.5 : 0.9,
     source: `${url}; Crossref REST API single source, Crossref relevance order; fetched ${fetchedAt}; acquired ${asOf}`,

@@ -1,3 +1,5 @@
+// These controls isolate the Crossref fallback and its cache/failure semantics.
+vi.mock('../src/handlers/openAlexAcademic',()=>({openAlexAnswer:vi.fn(async()=>{throw Error('OpenAlex unavailable in Crossref-specific control');})}));
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';import {readFileSync,mkdtempSync} from 'node:fs';import {join} from 'node:path';
 process.env.SQLITE_PATH=join(mkdtempSync('/tmp/academic-cache-'),'r.sqlite');
 import {handleAcademicSearch} from '../src/handlers/academicSearch';import {resetAcademicCacheForTests} from '../src/handlers/academicSourceCache';import {getReceiptEvidence} from '../src/core/storage';

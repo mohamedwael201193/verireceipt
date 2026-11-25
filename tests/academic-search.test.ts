@@ -1,3 +1,5 @@
+// These controls isolate the Crossref fallback and its cache/failure semantics.
+vi.mock('../src/handlers/openAlexAcademic',()=>({openAlexAnswer:vi.fn(async()=>{throw Error('OpenAlex unavailable in Crossref-specific control');})}));
 import {resetAcademicCacheForTests} from "../src/handlers/academicSourceCache";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
@@ -74,7 +76,7 @@ describe("ACADEMIC_SEARCH_GENERAL", () => {
     expect(titles.length).toBe(3);
     expect(dois.length).toBe(3);
     expect(titles[0]).toContain("Finance-Grade Assurance"); // first two items skipped, order preserved
-    expect(String(result.answer)).toContain("2 returned item(s) lacked a title or DOI");
+    expect(String(result.answer)).toContain("2 returned item(s) lacked title/DOI");
   });
   it("a Crossref outage is an honest 502, never an invented list", async () => {
     stub(null);

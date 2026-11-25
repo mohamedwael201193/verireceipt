@@ -1,0 +1,6326 @@
+{
+  "results": [
+    {
+      "id": "https://openalex.org/W4392553889",
+      "doi": "https://doi.org/10.1038/s43586-024-00294-7",
+      "title": "Graph neural networks",
+      "display_name": "Graph neural networks",
+      "alternate_titles": [],
+      "relevance_score": 245.95628,
+      "publication_year": 2024,
+      "publication_date": "2024-03-07",
+      "ids": {
+        "openalex": "https://openalex.org/W4392553889",
+        "doi": "https://doi.org/10.1038/s43586-024-00294-7"
+      },
+      "language": "en",
+      "primary_location": {
+        "id": "doi:10.1038/s43586-024-00294-7",
+        "doi": "https://doi.org/10.1038/s43586-024-00294-7",
+        "is_oa": false,
+        "landing_page_url": "https://doi.org/10.1038/s43586-024-00294-7",
+        "pdf_url": null,
+        "source": {
+          "id": "https://openalex.org/S4210231269",
+          "display_name": "Nature Reviews Methods Primers",
+          "issn_l": "2662-8449",
+          "issn": [
+            "2662-8449"
+          ],
+          "is_oa": false,
+          "is_in_doaj": false,
+          "is_core": true,
+          "listed_in": [
+            "cwts-core",
+            "dongbi-a",
+            "jufo-1",
+            "ki-jl-1",
+            "norway-1",
+            "poland-40",
+            "russia-white-list-4",
+            "vabb-shw"
+          ],
+          "host_organization": "https://openalex.org/P4310319908",
+          "host_organization_name": "Nature Portfolio",
+          "host_organization_lineage": [
+            "https://openalex.org/P4310319908",
+            "https://openalex.org/P4310319965"
+          ],
+          "host_organization_lineage_names": [
+            "Nature Portfolio",
+            "Springer Nature"
+          ],
+          "type": "journal"
+        },
+        "license": null,
+        "license_id": null,
+        "version": "publishedVersion",
+        "is_accepted": true,
+        "is_published": true,
+        "raw_source_name": "Nature Reviews Methods Primers",
+        "raw_type": "journal-article"
+      },
+      "parent_works": [],
+      "lineage": [
+        "https://openalex.org/W4392553889"
+      ],
+      "child_works_count": 0,
+      "pull_notice_works": [],
+      "type": "review",
+      "is_traditional": true,
+      "indexed_in": [
+        "crossref"
+      ],
+      "open_access": {
+        "is_oa": false,
+        "oa_status": "closed",
+        "oa_url": null,
+        "any_repository_has_fulltext": false
+      },
+      "authorships": [
+        {
+          "author_position": "first",
+          "author": {
+            "id": "https://openalex.org/A5057871229",
+            "display_name": "Gabriele Corso",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0002-1963-8755",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-1963-8755"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I4405258931",
+              "display_name": "MIT Computer Science and Artificial Intelligence Laboratory",
+              "ror": "https://ror.org/01e85r662",
+              "country_code": "US",
+              "type": "facility",
+              "lineage": [
+                "https://openalex.org/I4405258931",
+                "https://openalex.org/I63966007"
+              ]
+            },
+            {
+              "id": "https://openalex.org/I63966007",
+              "display_name": "Massachusetts Institute of Technology",
+              "ror": "https://ror.org/042nb2s44",
+              "country_code": "US",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I63966007"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": true,
+          "contributor_roles": [],
+          "raw_author_name": "Gabriele Corso",
+          "raw_affiliation_strings": [
+            "CSAIL, MIT, Cambridge, MA, US"
+          ],
+          "raw_orcid": "https://orcid.org/0000-0002-1963-8755",
+          "affiliations": [
+            {
+              "raw_affiliation_string": "CSAIL, MIT, Cambridge, MA, US",
+              "institution_ids": [
+                "https://openalex.org/I4405258931",
+                "https://openalex.org/I63966007"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5064282770",
+            "display_name": "Hannes Stark",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0002-4463-326X",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-4463-326X"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I4405258931",
+              "display_name": "MIT Computer Science and Artificial Intelligence Laboratory",
+              "ror": "https://ror.org/01e85r662",
+              "country_code": "US",
+              "type": "facility",
+              "lineage": [
+                "https://openalex.org/I4405258931",
+                "https://openalex.org/I63966007"
+              ]
+            },
+            {
+              "id": "https://openalex.org/I63966007",
+              "display_name": "Massachusetts Institute of Technology",
+              "ror": "https://ror.org/042nb2s44",
+              "country_code": "US",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I63966007"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": true,
+          "contributor_roles": [],
+          "raw_author_name": "Hannes Stark",
+          "raw_affiliation_strings": [
+            "CSAIL, MIT, Cambridge, MA, US"
+          ],
+          "raw_orcid": "https://orcid.org/0000-0002-4463-326X",
+          "affiliations": [
+            {
+              "raw_affiliation_string": "CSAIL, MIT, Cambridge, MA, US",
+              "institution_ids": [
+                "https://openalex.org/I4405258931",
+                "https://openalex.org/I63966007"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5085699861",
+            "display_name": "Stefanie Jegelka",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0002-6121-9474",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-6121-9474"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I4405258931",
+              "display_name": "MIT Computer Science and Artificial Intelligence Laboratory",
+              "ror": "https://ror.org/01e85r662",
+              "country_code": "US",
+              "type": "facility",
+              "lineage": [
+                "https://openalex.org/I4405258931",
+                "https://openalex.org/I63966007"
+              ]
+            },
+            {
+              "id": "https://openalex.org/I62916508",
+              "display_name": "Technical University of Munich",
+              "ror": "https://ror.org/02kkvpp62",
+              "country_code": "DE",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I62916508"
+              ]
+            },
+            {
+              "id": "https://openalex.org/I63966007",
+              "display_name": "Massachusetts Institute of Technology",
+              "ror": "https://ror.org/042nb2s44",
+              "country_code": "US",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I63966007"
+              ]
+            }
+          ],
+          "countries": [
+            "DE",
+            "US"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Stefanie Jegelka",
+          "raw_affiliation_strings": [
+            "CSAIL, MIT, Cambridge, MA, US",
+            "School of CIT, TU Munich, Munich, Germany"
+          ],
+          "raw_orcid": "https://orcid.org/0000-0002-6121-9474",
+          "affiliations": [
+            {
+              "raw_affiliation_string": "CSAIL, MIT, Cambridge, MA, US",
+              "institution_ids": [
+                "https://openalex.org/I4405258931",
+                "https://openalex.org/I63966007"
+              ]
+            },
+            {
+              "raw_affiliation_string": "School of CIT, TU Munich, Munich, Germany",
+              "institution_ids": [
+                "https://openalex.org/I62916508"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5048915657",
+            "display_name": "Tommi Jaakkola",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0002-2199-0379",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-2199-0379"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I4405258931",
+              "display_name": "MIT Computer Science and Artificial Intelligence Laboratory",
+              "ror": "https://ror.org/01e85r662",
+              "country_code": "US",
+              "type": "facility",
+              "lineage": [
+                "https://openalex.org/I4405258931",
+                "https://openalex.org/I63966007"
+              ]
+            },
+            {
+              "id": "https://openalex.org/I63966007",
+              "display_name": "Massachusetts Institute of Technology",
+              "ror": "https://ror.org/042nb2s44",
+              "country_code": "US",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I63966007"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Tommi Jaakkola",
+          "raw_affiliation_strings": [
+            "CSAIL, MIT, Cambridge, MA, US"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "CSAIL, MIT, Cambridge, MA, US",
+              "institution_ids": [
+                "https://openalex.org/I4405258931",
+                "https://openalex.org/I63966007"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "last",
+          "author": {
+            "id": "https://openalex.org/A5010124873",
+            "display_name": "Regina Barzilay",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0002-2921-8201",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-2921-8201"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I4405258931",
+              "display_name": "MIT Computer Science and Artificial Intelligence Laboratory",
+              "ror": "https://ror.org/01e85r662",
+              "country_code": "US",
+              "type": "facility",
+              "lineage": [
+                "https://openalex.org/I4405258931",
+                "https://openalex.org/I63966007"
+              ]
+            },
+            {
+              "id": "https://openalex.org/I63966007",
+              "display_name": "Massachusetts Institute of Technology",
+              "ror": "https://ror.org/042nb2s44",
+              "country_code": "US",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I63966007"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": true,
+          "contributor_roles": [],
+          "raw_author_name": "Regina Barzilay",
+          "raw_affiliation_strings": [
+            "CSAIL, MIT, Cambridge, MA, US"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "CSAIL, MIT, Cambridge, MA, US",
+              "institution_ids": [
+                "https://openalex.org/I4405258931",
+                "https://openalex.org/I63966007"
+              ]
+            }
+          ]
+        }
+      ],
+      "institutions": [],
+      "countries_distinct_count": 2,
+      "institutions_distinct_count": 3,
+      "corresponding_author_ids": [
+        "https://openalex.org/A5010124873",
+        "https://openalex.org/A5057871229",
+        "https://openalex.org/A5064282770"
+      ],
+      "corresponding_institution_ids": [
+        "https://openalex.org/I4405258931",
+        "https://openalex.org/I63966007"
+      ],
+      "apc_list": null,
+      "apc_paid": null,
+      "fwci": 13.2313,
+      "is_authors_truncated": false,
+      "has_fulltext": false,
+      "cited_by_count": 682,
+      "reviewed_by_count": 0,
+      "citation_normalized_percentile": {
+        "value": 0.99587118,
+        "is_in_top_1_percent": true,
+        "is_in_top_10_percent": true
+      },
+      "cited_by_percentile_year": {
+        "min": 99,
+        "max": 100
+      },
+      "biblio": {
+        "volume": "4",
+        "issue": "1",
+        "first_page": "17",
+        "last_page": null
+      },
+      "is_retracted": false,
+      "is_pulled": false,
+      "is_paratext": false,
+      "is_xpac": false,
+      "primary_topic": {
+        "id": "https://openalex.org/T11273",
+        "display_name": "Advanced Graph Neural Networks",
+        "score": 0.9951000213623047,
+        "subfield": {
+          "id": "https://openalex.org/subfields/1702",
+          "display_name": "Artificial Intelligence"
+        },
+        "field": {
+          "id": "https://openalex.org/fields/17",
+          "display_name": "Computer Science"
+        },
+        "domain": {
+          "id": "https://openalex.org/domains/3",
+          "display_name": "Physical Sciences"
+        }
+      },
+      "topics": [
+        {
+          "id": "https://openalex.org/T11273",
+          "display_name": "Advanced Graph Neural Networks",
+          "score": 0.9951000213623047,
+          "subfield": {
+            "id": "https://openalex.org/subfields/1702",
+            "display_name": "Artificial Intelligence"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/17",
+            "display_name": "Computer Science"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        },
+        {
+          "id": "https://openalex.org/T10211",
+          "display_name": "Computational Drug Discovery Methods",
+          "score": 0.003599999938160181,
+          "subfield": {
+            "id": "https://openalex.org/subfields/3002",
+            "display_name": "Drug Discovery"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/30",
+            "display_name": "Pharmacology, Toxicology and Pharmaceutics"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/1",
+            "display_name": "Life Sciences"
+          }
+        },
+        {
+          "id": "https://openalex.org/T12292",
+          "display_name": "Graph Theory and Algorithms",
+          "score": 0.0003000000142492354,
+          "subfield": {
+            "id": "https://openalex.org/subfields/1703",
+            "display_name": "Computational Theory and Mathematics"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/17",
+            "display_name": "Computer Science"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        }
+      ],
+      "keywords": [
+        {
+          "id": "https://openalex.org/keywords/graph-neural-networks",
+          "display_name": "graph neural networks",
+          "score": 1.0
+        },
+        {
+          "id": "https://openalex.org/keywords/graph-structured-data",
+          "display_name": "graph-structured data",
+          "score": 0.9800000190734863
+        },
+        {
+          "id": "https://openalex.org/keywords/graph-learning",
+          "display_name": "graph learning",
+          "score": 0.46399998664855957
+        },
+        {
+          "id": "https://openalex.org/keywords/drug-discovery",
+          "display_name": "drug discovery",
+          "score": 0.6700000166893005
+        },
+        {
+          "id": "https://openalex.org/keywords/drug-repurposing",
+          "display_name": "drug repurposing",
+          "score": 0.8539999723434448
+        },
+        {
+          "id": "https://openalex.org/keywords/antibiotic-discovery",
+          "display_name": "antibiotic discovery",
+          "score": 0.7609999775886536
+        },
+        {
+          "id": "https://openalex.org/keywords/molecular-generation",
+          "display_name": "molecular generation",
+          "score": 0.628000020980835
+        },
+        {
+          "id": "https://openalex.org/keywords/life-sciences-applications",
+          "display_name": "life sciences applications",
+          "score": 0.7369999885559082
+        }
+      ],
+      "concepts": [
+        {
+          "id": "https://openalex.org/C41008148",
+          "wikidata": "https://www.wikidata.org/wiki/Q21198",
+          "display_name": "Computer science",
+          "level": 0,
+          "score": 0.4192596673965454
+        }
+      ],
+      "mesh": [],
+      "locations_count": 1,
+      "locations": [
+        {
+          "id": "doi:10.1038/s43586-024-00294-7",
+          "doi": "https://doi.org/10.1038/s43586-024-00294-7",
+          "is_oa": false,
+          "landing_page_url": "https://doi.org/10.1038/s43586-024-00294-7",
+          "pdf_url": null,
+          "source": {
+            "id": "https://openalex.org/S4210231269",
+            "display_name": "Nature Reviews Methods Primers",
+            "issn_l": "2662-8449",
+            "issn": [
+              "2662-8449"
+            ],
+            "is_oa": false,
+            "is_in_doaj": false,
+            "is_core": true,
+            "listed_in": [
+              "cwts-core",
+              "dongbi-a",
+              "jufo-1",
+              "ki-jl-1",
+              "norway-1",
+              "poland-40",
+              "russia-white-list-4",
+              "vabb-shw"
+            ],
+            "host_organization": "https://openalex.org/P4310319908",
+            "host_organization_name": "Nature Portfolio",
+            "host_organization_lineage": [
+              "https://openalex.org/P4310319908",
+              "https://openalex.org/P4310319965"
+            ],
+            "host_organization_lineage_names": [
+              "Nature Portfolio",
+              "Springer Nature"
+            ],
+            "type": "journal"
+          },
+          "license": null,
+          "license_id": null,
+          "version": "publishedVersion",
+          "is_accepted": true,
+          "is_published": true,
+          "raw_source_name": "Nature Reviews Methods Primers",
+          "raw_type": "journal-article"
+        }
+      ],
+      "best_oa_location": null,
+      "sustainable_development_goals": [],
+      "study_designs": [],
+      "awards": [
+        {
+          "id": "https://openalex.org/G2082912093",
+          "display_name": "Expeditions: Collaborative Research: Understanding the World Through Code",
+          "funder_award_id": "1918839",
+          "funder_id": "https://openalex.org/F4320306076",
+          "funder_display_name": "National Science Foundation"
+        },
+        {
+          "id": "https://openalex.org/G2835580799",
+          "display_name": "NSF Convergence Accelerator Track D:  A Community Resource for Innovation in Polymer Technology (CRIPT)",
+          "funder_award_id": "2134795",
+          "funder_id": "https://openalex.org/F4320306076",
+          "funder_display_name": "National Science Foundation"
+        },
+        {
+          "id": "https://openalex.org/G3744848179",
+          "display_name": "AI Institute for Learning-Enabled Optimization at Scale (TILOS)",
+          "funder_award_id": "2112665",
+          "funder_id": "https://openalex.org/F4320306076",
+          "funder_display_name": "National Science Foundation"
+        }
+      ],
+      "funders": [
+        {
+          "id": "https://openalex.org/F4320306076",
+          "display_name": "National Science Foundation",
+          "ror": "https://ror.org/021nxhr62"
+        },
+        {
+          "id": "https://openalex.org/F4320332180",
+          "display_name": "Defense Advanced Research Projects Agency",
+          "ror": "https://ror.org/02caytj08"
+        },
+        {
+          "id": "https://openalex.org/F4320332186",
+          "display_name": "Defense Threat Reduction Agency",
+          "ror": "https://ror.org/04tz64554"
+        }
+      ],
+      "has_content": {
+        "pdf": false,
+        "grobid_xml": false
+      },
+      "content_urls": null,
+      "referenced_works_count": 94,
+      "referenced_works": [
+        "https://openalex.org/W174941419",
+        "https://openalex.org/W569478347",
+        "https://openalex.org/W1501856433",
+        "https://openalex.org/W2044834685",
+        "https://openalex.org/W2086789804",
+        "https://openalex.org/W2116341502",
+        "https://openalex.org/W2604314403",
+        "https://openalex.org/W2726670313",
+        "https://openalex.org/W2786722833",
+        "https://openalex.org/W2788775653",
+        "https://openalex.org/W2804057010",
+        "https://openalex.org/W2894663205",
+        "https://openalex.org/W2909137510",
+        "https://openalex.org/W2918342466",
+        "https://openalex.org/W2947873642",
+        "https://openalex.org/W2963341956",
+        "https://openalex.org/W2966357564",
+        "https://openalex.org/W2970119293",
+        "https://openalex.org/W2973805762",
+        "https://openalex.org/W2994536315",
+        "https://openalex.org/W3000120900",
+        "https://openalex.org/W3003605616",
+        "https://openalex.org/W3005187920",
+        "https://openalex.org/W3007309629",
+        "https://openalex.org/W3007332492",
+        "https://openalex.org/W3015208165",
+        "https://openalex.org/W3021975806",
+        "https://openalex.org/W3028499909",
+        "https://openalex.org/W3030163527",
+        "https://openalex.org/W3033892090",
+        "https://openalex.org/W3034806393",
+        "https://openalex.org/W3035524453",
+        "https://openalex.org/W3035664258",
+        "https://openalex.org/W3041877813",
+        "https://openalex.org/W3080555959",
+        "https://openalex.org/W3080588469",
+        "https://openalex.org/W3085084733",
+        "https://openalex.org/W3090285371",
+        "https://openalex.org/W3094502228",
+        "https://openalex.org/W3096831136",
+        "https://openalex.org/W3113177135",
+        "https://openalex.org/W3133998467",
+        "https://openalex.org/W3134210100",
+        "https://openalex.org/W3153673236",
+        "https://openalex.org/W3155335252",
+        "https://openalex.org/W3155952169",
+        "https://openalex.org/W3157286395",
+        "https://openalex.org/W3167082165",
+        "https://openalex.org/W3169575312",
+        "https://openalex.org/W3176408615",
+        "https://openalex.org/W3181995918",
+        "https://openalex.org/W3187220393",
+        "https://openalex.org/W3201888171",
+        "https://openalex.org/W3204523018",
+        "https://openalex.org/W3205158828",
+        "https://openalex.org/W3206420297",
+        "https://openalex.org/W3208462402",
+        "https://openalex.org/W3209752990",
+        "https://openalex.org/W4221149904",
+        "https://openalex.org/W4221149941",
+        "https://openalex.org/W4221161486",
+        "https://openalex.org/W4221162104",
+        "https://openalex.org/W4224457748",
+        "https://openalex.org/W4225405705",
+        "https://openalex.org/W4226281533",
+        "https://openalex.org/W4283362063",
+        "https://openalex.org/W4286588524",
+        "https://openalex.org/W4287828570",
+        "https://openalex.org/W4296032638",
+        "https://openalex.org/W4298185360",
+        "https://openalex.org/W4313400218",
+        "https://openalex.org/W4318620627",
+        "https://openalex.org/W4318983406",
+        "https://openalex.org/W4327550249",
+        "https://openalex.org/W4353007232",
+        "https://openalex.org/W4362679214",
+        "https://openalex.org/W4376653448",
+        "https://openalex.org/W4379538713",
+        "https://openalex.org/W4383957026",
+        "https://openalex.org/W4386557187",
+        "https://openalex.org/W4388694364",
+        "https://openalex.org/W4389775256",
+        "https://openalex.org/W4396220739",
+        "https://openalex.org/W6891343914",
+        "https://openalex.org/W7042803211",
+        "https://openalex.org/W7133189601",
+        "https://openalex.org/W7133195083",
+        "https://openalex.org/W7133214941",
+        "https://openalex.org/W7133216786",
+        "https://openalex.org/W7133218413",
+        "https://openalex.org/W7133218708",
+        "https://openalex.org/W7133220025",
+        "https://openalex.org/W7133244177",
+        "https://openalex.org/W7225222772"
+      ],
+      "related_works": [
+        "https://openalex.org/W4297237009",
+        "https://openalex.org/W3176826217",
+        "https://openalex.org/W4290875398",
+        "https://openalex.org/W7126382357",
+        "https://openalex.org/W4310273071",
+        "https://openalex.org/W4225397209",
+        "https://openalex.org/W3135116819",
+        "https://openalex.org/W4412197158",
+        "https://openalex.org/W4388481644",
+        "https://openalex.org/W4285242685"
+      ],
+      "abstract_inverted_index": null,
+      "cited_by_api_url": "https://api.openalex.org/works?filter=cites:W4392553889",
+      "counts_by_year": [
+        {
+          "year": 2026,
+          "cited_by_count": 393
+        },
+        {
+          "year": 2025,
+          "cited_by_count": 254
+        },
+        {
+          "year": 2024,
+          "cited_by_count": 35
+        }
+      ],
+      "updated_date": "2026-11-24T14:10:38.155754",
+      "created_date": "2024-03-08T00:00:00"
+    },
+    {
+      "id": "https://openalex.org/W3007332492",
+      "doi": "https://doi.org/10.48550/arxiv.2003.00982",
+      "title": "Benchmarking Graph Neural Networks",
+      "display_name": "Benchmarking Graph Neural Networks",
+      "alternate_titles": [],
+      "relevance_score": 236.11528,
+      "publication_year": 2020,
+      "publication_date": "2020-03-02",
+      "ids": {
+        "openalex": "https://openalex.org/W3007332492",
+        "doi": "https://doi.org/10.48550/arxiv.2003.00982",
+        "mag": "3007332492",
+        "arxiv": "https://arxiv.org/abs/2003.00982"
+      },
+      "language": "en",
+      "primary_location": {
+        "id": "pmh:oai:arXiv.org:2003.00982",
+        "doi": "https://doi.org/10.48550/arxiv.2003.00982",
+        "is_oa": true,
+        "landing_page_url": "http://arxiv.org/abs/2003.00982",
+        "pdf_url": "https://arxiv.org/pdf/2003.00982",
+        "source": {
+          "id": "https://openalex.org/S4306400194",
+          "display_name": "arXiv",
+          "issn_l": "2331-8422",
+          "issn": [
+            "2331-8422"
+          ],
+          "is_oa": true,
+          "is_in_doaj": false,
+          "is_core": false,
+          "listed_in": [],
+          "host_organization": "https://openalex.org/I4402554005",
+          "host_organization_name": "arXiv",
+          "host_organization_lineage": [
+            "https://openalex.org/I4402554005"
+          ],
+          "host_organization_lineage_names": [],
+          "type": "repository"
+        },
+        "license": null,
+        "license_id": null,
+        "version": "submittedVersion",
+        "is_accepted": false,
+        "is_published": false,
+        "raw_source_name": null,
+        "raw_type": "text"
+      },
+      "parent_works": [],
+      "lineage": [
+        "https://openalex.org/W3007332492"
+      ],
+      "child_works_count": 0,
+      "pull_notice_works": [],
+      "type": "preprint",
+      "is_traditional": true,
+      "indexed_in": [
+        "arxiv",
+        "datacite"
+      ],
+      "open_access": {
+        "is_oa": true,
+        "oa_status": "green",
+        "oa_url": "https://arxiv.org/pdf/2003.00982",
+        "any_repository_has_fulltext": true
+      },
+      "authorships": [
+        {
+          "author_position": "first",
+          "author": {
+            "id": "https://openalex.org/A5062564046",
+            "display_name": "Vijay Prakash Dwivedi",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0003-1836-4323",
+            "observed_orcids": [
+              "https://orcid.org/0000-0003-1836-4323"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I172675005",
+              "display_name": "Nanyang Technological University",
+              "ror": "https://ror.org/02e7b5302",
+              "country_code": "SG",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I172675005"
+              ]
+            }
+          ],
+          "countries": [
+            "SG"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Dwivedi, Vijay Prakash",
+          "raw_affiliation_strings": [
+            "Nanyang Technological University , Singapore ,",
+            "Nanyang Technological Univ"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Nanyang Technological University , Singapore ,",
+              "institution_ids": [
+                "https://openalex.org/I172675005"
+              ]
+            },
+            {
+              "raw_affiliation_string": "Nanyang Technological Univ",
+              "institution_ids": [
+                "https://openalex.org/I172675005"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5041429006",
+            "display_name": "Chaitanya K. Joshi",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0003-4722-1815",
+            "observed_orcids": [
+              "https://orcid.org/0000-0003-4722-1815"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I172675005",
+              "display_name": "Nanyang Technological University",
+              "ror": "https://ror.org/02e7b5302",
+              "country_code": "SG",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I172675005"
+              ]
+            },
+            {
+              "id": "https://openalex.org/I241749",
+              "display_name": "University of Cambridge",
+              "ror": "https://ror.org/013meh722",
+              "country_code": "GB",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I241749"
+              ]
+            }
+          ],
+          "countries": [
+            "GB",
+            "SG"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Joshi, Chaitanya K.",
+          "raw_affiliation_strings": [
+            "University of Cambridge , UK,",
+            "Nanyang Technological Univ"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "University of Cambridge , UK,",
+              "institution_ids": [
+                "https://openalex.org/I241749"
+              ]
+            },
+            {
+              "raw_affiliation_string": "Nanyang Technological Univ",
+              "institution_ids": [
+                "https://openalex.org/I172675005"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5050386762",
+            "display_name": "Anh Tuan Luu",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0001-6062-207X",
+            "observed_orcids": [
+              "https://orcid.org/0000-0001-6062-207X"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I172675005",
+              "display_name": "Nanyang Technological University",
+              "ror": "https://ror.org/02e7b5302",
+              "country_code": "SG",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I172675005"
+              ]
+            },
+            {
+              "id": "https://openalex.org/I35566140",
+              "display_name": "Loyola Marymount University",
+              "ror": "https://ror.org/00xhj8c72",
+              "country_code": "US",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I35566140"
+              ]
+            }
+          ],
+          "countries": [
+            "SG",
+            "US"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Luu, Anh Tuan",
+          "raw_affiliation_strings": [
+            "Nanyang Technological University , Singapore ,",
+            "loyola marymount university"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Nanyang Technological University , Singapore ,",
+              "institution_ids": [
+                "https://openalex.org/I172675005"
+              ]
+            },
+            {
+              "raw_affiliation_string": "loyola marymount university",
+              "institution_ids": [
+                "https://openalex.org/I35566140"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5024411628",
+            "display_name": "Thomas Laurent",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0002-0953-774X",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-0953-774X",
+              "https://orcid.org/0000-0002-0013-8240"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I35566140",
+              "display_name": "Loyola Marymount University",
+              "ror": "https://ror.org/00xhj8c72",
+              "country_code": "US",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I35566140"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Laurent, Thomas",
+          "raw_affiliation_strings": [
+            "Loyola Marymount University , USA,"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Loyola Marymount University , USA,",
+              "institution_ids": [
+                "https://openalex.org/I35566140"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5086198262",
+            "display_name": "Yoshua Bengio",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0002-9322-3515",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-9322-3515"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I172675005",
+              "display_name": "Nanyang Technological University",
+              "ror": "https://ror.org/02e7b5302",
+              "country_code": "SG",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I172675005"
+              ]
+            },
+            {
+              "id": "https://openalex.org/I4210164802",
+              "display_name": "Mila - Quebec Artificial Intelligence Institute",
+              "ror": "https://ror.org/05c22rx21",
+              "country_code": "CA",
+              "type": "facility",
+              "lineage": [
+                "https://openalex.org/I4210164802"
+              ]
+            },
+            {
+              "id": "https://openalex.org/I70931966",
+              "display_name": "Universit\u00e9 de Montr\u00e9al",
+              "ror": "https://ror.org/0161xgx34",
+              "country_code": "CA",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I70931966"
+              ]
+            }
+          ],
+          "countries": [
+            "CA",
+            "SG"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Bengio, Yoshua",
+          "raw_affiliation_strings": [
+            "Mila , University of Montr\u00e9al , Canada,",
+            "Nanyang Technological Univ"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Mila , University of Montr\u00e9al , Canada,",
+              "institution_ids": [
+                "https://openalex.org/I4210164802",
+                "https://openalex.org/I70931966"
+              ]
+            },
+            {
+              "raw_affiliation_string": "Nanyang Technological Univ",
+              "institution_ids": [
+                "https://openalex.org/I172675005"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "last",
+          "author": {
+            "id": "https://openalex.org/A5031210396",
+            "display_name": "Xavier Bresson",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0002-7109-461X",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-7109-461X",
+              "https://orcid.org/0009-0008-6599-2609"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I165932596",
+              "display_name": "National University of Singapore",
+              "ror": "https://ror.org/01tgyzw49",
+              "country_code": "SG",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I165932596"
+              ]
+            }
+          ],
+          "countries": [
+            "SG"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Bresson, Xavier",
+          "raw_affiliation_strings": [
+            "National University of Singapore"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "National University of Singapore",
+              "institution_ids": [
+                "https://openalex.org/I165932596"
+              ]
+            }
+          ]
+        }
+      ],
+      "institutions": [],
+      "countries_distinct_count": 4,
+      "institutions_distinct_count": 6,
+      "corresponding_author_ids": [],
+      "corresponding_institution_ids": [],
+      "apc_list": null,
+      "apc_paid": null,
+      "fwci": null,
+      "is_authors_truncated": false,
+      "has_fulltext": true,
+      "cited_by_count": 1071,
+      "reviewed_by_count": 0,
+      "citation_normalized_percentile": null,
+      "cited_by_percentile_year": null,
+      "biblio": {
+        "volume": null,
+        "issue": null,
+        "first_page": null,
+        "last_page": null
+      },
+      "is_retracted": false,
+      "is_pulled": false,
+      "is_paratext": false,
+      "is_xpac": false,
+      "primary_topic": {
+        "id": "https://openalex.org/T11273",
+        "display_name": "Advanced Graph Neural Networks",
+        "score": 0.9980000257492065,
+        "subfield": {
+          "id": "https://openalex.org/subfields/1702",
+          "display_name": "Artificial Intelligence"
+        },
+        "field": {
+          "id": "https://openalex.org/fields/17",
+          "display_name": "Computer Science"
+        },
+        "domain": {
+          "id": "https://openalex.org/domains/3",
+          "display_name": "Physical Sciences"
+        }
+      },
+      "topics": [
+        {
+          "id": "https://openalex.org/T11273",
+          "display_name": "Advanced Graph Neural Networks",
+          "score": 0.9980000257492065,
+          "subfield": {
+            "id": "https://openalex.org/subfields/1702",
+            "display_name": "Artificial Intelligence"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/17",
+            "display_name": "Computer Science"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        },
+        {
+          "id": "https://openalex.org/T10211",
+          "display_name": "Computational Drug Discovery Methods",
+          "score": 0.0007999999797903001,
+          "subfield": {
+            "id": "https://openalex.org/subfields/3002",
+            "display_name": "Drug Discovery"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/30",
+            "display_name": "Pharmacology, Toxicology and Pharmaceutics"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/1",
+            "display_name": "Life Sciences"
+          }
+        },
+        {
+          "id": "https://openalex.org/T12292",
+          "display_name": "Graph Theory and Algorithms",
+          "score": 0.00039999998989515007,
+          "subfield": {
+            "id": "https://openalex.org/subfields/1703",
+            "display_name": "Computational Theory and Mathematics"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/17",
+            "display_name": "Computer Science"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        }
+      ],
+      "keywords": [
+        {
+          "id": "https://openalex.org/keywords/graph-neural-networks",
+          "display_name": "graph neural networks",
+          "score": 0.996999979019165
+        },
+        {
+          "id": "https://openalex.org/keywords/benchmarking-framework",
+          "display_name": "benchmarking framework",
+          "score": 0.765999972820282
+        },
+        {
+          "id": "https://openalex.org/keywords/molecular-property-prediction",
+          "display_name": "molecular property prediction",
+          "score": 0.6460000276565552
+        },
+        {
+          "id": "https://openalex.org/keywords/reproducibility",
+          "display_name": "reproducibility",
+          "score": 0.6230000257492065
+        },
+        {
+          "id": "https://openalex.org/keywords/open-source-software",
+          "display_name": "open source software",
+          "score": 0.6850000023841858
+        }
+      ],
+      "concepts": [
+        {
+          "id": "https://openalex.org/C86251818",
+          "wikidata": "https://www.wikidata.org/wiki/Q816754",
+          "display_name": "Benchmarking",
+          "level": 2,
+          "score": 0.933215856552124
+        },
+        {
+          "id": "https://openalex.org/C41008148",
+          "wikidata": "https://www.wikidata.org/wiki/Q21198",
+          "display_name": "Computer science",
+          "level": 0,
+          "score": 0.8005453944206238
+        },
+        {
+          "id": "https://openalex.org/C132525143",
+          "wikidata": "https://www.wikidata.org/wiki/Q141488",
+          "display_name": "Graph",
+          "level": 2,
+          "score": 0.6131594181060791
+        },
+        {
+          "id": "https://openalex.org/C185798385",
+          "wikidata": "https://www.wikidata.org/wiki/Q1161707",
+          "display_name": "Benchmark (surveying)",
+          "level": 2,
+          "score": 0.6019496321678162
+        },
+        {
+          "id": "https://openalex.org/C154945302",
+          "wikidata": "https://www.wikidata.org/wiki/Q11660",
+          "display_name": "Artificial intelligence",
+          "level": 1,
+          "score": 0.5232821106910706
+        },
+        {
+          "id": "https://openalex.org/C119857082",
+          "wikidata": "https://www.wikidata.org/wiki/Q2539",
+          "display_name": "Machine learning",
+          "level": 1,
+          "score": 0.5177023410797119
+        },
+        {
+          "id": "https://openalex.org/C81363708",
+          "wikidata": "https://www.wikidata.org/wiki/Q17084460",
+          "display_name": "Convolutional neural network",
+          "level": 2,
+          "score": 0.43288731575012207
+        },
+        {
+          "id": "https://openalex.org/C80444323",
+          "wikidata": "https://www.wikidata.org/wiki/Q2878974",
+          "display_name": "Theoretical computer science",
+          "level": 1,
+          "score": 0.4166916310787201
+        },
+        {
+          "id": "https://openalex.org/C2522767166",
+          "wikidata": "https://www.wikidata.org/wiki/Q2374463",
+          "display_name": "Data science",
+          "level": 1,
+          "score": 0.33127883076667786
+        },
+        {
+          "id": "https://openalex.org/C162853370",
+          "wikidata": "https://www.wikidata.org/wiki/Q39809",
+          "display_name": "Marketing",
+          "level": 1,
+          "score": 0.0
+        },
+        {
+          "id": "https://openalex.org/C144133560",
+          "wikidata": "https://www.wikidata.org/wiki/Q4830453",
+          "display_name": "Business",
+          "level": 0,
+          "score": 0.0
+        },
+        {
+          "id": "https://openalex.org/C205649164",
+          "wikidata": "https://www.wikidata.org/wiki/Q1071",
+          "display_name": "Geography",
+          "level": 0,
+          "score": 0.0
+        },
+        {
+          "id": "https://openalex.org/C13280743",
+          "wikidata": "https://www.wikidata.org/wiki/Q131089",
+          "display_name": "Geodesy",
+          "level": 1,
+          "score": 0.0
+        }
+      ],
+      "mesh": [],
+      "locations_count": 3,
+      "locations": [
+        {
+          "id": "pmh:oai:arXiv.org:2003.00982",
+          "doi": "https://doi.org/10.48550/arxiv.2003.00982",
+          "is_oa": true,
+          "landing_page_url": "http://arxiv.org/abs/2003.00982",
+          "pdf_url": "https://arxiv.org/pdf/2003.00982",
+          "source": {
+            "id": "https://openalex.org/S4306400194",
+            "display_name": "arXiv",
+            "issn_l": "2331-8422",
+            "issn": [
+              "2331-8422"
+            ],
+            "is_oa": true,
+            "is_in_doaj": false,
+            "is_core": false,
+            "listed_in": [],
+            "host_organization": "https://openalex.org/I4402554005",
+            "host_organization_name": "arXiv",
+            "host_organization_lineage": [
+              "https://openalex.org/I4402554005"
+            ],
+            "host_organization_lineage_names": [],
+            "type": "repository"
+          },
+          "license": null,
+          "license_id": null,
+          "version": "submittedVersion",
+          "is_accepted": false,
+          "is_published": false,
+          "raw_source_name": null,
+          "raw_type": "text"
+        },
+        {
+          "id": "mag:3007332492",
+          "doi": null,
+          "is_oa": false,
+          "landing_page_url": "http://export.arxiv.org/pdf/2003.00982",
+          "pdf_url": null,
+          "source": null,
+          "license": null,
+          "license_id": null,
+          "version": "submittedVersion",
+          "is_accepted": false,
+          "is_published": false,
+          "raw_source_name": "arXiv (Cornell University)",
+          "raw_type": null
+        },
+        {
+          "id": "pmh:oai:dr.ntu.edu.sg:10356/227330",
+          "doi": null,
+          "is_oa": false,
+          "landing_page_url": "https://hdl.handle.net/10356/227330",
+          "pdf_url": null,
+          "source": {
+            "id": "https://openalex.org/S4306402609",
+            "display_name": "DR-NTU (Nanyang Technological University)",
+            "issn_l": null,
+            "issn": null,
+            "is_oa": false,
+            "is_in_doaj": false,
+            "is_core": false,
+            "listed_in": [],
+            "host_organization": "https://openalex.org/I172675005",
+            "host_organization_name": "Nanyang Technological University",
+            "host_organization_lineage": [
+              "https://openalex.org/I172675005"
+            ],
+            "host_organization_lineage_names": [],
+            "type": "repository"
+          },
+          "license": null,
+          "license_id": null,
+          "version": "submittedVersion",
+          "is_accepted": false,
+          "is_published": false,
+          "raw_source_name": null,
+          "raw_type": "Journal Article"
+        }
+      ],
+      "best_oa_location": {
+        "id": "pmh:oai:arXiv.org:2003.00982",
+        "doi": "https://doi.org/10.48550/arxiv.2003.00982",
+        "is_oa": true,
+        "landing_page_url": "http://arxiv.org/abs/2003.00982",
+        "pdf_url": "https://arxiv.org/pdf/2003.00982",
+        "source": {
+          "id": "https://openalex.org/S4306400194",
+          "display_name": "arXiv",
+          "issn_l": "2331-8422",
+          "issn": [
+            "2331-8422"
+          ],
+          "is_oa": true,
+          "is_in_doaj": false,
+          "is_core": false,
+          "listed_in": [],
+          "host_organization": "https://openalex.org/I4402554005",
+          "host_organization_name": "arXiv",
+          "host_organization_lineage": [
+            "https://openalex.org/I4402554005"
+          ],
+          "host_organization_lineage_names": [],
+          "type": "repository"
+        },
+        "license": null,
+        "license_id": null,
+        "version": "submittedVersion",
+        "is_accepted": false,
+        "is_published": false,
+        "raw_source_name": null,
+        "raw_type": "text"
+      },
+      "sustainable_development_goals": [],
+      "study_designs": [],
+      "awards": [
+        {
+          "id": "https://openalex.org/G3492086329",
+          "display_name": null,
+          "funder_award_id": "020724-00001",
+          "funder_id": "https://openalex.org/F4320320766",
+          "funder_display_name": "Nanyang Technological University"
+        }
+      ],
+      "funders": [
+        {
+          "id": "https://openalex.org/F4320320766",
+          "display_name": "Nanyang Technological University",
+          "ror": "https://ror.org/02e7b5302"
+        }
+      ],
+      "has_content": {
+        "pdf": true,
+        "grobid_xml": true
+      },
+      "content_urls": {
+        "pdf": "https://content.openalex.org/works/W3007332492.pdf",
+        "grobid_xml": "https://content.openalex.org/works/W3007332492.grobid-xml"
+      },
+      "referenced_works_count": 128,
+      "referenced_works": [
+        "https://openalex.org/W1522301498",
+        "https://openalex.org/W1538131130",
+        "https://openalex.org/W1662382123",
+        "https://openalex.org/W1836465849",
+        "https://openalex.org/W1849277567",
+        "https://openalex.org/W1903029394",
+        "https://openalex.org/W2027482274",
+        "https://openalex.org/W2049633694",
+        "https://openalex.org/W2097308346",
+        "https://openalex.org/W2102605133",
+        "https://openalex.org/W2103212156",
+        "https://openalex.org/W2108598243",
+        "https://openalex.org/W2112796928",
+        "https://openalex.org/W2116341502",
+        "https://openalex.org/W2116810533",
+        "https://openalex.org/W2117539524",
+        "https://openalex.org/W2118246710",
+        "https://openalex.org/W2132914434",
+        "https://openalex.org/W2133564696",
+        "https://openalex.org/W2150134853",
+        "https://openalex.org/W2162630660",
+        "https://openalex.org/W2163605009",
+        "https://openalex.org/W2173027866",
+        "https://openalex.org/W2194775991",
+        "https://openalex.org/W2250539671",
+        "https://openalex.org/W2402402867",
+        "https://openalex.org/W2468907370",
+        "https://openalex.org/W2504108613",
+        "https://openalex.org/W2507756961",
+        "https://openalex.org/W2519887557",
+        "https://openalex.org/W2552391307",
+        "https://openalex.org/W2558460151",
+        "https://openalex.org/W2558748708",
+        "https://openalex.org/W2559839022",
+        "https://openalex.org/W2600702321",
+        "https://openalex.org/W2604314403",
+        "https://openalex.org/W2606780347",
+        "https://openalex.org/W2607264901",
+        "https://openalex.org/W2607338098",
+        "https://openalex.org/W2618533983",
+        "https://openalex.org/W2624431344",
+        "https://openalex.org/W2626778328",
+        "https://openalex.org/W2768242641",
+        "https://openalex.org/W2786722833",
+        "https://openalex.org/W2804057010",
+        "https://openalex.org/W2804072623",
+        "https://openalex.org/W2805177834",
+        "https://openalex.org/W2805516822",
+        "https://openalex.org/W2807021761",
+        "https://openalex.org/W2811124557",
+        "https://openalex.org/W2891230096",
+        "https://openalex.org/W2894175828",
+        "https://openalex.org/W2894663205",
+        "https://openalex.org/W2900470550",
+        "https://openalex.org/W2900896126",
+        "https://openalex.org/W2902188679",
+        "https://openalex.org/W2906340703",
+        "https://openalex.org/W2907492528",
+        "https://openalex.org/W2909882940",
+        "https://openalex.org/W2911710347",
+        "https://openalex.org/W2912555327",
+        "https://openalex.org/W2912914769",
+        "https://openalex.org/W2918342466",
+        "https://openalex.org/W2920053903",
+        "https://openalex.org/W2939208918",
+        "https://openalex.org/W2944538680",
+        "https://openalex.org/W2945568301",
+        "https://openalex.org/W2945827377",
+        "https://openalex.org/W2945848398",
+        "https://openalex.org/W2946721323",
+        "https://openalex.org/W2947665307",
+        "https://openalex.org/W2948162129",
+        "https://openalex.org/W2948433391",
+        "https://openalex.org/W2951157442",
+        "https://openalex.org/W2954380329",
+        "https://openalex.org/W2962810718",
+        "https://openalex.org/W2963043672",
+        "https://openalex.org/W2964121744",
+        "https://openalex.org/W2966797369",
+        "https://openalex.org/W2968986602",
+        "https://openalex.org/W2970692043",
+        "https://openalex.org/W2970929262",
+        "https://openalex.org/W2970971581",
+        "https://openalex.org/W2972510165",
+        "https://openalex.org/W2977957659",
+        "https://openalex.org/W2987515519",
+        "https://openalex.org/W2990704537",
+        "https://openalex.org/W2992752586",
+        "https://openalex.org/W2995983896",
+        "https://openalex.org/W2997785591",
+        "https://openalex.org/W3002924435",
+        "https://openalex.org/W3007913393",
+        "https://openalex.org/W3013377162",
+        "https://openalex.org/W3018195242",
+        "https://openalex.org/W3019011053",
+        "https://openalex.org/W3021975806",
+        "https://openalex.org/W3022208364",
+        "https://openalex.org/W3023009950",
+        "https://openalex.org/W3035664258",
+        "https://openalex.org/W3039806961",
+        "https://openalex.org/W3041877813",
+        "https://openalex.org/W3080555959",
+        "https://openalex.org/W3081191522",
+        "https://openalex.org/W3094309150",
+        "https://openalex.org/W3102154670",
+        "https://openalex.org/W3116412901",
+        "https://openalex.org/W3118608800",
+        "https://openalex.org/W3127829048",
+        "https://openalex.org/W3136399186",
+        "https://openalex.org/W3153131045",
+        "https://openalex.org/W3155952169",
+        "https://openalex.org/W3156692528",
+        "https://openalex.org/W3167812602",
+        "https://openalex.org/W3169575312",
+        "https://openalex.org/W3194259208",
+        "https://openalex.org/W3204523018",
+        "https://openalex.org/W3211394146",
+        "https://openalex.org/W4206663027",
+        "https://openalex.org/W4214835738",
+        "https://openalex.org/W4221147848",
+        "https://openalex.org/W4221162104",
+        "https://openalex.org/W4239072543",
+        "https://openalex.org/W4285021420",
+        "https://openalex.org/W4293107948",
+        "https://openalex.org/W6887927328",
+        "https://openalex.org/W7042803211",
+        "https://openalex.org/W7095331819",
+        "https://openalex.org/W7223762255"
+      ],
+      "related_works": [
+        "https://openalex.org/W7027070088",
+        "https://openalex.org/W7124137896",
+        "https://openalex.org/W4417287173",
+        "https://openalex.org/W4283080554",
+        "https://openalex.org/W4404574290",
+        "https://openalex.org/W7133241539",
+        "https://openalex.org/W7108886935",
+        "https://openalex.org/W7160936290",
+        "https://openalex.org/W3210048979",
+        "https://openalex.org/W4400479959"
+      ],
+      "abstract_inverted_index": {
+        "In": [
+          0,
+          153
+        ],
+        "the": [
+          1,
+          11,
+          93,
+          126,
+          138,
+          141,
+          146,
+          150,
+          169,
+          181,
+          216
+        ],
+        "last": [
+          2
+        ],
+        "few": [
+          3
+        ],
+        "years,": [
+          4
+        ],
+        "graph": [
+          5,
+          219
+        ],
+        "neural": [
+          6
+        ],
+        "networks": [
+          7
+        ],
+        "(GNNs)": [
+          8
+        ],
+        "have": [
+          9,
+          34
+        ],
+        "become": [
+          10,
+          53
+        ],
+        "standard": [
+          12
+        ],
+        "toolkit": [
+          13
+        ],
+        "for": [
+          14,
+          48,
+          114,
+          241
+        ],
+        "analyzing": [
+          15
+        ],
+        "and": [
+          16,
+          45,
+          55,
+          84,
+          106,
+          110,
+          133,
+          191,
+          204,
+          231,
+          243
+        ],
+        "learning": [
+          17
+        ],
+        "from": [
+          18
+        ],
+        "data": [
+          19
+        ],
+        "on": [
+          20
+        ],
+        "graphs.": [
+          21
+        ],
+        "This": [
+          22,
+          64
+        ],
+        "emerging": [
+          23
+        ],
+        "field": [
+          24,
+          51
+        ],
+        "has": [
+          25,
+          102,
+          129,
+          232
+        ],
+        "witnessed": [
+          26
+        ],
+        "an": [
+          27,
+          103,
+          158,
+          173
+        ],
+        "extensive": [
+          28
+        ],
+        "growth": [
+          29
+        ],
+        "of": [
+          30,
+          78,
+          82,
+          123,
+          140,
+          161,
+          168,
+          209,
+          211,
+          218,
+          236
+        ],
+        "promising": [
+          31
+        ],
+        "techniques": [
+          32
+        ],
+        "that": [
+          33,
+          75
+        ],
+        "been": [
+          35
+        ],
+        "applied": [
+          36
+        ],
+        "with": [
+          37,
+          92,
+          118,
+          164,
+          185,
+          228
+        ],
+        "success": [
+          38
+        ],
+        "to": [
+          39,
+          52,
+          61,
+          70,
+          97,
+          116,
+          180,
+          199
+        ],
+        "computer": [
+          40
+        ],
+        "science,": [
+          41
+        ],
+        "mathematics,": [
+          42
+        ],
+        "biology,": [
+          43
+        ],
+        "physics": [
+          44
+        ],
+        "chemistry.": [
+          46
+        ],
+        "But": [
+          47
+        ],
+        "any": [
+          49
+        ],
+        "successful": [
+          50
+        ],
+        "mainstream": [
+          54
+        ],
+        "reliable,": [
+          56
+        ],
+        "benchmarks": [
+          57
+        ],
+        "must": [
+          58
+        ],
+        "be": [
+          59,
+          197
+        ],
+        "developed": [
+          60
+        ],
+        "quantify": [
+          62
+        ],
+        "progress.": [
+          63
+        ],
+        "led": [
+          65
+        ],
+        "us": [
+          66
+        ],
+        "in": [
+          67,
+          223,
+          245
+        ],
+        "March": [
+          68
+        ],
+        "2020": [
+          69
+        ],
+        "release": [
+          71
+        ],
+        "a": [
+          72,
+          79,
+          165,
+          186,
+          207,
+          246
+        ],
+        "benchmark": [
+          73,
+          163,
+          230
+        ],
+        "framework": [
+          74,
+          144,
+          171,
+          195
+        ],
+        "i)": [
+          76
+        ],
+        "comprises": [
+          77
+        ],
+        "diverse": [
+          80
+        ],
+        "collection": [
+          81
+        ],
+        "mathematical": [
+          83
+        ],
+        "real-world": [
+          85,
+          187
+        ],
+        "graphs,": [
+          86
+        ],
+        "ii)": [
+          87
+        ],
+        "enables": [
+          88
+        ],
+        "fair": [
+          89
+        ],
+        "model": [
+          90
+        ],
+        "comparison": [
+          91
+        ],
+        "same": [
+          94
+        ],
+        "parameter": [
+          95
+        ],
+        "budget": [
+          96
+        ],
+        "identify": [
+          98
+        ],
+        "key": [
+          99
+        ],
+        "architectures,": [
+          100
+        ],
+        "iii)": [
+          101
+        ],
+        "open-source,": [
+          104
+        ],
+        "easy-to-use": [
+          105
+        ],
+        "reproducible": [
+          107
+        ],
+        "code": [
+          108
+        ],
+        "infrastructure,": [
+          109
+        ],
+        "iv)": [
+          111
+        ],
+        "is": [
+          112
+        ],
+        "flexible": [
+          113
+        ],
+        "researchers": [
+          115
+        ],
+        "experiment": [
+          117
+        ],
+        "new": [
+          119,
+          201
+        ],
+        "theoretical": [
+          120
+        ],
+        "ideas.": [
+          121
+        ],
+        "As": [
+          122,
+          206
+        ],
+        "December": [
+          124
+        ],
+        "2022,": [
+          125
+        ],
+        "GitHub": [
+          127
+        ],
+        "repository": [
+          128
+        ],
+        "reached": [
+          130
+        ],
+        "2,000": [
+          131
+        ],
+        "stars": [
+          132
+        ],
+        "380": [
+          134
+        ],
+        "forks,": [
+          135
+        ],
+        "which": [
+          136,
+          225
+        ],
+        "demonstrates": [
+          137
+        ],
+        "utility": [
+          139
+        ],
+        "proposed": [
+          142
+        ],
+        "open-source": [
+          143
+        ],
+        "through": [
+          145
+        ],
+        "wide": [
+          147
+        ],
+        "usage": [
+          148
+        ],
+        "by": [
+          149
+        ],
+        "GNN": [
+          151,
+          202
+        ],
+        "community.": [
+          152
+        ],
+        "this": [
+          154,
+          194,
+          229
+        ],
+        "paper,": [
+          155
+        ],
+        "we": [
+          156,
+          214
+        ],
+        "present": [
+          157
+        ],
+        "updated": [
+          159
+        ],
+        "version": [
+          160
+        ],
+        "our": [
+          162,
+          212
+        ],
+        "concise": [
+          166
+        ],
+        "presentation": [
+          167
+        ],
+        "aforementioned": [
+          170
+        ],
+        "characteristics,": [
+          172
+        ],
+        "additional": [
+          174
+        ],
+        "medium-sized": [
+          175
+        ],
+        "molecular": [
+          176
+        ],
+        "dataset": [
+          177
+        ],
+        "AQSOL,": [
+          178
+        ],
+        "similar": [
+          179
+        ],
+        "popular": [
+          182
+        ],
+        "ZINC,": [
+          183
+        ],
+        "but": [
+          184
+        ],
+        "measured": [
+          188
+        ],
+        "chemical": [
+          189
+        ],
+        "target,": [
+          190
+        ],
+        "discuss": [
+          192
+        ],
+        "how": [
+          193
+        ],
+        "can": [
+          196
+        ],
+        "leveraged": [
+          198
+        ],
+        "explore": [
+          200
+        ],
+        "designs": [
+          203
+        ],
+        "insights.": [
+          205
+        ],
+        "proof": [
+          208
+        ],
+        "value": [
+          210
+        ],
+        "benchmark,": [
+          213
+        ],
+        "study": [
+          215
+        ],
+        "case": [
+          217
+        ],
+        "positional": [
+          220
+        ],
+        "encoding": [
+          221
+        ],
+        "(PE)": [
+          222
+        ],
+        "GNNs,": [
+          224
+        ],
+        "was": [
+          226
+        ],
+        "introduced": [
+          227
+        ],
+        "since": [
+          233
+        ],
+        "spurred": [
+          234
+        ],
+        "interest": [
+          235
+        ],
+        "exploring": [
+          237
+        ],
+        "more": [
+          238
+        ],
+        "powerful": [
+          239
+        ],
+        "PE": [
+          240
+        ],
+        "Transformers": [
+          242
+        ],
+        "GNNs": [
+          244
+        ],
+        "robust": [
+          247
+        ],
+        "experimental": [
+          248
+        ],
+        "setting.": [
+          249
+        ]
+      },
+      "cited_by_api_url": "https://api.openalex.org/works?filter=cites:W3007332492",
+      "counts_by_year": [
+        {
+          "year": 2026,
+          "cited_by_count": 80
+        },
+        {
+          "year": 2025,
+          "cited_by_count": 174
+        },
+        {
+          "year": 2024,
+          "cited_by_count": 217
+        },
+        {
+          "year": 2023,
+          "cited_by_count": 192
+        },
+        {
+          "year": 2022,
+          "cited_by_count": 179
+        },
+        {
+          "year": 2021,
+          "cited_by_count": 162
+        },
+        {
+          "year": 2020,
+          "cited_by_count": 66
+        },
+        {
+          "year": 2019,
+          "cited_by_count": 1
+        }
+      ],
+      "updated_date": "2026-11-24T14:10:38.155754",
+      "created_date": "2020-03-06T00:00:00"
+    },
+    {
+      "id": "https://openalex.org/W3042770487",
+      "doi": "https://doi.org/10.1145/3394486.3403076",
+      "title": "Towards Deeper Graph Neural Networks",
+      "display_name": "Towards Deeper Graph Neural Networks",
+      "alternate_titles": [],
+      "relevance_score": 234.65965,
+      "publication_year": 2020,
+      "publication_date": "2020-08-20",
+      "ids": {
+        "openalex": "https://openalex.org/W3042770487",
+        "doi": "https://doi.org/10.1145/3394486.3403076",
+        "mag": "3042770487",
+        "arxiv": "https://arxiv.org/abs/2007.09296"
+      },
+      "language": "en",
+      "primary_location": {
+        "id": "doi:10.1145/3394486.3403076",
+        "doi": "https://doi.org/10.1145/3394486.3403076",
+        "is_oa": false,
+        "landing_page_url": "https://doi.org/10.1145/3394486.3403076",
+        "pdf_url": null,
+        "source": {
+          "id": "https://openalex.org/S4363608767",
+          "display_name": "ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD)",
+          "issn_l": null,
+          "issn": null,
+          "is_oa": false,
+          "is_in_doaj": false,
+          "is_core": false,
+          "listed_in": [],
+          "host_organization": "https://openalex.org/P4310319798",
+          "host_organization_name": "Association for Computing Machinery",
+          "host_organization_lineage": [
+            "https://openalex.org/P4310319798"
+          ],
+          "host_organization_lineage_names": [
+            "Association for Computing Machinery"
+          ],
+          "type": "conference"
+        },
+        "license": null,
+        "license_id": null,
+        "version": "publishedVersion",
+        "is_accepted": true,
+        "is_published": true,
+        "raw_source_name": "Proceedings of the 26th ACM SIGKDD International Conference on Knowledge Discovery &amp; Data Mining",
+        "raw_type": "proceedings-article"
+      },
+      "parent_works": [
+        {
+          "id": "https://openalex.org/W4242818803",
+          "display_name": "Proceedings of the 26th ACM SIGKDD International Conference on Knowledge Discovery & Data Mining",
+          "relationship": "volume",
+          "link_type": "volume"
+        }
+      ],
+      "lineage": [
+        "https://openalex.org/W3042770487",
+        "https://openalex.org/W4242818803"
+      ],
+      "child_works_count": 0,
+      "pull_notice_works": [],
+      "type": "conference-paper",
+      "is_traditional": true,
+      "indexed_in": [
+        "arxiv",
+        "crossref",
+        "datacite"
+      ],
+      "open_access": {
+        "is_oa": true,
+        "oa_status": "green",
+        "oa_url": "https://arxiv.org/pdf/2007.09296",
+        "any_repository_has_fulltext": true
+      },
+      "authorships": [
+        {
+          "author_position": "first",
+          "author": {
+            "id": "https://openalex.org/A5100457527",
+            "display_name": "Meng Liu",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0002-9420-3874",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-9420-3874"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I91045830",
+              "display_name": "Texas A&M University",
+              "ror": "https://ror.org/01f5ytq51",
+              "country_code": "US",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I91045830"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Meng Liu",
+          "raw_affiliation_strings": [
+            "Texas A&M University, College Station, TX, USA"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Texas A&M University, College Station, TX, USA",
+              "institution_ids": [
+                "https://openalex.org/I91045830"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5101454834",
+            "display_name": "Hongyang Gao",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0002-9020-9080",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-9020-9080"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I91045830",
+              "display_name": "Texas A&M University",
+              "ror": "https://ror.org/01f5ytq51",
+              "country_code": "US",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I91045830"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Hongyang Gao",
+          "raw_affiliation_strings": [
+            "Texas A&M University, College Station, TX, USA"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Texas A&M University, College Station, TX, USA",
+              "institution_ids": [
+                "https://openalex.org/I91045830"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "last",
+          "author": {
+            "id": "https://openalex.org/A5052278550",
+            "display_name": "Shuiwang Ji",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0002-4205-4563",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-4205-4563"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I91045830",
+              "display_name": "Texas A&M University",
+              "ror": "https://ror.org/01f5ytq51",
+              "country_code": "US",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I91045830"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Shuiwang Ji",
+          "raw_affiliation_strings": [
+            "Texas A&M University, College Station, TX, USA"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Texas A&M University, College Station, TX, USA",
+              "institution_ids": [
+                "https://openalex.org/I91045830"
+              ]
+            }
+          ]
+        }
+      ],
+      "institutions": [],
+      "countries_distinct_count": 1,
+      "institutions_distinct_count": 1,
+      "corresponding_author_ids": [],
+      "corresponding_institution_ids": [
+        "https://openalex.org/I91045830"
+      ],
+      "apc_list": null,
+      "apc_paid": null,
+      "fwci": 20.8979,
+      "is_authors_truncated": false,
+      "has_fulltext": true,
+      "cited_by_count": 806,
+      "reviewed_by_count": 0,
+      "citation_normalized_percentile": {
+        "value": 0.99595032,
+        "is_in_top_1_percent": true,
+        "is_in_top_10_percent": true
+      },
+      "cited_by_percentile_year": {
+        "min": 92,
+        "max": 100
+      },
+      "biblio": {
+        "volume": null,
+        "issue": null,
+        "first_page": "338",
+        "last_page": "348"
+      },
+      "is_retracted": false,
+      "is_pulled": false,
+      "is_paratext": false,
+      "is_xpac": false,
+      "primary_topic": {
+        "id": "https://openalex.org/T11273",
+        "display_name": "Advanced Graph Neural Networks",
+        "score": 1.0,
+        "subfield": {
+          "id": "https://openalex.org/subfields/1702",
+          "display_name": "Artificial Intelligence"
+        },
+        "field": {
+          "id": "https://openalex.org/fields/17",
+          "display_name": "Computer Science"
+        },
+        "domain": {
+          "id": "https://openalex.org/domains/3",
+          "display_name": "Physical Sciences"
+        }
+      },
+      "topics": [
+        {
+          "id": "https://openalex.org/T11273",
+          "display_name": "Advanced Graph Neural Networks",
+          "score": 1.0,
+          "subfield": {
+            "id": "https://openalex.org/subfields/1702",
+            "display_name": "Artificial Intelligence"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/17",
+            "display_name": "Computer Science"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        },
+        {
+          "id": "https://openalex.org/T12292",
+          "display_name": "Graph Theory and Algorithms",
+          "score": 0.0,
+          "subfield": {
+            "id": "https://openalex.org/subfields/1703",
+            "display_name": "Computational Theory and Mathematics"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/17",
+            "display_name": "Computer Science"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        },
+        {
+          "id": "https://openalex.org/T10064",
+          "display_name": "Complex Network Analysis Techniques",
+          "score": 0.0,
+          "subfield": {
+            "id": "https://openalex.org/subfields/3109",
+            "display_name": "Statistical and Nonlinear Physics"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/31",
+            "display_name": "Physics and Astronomy"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        }
+      ],
+      "keywords": [
+        {
+          "id": "https://openalex.org/keywords/graph-neural-networks",
+          "display_name": "graph neural networks",
+          "score": 0.9589999914169312
+        },
+        {
+          "id": "https://openalex.org/keywords/over-smoothing",
+          "display_name": "over-smoothing",
+          "score": 0.8970000147819519
+        },
+        {
+          "id": "https://openalex.org/keywords/graph-convolution",
+          "display_name": "graph convolution",
+          "score": 0.7149999737739563
+        },
+        {
+          "id": "https://openalex.org/keywords/neighborhood-aggregation",
+          "display_name": "neighborhood aggregation",
+          "score": 0.765999972820282
+        },
+        {
+          "id": "https://openalex.org/keywords/receptive-fields",
+          "display_name": "receptive fields",
+          "score": 0.7950000166893005
+        },
+        {
+          "id": "https://openalex.org/keywords/graph-representation-learning",
+          "display_name": "graph representation learning",
+          "score": 0.722000002861023
+        },
+        {
+          "id": "https://openalex.org/keywords/deep-graph-neural-networks",
+          "display_name": "deep graph neural networks",
+          "score": 0.453000009059906
+        }
+      ],
+      "concepts": [
+        {
+          "id": "https://openalex.org/C41008148",
+          "wikidata": "https://www.wikidata.org/wiki/Q21198",
+          "display_name": "Computer science",
+          "level": 0,
+          "score": 0.7322316765785217
+        },
+        {
+          "id": "https://openalex.org/C80444323",
+          "wikidata": "https://www.wikidata.org/wiki/Q2878974",
+          "display_name": "Theoretical computer science",
+          "level": 1,
+          "score": 0.6187304854393005
+        },
+        {
+          "id": "https://openalex.org/C132525143",
+          "wikidata": "https://www.wikidata.org/wiki/Q141488",
+          "display_name": "Graph",
+          "level": 2,
+          "score": 0.583849310874939
+        },
+        {
+          "id": "https://openalex.org/C53811970",
+          "wikidata": "https://www.wikidata.org/wiki/Q5062194",
+          "display_name": "Centrality",
+          "level": 2,
+          "score": 0.4761733412742615
+        },
+        {
+          "id": "https://openalex.org/C50644808",
+          "wikidata": "https://www.wikidata.org/wiki/Q192776",
+          "display_name": "Artificial neural network",
+          "level": 2,
+          "score": 0.47014692425727844
+        },
+        {
+          "id": "https://openalex.org/C106937863",
+          "wikidata": "https://www.wikidata.org/wiki/Q7236518",
+          "display_name": "Power graph analysis",
+          "level": 3,
+          "score": 0.4609748423099518
+        },
+        {
+          "id": "https://openalex.org/C3770464",
+          "wikidata": "https://www.wikidata.org/wiki/Q775963",
+          "display_name": "Smoothing",
+          "level": 2,
+          "score": 0.457794725894928
+        },
+        {
+          "id": "https://openalex.org/C19071747",
+          "wikidata": "https://www.wikidata.org/wiki/Q1755207",
+          "display_name": "Receptive field",
+          "level": 2,
+          "score": 0.4448925852775574
+        },
+        {
+          "id": "https://openalex.org/C154945302",
+          "wikidata": "https://www.wikidata.org/wiki/Q11660",
+          "display_name": "Artificial intelligence",
+          "level": 1,
+          "score": 0.4303652346134186
+        },
+        {
+          "id": "https://openalex.org/C33923547",
+          "wikidata": "https://www.wikidata.org/wiki/Q395",
+          "display_name": "Mathematics",
+          "level": 0,
+          "score": 0.1695707142353058
+        },
+        {
+          "id": "https://openalex.org/C114614502",
+          "wikidata": "https://www.wikidata.org/wiki/Q76592",
+          "display_name": "Combinatorics",
+          "level": 1,
+          "score": 0.0
+        },
+        {
+          "id": "https://openalex.org/C31972630",
+          "wikidata": "https://www.wikidata.org/wiki/Q844240",
+          "display_name": "Computer vision",
+          "level": 1,
+          "score": 0.0
+        }
+      ],
+      "mesh": [],
+      "locations_count": 2,
+      "locations": [
+        {
+          "id": "doi:10.1145/3394486.3403076",
+          "doi": "https://doi.org/10.1145/3394486.3403076",
+          "is_oa": false,
+          "landing_page_url": "https://doi.org/10.1145/3394486.3403076",
+          "pdf_url": null,
+          "source": {
+            "id": "https://openalex.org/S4363608767",
+            "display_name": "ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD)",
+            "issn_l": null,
+            "issn": null,
+            "is_oa": false,
+            "is_in_doaj": false,
+            "is_core": false,
+            "listed_in": [],
+            "host_organization": "https://openalex.org/P4310319798",
+            "host_organization_name": "Association for Computing Machinery",
+            "host_organization_lineage": [
+              "https://openalex.org/P4310319798"
+            ],
+            "host_organization_lineage_names": [
+              "Association for Computing Machinery"
+            ],
+            "type": "conference"
+          },
+          "license": null,
+          "license_id": null,
+          "version": "publishedVersion",
+          "is_accepted": true,
+          "is_published": true,
+          "raw_source_name": "Proceedings of the 26th ACM SIGKDD International Conference on Knowledge Discovery &amp; Data Mining",
+          "raw_type": "proceedings-article"
+        },
+        {
+          "id": "pmh:oai:arXiv.org:2007.09296",
+          "doi": "https://doi.org/10.48550/arxiv.2007.09296",
+          "is_oa": true,
+          "landing_page_url": "http://arxiv.org/abs/2007.09296",
+          "pdf_url": "https://arxiv.org/pdf/2007.09296",
+          "source": {
+            "id": "https://openalex.org/S4306400194",
+            "display_name": "arXiv",
+            "issn_l": "2331-8422",
+            "issn": [
+              "2331-8422"
+            ],
+            "is_oa": true,
+            "is_in_doaj": false,
+            "is_core": false,
+            "listed_in": [],
+            "host_organization": "https://openalex.org/I4402554005",
+            "host_organization_name": "arXiv",
+            "host_organization_lineage": [
+              "https://openalex.org/I4402554005"
+            ],
+            "host_organization_lineage_names": [],
+            "type": "repository"
+          },
+          "license": null,
+          "license_id": null,
+          "version": "submittedVersion",
+          "is_accepted": false,
+          "is_published": false,
+          "raw_source_name": null,
+          "raw_type": "text"
+        }
+      ],
+      "best_oa_location": {
+        "id": "pmh:oai:arXiv.org:2007.09296",
+        "doi": "https://doi.org/10.48550/arxiv.2007.09296",
+        "is_oa": true,
+        "landing_page_url": "http://arxiv.org/abs/2007.09296",
+        "pdf_url": "https://arxiv.org/pdf/2007.09296",
+        "source": {
+          "id": "https://openalex.org/S4306400194",
+          "display_name": "arXiv",
+          "issn_l": "2331-8422",
+          "issn": [
+            "2331-8422"
+          ],
+          "is_oa": true,
+          "is_in_doaj": false,
+          "is_core": false,
+          "listed_in": [],
+          "host_organization": "https://openalex.org/I4402554005",
+          "host_organization_name": "arXiv",
+          "host_organization_lineage": [
+            "https://openalex.org/I4402554005"
+          ],
+          "host_organization_lineage_names": [],
+          "type": "repository"
+        },
+        "license": null,
+        "license_id": null,
+        "version": "submittedVersion",
+        "is_accepted": false,
+        "is_published": false,
+        "raw_source_name": null,
+        "raw_type": "text"
+      },
+      "sustainable_development_goals": [],
+      "study_designs": [],
+      "awards": [
+        {
+          "id": "https://openalex.org/G1092245336",
+          "display_name": "CAREER: Towards the Next Generation of Data-Driven",
+          "funder_award_id": "1922969",
+          "funder_id": "https://openalex.org/F4320306076",
+          "funder_display_name": "National Science Foundation"
+        },
+        {
+          "id": "https://openalex.org/G4457864232",
+          "display_name": "BIGDATA: Collaborative Research: F: Efficient and Exact Methods for Big Data Reduction",
+          "funder_award_id": "1908198",
+          "funder_id": "https://openalex.org/F4320306076",
+          "funder_display_name": "National Science Foundation"
+        },
+        {
+          "id": "https://openalex.org/G93484968",
+          "display_name": "III: Small: Collaborative Research: Structured Methods for Multi-Task Learning",
+          "funder_award_id": "1908166",
+          "funder_id": "https://openalex.org/F4320306076",
+          "funder_display_name": "National Science Foundation"
+        }
+      ],
+      "funders": [
+        {
+          "id": "https://openalex.org/F4320306076",
+          "display_name": "National Science Foundation",
+          "ror": "https://ror.org/021nxhr62"
+        }
+      ],
+      "has_content": {
+        "pdf": true,
+        "grobid_xml": true
+      },
+      "content_urls": {
+        "pdf": "https://content.openalex.org/works/W3042770487.pdf",
+        "grobid_xml": "https://content.openalex.org/works/W3042770487.grobid-xml"
+      },
+      "referenced_works_count": 41,
+      "referenced_works": [
+        "https://openalex.org/W1514107797",
+        "https://openalex.org/W1535136082",
+        "https://openalex.org/W1665214252",
+        "https://openalex.org/W1854214752",
+        "https://openalex.org/W1983320747",
+        "https://openalex.org/W2027731328",
+        "https://openalex.org/W2079017595",
+        "https://openalex.org/W2137983211",
+        "https://openalex.org/W2153959628",
+        "https://openalex.org/W2187089797",
+        "https://openalex.org/W2468907370",
+        "https://openalex.org/W2519887557",
+        "https://openalex.org/W2558460151",
+        "https://openalex.org/W2606780347",
+        "https://openalex.org/W2624431344",
+        "https://openalex.org/W2742503211",
+        "https://openalex.org/W2766453196",
+        "https://openalex.org/W2788512147",
+        "https://openalex.org/W2788919350",
+        "https://openalex.org/W2802074788",
+        "https://openalex.org/W2804057010",
+        "https://openalex.org/W2809418595",
+        "https://openalex.org/W2811124557",
+        "https://openalex.org/W2894175828",
+        "https://openalex.org/W2899771611",
+        "https://openalex.org/W2900470550",
+        "https://openalex.org/W2900763475",
+        "https://openalex.org/W2916106175",
+        "https://openalex.org/W2918342466",
+        "https://openalex.org/W2939208918",
+        "https://openalex.org/W2952832237",
+        "https://openalex.org/W2963066159",
+        "https://openalex.org/W2964051675",
+        "https://openalex.org/W2995509042",
+        "https://openalex.org/W2996091850",
+        "https://openalex.org/W2998008360",
+        "https://openalex.org/W2998496395",
+        "https://openalex.org/W3030661718",
+        "https://openalex.org/W3160202947",
+        "https://openalex.org/W4236323066",
+        "https://openalex.org/W7223762255"
+      ],
+      "related_works": [
+        "https://openalex.org/W4393387999",
+        "https://openalex.org/W4411048537",
+        "https://openalex.org/W4221138897",
+        "https://openalex.org/W4290943435",
+        "https://openalex.org/W4403582825",
+        "https://openalex.org/W4405935119",
+        "https://openalex.org/W3014294114",
+        "https://openalex.org/W4393372516",
+        "https://openalex.org/W4294791134",
+        "https://openalex.org/W3035649237"
+      ],
+      "abstract_inverted_index": {
+        "Graph": [
+          0,
+          14,
+          184
+        ],
+        "neural": [
+          1,
+          90,
+          131
+        ],
+        "networks": [
+          2,
+          132
+        ],
+        "have": [
+          3,
+          206
+        ],
+        "shown": [
+          4
+        ],
+        "significant": [
+          5
+        ],
+        "success": [
+          6
+        ],
+        "in": [
+          7,
+          119
+        ],
+        "the": [
+          8,
+          23,
+          41,
+          60,
+          104,
+          108,
+          112,
+          152,
+          170,
+          214
+        ],
+        "field": [
+          9
+        ],
+        "of": [
+          10,
+          22,
+          31,
+          71,
+          114,
+          151,
+          169,
+          198,
+          216
+        ],
+        "graph": [
+          11,
+          26,
+          89,
+          121,
+          130,
+          138
+        ],
+        "representation": [
+          12,
+          115
+        ],
+        "learning.": [
+          13
+        ],
+        "convolutions": [
+          15
+        ],
+        "perform": [
+          16
+        ],
+        "neighborhood": [
+          17,
+          33
+        ],
+        "aggregation": [
+          18,
+          34
+        ],
+        "and": [
+          19,
+          40,
+          83,
+          101,
+          117,
+          166,
+          177,
+          203,
+          210,
+          212
+        ],
+        "represent": [
+          20
+        ],
+        "one": [
+          21,
+          29
+        ],
+        "most": [
+          24
+        ],
+        "important": [
+          25
+        ],
+        "operations.": [
+          27,
+          123
+        ],
+        "Nevertheless,": [
+          28
+        ],
+        "layer": [
+          30
+        ],
+        "these": [
+          32,
+          126
+        ],
+        "methods": [
+          35
+        ],
+        "only": [
+          36
+        ],
+        "consider": [
+          37
+        ],
+        "immediate": [
+          38
+        ],
+        "neighbors,": [
+          39
+        ],
+        "performance": [
+          42,
+          57,
+          109
+        ],
+        "decreases": [
+          43
+        ],
+        "when": [
+          44,
+          155
+        ],
+        "going": [
+          45
+        ],
+        "deeper": [
+          46,
+          88,
+          129
+        ],
+        "to": [
+          47,
+          59,
+          136,
+          188
+        ],
+        "enable": [
+          48
+        ],
+        "larger": [
+          49,
+          142
+        ],
+        "receptive": [
+          50,
+          143,
+          194
+        ],
+        "fields.": [
+          51,
+          144,
+          195
+        ],
+        "Several": [
+          52
+        ],
+        "recent": [
+          53
+        ],
+        "studies": [
+          54
+        ],
+        "attribute": [
+          55
+        ],
+        "this": [
+          56,
+          76,
+          80,
+          99
+        ],
+        "deterioration": [
+          58
+        ],
+        "over-smoothing": [
+          61,
+          171
+        ],
+        "issue,": [
+          62
+        ],
+        "which": [
+          63,
+          160
+        ],
+        "states": [
+          64
+        ],
+        "that": [
+          65,
+          103
+        ],
+        "repeated": [
+          66
+        ],
+        "propagation": [
+          67,
+          118
+        ],
+        "makes": [
+          68
+        ],
+        "node": [
+          69,
+          139
+        ],
+        "representations": [
+          70,
+          140
+        ],
+        "different": [
+          72
+        ],
+        "classes": [
+          73
+        ],
+        "indistinguishable.": [
+          74
+        ],
+        "In": [
+          75
+        ],
+        "work,": [
+          77
+        ],
+        "we": [
+          78,
+          93,
+          180
+        ],
+        "study": [
+          79
+        ],
+        "observation": [
+          81,
+          154
+        ],
+        "systematically": [
+          82
+        ],
+        "develop": [
+          84
+        ],
+        "new": [
+          85
+        ],
+        "insights": [
+          86,
+          211
+        ],
+        "towards": [
+          87
+        ],
+        "networks.": [
+          91
+        ],
+        "First,": [
+          92
+        ],
+        "provide": [
+          94,
+          147
+        ],
+        "a": [
+          95,
+          148,
+          164
+        ],
+        "systematical": [
+          96
+        ],
+        "analysis": [
+          97,
+          150,
+          209
+        ],
+        "on": [
+          98,
+          174,
+          200
+        ],
+        "issue": [
+          100
+        ],
+        "argue": [
+          102
+        ],
+        "key": [
+          105
+        ],
+        "factor": [
+          106
+        ],
+        "compromising": [
+          107
+        ],
+        "significantly": [
+          110
+        ],
+        "is": [
+          111
+        ],
+        "entanglement": [
+          113
+        ],
+        "transformation": [
+          116
+        ],
+        "current": [
+          120
+        ],
+        "convolution": [
+          122
+        ],
+        "After": [
+          124
+        ],
+        "decoupling": [
+          125
+        ],
+        "two": [
+          127
+        ],
+        "operations,": [
+          128
+        ],
+        "can": [
+          133,
+          161
+        ],
+        "be": [
+          134
+        ],
+        "used": [
+          135
+        ],
+        "learn": [
+          137
+        ],
+        "from": [
+          141,
+          192
+        ],
+        "We": [
+          145
+        ],
+        "further": [
+          146
+        ],
+        "theoretical": [
+          149,
+          176
+        ],
+        "above": [
+          153
+        ],
+        "building": [
+          156
+        ],
+        "very": [
+          157
+        ],
+        "deep": [
+          158
+        ],
+        "models,": [
+          159
+        ],
+        "serve": [
+          162
+        ],
+        "as": [
+          163
+        ],
+        "rigorous": [
+          165
+        ],
+        "gentle": [
+          167
+        ],
+        "description": [
+          168
+        ],
+        "issue.": [
+          172
+        ],
+        "Based": [
+          173
+        ],
+        "our": [
+          175,
+          208,
+          217
+        ],
+        "empirical": [
+          178
+        ],
+        "analysis,": [
+          179
+        ],
+        "propose": [
+          181
+        ],
+        "Deep": [
+          182
+        ],
+        "Adaptive": [
+          183
+        ],
+        "Neural": [
+          185
+        ],
+        "Network": [
+          186
+        ],
+        "(DAGNN)": [
+          187
+        ],
+        "adaptively": [
+          189
+        ],
+        "incorporate": [
+          190
+        ],
+        "information": [
+          191
+        ],
+        "large": [
+          193
+        ],
+        "A": [
+          196
+        ],
+        "set": [
+          197
+        ],
+        "experiments": [
+          199
+        ],
+        "citation,": [
+          201
+        ],
+        "co-authorship,": [
+          202
+        ],
+        "co-purchase": [
+          204
+        ],
+        "datasets": [
+          205
+        ],
+        "confirmed": [
+          207
+        ],
+        "demonstrated": [
+          213
+        ],
+        "superiority": [
+          215
+        ],
+        "proposed": [
+          218
+        ],
+        "methods.": [
+          219
+        ]
+      },
+      "cited_by_api_url": "https://api.openalex.org/works?filter=cites:W3042770487",
+      "counts_by_year": [
+        {
+          "year": 2026,
+          "cited_by_count": 101
+        },
+        {
+          "year": 2025,
+          "cited_by_count": 146
+        },
+        {
+          "year": 2024,
+          "cited_by_count": 178
+        },
+        {
+          "year": 2023,
+          "cited_by_count": 154
+        },
+        {
+          "year": 2022,
+          "cited_by_count": 139
+        },
+        {
+          "year": 2021,
+          "cited_by_count": 79
+        },
+        {
+          "year": 2020,
+          "cited_by_count": 7
+        },
+        {
+          "year": 2019,
+          "cited_by_count": 2
+        }
+      ],
+      "updated_date": "2026-11-24T14:10:38.155754",
+      "created_date": "2020-07-23T00:00:00"
+    },
+    {
+      "id": "https://openalex.org/W2907492528",
+      "doi": "https://doi.org/10.1109/tnnls.2020.2978386",
+      "title": "A Comprehensive Survey on Graph Neural Networks",
+      "display_name": "A Comprehensive Survey on Graph Neural Networks",
+      "alternate_titles": [],
+      "relevance_score": 234.40273,
+      "publication_year": 2020,
+      "publication_date": "2020-03-24",
+      "ids": {
+        "openalex": "https://openalex.org/W2907492528",
+        "doi": "https://doi.org/10.1109/tnnls.2020.2978386",
+        "mag": "2907492528",
+        "pmid": "https://pubmed.ncbi.nlm.nih.gov/32217482",
+        "arxiv": "https://arxiv.org/abs/1901.00596"
+      },
+      "language": "en",
+      "primary_location": {
+        "id": "doi:10.1109/tnnls.2020.2978386",
+        "doi": "https://doi.org/10.1109/tnnls.2020.2978386",
+        "is_oa": false,
+        "landing_page_url": "https://doi.org/10.1109/tnnls.2020.2978386",
+        "pdf_url": null,
+        "source": {
+          "id": "https://openalex.org/S4210175523",
+          "display_name": "IEEE Transactions on Neural Networks and Learning Systems",
+          "issn_l": "2162-237X",
+          "issn": [
+            "2162-237X",
+            "2162-2388"
+          ],
+          "is_oa": false,
+          "is_in_doaj": false,
+          "is_core": true,
+          "listed_in": [
+            "anvur-class-a",
+            "anvur-scientific",
+            "ccf-b",
+            "cwts-core",
+            "dongbi-a",
+            "doyens",
+            "jufo-3",
+            "medline",
+            "norway-2",
+            "poland-200",
+            "russia-white-list-1",
+            "vabb-shw"
+          ],
+          "host_organization": "https://openalex.org/P4310319808",
+          "host_organization_name": "Institute of Electrical and Electronics Engineers",
+          "host_organization_lineage": [
+            "https://openalex.org/P4310319808"
+          ],
+          "host_organization_lineage_names": [
+            "Institute of Electrical and Electronics Engineers"
+          ],
+          "type": "journal"
+        },
+        "license": null,
+        "license_id": null,
+        "version": "publishedVersion",
+        "is_accepted": true,
+        "is_published": true,
+        "raw_source_name": "IEEE Transactions on Neural Networks and Learning Systems",
+        "raw_type": "journal-article"
+      },
+      "parent_works": [],
+      "lineage": [
+        "https://openalex.org/W2907492528"
+      ],
+      "child_works_count": 0,
+      "pull_notice_works": [],
+      "type": "review",
+      "is_traditional": true,
+      "indexed_in": [
+        "arxiv",
+        "crossref",
+        "datacite",
+        "pubmed"
+      ],
+      "open_access": {
+        "is_oa": true,
+        "oa_status": "green",
+        "oa_url": "https://arxiv.org/pdf/1901.00596",
+        "any_repository_has_fulltext": true
+      },
+      "authorships": [
+        {
+          "author_position": "first",
+          "author": {
+            "id": "https://openalex.org/A5083854216",
+            "display_name": "Zonghan Wu",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0003-4450-7738",
+            "observed_orcids": [
+              "https://orcid.org/0000-0003-4450-7738"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I114017466",
+              "display_name": "University of Technology Sydney",
+              "ror": "https://ror.org/03f0f6041",
+              "country_code": "AU",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I114017466"
+              ]
+            }
+          ],
+          "countries": [
+            "AU"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Zonghan Wu",
+          "raw_affiliation_strings": [
+            "Centre for Artificial Intelligence, Faculty of Engineering and Information Technology, University of Technology Sydney, Ultimo, Australia"
+          ],
+          "raw_orcid": "https://orcid.org/0000-0003-4450-7738",
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Centre for Artificial Intelligence, Faculty of Engineering and Information Technology, University of Technology Sydney, Ultimo, Australia",
+              "institution_ids": [
+                "https://openalex.org/I114017466"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5008056593",
+            "display_name": "Shirui Pan",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0003-0794-527X",
+            "observed_orcids": [
+              "https://orcid.org/0000-0003-0794-527X"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I56590836",
+              "display_name": "Monash University",
+              "ror": "https://ror.org/02bfwt286",
+              "country_code": "AU",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I56590836"
+              ]
+            }
+          ],
+          "countries": [
+            "AU"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Shirui Pan",
+          "raw_affiliation_strings": [
+            "Faculty of Information Technology, Monash University, Clayton, VIC, Australia"
+          ],
+          "raw_orcid": "https://orcid.org/0000-0003-0794-527X",
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Faculty of Information Technology, Monash University, Clayton, VIC, Australia",
+              "institution_ids": [
+                "https://openalex.org/I56590836"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": null,
+            "display_name": "Fengwen Chen",
+            "type": null,
+            "orcid": null,
+            "observed_orcids": []
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I114017466",
+              "display_name": "University of Technology Sydney",
+              "ror": "https://ror.org/03f0f6041",
+              "country_code": "AU",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I114017466"
+              ]
+            }
+          ],
+          "countries": [
+            "AU"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Fengwen Chen",
+          "raw_affiliation_strings": [
+            "Centre for Artificial Intelligence, Faculty of Engineering and Information Technology, University of Technology Sydney, Ultimo, Australia"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Centre for Artificial Intelligence, Faculty of Engineering and Information Technology, University of Technology Sydney, Ultimo, Australia",
+              "institution_ids": [
+                "https://openalex.org/I114017466"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5059227406",
+            "display_name": "Guodong Long",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0003-3740-9515",
+            "observed_orcids": [
+              "https://orcid.org/0000-0003-3740-9515"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I114017466",
+              "display_name": "University of Technology Sydney",
+              "ror": "https://ror.org/03f0f6041",
+              "country_code": "AU",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I114017466"
+              ]
+            }
+          ],
+          "countries": [
+            "AU"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Guodong Long",
+          "raw_affiliation_strings": [
+            "Centre for Artificial Intelligence, Faculty of Engineering and Information Technology, University of Technology Sydney, Ultimo, Australia"
+          ],
+          "raw_orcid": "https://orcid.org/0000-0003-3740-9515",
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Centre for Artificial Intelligence, Faculty of Engineering and Information Technology, University of Technology Sydney, Ultimo, Australia",
+              "institution_ids": [
+                "https://openalex.org/I114017466"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5100438525",
+            "display_name": "Chengqi Zhang",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0001-5715-7154",
+            "observed_orcids": [
+              "https://orcid.org/0000-0001-5715-7154"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I114017466",
+              "display_name": "University of Technology Sydney",
+              "ror": "https://ror.org/03f0f6041",
+              "country_code": "AU",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I114017466"
+              ]
+            }
+          ],
+          "countries": [
+            "AU"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Chengqi Zhang",
+          "raw_affiliation_strings": [
+            "Centre for Artificial Intelligence, Faculty of Engineering and Information Technology, University of Technology Sydney, Ultimo, Australia"
+          ],
+          "raw_orcid": "https://orcid.org/0000-0001-5715-7154",
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Centre for Artificial Intelligence, Faculty of Engineering and Information Technology, University of Technology Sydney, Ultimo, Australia",
+              "institution_ids": [
+                "https://openalex.org/I114017466"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "last",
+          "author": {
+            "id": "https://openalex.org/A5036357902",
+            "display_name": "Philip S. Yu",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0002-3491-5968",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-3491-5968"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I39422238",
+              "display_name": "University of Illinois Chicago",
+              "ror": "https://ror.org/02mpq6x41",
+              "country_code": "US",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I39422238"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Philip S. Yu",
+          "raw_affiliation_strings": [
+            "University of Illinois at Chicago, Chicago, IL, USA"
+          ],
+          "raw_orcid": null,
+          "affiliations": [
+            {
+              "raw_affiliation_string": "University of Illinois at Chicago, Chicago, IL, USA",
+              "institution_ids": [
+                "https://openalex.org/I39422238"
+              ]
+            }
+          ]
+        }
+      ],
+      "institutions": [],
+      "countries_distinct_count": 2,
+      "institutions_distinct_count": 3,
+      "corresponding_author_ids": [],
+      "corresponding_institution_ids": [],
+      "apc_list": {
+        "value": 2045,
+        "currency": "USD",
+        "value_usd": 2045
+      },
+      "apc_paid": null,
+      "fwci": 73.1338,
+      "is_authors_truncated": false,
+      "has_fulltext": true,
+      "cited_by_count": 16058,
+      "reviewed_by_count": 0,
+      "citation_normalized_percentile": {
+        "value": 1.0,
+        "is_in_top_1_percent": true,
+        "is_in_top_10_percent": true
+      },
+      "cited_by_percentile_year": {
+        "min": 86,
+        "max": 100
+      },
+      "biblio": {
+        "volume": "32",
+        "issue": "1",
+        "first_page": "4",
+        "last_page": "24"
+      },
+      "is_retracted": false,
+      "is_pulled": false,
+      "is_paratext": false,
+      "is_xpac": false,
+      "primary_topic": {
+        "id": "https://openalex.org/T11273",
+        "display_name": "Advanced Graph Neural Networks",
+        "score": 1.0,
+        "subfield": {
+          "id": "https://openalex.org/subfields/1702",
+          "display_name": "Artificial Intelligence"
+        },
+        "field": {
+          "id": "https://openalex.org/fields/17",
+          "display_name": "Computer Science"
+        },
+        "domain": {
+          "id": "https://openalex.org/domains/3",
+          "display_name": "Physical Sciences"
+        }
+      },
+      "topics": [
+        {
+          "id": "https://openalex.org/T11273",
+          "display_name": "Advanced Graph Neural Networks",
+          "score": 1.0,
+          "subfield": {
+            "id": "https://openalex.org/subfields/1702",
+            "display_name": "Artificial Intelligence"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/17",
+            "display_name": "Computer Science"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        },
+        {
+          "id": "https://openalex.org/T12292",
+          "display_name": "Graph Theory and Algorithms",
+          "score": 0.0,
+          "subfield": {
+            "id": "https://openalex.org/subfields/1703",
+            "display_name": "Computational Theory and Mathematics"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/17",
+            "display_name": "Computer Science"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        },
+        {
+          "id": "https://openalex.org/T10203",
+          "display_name": "Recommender Systems and Techniques",
+          "score": 0.0,
+          "subfield": {
+            "id": "https://openalex.org/subfields/1710",
+            "display_name": "Information Systems"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/17",
+            "display_name": "Computer Science"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        }
+      ],
+      "keywords": [
+        {
+          "id": "https://openalex.org/keywords/graph-neural-networks",
+          "display_name": "graph neural networks",
+          "score": 1.0
+        },
+        {
+          "id": "https://openalex.org/keywords/graph-data",
+          "display_name": "graph data",
+          "score": 0.8169999718666077
+        },
+        {
+          "id": "https://openalex.org/keywords/non-euclidean-data",
+          "display_name": "non-Euclidean data",
+          "score": 0.8360000252723694
+        },
+        {
+          "id": "https://openalex.org/keywords/recurrent-graph-neural-networks",
+          "display_name": "recurrent graph neural networks",
+          "score": 0.8360000252723694
+        },
+        {
+          "id": "https://openalex.org/keywords/graph-convolutional-networks",
+          "display_name": "graph convolutional networks",
+          "score": 0.9330000281333923
+        },
+        {
+          "id": "https://openalex.org/keywords/graph-autoencoder",
+          "display_name": "graph autoencoder",
+          "score": 1.0
+        },
+        {
+          "id": "https://openalex.org/keywords/spatiotemporal-graph-neural-networks",
+          "display_name": "spatio-temporal graph neural networks",
+          "score": 0.9929999709129333
+        },
+        {
+          "id": "https://openalex.org/keywords/benchmark-dataset",
+          "display_name": "benchmark dataset",
+          "score": 0.8500000238418579
+        }
+      ],
+      "concepts": [
+        {
+          "id": "https://openalex.org/C41008148",
+          "wikidata": "https://www.wikidata.org/wiki/Q21198",
+          "display_name": "Computer science",
+          "level": 0,
+          "score": 0.7860999703407288
+        },
+        {
+          "id": "https://openalex.org/C154945302",
+          "wikidata": "https://www.wikidata.org/wiki/Q11660",
+          "display_name": "Artificial intelligence",
+          "level": 1,
+          "score": 0.6552000045776367
+        },
+        {
+          "id": "https://openalex.org/C119857082",
+          "wikidata": "https://www.wikidata.org/wiki/Q2539",
+          "display_name": "Machine learning",
+          "level": 1,
+          "score": 0.6035000085830688
+        },
+        {
+          "id": "https://openalex.org/C108583219",
+          "wikidata": "https://www.wikidata.org/wiki/Q197536",
+          "display_name": "Deep learning",
+          "level": 2,
+          "score": 0.545199990272522
+        },
+        {
+          "id": "https://openalex.org/C132525143",
+          "wikidata": "https://www.wikidata.org/wiki/Q141488",
+          "display_name": "Graph",
+          "level": 2,
+          "score": 0.5358999967575073
+        },
+        {
+          "id": "https://openalex.org/C81363708",
+          "wikidata": "https://www.wikidata.org/wiki/Q17084460",
+          "display_name": "Convolutional neural network",
+          "level": 2,
+          "score": 0.4641000032424927
+        },
+        {
+          "id": "https://openalex.org/C50644808",
+          "wikidata": "https://www.wikidata.org/wiki/Q192776",
+          "display_name": "Artificial neural network",
+          "level": 2,
+          "score": 0.38920000195503235
+        },
+        {
+          "id": "https://openalex.org/C59404180",
+          "wikidata": "https://www.wikidata.org/wiki/Q17013334",
+          "display_name": "Feature learning",
+          "level": 2,
+          "score": 0.38850000500679016
+        },
+        {
+          "id": "https://openalex.org/C2776145971",
+          "wikidata": "https://www.wikidata.org/wiki/Q30673951",
+          "display_name": "Labeled data",
+          "level": 2,
+          "score": 0.36739999055862427
+        },
+        {
+          "id": "https://openalex.org/C51632099",
+          "wikidata": "https://www.wikidata.org/wiki/Q3985153",
+          "display_name": "Training set",
+          "level": 2,
+          "score": 0.3441999852657318
+        },
+        {
+          "id": "https://openalex.org/C185798385",
+          "wikidata": "https://www.wikidata.org/wiki/Q1161707",
+          "display_name": "Benchmark (surveying)",
+          "level": 2,
+          "score": 0.33480000495910645
+        },
+        {
+          "id": "https://openalex.org/C147168706",
+          "wikidata": "https://www.wikidata.org/wiki/Q1457734",
+          "display_name": "Recurrent neural network",
+          "level": 3,
+          "score": 0.3127000033855438
+        },
+        {
+          "id": "https://openalex.org/C67186912",
+          "wikidata": "https://www.wikidata.org/wiki/Q367664",
+          "display_name": "Data modeling",
+          "level": 2,
+          "score": 0.304500013589859
+        },
+        {
+          "id": "https://openalex.org/C58642233",
+          "wikidata": "https://www.wikidata.org/wiki/Q8269924",
+          "display_name": "Taxonomy (biology)",
+          "level": 2,
+          "score": 0.28769999742507935
+        },
+        {
+          "id": "https://openalex.org/C116409475",
+          "wikidata": "https://www.wikidata.org/wiki/Q1385056",
+          "display_name": "External Data Representation",
+          "level": 2,
+          "score": 0.2809999883174896
+        },
+        {
+          "id": "https://openalex.org/C155846161",
+          "wikidata": "https://www.wikidata.org/wiki/Q1143367",
+          "display_name": "Graphical model",
+          "level": 2,
+          "score": 0.28040000796318054
+        },
+        {
+          "id": "https://openalex.org/C138958017",
+          "wikidata": "https://www.wikidata.org/wiki/Q190087",
+          "display_name": "Data type",
+          "level": 2,
+          "score": 0.26489999890327454
+        },
+        {
+          "id": "https://openalex.org/C80444323",
+          "wikidata": "https://www.wikidata.org/wiki/Q2878974",
+          "display_name": "Theoretical computer science",
+          "level": 1,
+          "score": 0.26420000195503235
+        },
+        {
+          "id": "https://openalex.org/C2984842247",
+          "wikidata": "https://www.wikidata.org/wiki/Q197536",
+          "display_name": "Deep neural networks",
+          "level": 3,
+          "score": 0.2590999901294708
+        },
+        {
+          "id": "https://openalex.org/C21080849",
+          "wikidata": "https://www.wikidata.org/wiki/Q13611879",
+          "display_name": "Data point",
+          "level": 2,
+          "score": 0.2547000050544739
+        },
+        {
+          "id": "https://openalex.org/C2779439875",
+          "wikidata": "https://www.wikidata.org/wiki/Q1078276",
+          "display_name": "Natural language understanding",
+          "level": 3,
+          "score": 0.2515999972820282
+        }
+      ],
+      "mesh": [
+        {
+          "descriptor_ui": "D000069550",
+          "descriptor_name": "Machine Learning",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000465",
+          "descriptor_name": "Algorithms",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D006801",
+          "descriptor_name": "Humans",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D011795",
+          "descriptor_name": "Surveys and Questionnaires",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D016571",
+          "descriptor_name": "Neural Networks, Computer",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": true
+        },
+        {
+          "descriptor_ui": "D057225",
+          "descriptor_name": "Data Mining",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        }
+      ],
+      "locations_count": 5,
+      "locations": [
+        {
+          "id": "doi:10.1109/tnnls.2020.2978386",
+          "doi": "https://doi.org/10.1109/tnnls.2020.2978386",
+          "is_oa": false,
+          "landing_page_url": "https://doi.org/10.1109/tnnls.2020.2978386",
+          "pdf_url": null,
+          "source": {
+            "id": "https://openalex.org/S4210175523",
+            "display_name": "IEEE Transactions on Neural Networks and Learning Systems",
+            "issn_l": "2162-237X",
+            "issn": [
+              "2162-237X",
+              "2162-2388"
+            ],
+            "is_oa": false,
+            "is_in_doaj": false,
+            "is_core": true,
+            "listed_in": [
+              "anvur-class-a",
+              "anvur-scientific",
+              "ccf-b",
+              "cwts-core",
+              "dongbi-a",
+              "doyens",
+              "jufo-3",
+              "medline",
+              "norway-2",
+              "poland-200",
+              "russia-white-list-1",
+              "vabb-shw"
+            ],
+            "host_organization": "https://openalex.org/P4310319808",
+            "host_organization_name": "Institute of Electrical and Electronics Engineers",
+            "host_organization_lineage": [
+              "https://openalex.org/P4310319808"
+            ],
+            "host_organization_lineage_names": [
+              "Institute of Electrical and Electronics Engineers"
+            ],
+            "type": "journal"
+          },
+          "license": null,
+          "license_id": null,
+          "version": "publishedVersion",
+          "is_accepted": true,
+          "is_published": true,
+          "raw_source_name": "IEEE Transactions on Neural Networks and Learning Systems",
+          "raw_type": "journal-article"
+        },
+        {
+          "id": "pmid:32217482",
+          "doi": null,
+          "is_oa": false,
+          "landing_page_url": "https://pubmed.ncbi.nlm.nih.gov/32217482",
+          "pdf_url": null,
+          "source": {
+            "id": "https://openalex.org/S4306525036",
+            "display_name": "PubMed",
+            "issn_l": null,
+            "issn": null,
+            "is_oa": false,
+            "is_in_doaj": false,
+            "is_core": false,
+            "listed_in": [],
+            "host_organization": "https://openalex.org/I1299303238",
+            "host_organization_name": "National Institutes of Health",
+            "host_organization_lineage": [
+              "https://openalex.org/I1299303238"
+            ],
+            "host_organization_lineage_names": [],
+            "type": "repository"
+          },
+          "license": null,
+          "license_id": null,
+          "version": "publishedVersion",
+          "is_accepted": true,
+          "is_published": true,
+          "raw_source_name": "IEEE transactions on neural networks and learning systems",
+          "raw_type": "Journal Article"
+        },
+        {
+          "id": "pmh:oai:arXiv.org:1901.00596",
+          "doi": "https://doi.org/10.48550/arxiv.1901.00596",
+          "is_oa": true,
+          "landing_page_url": "http://arxiv.org/abs/1901.00596",
+          "pdf_url": "https://arxiv.org/pdf/1901.00596",
+          "source": {
+            "id": "https://openalex.org/S4306400194",
+            "display_name": "arXiv",
+            "issn_l": "2331-8422",
+            "issn": [
+              "2331-8422"
+            ],
+            "is_oa": true,
+            "is_in_doaj": false,
+            "is_core": false,
+            "listed_in": [],
+            "host_organization": "https://openalex.org/I4402554005",
+            "host_organization_name": "arXiv",
+            "host_organization_lineage": [
+              "https://openalex.org/I4402554005"
+            ],
+            "host_organization_lineage_names": [],
+            "type": "repository"
+          },
+          "license": null,
+          "license_id": null,
+          "version": "submittedVersion",
+          "is_accepted": false,
+          "is_published": false,
+          "raw_source_name": null,
+          "raw_type": "text"
+        },
+        {
+          "id": "pmh:oai:opus.lib.uts.edu.au:10453/146542",
+          "doi": null,
+          "is_oa": true,
+          "landing_page_url": "http://hdl.handle.net/10453/146542",
+          "pdf_url": null,
+          "source": {
+            "id": "https://openalex.org/S4306401357",
+            "display_name": "UTS ePRESS (University of Technology Sydney)",
+            "issn_l": null,
+            "issn": null,
+            "is_oa": false,
+            "is_in_doaj": false,
+            "is_core": false,
+            "listed_in": [],
+            "host_organization": "https://openalex.org/I114017466",
+            "host_organization_name": "University of Technology Sydney",
+            "host_organization_lineage": [
+              "https://openalex.org/I114017466"
+            ],
+            "host_organization_lineage_names": [],
+            "type": "repository"
+          },
+          "license": "other-oa",
+          "license_id": "https://openalex.org/licenses/other-oa",
+          "version": "submittedVersion",
+          "is_accepted": false,
+          "is_published": false,
+          "raw_source_name": "",
+          "raw_type": "Journal Article"
+        },
+        {
+          "id": "pmh:oai:research-repository.griffith.edu.au:10072/416695",
+          "doi": null,
+          "is_oa": false,
+          "landing_page_url": "http://hdl.handle.net/10072/416695",
+          "pdf_url": null,
+          "source": {
+            "id": "https://openalex.org/S7407064376",
+            "display_name": "Griffith Research Online",
+            "issn_l": null,
+            "issn": null,
+            "is_oa": false,
+            "is_in_doaj": false,
+            "is_core": false,
+            "listed_in": [],
+            "host_organization": null,
+            "host_organization_name": null,
+            "host_organization_lineage": [],
+            "host_organization_lineage_names": [],
+            "type": "repository"
+          },
+          "license": null,
+          "license_id": null,
+          "version": "submittedVersion",
+          "is_accepted": false,
+          "is_published": false,
+          "raw_source_name": null,
+          "raw_type": "Journal article"
+        }
+      ],
+      "best_oa_location": {
+        "id": "pmh:oai:arXiv.org:1901.00596",
+        "doi": "https://doi.org/10.48550/arxiv.1901.00596",
+        "is_oa": true,
+        "landing_page_url": "http://arxiv.org/abs/1901.00596",
+        "pdf_url": "https://arxiv.org/pdf/1901.00596",
+        "source": {
+          "id": "https://openalex.org/S4306400194",
+          "display_name": "arXiv",
+          "issn_l": "2331-8422",
+          "issn": [
+            "2331-8422"
+          ],
+          "is_oa": true,
+          "is_in_doaj": false,
+          "is_core": false,
+          "listed_in": [],
+          "host_organization": "https://openalex.org/I4402554005",
+          "host_organization_name": "arXiv",
+          "host_organization_lineage": [
+            "https://openalex.org/I4402554005"
+          ],
+          "host_organization_lineage_names": [],
+          "type": "repository"
+        },
+        "license": null,
+        "license_id": null,
+        "version": "submittedVersion",
+        "is_accepted": false,
+        "is_published": false,
+        "raw_source_name": null,
+        "raw_type": "text"
+      },
+      "sustainable_development_goals": [],
+      "study_designs": [],
+      "awards": [
+        {
+          "id": "https://openalex.org/G2142201510",
+          "display_name": "III: Small: Exploiting the Massive User Generated Utterances for Intent Mining under Scarce Annotations",
+          "funder_award_id": "1909323",
+          "funder_id": "https://openalex.org/F4320306076",
+          "funder_display_name": "National Science Foundation"
+        },
+        {
+          "id": "https://openalex.org/G3118254216",
+          "display_name": "III: Medium: Collaborative Research: An Extensible Heterogeneous Network Embedding Framework with Application Specific Adaptation",
+          "funder_award_id": "1763325",
+          "funder_id": "https://openalex.org/F4320306076",
+          "funder_display_name": "National Science Foundation"
+        },
+        {
+          "id": "https://openalex.org/G4116957712",
+          "display_name": "Cohort discovery and activity mining for policy impact prediction",
+          "funder_award_id": "LP160100630",
+          "funder_id": "https://openalex.org/F4320334704",
+          "funder_display_name": "Australian Research Council"
+        },
+        {
+          "id": "https://openalex.org/G5556617729",
+          "display_name": "Interaction Mining for Cyberbullying Detection on Social Networks",
+          "funder_award_id": "LP150100671",
+          "funder_id": "https://openalex.org/F4320334704",
+          "funder_display_name": "Australian Research Council"
+        },
+        {
+          "id": "https://openalex.org/G652412008",
+          "display_name": "Dialogue-to-Action:Towards A Self-Evolving Enterprise Intelligent Assistant",
+          "funder_award_id": "LP180100654",
+          "funder_id": "https://openalex.org/F4320334704",
+          "funder_display_name": "Australian Research Council"
+        },
+        {
+          "id": "https://openalex.org/G779482199",
+          "display_name": "III: Small: Fusion of Heterogeneous Networks for Synergistic Knowledge Discovery",
+          "funder_award_id": "1526499",
+          "funder_id": "https://openalex.org/F4320306076",
+          "funder_display_name": "National Science Foundation"
+        },
+        {
+          "id": "https://openalex.org/G979281235",
+          "display_name": "SaTC: CORE: Small: Collaborative: Learning Dynamic and Robust Defenses Against Co-Adaptive Spammers",
+          "funder_award_id": "1930941",
+          "funder_id": "https://openalex.org/F4320306076",
+          "funder_display_name": "National Science Foundation"
+        }
+      ],
+      "funders": [
+        {
+          "id": "https://openalex.org/F4320306076",
+          "display_name": "National Science Foundation",
+          "ror": "https://ror.org/021nxhr62"
+        },
+        {
+          "id": "https://openalex.org/F4320315885",
+          "display_name": "Australian Government",
+          "ror": "https://ror.org/0314h5y94"
+        },
+        {
+          "id": "https://openalex.org/F4320334704",
+          "display_name": "Australian Research Council",
+          "ror": "https://ror.org/05mmh0f86"
+        }
+      ],
+      "has_content": {
+        "pdf": true,
+        "grobid_xml": true
+      },
+      "content_urls": {
+        "pdf": "https://content.openalex.org/works/W2907492528.pdf",
+        "grobid_xml": "https://content.openalex.org/works/W2907492528.grobid-xml"
+      },
+      "referenced_works_count": 181,
+      "referenced_works": [
+        "https://openalex.org/W188630073",
+        "https://openalex.org/W637153065",
+        "https://openalex.org/W639708223",
+        "https://openalex.org/W1483870316",
+        "https://openalex.org/W1501856433",
+        "https://openalex.org/W1512387364",
+        "https://openalex.org/W1538131130",
+        "https://openalex.org/W1662382123",
+        "https://openalex.org/W1677991150",
+        "https://openalex.org/W1888005072",
+        "https://openalex.org/W1902237438",
+        "https://openalex.org/W1991252559",
+        "https://openalex.org/W2000375074",
+        "https://openalex.org/W2022322548",
+        "https://openalex.org/W2025768430",
+        "https://openalex.org/W2034618876",
+        "https://openalex.org/W2046253692",
+        "https://openalex.org/W2056562706",
+        "https://openalex.org/W2064675550",
+        "https://openalex.org/W2080635178",
+        "https://openalex.org/W2080731889",
+        "https://openalex.org/W2092750499",
+        "https://openalex.org/W2099438806",
+        "https://openalex.org/W2101491865",
+        "https://openalex.org/W2112796928",
+        "https://openalex.org/W2116341502",
+        "https://openalex.org/W2135957668",
+        "https://openalex.org/W2137983211",
+        "https://openalex.org/W2139906443",
+        "https://openalex.org/W2142498761",
+        "https://openalex.org/W2145094598",
+        "https://openalex.org/W2150120952",
+        "https://openalex.org/W2151827881",
+        "https://openalex.org/W2153513200",
+        "https://openalex.org/W2153959628",
+        "https://openalex.org/W2154851992",
+        "https://openalex.org/W2157331557",
+        "https://openalex.org/W2160815625",
+        "https://openalex.org/W2161763921",
+        "https://openalex.org/W2166681504",
+        "https://openalex.org/W2173027866",
+        "https://openalex.org/W2173183968",
+        "https://openalex.org/W2176353499",
+        "https://openalex.org/W2194775991",
+        "https://openalex.org/W2240571584",
+        "https://openalex.org/W2244807774",
+        "https://openalex.org/W2258064579",
+        "https://openalex.org/W2290847742",
+        "https://openalex.org/W2343790552",
+        "https://openalex.org/W2393319904",
+        "https://openalex.org/W2404723690",
+        "https://openalex.org/W2406128552",
+        "https://openalex.org/W2415243320",
+        "https://openalex.org/W2439554109",
+        "https://openalex.org/W2465015709",
+        "https://openalex.org/W2468907370",
+        "https://openalex.org/W2519887557",
+        "https://openalex.org/W2525778437",
+        "https://openalex.org/W2526511911",
+        "https://openalex.org/W2527189750",
+        "https://openalex.org/W2529996553",
+        "https://openalex.org/W2554952599",
+        "https://openalex.org/W2557074642",
+        "https://openalex.org/W2558460151",
+        "https://openalex.org/W2558748708",
+        "https://openalex.org/W2565330852",
+        "https://openalex.org/W2574817444",
+        "https://openalex.org/W2579549467",
+        "https://openalex.org/W2592725663",
+        "https://openalex.org/W2594083602",
+        "https://openalex.org/W2600702321",
+        "https://openalex.org/W2604314403",
+        "https://openalex.org/W2605135824",
+        "https://openalex.org/W2606202972",
+        "https://openalex.org/W2606780347",
+        "https://openalex.org/W2612872092",
+        "https://openalex.org/W2612881151",
+        "https://openalex.org/W2618170429",
+        "https://openalex.org/W2624407581",
+        "https://openalex.org/W2624431344",
+        "https://openalex.org/W2735272571",
+        "https://openalex.org/W2750894112",
+        "https://openalex.org/W2751808960",
+        "https://openalex.org/W2755092149",
+        "https://openalex.org/W2756203131",
+        "https://openalex.org/W2765574772",
+        "https://openalex.org/W2766453196",
+        "https://openalex.org/W2767404761",
+        "https://openalex.org/W2768008502",
+        "https://openalex.org/W2768308213",
+        "https://openalex.org/W2769473888",
+        "https://openalex.org/W2770468159",
+        "https://openalex.org/W2776622059",
+        "https://openalex.org/W2785542811",
+        "https://openalex.org/W2786103815",
+        "https://openalex.org/W2786565076",
+        "https://openalex.org/W2786915849",
+        "https://openalex.org/W2788134583",
+        "https://openalex.org/W2788284887",
+        "https://openalex.org/W2788474500",
+        "https://openalex.org/W2788512147",
+        "https://openalex.org/W2788919350",
+        "https://openalex.org/W2790814121",
+        "https://openalex.org/W2792402990",
+        "https://openalex.org/W2792839479",
+        "https://openalex.org/W2798296074",
+        "https://openalex.org/W2798308429",
+        "https://openalex.org/W2798749466",
+        "https://openalex.org/W2803533564",
+        "https://openalex.org/W2803831897",
+        "https://openalex.org/W2803881248",
+        "https://openalex.org/W2805177834",
+        "https://openalex.org/W2805516822",
+        "https://openalex.org/W2806115886",
+        "https://openalex.org/W2806351858",
+        "https://openalex.org/W2807021761",
+        "https://openalex.org/W2808373708",
+        "https://openalex.org/W2808409763",
+        "https://openalex.org/W2808867307",
+        "https://openalex.org/W2808987817",
+        "https://openalex.org/W2809343047",
+        "https://openalex.org/W2809418595",
+        "https://openalex.org/W2809583854",
+        "https://openalex.org/W2810482788",
+        "https://openalex.org/W2811124557",
+        "https://openalex.org/W2886970679",
+        "https://openalex.org/W2887092413",
+        "https://openalex.org/W2888096830",
+        "https://openalex.org/W2889399096",
+        "https://openalex.org/W2889599487",
+        "https://openalex.org/W2889792105",
+        "https://openalex.org/W2889833989",
+        "https://openalex.org/W2890703109",
+        "https://openalex.org/W2890855364",
+        "https://openalex.org/W2891230096",
+        "https://openalex.org/W2891814056",
+        "https://openalex.org/W2894175828",
+        "https://openalex.org/W2894982307",
+        "https://openalex.org/W2900470550",
+        "https://openalex.org/W2903163273",
+        "https://openalex.org/W2903871660",
+        "https://openalex.org/W2906340703",
+        "https://openalex.org/W2911286998",
+        "https://openalex.org/W2911738047",
+        "https://openalex.org/W2914080035",
+        "https://openalex.org/W2925177113",
+        "https://openalex.org/W2939208918",
+        "https://openalex.org/W2944206301",
+        "https://openalex.org/W2945827377",
+        "https://openalex.org/W2951441387",
+        "https://openalex.org/W2951936753",
+        "https://openalex.org/W2953060237",
+        "https://openalex.org/W2962975498",
+        "https://openalex.org/W2963017945",
+        "https://openalex.org/W2963043672",
+        "https://openalex.org/W2963076818",
+        "https://openalex.org/W2963184176",
+        "https://openalex.org/W2963224980",
+        "https://openalex.org/W2963280944",
+        "https://openalex.org/W2963312728",
+        "https://openalex.org/W2963333168",
+        "https://openalex.org/W2963374482",
+        "https://openalex.org/W2963415211",
+        "https://openalex.org/W2963512530",
+        "https://openalex.org/W2963581908",
+        "https://openalex.org/W2963653811",
+        "https://openalex.org/W2963920355",
+        "https://openalex.org/W2963984147",
+        "https://openalex.org/W2964051675",
+        "https://openalex.org/W2964094751",
+        "https://openalex.org/W2965341826",
+        "https://openalex.org/W2966149470",
+        "https://openalex.org/W2972209102",
+        "https://openalex.org/W2979750740",
+        "https://openalex.org/W2987119394",
+        "https://openalex.org/W2995983896",
+        "https://openalex.org/W3037567775",
+        "https://openalex.org/W3080555959",
+        "https://openalex.org/W4297951436",
+        "https://openalex.org/W4320013936",
+        "https://openalex.org/W6748555532"
+      ],
+      "related_works": [
+        "https://openalex.org/W4409310529",
+        "https://openalex.org/W4384070065",
+        "https://openalex.org/W4309796907",
+        "https://openalex.org/W4390906246",
+        "https://openalex.org/W4413356122",
+        "https://openalex.org/W7223052956",
+        "https://openalex.org/W4411131097",
+        "https://openalex.org/W4402401635",
+        "https://openalex.org/W3192673158"
+      ],
+      "abstract_inverted_index": {
+        "Deep": [
+          0
+        ],
+        "learning": [
+          1,
+          6,
+          77,
+          85,
+          110
+        ],
+        "has": [
+          2,
+          69
+        ],
+        "revolutionized": [
+          3
+        ],
+        "many": [
+          4,
+          80
+        ],
+        "machine": [
+          5,
+          76,
+          109
+        ],
+        "tasks": [
+          7,
+          29
+        ],
+        "in": [
+          8,
+          27,
+          33,
+          105,
+          164
+        ],
+        "recent": [
+          9
+        ],
+        "years,": [
+          10
+        ],
+        "ranging": [
+          11
+        ],
+        "from": [
+          12,
+          49
+        ],
+        "image": [
+          13
+        ],
+        "classification": [
+          14
+        ],
+        "and": [
+          15,
+          21,
+          52,
+          60,
+          108,
+          132,
+          145,
+          153
+        ],
+        "video": [
+          16
+        ],
+        "processing": [
+          17
+        ],
+        "to": [
+          18,
+          117
+        ],
+        "speech": [
+          19
+        ],
+        "recognition": [
+          20
+        ],
+        "natural": [
+          22
+        ],
+        "language": [
+          23
+        ],
+        "understanding.": [
+          24
+        ],
+        "The": [
+          25,
+          64
+        ],
+        "data": [
+          26,
+          46,
+          68,
+          89,
+          106,
+          151
+        ],
+        "these": [
+          28
+        ],
+        "are": [
+          30,
+          47,
+          53
+        ],
+        "typically": [
+          31
+        ],
+        "represented": [
+          32,
+          54
+        ],
+        "the": [
+          34,
+          74,
+          119,
+          138,
+          147
+        ],
+        "Euclidean": [
+          35
+        ],
+        "space.": [
+          36
+        ],
+        "However,": [
+          37
+        ],
+        "there": [
+          38
+        ],
+        "is": [
+          39
+        ],
+        "an": [
+          40
+        ],
+        "increasing": [
+          41
+        ],
+        "number": [
+          42
+        ],
+        "of": [
+          43,
+          66,
+          100,
+          140,
+          156
+        ],
+        "applications,": [
+          44
+        ],
+        "where": [
+          45
+        ],
+        "generated": [
+          48
+        ],
+        "non-Euclidean": [
+          50
+        ],
+        "domains": [
+          51,
+          144
+        ],
+        "as": [
+          55
+        ],
+        "graphs": [
+          56
+        ],
+        "with": [
+          57
+        ],
+        "complex": [
+          58
+        ],
+        "relationships": [
+          59
+        ],
+        "interdependency": [
+          61
+        ],
+        "between": [
+          62
+        ],
+        "objects.": [
+          63
+        ],
+        "complexity": [
+          65
+        ],
+        "graph": [
+          67,
+          88,
+          101,
+          130
+        ],
+        "imposed": [
+          70
+        ],
+        "significant": [
+          71
+        ],
+        "challenges": [
+          72
+        ],
+        "on": [
+          73,
+          82
+        ],
+        "existing": [
+          75
+        ],
+        "algorithms.": [
+          78
+        ],
+        "Recently,": [
+          79
+        ],
+        "studies": [
+          81
+        ],
+        "extending": [
+          83
+        ],
+        "deep": [
+          84
+        ],
+        "approaches": [
+          86
+        ],
+        "for": [
+          87
+        ],
+        "have": [
+          90
+        ],
+        "emerged.": [
+          91
+        ],
+        "In": [
+          92
+        ],
+        "this": [
+          93,
+          165
+        ],
+        "article,": [
+          94
+        ],
+        "we": [
+          95,
+          159
+        ],
+        "provide": [
+          96
+        ],
+        "a": [
+          97,
+          114
+        ],
+        "comprehensive": [
+          98
+        ],
+        "overview": [
+          99
+        ],
+        "neural": [
+          102
+        ],
+        "networks": [
+          103
+        ],
+        "(GNNs)": [
+          104
+        ],
+        "mining": [
+          107
+        ],
+        "fields.": [
+          111
+        ],
+        "We": [
+          112,
+          135
+        ],
+        "propose": [
+          113,
+          160
+        ],
+        "new": [
+          115
+        ],
+        "taxonomy": [
+          116
+        ],
+        "divide": [
+          118
+        ],
+        "state-of-the-art": [
+          120
+        ],
+        "GNNs": [
+          121,
+          141
+        ],
+        "into": [
+          122
+        ],
+        "four": [
+          123
+        ],
+        "categories,": [
+          124
+        ],
+        "namely,": [
+          125
+        ],
+        "recurrent": [
+          126
+        ],
+        "GNNs,": [
+          127,
+          129
+        ],
+        "convolutional": [
+          128
+        ],
+        "autoencoders,": [
+          131
+        ],
+        "spatial-temporal": [
+          133
+        ],
+        "GNNs.": [
+          134,
+          157
+        ],
+        "further": [
+          136
+        ],
+        "discuss": [
+          137
+        ],
+        "applications": [
+          139
+        ],
+        "across": [
+          142
+        ],
+        "various": [
+          143
+        ],
+        "summarize": [
+          146
+        ],
+        "open-source": [
+          148
+        ],
+        "codes,": [
+          149
+        ],
+        "benchmark": [
+          150
+        ],
+        "sets,": [
+          152
+        ],
+        "model": [
+          154
+        ],
+        "evaluation": [
+          155
+        ],
+        "Finally,": [
+          158
+        ],
+        "potential": [
+          161
+        ],
+        "research": [
+          162
+        ],
+        "directions": [
+          163
+        ],
+        "rapidly": [
+          166
+        ],
+        "growing": [
+          167
+        ],
+        "field.": [
+          168
+        ]
+      },
+      "cited_by_api_url": "https://api.openalex.org/works?filter=cites:W2907492528",
+      "counts_by_year": [
+        {
+          "year": 2026,
+          "cited_by_count": 3332
+        },
+        {
+          "year": 2025,
+          "cited_by_count": 3463
+        },
+        {
+          "year": 2024,
+          "cited_by_count": 2641
+        },
+        {
+          "year": 2023,
+          "cited_by_count": 2349
+        },
+        {
+          "year": 2022,
+          "cited_by_count": 1883
+        },
+        {
+          "year": 2021,
+          "cited_by_count": 1424
+        },
+        {
+          "year": 2020,
+          "cited_by_count": 800
+        },
+        {
+          "year": 2019,
+          "cited_by_count": 161
+        },
+        {
+          "year": 2018,
+          "cited_by_count": 1
+        },
+        {
+          "year": 2016,
+          "cited_by_count": 1
+        },
+        {
+          "year": 2012,
+          "cited_by_count": 1
+        }
+      ],
+      "updated_date": "2026-11-24T14:10:38.155754",
+      "created_date": "2019-01-11T00:00:00"
+    },
+    {
+      "id": "https://openalex.org/W3045164669",
+      "doi": "https://doi.org/10.1088/2632-2153/abbf9a",
+      "title": "Graph neural networks in particle physics",
+      "display_name": "Graph neural networks in particle physics",
+      "alternate_titles": [],
+      "relevance_score": 231.63947,
+      "publication_year": 2021,
+      "publication_date": "2021-01-08",
+      "ids": {
+        "openalex": "https://openalex.org/W3045164669",
+        "doi": "https://doi.org/10.1088/2632-2153/abbf9a",
+        "mag": "3045164669",
+        "arxiv": "https://arxiv.org/abs/2007.13681"
+      },
+      "language": "en",
+      "primary_location": {
+        "id": "doi:10.1088/2632-2153/abbf9a",
+        "doi": "https://doi.org/10.1088/2632-2153/abbf9a",
+        "is_oa": true,
+        "landing_page_url": "https://doi.org/10.1088/2632-2153/abbf9a",
+        "pdf_url": "https://iopscience.iop.org/article/10.1088/2632-2153/abbf9a/pdf",
+        "source": {
+          "id": "https://openalex.org/S4210200687",
+          "display_name": "Machine Learning Science and Technology",
+          "issn_l": "2632-2153",
+          "issn": [
+            "2632-2153"
+          ],
+          "is_oa": true,
+          "is_in_doaj": true,
+          "is_core": true,
+          "listed_in": [
+            "cwts-core",
+            "doaj",
+            "dongbi-c",
+            "jufo-1",
+            "ki-jl-1",
+            "norway-1",
+            "oarl",
+            "poland-20",
+            "russia-white-list-1"
+          ],
+          "host_organization": "https://openalex.org/P4310320083",
+          "host_organization_name": "IOP Publishing",
+          "host_organization_lineage": [
+            "https://openalex.org/P4310320083",
+            "https://openalex.org/P4310311669"
+          ],
+          "host_organization_lineage_names": [
+            "IOP Publishing",
+            "Institute of Physics"
+          ],
+          "type": "journal"
+        },
+        "license": "cc-by",
+        "license_id": "https://openalex.org/licenses/cc-by",
+        "version": "publishedVersion",
+        "is_accepted": true,
+        "is_published": true,
+        "raw_source_name": "Machine Learning: Science and Technology",
+        "raw_type": "journal-article"
+      },
+      "parent_works": [],
+      "lineage": [
+        "https://openalex.org/W3045164669"
+      ],
+      "child_works_count": 0,
+      "pull_notice_works": [],
+      "type": "article",
+      "is_traditional": true,
+      "indexed_in": [
+        "arxiv",
+        "crossref",
+        "datacite"
+      ],
+      "open_access": {
+        "is_oa": true,
+        "oa_status": "gold",
+        "oa_url": "https://iopscience.iop.org/article/10.1088/2632-2153/abbf9a/pdf",
+        "any_repository_has_fulltext": true
+      },
+      "authorships": [
+        {
+          "author_position": "first",
+          "author": {
+            "id": null,
+            "display_name": "Jonathan Shlomi",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0002-2628-3470",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-2628-3470"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I53964585",
+              "display_name": "Weizmann Institute of Science",
+              "ror": "https://ror.org/0316ej306",
+              "country_code": "IL",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I53964585"
+              ]
+            }
+          ],
+          "countries": [
+            "IL"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Jonathan Shlomi",
+          "raw_affiliation_strings": [
+            "Weizmann Institute of Science, Rehovot, Israel"
+          ],
+          "raw_orcid": "https://orcid.org/0000-0002-2628-3470",
+          "affiliations": [
+            {
+              "raw_affiliation_string": "Weizmann Institute of Science, Rehovot, Israel",
+              "institution_ids": [
+                "https://openalex.org/I53964585"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "id": "https://openalex.org/A5059792149",
+            "display_name": "Peter Battaglia",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0003-3622-7111",
+            "observed_orcids": [
+              "https://orcid.org/0000-0003-3622-7111"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I4210090411",
+              "display_name": "Google DeepMind (United Kingdom)",
+              "ror": "https://ror.org/00971b260",
+              "country_code": "GB",
+              "type": "company",
+              "lineage": [
+                "https://openalex.org/I4210090411",
+                "https://openalex.org/I4210128969"
+              ]
+            }
+          ],
+          "countries": [
+            "GB"
+          ],
+          "is_corresponding": false,
+          "contributor_roles": [],
+          "raw_author_name": "Peter Battaglia",
+          "raw_affiliation_strings": [
+            "DeepMind, London United Kingdom"
+          ],
+          "raw_orcid": "https://orcid.org/0000-0003-3622-7111",
+          "affiliations": [
+            {
+              "raw_affiliation_string": "DeepMind, London United Kingdom",
+              "institution_ids": [
+                "https://openalex.org/I4210090411"
+              ]
+            }
+          ]
+        },
+        {
+          "author_position": "last",
+          "author": {
+            "id": null,
+            "display_name": "Jean-Roch Vlimant",
+            "type": null,
+            "orcid": "https://orcid.org/0000-0002-9705-101X",
+            "observed_orcids": [
+              "https://orcid.org/0000-0002-9705-101X"
+            ]
+          },
+          "acted_on_behalf_of": [],
+          "institutions": [
+            {
+              "id": "https://openalex.org/I122411786",
+              "display_name": "California Institute of Technology",
+              "ror": "https://ror.org/05dxps055",
+              "country_code": "US",
+              "type": "education",
+              "lineage": [
+                "https://openalex.org/I122411786"
+              ]
+            }
+          ],
+          "countries": [
+            "US"
+          ],
+          "is_corresponding": true,
+          "contributor_roles": [],
+          "raw_author_name": "Jean-Roch Vlimant",
+          "raw_affiliation_strings": [
+            "California Institute of Technology, PMA, Pasadena, CA, 91125-0002, United States of America"
+          ],
+          "raw_orcid": "https://orcid.org/0000-0002-9705-101X",
+          "affiliations": [
+            {
+              "raw_affiliation_string": "California Institute of Technology, PMA, Pasadena, CA, 91125-0002, United States of America",
+              "institution_ids": [
+                "https://openalex.org/I122411786"
+              ]
+            }
+          ]
+        }
+      ],
+      "institutions": [],
+      "countries_distinct_count": 3,
+      "institutions_distinct_count": 3,
+      "corresponding_author_ids": [],
+      "corresponding_institution_ids": [
+        "https://openalex.org/I122411786"
+      ],
+      "apc_list": {
+        "value": 2255,
+        "currency": "USD",
+        "value_usd": 2255
+      },
+      "apc_paid": {
+        "value": 2255,
+        "currency": "USD",
+        "value_usd": 2255
+      },
+      "fwci": 24.8971,
+      "is_authors_truncated": false,
+      "has_fulltext": true,
+      "cited_by_count": 465,
+      "reviewed_by_count": 0,
+      "citation_normalized_percentile": {
+        "value": 0.99896154,
+        "is_in_top_1_percent": true,
+        "is_in_top_10_percent": true
+      },
+      "cited_by_percentile_year": {
+        "min": 86,
+        "max": 100
+      },
+      "biblio": {
+        "volume": "2",
+        "issue": "2",
+        "first_page": "021001",
+        "last_page": "021001"
+      },
+      "is_retracted": false,
+      "is_pulled": false,
+      "is_paratext": false,
+      "is_xpac": false,
+      "primary_topic": {
+        "id": "https://openalex.org/T10048",
+        "display_name": "Particle physics theoretical and experimental studies",
+        "score": 0.4196999967098236,
+        "subfield": {
+          "id": "https://openalex.org/subfields/3106",
+          "display_name": "Nuclear and High Energy Physics"
+        },
+        "field": {
+          "id": "https://openalex.org/fields/31",
+          "display_name": "Physics and Astronomy"
+        },
+        "domain": {
+          "id": "https://openalex.org/domains/3",
+          "display_name": "Physical Sciences"
+        }
+      },
+      "topics": [
+        {
+          "id": "https://openalex.org/T10048",
+          "display_name": "Particle physics theoretical and experimental studies",
+          "score": 0.4196999967098236,
+          "subfield": {
+            "id": "https://openalex.org/subfields/3106",
+            "display_name": "Nuclear and High Energy Physics"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/31",
+            "display_name": "Physics and Astronomy"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        },
+        {
+          "id": "https://openalex.org/T11273",
+          "display_name": "Advanced Graph Neural Networks",
+          "score": 0.29319998621940613,
+          "subfield": {
+            "id": "https://openalex.org/subfields/1702",
+            "display_name": "Artificial Intelligence"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/17",
+            "display_name": "Computer Science"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        },
+        {
+          "id": "https://openalex.org/T11044",
+          "display_name": "Particle Detector Development and Performance",
+          "score": 0.028200000524520874,
+          "subfield": {
+            "id": "https://openalex.org/subfields/3106",
+            "display_name": "Nuclear and High Energy Physics"
+          },
+          "field": {
+            "id": "https://openalex.org/fields/31",
+            "display_name": "Physics and Astronomy"
+          },
+          "domain": {
+            "id": "https://openalex.org/domains/3",
+            "display_name": "Physical Sciences"
+          }
+        }
+      ],
+      "keywords": [
+        {
+          "id": "https://openalex.org/keywords/graph-neural-networks",
+          "display_name": "graph neural networks",
+          "score": 1.0
+        },
+        {
+          "id": "https://openalex.org/keywords/particle-physics",
+          "display_name": "particle physics",
+          "score": 0.9539999961853027
+        },
+        {
+          "id": "https://openalex.org/keywords/geometric-deep-learning",
+          "display_name": "geometric deep learning",
+          "score": 0.9940000176429749
+        },
+        {
+          "id": "https://openalex.org/keywords/graph-construction",
+          "display_name": "graph construction",
+          "score": 0.8349999785423279
+        },
+        {
+          "id": "https://openalex.org/keywords/graph-neural-network-architectures",
+          "display_name": "graph neural network architectures",
+          "score": 0.718999981880188
+        },
+        {
+          "id": "https://openalex.org/keywords/learning-objectives",
+          "display_name": "learning objectives",
+          "score": 0.9300000071525574
+        }
+      ],
+      "concepts": [
+        {
+          "id": "https://openalex.org/C50644808",
+          "wikidata": "https://www.wikidata.org/wiki/Q192776",
+          "display_name": "Artificial neural network",
+          "level": 2,
+          "score": 0.6686000227928162
+        },
+        {
+          "id": "https://openalex.org/C132525143",
+          "wikidata": "https://www.wikidata.org/wiki/Q141488",
+          "display_name": "Graph",
+          "level": 2,
+          "score": 0.5914000272750854
+        },
+        {
+          "id": "https://openalex.org/C41008148",
+          "wikidata": "https://www.wikidata.org/wiki/Q21198",
+          "display_name": "Computer science",
+          "level": 0,
+          "score": 0.5252000093460083
+        },
+        {
+          "id": "https://openalex.org/C80444323",
+          "wikidata": "https://www.wikidata.org/wiki/Q2878974",
+          "display_name": "Theoretical computer science",
+          "level": 1,
+          "score": 0.5115000009536743
+        },
+        {
+          "id": "https://openalex.org/C154945302",
+          "wikidata": "https://www.wikidata.org/wiki/Q11660",
+          "display_name": "Artificial intelligence",
+          "level": 1,
+          "score": 0.46149998903274536
+        },
+        {
+          "id": "https://openalex.org/C2984842247",
+          "wikidata": "https://www.wikidata.org/wiki/Q197536",
+          "display_name": "Deep neural networks",
+          "level": 3,
+          "score": 0.40619999170303345
+        },
+        {
+          "id": "https://openalex.org/C184898388",
+          "wikidata": "https://www.wikidata.org/wiki/Q1435712",
+          "display_name": "Pairwise comparison",
+          "level": 2,
+          "score": 0.38600000739097595
+        },
+        {
+          "id": "https://openalex.org/C108583219",
+          "wikidata": "https://www.wikidata.org/wiki/Q197536",
+          "display_name": "Deep learning",
+          "level": 2,
+          "score": 0.38510000705718994
+        },
+        {
+          "id": "https://openalex.org/C26517878",
+          "wikidata": "https://www.wikidata.org/wiki/Q228039",
+          "display_name": "Key (lock)",
+          "level": 2,
+          "score": 0.3458999991416931
+        },
+        {
+          "id": "https://openalex.org/C88230418",
+          "wikidata": "https://www.wikidata.org/wiki/Q131476",
+          "display_name": "Graph theory",
+          "level": 2,
+          "score": 0.3294000029563904
+        },
+        {
+          "id": "https://openalex.org/C136197465",
+          "wikidata": "https://www.wikidata.org/wiki/Q1729295",
+          "display_name": "Variety (cybernetics)",
+          "level": 2,
+          "score": 0.31859999895095825
+        },
+        {
+          "id": "https://openalex.org/C9652623",
+          "wikidata": "https://www.wikidata.org/wiki/Q190109",
+          "display_name": "Field (mathematics)",
+          "level": 2,
+          "score": 0.3005000054836273
+        },
+        {
+          "id": "https://openalex.org/C137753397",
+          "wikidata": "https://www.wikidata.org/wiki/Q2434424",
+          "display_name": "Network science",
+          "level": 3,
+          "score": 0.28600001335144043
+        },
+        {
+          "id": "https://openalex.org/C184720557",
+          "wikidata": "https://www.wikidata.org/wiki/Q7825049",
+          "display_name": "Topology (electrical circuits)",
+          "level": 2,
+          "score": 0.2793000042438507
+        },
+        {
+          "id": "https://openalex.org/C194583477",
+          "wikidata": "https://www.wikidata.org/wiki/Q408891",
+          "display_name": "Physical law",
+          "level": 2,
+          "score": 0.2667999863624573
+        },
+        {
+          "id": "https://openalex.org/C119857082",
+          "wikidata": "https://www.wikidata.org/wiki/Q2539",
+          "display_name": "Machine learning",
+          "level": 1,
+          "score": 0.2597000002861023
+        },
+        {
+          "id": "https://openalex.org/C2778517922",
+          "wikidata": "https://www.wikidata.org/wiki/Q7140482",
+          "display_name": "Particle (ecology)",
+          "level": 2,
+          "score": 0.2578999996185303
+        },
+        {
+          "id": "https://openalex.org/C34947359",
+          "wikidata": "https://www.wikidata.org/wiki/Q665189",
+          "display_name": "Complex network",
+          "level": 2,
+          "score": 0.2540000081062317
+        },
+        {
+          "id": "https://openalex.org/C49777392",
+          "wikidata": "https://www.wikidata.org/wiki/Q5535495",
+          "display_name": "Geometric networks",
+          "level": 3,
+          "score": 0.25049999356269836
+        }
+      ],
+      "mesh": [],
+      "locations_count": 3,
+      "locations": [
+        {
+          "id": "doi:10.1088/2632-2153/abbf9a",
+          "doi": "https://doi.org/10.1088/2632-2153/abbf9a",
+          "is_oa": true,
+          "landing_page_url": "https://doi.org/10.1088/2632-2153/abbf9a",
+          "pdf_url": "https://iopscience.iop.org/article/10.1088/2632-2153/abbf9a/pdf",
+          "source": {
+            "id": "https://openalex.org/S4210200687",
+            "display_name": "Machine Learning Science and Technology",
+            "issn_l": "2632-2153",
+            "issn": [
+              "2632-2153"
+            ],
+            "is_oa": true,
+            "is_in_doaj": true,
+            "is_core": true,
+            "listed_in": [
+              "cwts-core",
+              "doaj",
+              "dongbi-c",
+              "jufo-1",
+              "ki-jl-1",
+              "norway-1",
+              "oarl",
+              "poland-20",
+              "russia-white-list-1"
+            ],
+            "host_organization": "https://openalex.org/P4310320083",
+            "host_organization_name": "IOP Publishing",
+            "host_organization_lineage": [
+              "https://openalex.org/P4310320083",
+              "https://openalex.org/P4310311669"
+            ],
+            "host_organization_lineage_names": [
+              "IOP Publishing",
+              "Institute of Physics"
+            ],
+            "type": "journal"
+          },
+          "license": "cc-by",
+          "license_id": "https://openalex.org/licenses/cc-by",
+          "version": "publishedVersion",
+          "is_accepted": true,
+          "is_published": true,
+          "raw_source_name": "Machine Learning: Science and Technology",
+          "raw_type": "journal-article"
+        },
+        {
+          "id": "pmh:oai:arXiv.org:2007.13681",
+          "doi": "https://doi.org/10.48550/arxiv.2007.13681",
+          "is_oa": true,
+          "landing_page_url": "http://arxiv.org/abs/2007.13681",
+          "pdf_url": "https://arxiv.org/pdf/2007.13681",
+          "source": {
+            "id": "https://openalex.org/S4306400194",
+            "display_name": "arXiv",
+            "issn_l": "2331-8422",
+            "issn": [
+              "2331-8422"
+            ],
+            "is_oa": true,
+            "is_in_doaj": false,
+            "is_core": false,
+            "listed_in": [],
+            "host_organization": "https://openalex.org/I4402554005",
+            "host_organization_name": "arXiv",
+            "host_organization_lineage": [
+              "https://openalex.org/I4402554005"
+            ],
+            "host_organization_lineage_names": [],
+            "type": "repository"
+          },
+          "license": null,
+          "license_id": null,
+          "version": "submittedVersion",
+          "is_accepted": false,
+          "is_published": false,
+          "raw_source_name": null,
+          "raw_type": "text"
+        },
+        {
+          "id": "pmh:oai:authors.library.caltech.edu:107382",
+          "doi": null,
+          "is_oa": true,
+          "landing_page_url": "https://resolver.caltech.edu/CaltechAUTHORS:20210108-132843483",
+          "pdf_url": null,
+          "source": {
+            "id": "https://openalex.org/S4306402161",
+            "display_name": "CaltechAUTHORS (California Institute of Technology)",
+            "issn_l": null,
+            "issn": null,
+            "is_oa": false,
+            "is_in_doaj": false,
+            "is_core": false,
+            "listed_in": [],
+            "host_organization": "https://openalex.org/I122411786",
+            "host_organization_name": "California Institute of Technology",
+            "host_organization_lineage": [
+              "https://openalex.org/I122411786"
+            ],
+            "host_organization_lineage_names": [],
+            "type": "repository"
+          },
+          "license": "cc-by",
+          "license_id": "https://openalex.org/licenses/cc-by",
+          "version": "submittedVersion",
+          "is_accepted": false,
+          "is_published": false,
+          "raw_source_name": "",
+          "raw_type": "Article"
+        }
+      ],
+      "best_oa_location": {
+        "id": "doi:10.1088/2632-2153/abbf9a",
+        "doi": "https://doi.org/10.1088/2632-2153/abbf9a",
+        "is_oa": true,
+        "landing_page_url": "https://doi.org/10.1088/2632-2153/abbf9a",
+        "pdf_url": "https://iopscience.iop.org/article/10.1088/2632-2153/abbf9a/pdf",
+        "source": {
+          "id": "https://openalex.org/S4210200687",
+          "display_name": "Machine Learning Science and Technology",
+          "issn_l": "2632-2153",
+          "issn": [
+            "2632-2153"
+          ],
+          "is_oa": true,
+          "is_in_doaj": true,
+          "is_core": true,
+          "listed_in": [
+            "cwts-core",
+            "doaj",
+            "dongbi-c",
+            "jufo-1",
+            "ki-jl-1",
+            "norway-1",
+            "oarl",
+            "poland-20",
+            "russia-white-list-1"
+          ],
+          "host_organization": "https://openalex.org/P4310320083",
+          "host_organization_name": "IOP Publishing",
+          "host_organization_lineage": [
+            "https://openalex.org/P4310320083",
+            "https://openalex.org/P4310311669"
+          ],
+          "host_organization_lineage_names": [
+            "IOP Publishing",
+            "Institute of Physics"
+          ],
+          "type": "journal"
+        },
+        "license": "cc-by",
+        "license_id": "https://openalex.org/licenses/cc-by",
+        "version": "publishedVersion",
+        "is_accepted": true,
+        "is_published": true,
+        "raw_source_name": "Machine Learning: Science and Technology",
+        "raw_type": "journal-article"
+      },
+      "sustainable_development_goals": [],
+      "study_designs": [],
+      "awards": [
+        {
+          "id": "https://openalex.org/G2176057992",
+          "display_name": "QUANTUM MACHINE LEARNING AND QUANTUM COMPUTATION FRAMEWORKS FOR HEP (QMLQCF)",
+          "funder_award_id": "DESC0019227",
+          "funder_id": "https://openalex.org/F4320306084",
+          "funder_display_name": "U.S. Department of Energy"
+        },
+        {
+          "id": "https://openalex.org/G2996425081",
+          "display_name": "machine learning for Particle Physics",
+          "funder_award_id": "772369",
+          "funder_id": "https://openalex.org/F4320338335",
+          "funder_display_name": "H2020 European Research Council"
+        },
+        {
+          "id": "https://openalex.org/G3331003362",
+          "display_name": "NSF Student Travel Grant for the 2020 IFIP Networking Conference (IFIP NETWORKING)",
+          "funder_award_id": "2017600",
+          "funder_id": "https://openalex.org/F4320306076",
+          "funder_display_name": "National Science Foundation"
+        },
+        {
+          "id": "https://openalex.org/G434337789",
+          "display_name": null,
+          "funder_award_id": "HORIZON2020",
+          "funder_id": "https://openalex.org/F4320320300",
+          "funder_display_name": "European Commission"
+        },
+        {
+          "id": "https://openalex.org/G4404904460",
+          "display_name": null,
+          "funder_award_id": "DE-AC02\u201307CH11359",
+          "funder_id": "https://openalex.org/F4320337511",
+          "funder_display_name": "High Energy Physics"
+        },
+        {
+          "id": "https://openalex.org/G5822809551",
+          "display_name": null,
+          "funder_award_id": "DE-SC0019227",
+          "funder_id": "https://openalex.org/F4320337511",
+          "funder_display_name": "High Energy Physics"
+        },
+        {
+          "id": "https://openalex.org/G585908603",
+          "display_name": null,
+          "funder_award_id": "AC02-07CH11359",
+          "funder_id": "https://openalex.org/F4320306084",
+          "funder_display_name": "U.S. Department of Energy"
+        },
+        {
+          "id": "https://openalex.org/G716412294",
+          "display_name": null,
+          "funder_award_id": "DE\u2013AC02\u201307CH11359",
+          "funder_id": "https://openalex.org/F4320332359",
+          "funder_display_name": "Office of Science"
+        },
+        {
+          "id": "https://openalex.org/G7759179936",
+          "display_name": "RESEARCH ACCOMPLISHMENTS AND GOALS OF THE EXPERIMENTAL HIGH ENERGY PHYSICS GROUP",
+          "funder_award_id": "DESC0011925",
+          "funder_id": "https://openalex.org/F4320332359",
+          "funder_display_name": "Office of Science"
+        },
+        {
+          "id": "https://openalex.org/G8141850949",
+          "display_name": "RESEARCH ACCOMPLISHMENTS AND GOALS OF THE EXPERIMENTAL HIGH ENERGY PHYSICS GROUP",
+          "funder_award_id": "DESC0011925",
+          "funder_id": "https://openalex.org/F4320306084",
+          "funder_display_name": "U.S. Department of Energy"
+        },
+        {
+          "id": "https://openalex.org/G86560745",
+          "display_name": null,
+          "funder_award_id": "DE\u2010AC02\u201007CH11359",
+          "funder_id": "https://openalex.org/F4320306084",
+          "funder_display_name": "U.S. Department of Energy"
+        },
+        {
+          "id": "https://openalex.org/G8890396195",
+          "display_name": null,
+          "funder_award_id": "DE-SC0011925",
+          "funder_id": "https://openalex.org/F4320337511",
+          "funder_display_name": "High Energy Physics"
+        }
+      ],
+      "funders": [
+        {
+          "id": "https://openalex.org/F4320306076",
+          "display_name": "National Science Foundation",
+          "ror": "https://ror.org/021nxhr62"
+        },
+        {
+          "id": "https://openalex.org/F4320306084",
+          "display_name": "U.S. Department of Energy",
+          "ror": "https://ror.org/01bj3aw27"
+        },
+        {
+          "id": "https://openalex.org/F4320320300",
+          "display_name": "European Commission",
+          "ror": "https://ror.org/00k4n6c32"
+        },
+        {
+          "id": "https://openalex.org/F4320322252",
+          "display_name": "Israel Science Foundation",
+          "ror": "https://ror.org/04sazxf24"
+        },
+        {
+          "id": "https://openalex.org/F4320323278",
+          "display_name": "Council for Higher Education",
+          "ror": "https://ror.org/036mqp197"
+        },
+        {
+          "id": "https://openalex.org/F4320332359",
+          "display_name": "Office of Science",
+          "ror": "https://ror.org/00mmn6b08"
+        },
+        {
+          "id": "https://openalex.org/F4320337393",
+          "display_name": "Division of Chemistry",
+          "ror": "https://ror.org/01ar8dr59"
+        },
+        {
+          "id": "https://openalex.org/F4320337511",
+          "display_name": "High Energy Physics",
+          "ror": "https://ror.org/035m6g344"
+        },
+        {
+          "id": "https://openalex.org/F4320338335",
+          "display_name": "H2020 European Research Council",
+          "ror": "https://ror.org/0472cxd90"
+        }
+      ],
+      "has_content": {
+        "pdf": true,
+        "grobid_xml": true
+      },
+      "content_urls": {
+        "pdf": "https://content.openalex.org/works/W3045164669.pdf",
+        "grobid_xml": "https://content.openalex.org/works/W3045164669.grobid-xml"
+      },
+      "referenced_works_count": 99,
+      "referenced_works": [
+        "https://openalex.org/W637153065",
+        "https://openalex.org/W1501856433",
+        "https://openalex.org/W1662382123",
+        "https://openalex.org/W1881179843",
+        "https://openalex.org/W2007431958",
+        "https://openalex.org/W2064675550",
+        "https://openalex.org/W2076063813",
+        "https://openalex.org/W2097795946",
+        "https://openalex.org/W2116341502",
+        "https://openalex.org/W2157331557",
+        "https://openalex.org/W2164414492",
+        "https://openalex.org/W2244807774",
+        "https://openalex.org/W2282866165",
+        "https://openalex.org/W2290847742",
+        "https://openalex.org/W2468907370",
+        "https://openalex.org/W2519887557",
+        "https://openalex.org/W2552391307",
+        "https://openalex.org/W2558748708",
+        "https://openalex.org/W2586557507",
+        "https://openalex.org/W2586765566",
+        "https://openalex.org/W2606780347",
+        "https://openalex.org/W2612690371",
+        "https://openalex.org/W2613081657",
+        "https://openalex.org/W2624881227",
+        "https://openalex.org/W2626778328",
+        "https://openalex.org/W2753798143",
+        "https://openalex.org/W2756071324",
+        "https://openalex.org/W2766453196",
+        "https://openalex.org/W2786103815",
+        "https://openalex.org/W2787337315",
+        "https://openalex.org/W2787586057",
+        "https://openalex.org/W2792435888",
+        "https://openalex.org/W2794980531",
+        "https://openalex.org/W2804072623",
+        "https://openalex.org/W2805516822",
+        "https://openalex.org/W2806115886",
+        "https://openalex.org/W2810437889",
+        "https://openalex.org/W2811124557",
+        "https://openalex.org/W2883445762",
+        "https://openalex.org/W2883681588",
+        "https://openalex.org/W2887330313",
+        "https://openalex.org/W2891923130",
+        "https://openalex.org/W2895524695",
+        "https://openalex.org/W2895846750",
+        "https://openalex.org/W2896410853",
+        "https://openalex.org/W2896556401",
+        "https://openalex.org/W2896693058",
+        "https://openalex.org/W2899140785",
+        "https://openalex.org/W2899771611",
+        "https://openalex.org/W2907492528",
+        "https://openalex.org/W2908715903",
+        "https://openalex.org/W2915621743",
+        "https://openalex.org/W2916639378",
+        "https://openalex.org/W2919115771",
+        "https://openalex.org/W2923537029",
+        "https://openalex.org/W2935968271",
+        "https://openalex.org/W2949697408",
+        "https://openalex.org/W2950635152",
+        "https://openalex.org/W2962888073",
+        "https://openalex.org/W2963169753",
+        "https://openalex.org/W2963240617",
+        "https://openalex.org/W2963411763",
+        "https://openalex.org/W2963464736",
+        "https://openalex.org/W2967177183",
+        "https://openalex.org/W2968312879",
+        "https://openalex.org/W2972510165",
+        "https://openalex.org/W2975089235",
+        "https://openalex.org/W2975784920",
+        "https://openalex.org/W2979750740",
+        "https://openalex.org/W2981573899",
+        "https://openalex.org/W2994673210",
+        "https://openalex.org/W2996324165",
+        "https://openalex.org/W2999026142",
+        "https://openalex.org/W3004220063",
+        "https://openalex.org/W3005009137",
+        "https://openalex.org/W3007913393",
+        "https://openalex.org/W3008024694",
+        "https://openalex.org/W3008758407",
+        "https://openalex.org/W3012294986",
+        "https://openalex.org/W3013398575",
+        "https://openalex.org/W3022100264",
+        "https://openalex.org/W3026610215",
+        "https://openalex.org/W3033529678",
+        "https://openalex.org/W3034686470",
+        "https://openalex.org/W3041666974",
+        "https://openalex.org/W3084106382",
+        "https://openalex.org/W3098229010",
+        "https://openalex.org/W3101501459",
+        "https://openalex.org/W3101867861",
+        "https://openalex.org/W3102090196",
+        "https://openalex.org/W3126756758",
+        "https://openalex.org/W3152893301",
+        "https://openalex.org/W3166332831",
+        "https://openalex.org/W7014499669",
+        "https://openalex.org/W7014683155",
+        "https://openalex.org/W7027459695",
+        "https://openalex.org/W7055661961",
+        "https://openalex.org/W7057175160",
+        "https://openalex.org/W7223762255"
+      ],
+      "related_works": [
+        "https://openalex.org/W3107418196",
+        "https://openalex.org/W4221150254",
+        "https://openalex.org/W4366975045",
+        "https://openalex.org/W7137467964",
+        "https://openalex.org/W7000796902",
+        "https://openalex.org/W4392271189",
+        "https://openalex.org/W3013398575",
+        "https://openalex.org/W4388482003",
+        "https://openalex.org/W3179176799",
+        "https://openalex.org/W3152893301"
+      ],
+      "abstract_inverted_index": {
+        "Particle": [
+          0
+        ],
+        "physics": [
+          1,
+          69,
+          115
+        ],
+        "is": [
+          2
+        ],
+        "a": [
+          3,
+          34,
+          61
+        ],
+        "branch": [
+          4
+        ],
+        "of": [
+          5,
+          13,
+          27,
+          41,
+          63,
+          91
+        ],
+        "science": [
+          6
+        ],
+        "aiming": [
+          7
+        ],
+        "at": [
+          8
+        ],
+        "discovering": [
+          9
+        ],
+        "the": [
+          10,
+          38
+        ],
+        "fundamental": [
+          11
+        ],
+        "laws": [
+          12
+        ],
+        "matter": [
+          14
+        ],
+        "and": [
+          15,
+          29,
+          49,
+          75,
+          77,
+          104
+        ],
+        "forces.": [
+          16
+        ],
+        "Graph": [
+          17
+        ],
+        "neural": [
+          18,
+          81,
+          93,
+          119
+        ],
+        "networks": [
+          19,
+          82,
+          94,
+          120
+        ],
+        "are": [
+          20,
+          33,
+          46,
+          70,
+          121
+        ],
+        "trainable": [
+          21
+        ],
+        "functions": [
+          22
+        ],
+        "which": [
+          23,
+          117
+        ],
+        "operate": [
+          24
+        ],
+        "on": [
+          25
+        ],
+        "graphs\u2014sets": [
+          26
+        ],
+        "elements": [
+          28
+        ],
+        "their": [
+          30
+        ],
+        "pairwise": [
+          31
+        ],
+        "relations\u2014and": [
+          32
+        ],
+        "central": [
+          35
+        ],
+        "method": [
+          36
+        ],
+        "within": [
+          37
+        ],
+        "broader": [
+          39
+        ],
+        "field": [
+          40
+        ],
+        "geometric": [
+          42
+        ],
+        "deep": [
+          43,
+          57
+        ],
+        "learning.": [
+          44
+        ],
+        "They": [
+          45
+        ],
+        "very": [
+          47
+        ],
+        "expressive": [
+          48
+        ],
+        "have": [
+          50
+        ],
+        "demonstrated": [
+          51
+        ],
+        "superior": [
+          52
+        ],
+        "performance": [
+          53
+        ],
+        "to": [
+          54
+        ],
+        "other": [
+          55
+        ],
+        "classical": [
+          56
+        ],
+        "learning": [
+          58,
+          105
+        ],
+        "approaches": [
+          59
+        ],
+        "in": [
+          60,
+          67,
+          95,
+          113
+        ],
+        "variety": [
+          62
+        ],
+        "domains.": [
+          64
+        ],
+        "The": [
+          65
+        ],
+        "data": [
+          66
+        ],
+        "particle": [
+          68,
+          96,
+          114
+        ],
+        "often": [
+          71
+        ],
+        "represented": [
+          72
+        ],
+        "by": [
+          73
+        ],
+        "sets": [
+          74
+        ],
+        "graphs": [
+          76
+        ],
+        "as": [
+          78,
+          107,
+          109
+        ],
+        "such,": [
+          79
+        ],
+        "graph": [
+          80,
+          92,
+          100,
+          118
+        ],
+        "offer": [
+          83
+        ],
+        "key": [
+          84,
+          110
+        ],
+        "advantages.": [
+          85
+        ],
+        "Here": [
+          86
+        ],
+        "we": [
+          87
+        ],
+        "review": [
+          88
+        ],
+        "various": [
+          89
+        ],
+        "applications": [
+          90
+        ],
+        "physics,": [
+          97
+        ],
+        "including": [
+          98
+        ],
+        "different": [
+          99
+        ],
+        "constructions,": [
+          101
+        ],
+        "model": [
+          102
+        ],
+        "architectures": [
+          103
+        ],
+        "objectives,": [
+          106
+        ],
+        "well": [
+          108
+        ],
+        "open": [
+          111
+        ],
+        "problems": [
+          112
+        ],
+        "for": [
+          116
+        ],
+        "promising.": [
+          122
+        ]
+      },
+      "cited_by_api_url": "https://api.openalex.org/works?filter=cites:W3045164669",
+      "counts_by_year": [
+        {
+          "year": 2026,
+          "cited_by_count": 70
+        },
+        {
+          "year": 2025,
+          "cited_by_count": 89
+        },
+        {
+          "year": 2024,
+          "cited_by_count": 96
+        },
+        {
+          "year": 2023,
+          "cited_by_count": 76
+        },
+        {
+          "year": 2022,
+          "cited_by_count": 61
+        },
+        {
+          "year": 2021,
+          "cited_by_count": 64
+        },
+        {
+          "year": 2020,
+          "cited_by_count": 8
+        },
+        {
+          "year": 2019,
+          "cited_by_count": 1
+        }
+      ],
+      "updated_date": "2026-11-24T14:10:38.155754",
+      "created_date": "2020-07-29T00:00:00"
+    }
+  ],
+  "group_by": [],
+  "meta": {
+    "count": 896532
+  }
+}
