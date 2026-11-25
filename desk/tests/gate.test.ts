@@ -43,6 +43,15 @@ afterEach(() => { while (dirs.length) rmSync(dirs.pop()!, { recursive: true, for
 const baseOpts = (w: ReturnType<typeof workspace>) => ({ policy, policyHash: POLICY_HASH, ledgerFile: w.ledgerFile, spend: w.spend });
 
 describe("runGate", () => {
+  it("accepts active registration6188 with the VeriReceipt slug", async () => {
+    const w=workspace(); const rec=await runGate(task.id,makePayer(),{...baseOpts(w),f:node({miner:"6188",minerSlug:"verireceipt"}).f});
+    expect(rec.outcome).toBe("PASS"); expect(rec.miner_chain).toBe("passed"); expect(rec.purchase.serving_miner).toBe("6188");
+  });
+  it("rejects unknown registration6189 claiming the VeriReceipt slug", async () => {
+    const w=workspace(); const rec=await runGate(task.id,makePayer(),{...baseOpts(w),f:node({miner:"6189",minerSlug:"verireceipt"}).f});
+    expect(rec.outcome).toBe("HOLD"); expect(rec.reasons.join(" ")).toMatch(/identity consistent with the receipt registration/);
+  });
+
   it("PASSes when the fresh auto-routed purchase verifies and the value meets the precommitted rule", async () => {
     const w = workspace();
     const rec = await runGate(task.id, makePayer(), { ...baseOpts(w), f: node().f });
