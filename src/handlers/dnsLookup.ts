@@ -83,12 +83,16 @@ interface ResolverVerdict {
   rawBody: string;
   hasRecord: boolean;
   status: number; // DoH Status: 0 NOERROR, 3 NXDOMAIN
+  ttl: number | null; // minimum matching-record TTL, null if any is unavailable
+  dnssecValidated: boolean | null; // resolver AD assertion, not independent validation
+  cnameChain: string[];
   records: string[]; // data fields of answers matching the requested type
 }
 
 interface DohAnswer {
   Status?: unknown;
   TC?: unknown;
+  AD?: unknown;
   Answer?: Array<{ name?: unknown; type?: unknown; TTL?: unknown; data?: unknown }>;
 }
 
@@ -119,6 +123,7 @@ export function parseDohVerdict(
   url: string,
   rawBody: string,
   typeCode: number,
+  requestedName?: string,
 ): ResolverVerdict {
   const parsed = JSON.parse(rawBody) as DohAnswer;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid DoH response");
@@ -131,11 +136,36 @@ export function parseDohVerdict(
     throw new Error("malformed DNS record");
   }
   if (status === 3 && answers.length > 0) throw new Error("NXDOMAIN conflicts with answer records");
-  const matching = answers.filter((a) => a.type === typeCode);
+  const normalize = (value: string) => value.replace(/\.$/, "").toLowerCase();
+  const cnameChain: string[] = [];
+  let owner = requestedName ? normalize(requestedName) : undefined;
+  if (owner) {
+    const seen = new Set<string>();
+    while (true) {
+      if (seen.has(owner)) throw new Error("cyclic DNS alias chain");
+      seen.add(owner);
+      const aliases = answers.filter(a => a.type === 5 && typeof a.name === "string" && normalize(a.name) === owner);
+      if (!aliases.length || typeCode === 5) break;
+      const targets = [...new Set(aliases.map(a => normalize(String(a.data))))];
+      if (targets.length !== 1 || !isValidDnsName(targets[0])) throw new Error("invalid DNS alias chain");
+      owner = targets[0];
+      cnameChain.push(owner);
+    }
+  }
+  const matching = answers.filter((a) => a.type === typeCode && (!owner ||
+    (typeof a.name === "string" && normalize(a.name) === owner)));
+  if (owner && typeCode !== 5 && answers.some(a => a.type === typeCode && !matching.includes(a))) {
+    throw new Error("DNS answer owner is outside requested alias chain");
+  }
+  const ttl = matching.length && matching.every(a => typeof a.TTL === "number" && Number.isInteger(a.TTL) && a.TTL >= 0 && a.TTL <= 2147483647)
+    ? Math.min(...matching.map(a => a.TTL as number)) : null;
   return {
     resolver,
     url,
     rawBody,
+    ttl,
+    dnssecValidated: typeof parsed.AD === "boolean" ? parsed.AD : null,
+    cnameChain,
     hasRecord: matching.length > 0,
     status,
     records: matching.map((a) => String(a.data ?? "")),
@@ -151,7 +181,7 @@ const RESOLVERS: Array<{
     query: async (name, typeCode) => {
       const url = `https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${typeCode}`;
       const rawBody = await fetchText(url, RESOLVER_TIMEOUT_MS);
-      return parseDohVerdict("Google Public DNS", url, rawBody, typeCode);
+      return parseDohVerdict("Google Public DNS", url, rawBody, typeCode, name);
     },
   },
   {
@@ -159,7 +189,7 @@ const RESOLVERS: Array<{
     query: async (name, typeCode) => {
       const url = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${typeCode}`;
       const rawBody = await fetchText(url, RESOLVER_TIMEOUT_MS, { accept: "application/dns-json" });
-      return parseDohVerdict("Cloudflare", url, rawBody, typeCode);
+      return parseDohVerdict("Cloudflare", url, rawBody, typeCode, name);
     },
   },
   {
@@ -167,7 +197,7 @@ const RESOLVERS: Array<{
     query: async (name, typeCode) => {
       const url = `https://dns.adguard-dns.com/resolve?name=${encodeURIComponent(name)}&type=${typeCode}`;
       const rawBody = await fetchText(url, RESOLVER_TIMEOUT_MS);
-      return parseDohVerdict("AdGuard", url, rawBody, typeCode);
+      return parseDohVerdict("AdGuard", url, rawBody, typeCode, name);
     },
   },
 ];
@@ -235,6 +265,13 @@ export async function handleDns(
 
   const serving = verdicts.find((v) => v.hasRecord === hasRecord) ?? verdicts[0];
   const nxdomain = serving.status === 3;
+  // Equality of observed data strings only, not an assertion of global DNS consistency.
+  const recordKey = (v: ResolverVerdict) => JSON.stringify([...new Set(v.records)].sort());
+  const recordValuesAgree = verdicts.length >= 2 ? verdicts.every(v => recordKey(v) === recordKey(serving)) : null;
+  const resolverDetails = verdicts.map(v => ({
+    resolver: v.resolver, status: v.status, has_record: v.hasRecord,
+    records: v.records, ttl: v.ttl, dnssec_validated: v.dnssecValidated, cname_chain: v.cnameChain,
+  }));
   const recordsText =
     hasRecord && serving.records.length > 0
       ? `: ${serving.records.slice(0, 10).join(", ")}` +
@@ -258,12 +295,17 @@ export async function handleDns(
     name,
     record_type: typeRaw,
     has_record: hasRecord,
+    record_values_agree: recordValuesAgree,
+    dnssec_scope: "Resolver AD assertion only; no independent DNSSEC validation",
     resolvers: verdicts.map((v) => ({
       resolver: v.resolver,
       url: v.url,
       status: v.status,
       has_record: v.hasRecord,
       records: v.records,
+      ttl: v.ttl,
+      dnssec_validated: v.dnssecValidated,
+      cname_chain: v.cnameChain,
       raw_body: v.rawBody,
     })),
     failed_resolvers: failedResolvers,
@@ -286,6 +328,11 @@ export async function handleDns(
     name,
     record_type: typeRaw,
     records: serving.records,
+    ttl: serving.ttl,
+    cname_chain: serving.cnameChain,
+    resolvers: resolverDetails,
+    record_values_agree: recordValuesAgree,
+    dnssec_scope: "Resolver AD assertion only; no independent DNSSEC validation",
     resolvers_used: verdicts.map((v) => v.resolver),
   };
 
