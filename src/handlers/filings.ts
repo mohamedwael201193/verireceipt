@@ -2350,16 +2350,20 @@ export async function handleFilings(
       // No SEC filer in the entity. A named CIK may still answer it, but
       // only when the leftover name equals the EDGAR name of that CIK.
       const hasClaim = cikClaims.length > 0 || (spans.name?.comp.ciks.length ?? 0) > 0;
-      if (!hasClaim && spans.searchEligible && spans.name) {
-        entity=spans.name.entity;entityForms=spans.name.comp.forms;phraseForm=spans.name.comp.phraseForm;
-        const url='https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company='+encodeURIComponent(entity)+'&owner=exclude&count=100&output=atom';
+      if (!hasClaim && spans.error.code==='ENTITY_NOT_FOUND') {
+        // Unknown residue is never silently removed to claim a known company.
+        // Search the entire unresolved name when the clean-span gate refused it.
+        entity=spans.searchEligible&&spans.name?spans.name.entity:entityNfc;
+        if(spans.searchEligible&&spans.name){entityForms=spans.name.comp.forms;phraseForm=spans.name.comp.phraseForm;}
+        const searchName=stripInvisibleChars(entity).replace(/\s+/g,' ').trim();
+        const url='https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company='+encodeURIComponent(searchName)+'&owner=exclude&count=100&output=atom';
         let response: Awaited<ReturnType<typeof fetchTextWithTimeout>>;
         try{response=await fetchTextWithTimeout(fetchImpl,url,{headers:{'User-Agent':userAgent,Accept:'application/atom+xml'}},timeouts);}catch(error){if(error instanceof ApiError)throw error;throw upstreamUnavailable('SEC_UNAVAILABLE','SEC company search is unavailable');}
         const {res,body}=response;
         if(!res.ok||body===null)throw upstreamUnavailable('SEC_UNAVAILABLE','SEC company search is unavailable');
         const companies=parseSecCompanyAtom(body);
         searchEvidence={url,body:JSON.stringify({evidence_kind:'filtered SEC company-search identity excerpt',omitted_fields:'addresses, phones, contacts, filing entries and other non-identity metadata',companies})};
-        const match=matchSecCompany(companies,entity);
+        const match=matchSecCompany(companies,searchName);
         if(hasNextSecCompanyPage(body))throw unprocessable('AMBIGUOUS_ENTITY','SEC company search is truncated; supply the exact legal name or CIK');
         console.log(JSON.stringify({event:'filings_entity_resolution',entity_sha256:sha256Hex(entityNfc),entity_length:entityNfc.length,source:'sec_company_search',outcome:match?'matched':'no_data'}));
         if(match){cikMatch={cik:match.cik,cik10:padCik(match.cik),matchKind:'name'};matchedLegalName=match.name;cikNameMustMatch=match.name;}
@@ -2416,7 +2420,7 @@ export async function handleFilings(
   if(!cikMatch&&searchEvidence){
     const receipt=makeReceipt(INTENT,searchEvidence.url,searchEvidence.body,'Filtered SEC company-search identity excerpt: no matching legal identity, not a filing count');
     try{await(deps.saveReceiptImpl??saveReceipt)(receipt,searchEvidence.body);}catch{throw new ApiError(500,'RECEIPT_STORE_FAILED','The receipt could not be stored');}
-    return envelope(INTENT,{entity,data_status:'no_data',filings:[],urls:[],resolution_scope:'SEC EDGAR company search only; not a worldwide registry'},receipt,{answer:'No matching SEC EDGAR legal entity was found. No filing count is asserted; this is not evidence that the entity has no regulatory filings elsewhere.',verdict:'no_data',confidence:0,source:'SEC EDGAR company-search Atom'});
+    return envelope(INTENT,{entity,data_status:'no_data',filings:[],urls:[],resolution_scope:'SEC EDGAR company search only; not a worldwide registry'},receipt,{answer:`SEC EDGAR company search found no matching legal entity for "${entity}". No filing count is asserted; this is not evidence that the entity has no regulatory filings elsewhere.`,verdict:'no_data',confidence:0,source:'SEC EDGAR company-search Atom'});
   }
   if (!cikMatch) {
     throw unprocessable('ENTITY_NOT_FOUND', `No SEC EDGAR entry found for entity "${entityNfc}"`);

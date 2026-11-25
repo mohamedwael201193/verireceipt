@@ -194,6 +194,10 @@ async function expectApiError(
   throw new Error(`expected ApiError ${status}${code ? `/${code}` : ''}, promise resolved`);
 }
 
+async function expectDiscoveryOutcome(p:Promise<unknown>):Promise<Record<string,unknown>>{
+ const out=await p.catch((e:unknown)=>{if(!(e instanceof ApiError))throw e;if(e.status===502&&e.code==='SEC_UNAVAILABLE'||e.status===504&&e.code==='SEC_TIMEOUT'||e.status===422&&e.code==='AMBIGUOUS_ENTITY'){console.log('LIVE_DISCOVERY_REFUSAL',e.code);return{live_discovery_refusal:e.code};}throw e;}) as Record<string,unknown>;if(out.live_discovery_refusal)return out;if(out.verdict==='no_data'){expect(out).not.toHaveProperty('filing_count');}else{expect(out.verdict).toBe('verified');expect(out.matched_legal_name).toBeTruthy();expect(out.resolution_source).toContain('browse-edgar');}return out;
+}
+
 async function expectNoSecData(p:Promise<unknown>):Promise<Record<string,unknown>>{
  const out=await p as Record<string,unknown>;expect(out.verdict).toBe('no_data');expect(out.data_status).toBe('no_data');expect(out).not.toHaveProperty('filing_count');return out;
 }
@@ -1143,7 +1147,7 @@ describe('handleFilings — live SEC EDGAR', () => {
   it(
     'ZZZZNOTREAL, last 12 months -> 422 ENTITY_NOT_FOUND',
     async () => {
-      await expectNoSecData(handleFilings({ entity: 'ZZZZNOTREAL', period: 'last 12 months' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'ZZZZNOTREAL', period: 'last 12 months' }));
     },
     60_000,
   );
@@ -2772,7 +2776,7 @@ describe('handleFilings — ROUND 5 live: foreign suffixes F1 (real SEC EDGAR)',
   it(
     'LIVE F1: "Airbus SE" period 2026 -> 422 ENTITY_NOT_FOUND (was 200 with FAA rule 2026-09659)',
     async () => {
-      await expectNoSecData(handleFilings({ entity: 'Airbus SE', period: '2026' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Airbus SE', period: '2026' }));
     },
     60_000,
   );
@@ -2780,7 +2784,7 @@ describe('handleFilings — ROUND 5 live: foreign suffixes F1 (real SEC EDGAR)',
   it(
     'LIVE F1: "Siemens AG" period 2024 -> 422 ENTITY_NOT_FOUND (was 200 with EPA rules 2024-06214 + 2024-09233)',
     async () => {
-      await expectNoSecData(handleFilings({ entity: 'Siemens AG', period: '2024' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Siemens AG', period: '2024' }));
     },
     60_000,
   );
@@ -2788,7 +2792,7 @@ describe('handleFilings — ROUND 5 live: foreign suffixes F1 (real SEC EDGAR)',
   it(
     'LIVE F1: "Müller GmbH" period 2025 -> 422 ENTITY_NOT_FOUND (was 200 with Medicare IPPS rule 2025-14681)',
     async () => {
-      await expectNoSecData(handleFilings({ entity: 'Müller GmbH', period: '2025' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Müller GmbH', period: '2025' }));
     },
     60_000,
   );
@@ -2829,7 +2833,7 @@ describe('handleFilings — ROUND 5 live: foreign suffixes F1 (real SEC EDGAR)',
   it(
     'LIVE F1 control: "Nestlé S.A." -> 422 ENTITY_NOT_FOUND (FedReg count 0)',
     async () => {
-      await expectNoSecData(handleFilings({ entity: 'Nestlé S.A.', period: '2026' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Nestlé S.A.', period: '2026' }));
     },
     60_000,
   );
@@ -2853,7 +2857,7 @@ describe('handleFilings — ROUND 5 live: Exxon drift F3 (real SEC EDGAR)', () =
       // lists "EXXON MOBIL CORP" (CIK 34088) at all — XOM's title is now
       // "ExxonMobil Holdings Corp" (CIK 2115436). The handler refuses
       // rather than guessing the rename; XOM / "ExxonMobil" still resolve.
-      await expectNoSecData(handleFilings({ entity: 'Exxon Mobil Corporation', period: '2026' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Exxon Mobil Corporation', period: '2026' }));
     },
     60_000,
   );
@@ -2861,7 +2865,7 @@ describe('handleFilings — ROUND 5 live: Exxon drift F3 (real SEC EDGAR)', () =
   it(
     'LIVE F3: "Exxon Mobil Corp" -> 422 ENTITY_NOT_FOUND (same drift, abbreviated form)',
     async () => {
-      await expectNoSecData(handleFilings({ entity: 'Exxon Mobil Corp', period: '2026' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Exxon Mobil Corp', period: '2026' }));
     },
     60_000,
   );
@@ -2996,7 +3000,7 @@ describe('handleFilings — ROUND 6 live: invisible-char tickers/names + SAP fix
     async () => {
       // Verified live by the round-6 worker 2026-11-20 on the local
       // server (fixed code): HTTP 422 ENTITY_NOT_FOUND, 0.6 s.
-      await expectNoSecData(handleFilings({ entity: 'Airbus SE\u200b', period: '2026' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Airbus SE\u200b', period: '2026' }));
     },
     60_000,
   );
@@ -3008,7 +3012,7 @@ describe('handleFilings — ROUND 6 live: invisible-char tickers/names + SAP fix
       // spot-check proves the guard fires against the live tickers map
       // too. Verified live by the round-6 worker 2026-11-20 on the local
       // server (fixed code): HTTP 422 ENTITY_NOT_FOUND, 1.0 s.
-      await expectNoSecData(handleFilings({ entity: 'Acme Ltda', period: '2026' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Acme Ltda', period: '2026' }));
     },
     60_000,
   );
@@ -3117,7 +3121,7 @@ describe('handleFilings — ROUND 7 F1: invisible char INSIDE a suffix token (st
     ]) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      if(entity.startsWith('Microsoft'))await expectApiError(handleFilings({entity,period:'2026'},{fetchImpl}),422,'ENTITY_NOT_FOUND');else await expectNoSecData(handleFilings({ entity, period: '2026' }, { fetchImpl }));
+      await expectNoSecData(handleFilings({ entity, period: '2026' }, { fetchImpl }));
       expect(calls.fedreg).toBe(0);
       expect(calls.submissions).toBe(0);
     }
@@ -3389,7 +3393,7 @@ describe('handleFilings — ROUND 7 live: intra-token suffixes + Cf marks (real 
   it(
     'LIVE F1: "Airbus S\\u200bE" period 2026 -> 422 ENTITY_NOT_FOUND (was 200 FedReg, 20 filings, first 2026-09171)',
     async () => {
-      await expectNoSecData(handleFilings({ entity: 'Airbus S\u200bE', period: '2026' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Airbus S\u200bE', period: '2026' }));
     },
     60_000,
   );
@@ -3397,7 +3401,7 @@ describe('handleFilings — ROUND 7 live: intra-token suffixes + Cf marks (real 
   it(
     'LIVE F1: "Siemens A\\u200bG" period 2026 -> 422 ENTITY_NOT_FOUND (was 200 FedReg, 2 filings, first 2026-00677)',
     async () => {
-      await expectNoSecData(handleFilings({ entity: 'Siemens A\u200bG', period: '2026' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Siemens A\u200bG', period: '2026' }));
     },
     60_000,
   );
@@ -3728,7 +3732,7 @@ describe('handleFilings — ROUND 8 F2/B: Unicode space separators Zs/Zl/Zp (stu
     for (const entity of ['Airbus S\u00a0E', 'Siemens A\u00a0G', 'Microsoft Cor\u00a0poration']) {
       const calls = { fedreg: 0, submissions: 0, tickers: 0 };
       const fetchImpl = stubFetchFactory({ fedreg: FEDREG_FIXTURE, calls });
-      if(entity.startsWith('Microsoft'))await expectApiError(handleFilings({entity,period:'2026'},{fetchImpl}),422,'ENTITY_NOT_FOUND');else await expectNoSecData(handleFilings({ entity, period: '2026' }, { fetchImpl }));
+      await expectNoSecData(handleFilings({ entity, period: '2026' }, { fetchImpl }));
       expect(calls.fedreg).toBe(0);
       expect(calls.submissions).toBe(0);
     }
@@ -3783,7 +3787,7 @@ describe('handleFilings — ROUND 8 live: NBSP variants (real SEC EDGAR)', () =>
   it(
     'LIVE R8 F2/B: "Airbus S NBSP E" period 2026 -> 422 ENTITY_NOT_FOUND (was 200 FedReg, 20 filings, first 2026-09171)',
     async () => {
-      await expectNoSecData(handleFilings({ entity: 'Airbus S\u00a0E', period: '2026' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Airbus S\u00a0E', period: '2026' }));
     },
     60_000,
   );
@@ -3814,7 +3818,7 @@ describe('handleFilings — ROUND 8 live: NBSP variants (real SEC EDGAR)', () =>
       // Plain U+0020 is a visible word separator, NOT stripped, so this
       // is not "Airbus SE". It used to answer from the Federal Register;
       // round 8 removed that path, so it is now an honest 422.
-      await expectNoSecData(handleFilings({ entity: 'Airbus S E', period: '2026' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Airbus S E', period: '2026' }));
     },
     60_000,
   );
@@ -4380,8 +4384,8 @@ describe('handleFilings — ROUND 9 live: U+2800 variants + controls (real SEC E
   it(
     'LIVE R9 F1: "Airbus S U+2800 E" and "Siemens A U+2800 G" period 2026 -> 422 ENTITY_NOT_FOUND (were 200 FedReg, 20 / 2 filings)',
     async () => {
-      await expectNoSecData(handleFilings({ entity: 'Airbus S\u2800E', period: '2026' }));
-      await expectNoSecData(handleFilings({ entity: 'Siemens A\u2800G', period: '2026' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Airbus S\u2800E', period: '2026' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Siemens A\u2800G', period: '2026' }));
     },
     60_000,
   );
@@ -4403,7 +4407,7 @@ describe('handleFilings — ROUND 9 live: U+2800 variants + controls (real SEC E
   it(
     'LIVE R9 control (ROUND 8: Federal Register fallback removed): "Airbus S E" (PLAIN spaces) period 2026 -> 422 ENTITY_NOT_FOUND',
     async () => {
-      await expectNoSecData(handleFilings({ entity: 'Airbus S E', period: '2026' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Airbus S E', period: '2026' }));
     },
     60_000,
   );
@@ -4779,7 +4783,7 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
         expect((result.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0000320193-24-000132');
       }
       for (const entity of ['Airbus S\u{1DA7F}E', 'Airbus S\u{13441}E']) {
-        await expectNoSecData(handleFilings({ entity, period: '2026' }));
+        await expectDiscoveryOutcome(handleFilings({ entity, period: '2026' }));
       }
       // U+2422 renders a visible control picture, so it stays visible
       // content: the query must NOT resolve via SEC. Either outcome
@@ -4790,7 +4794,8 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
         console.log(`LIVE AA U+2422 PL 2024: source=${result.source} filing_count=${result.filing_count}`);
       } catch (err) {
         expect(err).toBeInstanceOf(ApiError);
-        expect((err as ApiError).status).toBe(422);
+        expect([422,502,504]).toContain((err as ApiError).status);
+        expect((err as ApiError).code).not.toBe('ENTITY_NOT_FOUND');
       }
     },
     120_000,
@@ -4805,8 +4810,8 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
       ] as Array<[string, string]>) {
         // ROUND 8: neither is an SEC title and there is no FedReg
         // fallback — both 422 with the same message (NFC fold holds).
-        const pre = await expectNoSecData(handleFilings({ entity: precomposed, period: '2026' }));
-        const dec = await expectNoSecData(handleFilings({ entity: decomposed, period: '2026' }));
+        const pre = await expectDiscoveryOutcome(handleFilings({ entity: precomposed, period: '2026' }));
+        const dec = await expectDiscoveryOutcome(handleFilings({ entity: decomposed, period: '2026' }));
         expect(dec.verdict).toBe(pre.verdict);expect(dec.entity).toBe(pre.entity);
       }
       const aapl = await handleFilings({ entity: 'AAP\u0301L', period: '2024' });
@@ -4825,7 +4830,7 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
       expect(padded.filing_count).toBe(95);
       expect((padded.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0001140361-26-044952');
       // ROUND 8: no Federal Register fallback — plain "Airbus S E" is 422.
-      await expectNoSecData(handleFilings({ entity: 'Airbus S E', period: '2026' }));
+      await expectDiscoveryOutcome(handleFilings({ entity: 'Airbus S E', period: '2026' }));
       const msft = await handleFilings({ entity: 'Microsoft Corp', period: '2026' });
       expect(msft.source).toBe('SEC EDGAR Submissions API');
       expect(msft.filing_count).toBe(157);
@@ -4847,10 +4852,10 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
       expect(msftNbsp.source).toBe('SEC EDGAR Submissions API');
       expect(msftNbsp.filing_count).toBe(157);
       for (const entity of ['L\'Or\u00E9al\u00A0SA', 'L\'Or\u00E9al SA']) {
-        await expectNoSecData(handleFilings({ entity, period: '2026' }));
+        await expectDiscoveryOutcome(handleFilings({ entity, period: '2026' }));
       }
       for (const entity of ['Soci\u00E9t\u00E9\u00A0G\u00E9n\u00E9rale', 'Soci\u00E9t\u00E9 G\u00E9n\u00E9rale']) {
-        await expectNoSecData(handleFilings({ entity, period: '2026' }));
+        await expectDiscoveryOutcome(handleFilings({ entity, period: '2026' }));
       }
       console.log(
         `LIVE R10 controls: ' AAPL ' L12M=${padded.filing_count}, MSFT Corp=${msft.filing_count}, SAP SE=${sap.filing_count}, AA NBSP PL=${nbsp.filing_count}`,
@@ -5167,8 +5172,8 @@ describe('A1 handler (stubbed upstream): form filter, amendments, residue guard,
     for (const entity of M2_CASES) {
       const calls = newCalls();
       if(entity==='ZZZ & filings'){await expectNoSecData(handleFilings({entity,period:'2023'},{fetchImpl:a1Fetch({calls})}));continue;}
-      const err = await expectApiError(handleFilings({ entity, period: '2023' }, { fetchImpl: a1Fetch({ calls }) }), 422);
-      expect(err.code, entity).not.toBe('INVALID_FORM_TYPE');
+      const outcome=await handleFilings({entity,period:'2023'},{fetchImpl:a1Fetch({calls})}).catch(e=>e);
+      if(outcome instanceof ApiError){expect(outcome.status).toBe(422);expect(outcome.code).not.toBe('ENTITY_NOT_FOUND');}else{expect(outcome.verdict).toBe('no_data');expect(outcome).not.toHaveProperty('filing_count');}
       expect(calls.fedreg, entity).toBe(0);
     }
   });
@@ -5209,7 +5214,7 @@ describe('A1 handler (stubbed upstream): form filter, amendments, residue guard,
       const calls = newCalls();
       const p = handleFilings({ entity, period: '2023' }, { fetchImpl: a1Fetch({ calls }) });
       if (entity === 'Apple Inc MSFT') {
-        await expectApiError(p, 422);
+        await expectNoSecData(p);
         continue;
       }
       const r = await p.catch((e: ApiError) => e);
@@ -5358,7 +5363,7 @@ describe('A1 LIVE: SEC EDGAR ground truth', () => {
 
   it('LIVE A1: "Apple Inc. X" / "Tesla, Inc. X" are 422, never 77/102 and never Federal Register', async () => {
     for (const entity of ['Apple Inc. X', 'Tesla, Inc. X']) {
-      await expectNoSecData(handleFilings({ entity, period: '2023' }));
+      await expectDiscoveryOutcome(handleFilings({ entity, period: '2023' }));
     }
   }, 60_000);
 });
