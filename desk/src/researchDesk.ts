@@ -14,7 +14,7 @@ export interface FactSpec {
 export interface Assumption { id: string; value: string; unit: string; rationale: string }
 export interface Calculation { id: string; op: 'multiply' | 'divide' | 'subtract'; left: string; right: string; unit: string }
 export interface ThesisSpec {
-  version: typeof VERSION; network: typeof NETWORK; template: 'onchain-valuation' | 'issuer-macro' | 'private-mark' | 'diligence-pack' | 'listing-risk' | 'settlement-screen';
+  version: typeof VERSION; network: typeof NETWORK; template: 'onchain-valuation' | 'issuer-macro' | 'private-mark' | 'diligence-pack' | 'listing-risk' | 'settlement-screen' | 'token-preflight';
   question: string; frozen_at: string; facts: FactSpec[]; assumptions: Assumption[]; calculations: Calculation[];
   budget_uusdc: string; max_call_uusdc: '10000'; max_escalations: 1;
 }
@@ -30,6 +30,7 @@ const CONTRACTS: Record<string, { field: string; unit: string; required: string[
   SANCTIONS_SCREENING_MATCH_GENERAL: {field:'match_score',unit:'score',required:['name']},
   TOKEN_HOLDER_COUNT_GENERAL: {field:'holders_count',unit:'addresses',required:['token','chain']},
   ASSET_RESERVE_ATTESTATION_GENERAL: {field:'attested_reserve',unit:'micro-units of the underlying asset',required:['asset']},
+  ONCHAIN_METRIC_VERIFY_GENERAL: {field:'balance_gwei',unit:'gwei',required:['address','block'],optional:['chain','metric']},
 };
 // Required observations per template. A template with no entry is rejected.
 const REQUIRED: Record<string, string[]> = {
@@ -39,6 +40,7 @@ const REQUIRED: Record<string, string[]> = {
   'diligence-pack':['SANCTIONS_SCREENING_MATCH_GENERAL','REGULATORY_FILING_MONITOR_GENERAL'],
   'listing-risk':['TOKEN_HOLDER_COUNT_GENERAL','LIQUIDITY_DEPTH_VERIFY_GENERAL','TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL'],
   'settlement-screen':['SANCTIONS_SCREENING_MATCH_GENERAL','ASSET_RESERVE_ATTESTATION_GENERAL'],
+  'token-preflight':['TOKEN_HOLDER_COUNT_GENERAL','LIQUIDITY_DEPTH_VERIFY_GENERAL','TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL','ONCHAIN_METRIC_VERIFY_GENERAL'],
 };
 function invariant(ok: unknown, message: string): asserts ok { if (!ok) throw new Error(message); }
 const uint = (s: unknown): s is string => typeof s === 'string' && /^(0|[1-9]\d*)$/.test(s);
@@ -74,6 +76,12 @@ export function validateSpec(spec: ThesisSpec): void {
       invariant(f.params.year===undefined || /^(19[6-9]\d|20\d\d|2100)$/.test(f.params.year),'invalid macro year');
     }
     if(f.intent==='TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL') invariant(/(?:ethereum|polygon|arbitrum|base|optimism|chain[:=])/i.test(f.params.token),'total supply needs explicit chain');
+    if(f.intent==='ONCHAIN_METRIC_VERIFY_GENERAL'){
+      invariant(/^0x[0-9a-fA-F]{40}$/.test(f.params.address),'onchain metric needs an explicit 0x address');
+      invariant(uint(f.params.block) && BigInt(f.params.block)>0n,'onchain metric needs an explicit pinned block');
+      invariant(f.params.chain===undefined || ['ethereum','polygon','arbitrum'].includes(f.params.chain),'onchain metric chain outside the live enum');
+      invariant(f.params.metric===undefined || f.params.metric==='balance','onchain metric primary covers the scored balance metric only');
+    }
     add(f.id,f.unit);
   }
   const intents=spec.facts.map(f=>f.intent);

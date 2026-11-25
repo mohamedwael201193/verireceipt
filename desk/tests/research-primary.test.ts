@@ -116,6 +116,30 @@ describe('reserve attestation primary, unit transport only',()=>{
  it('source replay re-runs the same RPC sequence from stored bytes',async()=>{const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(reserve,MICRO.toString(),{f:rpcReserve().f,now});expect(await replayPrimaryBytes(reserve,{source:r.source,value:MICRO.toString(),as_of:r.as_of} as any,now().toISOString())).toBe(true);});
 });
 
+describe('pinned-block native balance primary, unit RPC transport only',()=>{
+ const POOL='0x1d42064Fc4Beb5F8aAF85F4617AE8b3b5B8Bd801';
+ const balance:FactSpec={id:'contract_balance',intent:'ONCHAIN_METRIC_VERIFY_GENERAL',params:{address:POOL,block:'291',chain:'ethereum',metric:'balance'},field:'balance_gwei',unit:'gwei',max_age_seconds:1800};
+ const blockSecs=BigInt(Math.floor(now().getTime()/1000)-60);
+ function rpcBalance(mutant?:'chain'|'block'|'balance'){
+  let calls=0;const f:typeof fetch=async(url,init)=>{calls++;const req=JSON.parse(String(init?.body));const second=String(url).includes('drpc');let result:unknown;
+   if(req.method==='eth_chainId')result=mutant==='chain'&&second?'0x89':'0x1';
+   else if(req.method==='eth_getBlockByNumber'){expect(req.params[0]).toBe('0x123');result={number:'0x123',hash:'0x'+(mutant==='block'&&second?'b':'a').repeat(64),timestamp:'0x'+blockSecs.toString(16)};}
+   else if(req.method==='eth_getBalance'){expect(req.params).toEqual([POOL,'0x123']);result=mutant==='balance'&&second?'0x5f5e101':'0x5f5e100';}
+   else throw new Error('unexpected RPC method '+req.method);
+   return Response.json({jsonrpc:'2.0',id:1,result});
+  };return {f,get calls(){return calls;}};
+ }
+ // 0x5f5e100 wei = 100000000 wei = 0.1 gwei exactly.
+ it('recomputes the exact gwei balance at the pinned block over two chain-bound RPCs',async()=>{const t=rpcBalance();const r=await verifyResearchPrimary(balance,'0.1',{f:t.f,now});expect(r.ok).toBe(true);expect(t.calls).toBe(6);expect(r.source!.parser).toBe('evm-two-rpc-pinned-block-balance-gwei-v1');expect(r.source!.raw_text).toContain('eth_getBalance');});
+ it('accepts the zero balance of a WETH pool contract',async()=>{const t=rpcBalance();const zero:typeof fetch=async(url,init)=>{const req=JSON.parse(String(init?.body));if(req.method==='eth_getBalance')return Response.json({jsonrpc:'2.0',id:1,result:'0x0'});return t.f(url,init);};const r=await verifyResearchPrimary(balance,'0',{f:zero,now});expect(r.ok).toBe(true);});
+ it.each(['chain','block','balance'] as const)('rejects RPC %s mismatch',async mutant=>expect((await verifyResearchPrimary(balance,'0.1',{f:rpcBalance(mutant).f,now})).ok).toBe(false));
+ it('rejects a paid value that differs at wei precision',async()=>expect((await verifyResearchPrimary(balance,'0.100000001',{f:rpcBalance().f,now})).ok).toBe(false));
+ it('refuses a non-0x address or a missing block without fetching',async()=>{let calls=0;const f=async()=>{calls++;return Response.json({});};expect((await verifyResearchPrimary({...balance,params:{...balance.params,address:'not-an-address'}},'0',{f,now})).ok).toBe(false);expect((await verifyResearchPrimary({...balance,params:{...balance.params,block:''}},'0',{f,now})).ok).toBe(false);expect(calls).toBe(0);});
+ it('refuses the unscored tx_count metric without fetching',async()=>{let calls=0;const f=async()=>{calls++;return Response.json({});};expect((await verifyResearchPrimary({...balance,params:{...balance.params,metric:'tx_count'}},'1',{f,now})).ok).toBe(false);expect(calls).toBe(0);});
+ it('refuses a chain outside the live enum without fetching',async()=>{let calls=0;const f=async()=>{calls++;return Response.json({});};expect((await verifyResearchPrimary({...balance,params:{...balance.params,chain:'base'}},'0',{f,now})).ok).toBe(false);expect(calls).toBe(0);});
+ it('source replay re-runs the same RPC sequence from stored bytes',async()=>{const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(balance,'0.1',{f:rpcBalance().f,now});expect(await replayPrimaryBytes(balance,{source:r.source,value:'0.1',as_of:r.as_of} as any,now().toISOString())).toBe(true);});
+});
+
 it('replay binds derived timestamp, source URL, parser, scope and observation metadata',async()=>{
  const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(macro,'4.123457',{f:transport([{},[macroRow]]),now});
  for(const change of ['as_of','url','parser','scope_hash','observed_at'] as const){const o={source:structuredClone(r.source),value:'4.123457',as_of:r.as_of} as any;if(change==='as_of')o.as_of='2026-11-23T00:00:00Z';else o.source[change]=change==='observed_at'?'2020-01-01T00:00:00Z':'changed';expect(await replayPrimaryBytes(macro,o,now().toISOString())).toBe(false);}

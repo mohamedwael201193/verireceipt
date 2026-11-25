@@ -201,6 +201,36 @@ export async function verifyResearchPrimary(fact:FactSpec,value:string,options:{
     const paid=decimal(value);if(paid.n!==micro*paid.d)fail('reserve micro-unit value mismatch');
     const blockSeconds=hex(first?.timestamp);if(blockSeconds>BigInt(Math.floor(now().getTime()/1000)))fail('future finalized block timestamp');as_of=new Date(Number(blockSeconds)*1000).toISOString();parser='evm-two-rpc-finalized-chainlink-por-micro-v1';break;
    }
+   case 'ONCHAIN_METRIC_VERIFY_GENERAL':{
+    const address=fact.params.address;if(!/^0x[0-9a-fA-F]{40}$/.test(address))fail('onchain metric primary requires an explicit 0x address');
+    const blockDec=fact.params.block;if(!/^(0|[1-9]\d*)$/.test(blockDec)||BigInt(blockDec)<=0n)fail('onchain metric primary requires an explicit pinned block');
+    const chain=(fact.params.chain??'ethereum').toLowerCase();
+    const chainIds:Record<string,bigint>={ethereum:1n,polygon:137n,arbitrum:42161n};
+    if(!chainIds[chain]||!CHAIN_RPCS[chain])fail('onchain metric primary supports ethereum/polygon/arbitrum only');
+    if(fact.params.metric!==undefined&&fact.params.metric!=='balance')fail('onchain metric primary covers the scored balance metric only');
+    const urls=CHAIN_RPCS[chain].slice(0,2);
+    const rpc=async(url:string,method:string,params:unknown[])=>{const r=await read(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});if(r.json.error||r.json.id!==1)fail('RPC error');return r.json.result;};
+    const hex=(x:unknown)=>{if(typeof x!=='string'||!/^0x[0-9a-fA-F]+$/.test(x))fail('invalid RPC quantity');return BigInt(x as string);};
+    // Two independent chain-bound RPCs at the same pinned block: compare
+    // chain id, the pinned block hash and the exact wei balance; any
+    // disagreement fails closed. The pinned block is part of the paid
+    // request, so neither leg can drift to a different height.
+    const blockHex='0x'+BigInt(blockDec).toString(16);
+    const legs=[];
+    for(const url of urls){
+     if(hex(await rpc(url,'eth_chainId',[]))!==chainIds[chain])fail('RPC chain mismatch');
+     legs.push({block:await rpc(url,'eth_getBlockByNumber',[blockHex,false]),wei:hex(await rpc(url,'eth_getBalance',[address,blockHex]))});
+    }
+    const a=legs[0],b=legs[1];
+    if(!a.block?.hash||a.block.hash!==b.block?.hash)fail('RPC pinned block hash mismatch');
+    if(a.wei!==b.wei)fail('RPC balance disagreement at pinned block');
+    // The handler's conversion is full-precision gwei (wei / 10^9 with no
+    // quantization; the live schema's 6 decimals are the scoring display,
+    // not the transport). Compared exactly; a balance cannot change at a
+    // pinned block, so any mismatch is a discrepancy, not drift.
+    const paid=decimal(value);if(paid.n*(10n**9n)!==a.wei*paid.d)fail('balance gwei mismatch at pinned block');
+    const blockSeconds=hex(a.block.timestamp);if(blockSeconds>BigInt(Math.floor(now().getTime()/1000)))fail('future pinned block timestamp');as_of=new Date(Number(blockSeconds)*1000).toISOString();parser='evm-two-rpc-pinned-block-balance-gwei-v1';break;
+   }
    default: fail('no independent primary parser for intent');
   }
   if(!reads.length)fail('primary evidence empty');

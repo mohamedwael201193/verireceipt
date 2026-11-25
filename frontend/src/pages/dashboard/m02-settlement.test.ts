@@ -167,6 +167,14 @@ describe("M02 pre-settlement compliance screen preset", () => {
     expect(out.why.find((c) => c.k === "Attested Reserve")!.ok).toBe(false);
   });
 
+  it("HOLDs as unverified when the reserve response omits feed freshness metadata", () => {
+    const noAge = verified("ASSET_RESERVE_ATTESTATION_GENERAL", R_URL, { ...RESERVE_BODY, feed_age_seconds: undefined }, RESERVE_RECEIPT);
+    const out = preset("m02-settlement").evaluate([okSanctions(), noAge]);
+    expect(out.verdict).toBe("HOLD");
+    expect(out.headline).toContain("Evidence did not verify");
+    expect(out.why.find((c) => c.k === "Attested Reserve")!.ok).toBe(false);
+  });
+
   it("HOLDs when the sanctions screen does not verify, never authorizing", () => {
     const out = preset("m02-settlement").evaluate([refused("SANCTIONS_SCREENING_MATCH_GENERAL", S_URL), okReserve()]);
     expect(out.verdict).toBe("HOLD");

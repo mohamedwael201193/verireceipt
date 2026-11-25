@@ -198,6 +198,22 @@ describe("Dashboard page", () => {
     expect(await screen.findByText("protocol=", {}, { timeout: 5000 })).toBeTruthy();
   }, 30000);
 
+  it("Mission 14 on a non-ethereum chain ends in the unsupported-chain HOLD through the real run path", async () => {
+    render(<Dashboard />);
+    fireEvent.click(screen.getByRole("button", { name: /Mission 14 · Web3/ }));
+    const scopeInput = screen.getByLabelText(/Chain \/ Period \/ Interval · Threshold/) as HTMLInputElement;
+    fireEvent.change(scopeInput, { target: { value: "polygon" } });
+    fireEvent.click(screen.getByRole("button", { name: /Run Live Checks/ }));
+    expect(await screen.findByText(/^COMPLETE( · RECEIPTS SAVED TO LEDGER)?$/, {}, { timeout: 15000 })).toBeTruthy();
+    // MissionDesk passes the run's input snapshot as evaluate's second
+    // argument; the verdict comes from the real call path, and the
+    // headline, not a preset default, carries the chain refusal.
+    expect(await screen.findByText(/unsupported chain "polygon"/, {}, { timeout: 5000 })).toBeTruthy();
+    // The phrase appears in the run stream (the balance check's fail-closed
+    // line) and in the verdict headline; both are the real path.
+    expect(screen.getAllByText(/pins its finalized block and contract reads on ethereum/).length).toBeGreaterThanOrEqual(2);
+  }, 30000);
+
   it("a desk run can be cancelled and the Run button comes back", async () => {
     vi.stubGlobal("fetch", (url: string, init?: { signal?: AbortSignal }) => hangingFetch(url, init));
     render(<Dashboard />);

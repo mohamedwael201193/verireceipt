@@ -19,11 +19,11 @@
 //   are the repo's own test fixtures (tests/tx.test.ts).
 // - grid zone TH_NP15_GEN-APND + a 2h-ago interval returns live CAISO LMP.
 
-import { getCorporateRegistry, getFilings, getGridPrice, getPoolLiquidity, getReserveAttestation, getRoute, getSanctionsScreen, getStockPrice, getTokenHolders, getTokenSupply, getTvl, getTx } from "../../lib/api";
-import type { CorporateRegistryResponse, FilingsResponse, GridPriceResponse, LiveReceipt, PoolLiquidityResponse, ProbeOutcome, ReserveAttestationResponse, RouteResponse, SanctionsScreenResponse, StockPriceResponse, TokenHoldersResponse, TokenSupplyResponse, TvlResponse, TxResponse } from "./types";
+import { getCorporateRegistry, getFilings, getGridPrice, getOnchainMetric, getPoolLiquidity, getReserveAttestation, getRoute, getSanctionsScreen, getStockPrice, getTokenHolders, getTokenSupply, getTvl, getTx } from "../../lib/api";
+import type { CorporateRegistryResponse, FilingsResponse, GridPriceResponse, LiveReceipt, OnchainMetricResponse, PoolLiquidityResponse, ProbeOutcome, ReserveAttestationResponse, RouteResponse, SanctionsScreenResponse, StockPriceResponse, TokenHoldersResponse, TokenSupplyResponse, TvlResponse, TxResponse } from "./types";
 import { formatUsd, formatUsdPrecise, isVerified, probe, recentGridInterval } from "./utils";
 
-export type MissionId = "m13" | "m12" | "m03" | "m04" | "m01" | "m02";
+export type MissionId = "m13" | "m12" | "m03" | "m04" | "m01" | "m02" | "m14";
 /**
  * APPROVE / REJECT / HOLD: a decision against a rule the scenario states.
  * VERIFIED: the data was retrieved and receipted, but no decision rule
@@ -1083,6 +1083,191 @@ export const DESK_PRESETS: DeskPreset[] = [
     },
   },
   {
+    id: "m14-preflight",
+    mission: "m14",
+    tag: "M14 · WEB3",
+    title: "Token-Risk Preflight",
+    // Disclosure: the finalized block is pinned by a direct browser read
+    // of a public Ethereum RPC (outside the receipted miner calls). No
+    // miner endpoint exposes a bare finalized block; the paid balance
+    // probe itself is receipted and pinned to that block.
+    sub: "Holders + liquidity floors + contract native-balance probe, receipted — simulated trade · block pinned via a direct public RPC read (outside the receipts)",
+    // Declared analyst floors, identical to the desk's template G
+    // assumptions. Screen thresholds, never market forecasts or advice.
+    inputs: {
+      entity: "UNI",
+      ref: "0x1d42064Fc4Beb5F8aAF85F4617AE8b3b5B8Bd801",
+      scope: "ethereum",
+    },
+    buildChecks: (inputs) => {
+      // entity = token symbol; ref = DEX pool contract; scope = chain.
+      // No silent defaults: a cleared input runs empty and the lib refuses it.
+      const symbol = inputs.entity.trim();
+      const pool = inputs.ref.trim();
+      const chain = inputs.scope.trim();
+      return [
+        {
+          label: "Token holders",
+          intent: "TOKEN_HOLDER_COUNT_GENERAL",
+          query: `token=${symbol} · chain=${chain}`,
+          requestUrl: direct("/v1/token-holders", { token: symbol, chain }),
+          run: (signal) => probe((s) => getTokenHolders({ token: symbol, chain }, s), signal),
+        },
+        {
+          label: "Pool liquidity",
+          intent: "LIQUIDITY_DEPTH_VERIFY_GENERAL",
+          query: `pool=${pool} · chain=${chain}`,
+          requestUrl: direct("/v1/liquidity", { pool, chain }),
+          run: (signal) => probe((s) => getPoolLiquidity({ pool, chain }, s), signal),
+        },
+        {
+          label: "Token supply",
+          intent: "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL",
+          query: `token=${symbol} on ${chain}`,
+          requestUrl: direct("/v1/token-supply", { token: `${symbol} on ${chain}` }),
+          run: (signal) => probe((s) => getTokenSupply({ token: `${symbol} on ${chain}` }, s), signal),
+        },
+        {
+          // The block is pinned at run time: the run resolves the current
+          // finalized block from a public RPC, then asks the miner for the
+          // pool contract's native-coin balance at exactly that block. The
+          // static URL omits the block for that reason; the executed URL
+          // with the pinned block is shown from the receipt after a run.
+          label: "Contract balance",
+          intent: "ONCHAIN_METRIC_VERIFY_GENERAL",
+          query: `address=${pool} · chain=${chain} · block=<finalized at run>`,
+          requestUrl: direct("/v1/onchain-metric", { address: pool, chain }),
+          // Everything inside probe(): a failed block resolution (RPC down,
+          // CORS, rate limit) or a non-ethereum chain becomes a failed
+          // check and a HOLD, never an aborted run.
+          run: (signal) =>
+            probe(async (s) => {
+              if (chain.toLowerCase() !== "ethereum") throw new Error(`unsupported chain ${chain}: the preflight pins its finalized block and contract reads on ethereum`);
+              const res = await fetch("https://eth-mainnet.public.blastapi.io", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["finalized", false] }),
+                signal: s,
+              });
+              const j = (await res.json()) as { result?: { number?: string } };
+              const n = j?.result?.number;
+              if (typeof n !== "string" || !/^0x[0-9a-fA-F]+$/.test(n)) throw new Error("finalized block unavailable");
+              const block = BigInt(n).toString(10);
+              return getOnchainMetric({ address: pool, block, chain }, s);
+            }, signal),
+        },
+      ];
+    },
+    evaluate: (results, inputs) => {
+      const [holders, liquidity, supply, balance] = results;
+      const HOLDERS_FLOOR = 100_000;
+      const LIQUIDITY_FLOOR_USD = 5_000_000;
+      // The pinned block is resolved from an Ethereum RPC, so the screen
+      // only supports ethereum; any other chain input is a clear HOLD.
+      const scopeChain = (inputs?.scope ?? "ethereum").trim().toLowerCase();
+      if (scopeChain !== "ethereum") {
+        return {
+          verdict: "HOLD",
+          score: 0,
+          headline: `NEEDS REVIEW: unsupported chain "${scopeChain}" — this preflight pins its finalized block and contract reads on ethereum; no cross-chain screen is claimed. The simulated purchase is not cleared.`,
+          why: [],
+        };
+      }
+      const hBody = holders ? bodyOf<TokenHoldersResponse>(holders) : null;
+      const holdersOk = !!holders && isVerified(holders.receipt) && typeof hBody?.holders_count === "number" && hBody.stale !== true;
+      const hCount = holdersOk ? hBody!.holders_count! : null;
+      const lBody = liquidity ? bodyOf<PoolLiquidityResponse>(liquidity) : null;
+      const liquidityOk = !!liquidity && isVerified(liquidity.receipt) && typeof lBody?.liquidity_usd === "number";
+      const lUsd = liquidityOk ? lBody!.liquidity_usd! : null;
+      const spBody = supply ? bodyOf<TokenSupplyResponse>(supply) : null;
+      const supplyOk = !!supply && isVerified(supply.receipt) && typeof spBody?.total_supply === "number";
+      const spTotal = supplyOk ? spBody!.total_supply! : null;
+      const bBody = balance ? bodyOf<OnchainMetricResponse>(balance) : null;
+      // Gate on the exact wei string, never a rounded float: without it
+      // the balance is unverified.
+      const weiText = typeof bBody?.balance_wei === "string" && /^\d+$/.test(bBody.balance_wei) ? bBody.balance_wei : null;
+      const balanceOk = !!balance && isVerified(balance.receipt) && weiText !== null;
+      const weiToGwei = (w: string): string => {
+        const v = BigInt(w);
+        const whole = v / 1_000_000_000n;
+        const frac = (v % 1_000_000_000n).toString().padStart(9, "0").replace(/0+$/, "");
+        return frac ? `${whole}.${frac}` : `${whole}`;
+      };
+      const bGwei = weiText !== null ? weiToGwei(weiText) : null;
+      const holdersPass = holdersOk && hCount! >= HOLDERS_FLOOR;
+      const liquidityPass = liquidityOk && lUsd! >= LIQUIDITY_FLOOR_USD;
+      const balanceExpected = balanceOk && weiText === "0";
+      const why: WhyCard[] = [
+        {
+          k: "Token Holders",
+          v: !holdersOk
+            ? "not verified"
+            : `${hCount!.toLocaleString("en-US")} distinct holder addresses${hBody?.token_symbol ? ` · ${hBody.token_symbol}` : ""}${hBody?.as_of ? ` · as of ${hBody.as_of}` : ""} — declared floor ${HOLDERS_FLOOR.toLocaleString("en-US")}`,
+          ok: holdersPass,
+        },
+        {
+          k: "Pool Liquidity",
+          v: !liquidityOk
+            ? "not verified"
+            : `${formatUsdPrecise(lUsd)} total pool reserves · ${lBody?.pool ?? "pool"} · ${lBody?.chain ?? "?"} — declared floor ${formatUsdPrecise(LIQUIDITY_FLOOR_USD)}`,
+          ok: liquidityPass,
+        },
+        {
+          k: "Contract Balance",
+          v: !balanceOk
+            ? "not verified"
+            : `${bGwei} gwei (${weiText} wei) native coin held by the pool contract${bBody?.block ? ` · pinned block ${bBody.block}` : ""}${bBody?.checked_at ? ` · as of ${bBody.checked_at}` : ""} — declared expectation 0 gwei; trapped or sent coin is a review trigger, not proof of malice`,
+          ok: balanceExpected,
+        },
+        {
+          // Context, never a gate: supply breadth informs the screen but
+          // no floor applies to it.
+          k: "Total Supply (context)",
+          v: !supplyOk
+            ? "not verified"
+            : `${spTotal!.toLocaleString("en-US")}${spBody?.token_symbol ? ` ${spBody.token_symbol}` : ""}${spBody?.chain ? ` · ${spBody.chain}` : ""} — context only, no floor applies`,
+          ok: supplyOk ? "na" : false,
+        },
+      ];
+      const verifiedCount = [holdersOk, liquidityOk, supplyOk, balanceOk].filter(Boolean).length;
+      if (!holdersOk || !liquidityOk || !supplyOk || !balanceOk) {
+        return {
+          verdict: "HOLD",
+          score: scoreOf(verifiedCount, 4),
+          headline: "Evidence did not verify — the simulated purchase is not cleared. Review the rows before relying on this preflight.",
+          why,
+        };
+      }
+      if (!balanceExpected) {
+        // A WETH-pool contract holding native coin is unusual: review, not
+        // an automatic block. Never a public claim against the token.
+        return {
+          verdict: "HOLD",
+          score: scoreOf(3, 4),
+          headline: `NEEDS REVIEW: the pool contract holds ${bGwei} gwei of native coin at the pinned block against a declared expectation of 0. Trapped or sent coin is a review trigger, not proof of malice; the simulated purchase is not cleared.`,
+          why,
+        };
+      }
+      if (holdersPass && liquidityPass) {
+        return {
+          verdict: "APPROVE",
+          score: 100,
+          headline: `Simulated purchase cleared: ${hCount!.toLocaleString("en-US")} holders and ${formatUsdPrecise(lUsd)} pool reserves clear the declared floors, and the pool contract holds no native coin at the pinned block. Simulated trade only — no wallet, signing or purchase occurs; a screen pass is not an endorsement or investment advice.`,
+          why,
+        };
+      }
+      return {
+        verdict: "HOLD",
+        // All four checks verified and only a declared floor failed: the
+        // HOLD is the rule outcome, not a failed check. A screen threshold
+        // is never published as a finding about the token.
+        score: scoreOf(2, 4),
+        headline: `NEEDS REVIEW: ${[!holdersPass ? `holders ${hCount!.toLocaleString("en-US")} below declared floor ${HOLDERS_FLOOR.toLocaleString("en-US")}` : "", !liquidityPass ? `pool reserves ${formatUsdPrecise(lUsd)} below declared floor ${formatUsdPrecise(LIQUIDITY_FLOOR_USD)}` : ""].filter(Boolean).join("; ")}. A screen threshold, not a finding about the token; the simulated purchase is not cleared and no trade occurs.`,
+        why,
+      };
+    },
+  },
+  {
     id: "m02-settlement",
     mission: "m02",
     tag: "M02 · STABLECOIN",
@@ -1126,14 +1311,18 @@ export const DESK_PRESETS: DeskPreset[] = [
       const sanctionsOk = !!sanctions && isVerified(sanctions.receipt) && typeof sBody?.match_score === "number";
       const sScore = sanctionsOk ? sBody!.match_score! : null;
       const rBody = reserve ? bodyOf<ReserveAttestationResponse>(reserve) : null;
-      const reserveOk = !!reserve && isVerified(reserve.receipt) && typeof rBody?.attested_reserve === "number";
+      // Freshness metadata is part of verification: without feed age and
+      // heartbeat the screen cannot prove the attestation is fresh, so the
+      // reserve check is unverified and the outcome is HOLD.
+      const reserveOk =
+        !!reserve &&
+        isVerified(reserve.receipt) &&
+        typeof rBody?.attested_reserve === "number" &&
+        typeof rBody?.feed_age_seconds === "number" &&
+        typeof rBody?.heartbeat_seconds === "number";
       const rMicro = reserveOk ? rBody!.attested_reserve! : null;
       const sanctionsHit = sanctionsOk && sScore! >= SANCTIONS_THRESHOLD;
-      const stale =
-        reserveOk &&
-        typeof rBody?.feed_age_seconds === "number" &&
-        typeof rBody?.heartbeat_seconds === "number" &&
-        rBody!.feed_age_seconds! > rBody!.heartbeat_seconds!;
+      const stale = reserveOk && rBody!.feed_age_seconds! > rBody!.heartbeat_seconds!;
       const sanctionsPass = sanctionsOk && !sanctionsHit;
       const reservePass = reserveOk && !stale && rMicro! >= RESERVE_FLOOR_MICRO;
       const why: WhyCard[] = [

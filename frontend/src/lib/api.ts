@@ -11,6 +11,7 @@ import type {
   CorporateRegistryResponse,
   RouteResponse,
   PoolLiquidityResponse,
+  OnchainMetricResponse,
   ReserveAttestationResponse,
   SanctionsScreenResponse,
   StockPriceResponse,
@@ -616,6 +617,20 @@ export async function getReserveAttestation(
     expectReceipt: true,
     signal,
   });
+}
+
+export async function getOnchainMetric(
+  params: { address: string; block: string; chain: string },
+  signal?: AbortSignal,
+): Promise<OnchainMetricResponse> {
+  assertValidParamsObject(params, "getOnchainMetric");
+  assertValidParam(params.address, "address");
+  assertValidParam(params.block, "block");
+  assertValidParam(params.chain, "chain");
+  return fetchJson<OnchainMetricResponse>(
+    buildUrl("/v1/onchain-metric", { address: params.address, block: params.block, chain: params.chain, metric: "balance" }),
+    { expectReceipt: true, signal },
+  );
 }
 
 export async function getCorporateRegistry(

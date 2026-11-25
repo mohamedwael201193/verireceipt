@@ -1,8 +1,29 @@
 // Templates contain selectors and declared analyst thresholds, never numeric
 // observations. Freeze the resolved timestamp before the first purchase.
 import type {ThesisSpec,Claim} from './researchDesk.js';
-export function researchTemplate(id:'A'|'B'|'C'|'D'|'E'|'F',frozen_at:string):{spec:ThesisSpec;claims:Claim[]}{
+export function researchTemplate(id:'A'|'B'|'C'|'D'|'E'|'F'|'G',frozen_at:string,pinned_block?:string):{spec:ThesisSpec;claims:Claim[]}{
  const base={version:'research-desk-v1' as const,network:'eip155:11155111' as const,frozen_at,budget_uusdc:'60000',max_call_uusdc:'10000' as const,max_escalations:1 as const};
+ if(id==='G'){
+  // The block is a selector resolved by the operator CLI from the current
+  // finalized chain state immediately before the first purchase, never a
+  // numeric observation: the paid response and the independent primary
+  // both read the balance at exactly this pinned block.
+  if(!pinned_block||!/^(0|[1-9]\d*)$/.test(pinned_block)||BigInt(pinned_block)<=0n)throw new Error('token-preflight requires an explicit pinned finalized block');
+  return {
+  spec:{...base,template:'token-preflight',question:'Does UNI (Uniswap governance token on Ethereum) pass the declared pre-purchase token-risk preflight for a simulated trade: holder count and UNI/WETH pool liquidity at or above the declared floors, and the pool contract native-coin balance equal to the declared expectation at the pinned block, with total supply context?',facts:[
+   {id:'holders',intent:'TOKEN_HOLDER_COUNT_GENERAL',params:{token:'UNI',chain:'ethereum'},field:'holders_count',unit:'addresses',max_age_seconds:86400},
+   // UNI/WETH 0.3% Uniswap v3 pool on Ethereum; pool identity is pinned
+   // by address and the primary re-read checks the exact pool id.
+   {id:'liquidity',intent:'LIQUIDITY_DEPTH_VERIFY_GENERAL',params:{pool:'0x1d42064Fc4Beb5F8aAF85F4617AE8b3b5B8Bd801',chain:'ethereum'},field:'liquidity_usd',unit:'USD',max_age_seconds:1800},
+   {id:'supply',intent:'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL',params:{token:'UNI on ethereum'},field:'total_supply',unit:'token',max_age_seconds:86400},
+   // Native-coin balance of the pool contract itself at the pinned
+   // block. A WETH-pool contract should hold no native coin; a nonzero
+   // balance means trapped or deliberately sent coin and triggers review.
+   {id:'contract_balance',intent:'ONCHAIN_METRIC_VERIFY_GENERAL',params:{address:'0x1d42064Fc4Beb5F8aAF85F4617AE8b3b5B8Bd801',block:pinned_block,chain:'ethereum',metric:'balance'},field:'balance_gwei',unit:'gwei',max_age_seconds:1800},
+  ],assumptions:[{id:'holders_floor',value:'100000',unit:'addresses',rationale:'Declared analyst pre-purchase floor for holder-distribution breadth; a screen threshold, not a market forecast or investment recommendation.'},{id:'liquidity_floor',value:'5000000',unit:'USD',rationale:'Declared analyst minimum DEX pool reserve depth for the pre-purchase liquidity screen; a screen threshold, not a market forecast or investment recommendation.'},{id:'expected_balance_gwei',value:'0',unit:'gwei',rationale:'Declared expectation that the WETH-pool contract holds no native coin at the pinned block; a nonzero balance is a review trigger, not proof of malice.'}],calculations:[]},
+  claims:[{id:'holders_above_floor',fact_refs:['holders'],assumption_refs:['holders_floor'],predicate:{left:'holders',op:'>=',right:'holders_floor'}},{id:'liquidity_above_floor',fact_refs:['liquidity'],assumption_refs:['liquidity_floor'],predicate:{left:'liquidity',op:'>=',right:'liquidity_floor'}},{id:'balance_matches_declared',fact_refs:['contract_balance'],assumption_refs:['expected_balance_gwei'],predicate:{left:'contract_balance',op:'==',right:'expected_balance_gwei'}},{id:'supply_context',fact_refs:['supply'],assumption_refs:[]}],
+  };
+ }
  if(id==='A')return {
   spec:{...base,template:'onchain-valuation',question:'Is UNI Ethereum-contract implied valuation below the declared analyst ceiling, with protocol TVL context?',facts:[
    {id:'price',intent:'CRYPTO_PRICE_USD',params:{symbol:'UNI'},field:'price_usd',unit:'USD/token',max_age_seconds:900},

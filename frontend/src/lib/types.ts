@@ -92,6 +92,21 @@ export interface ReserveAttestationResponse extends ReceiptedResponse {
   confidence?: number;
 }
 
+export interface OnchainMetricResponse extends ReceiptedResponse {
+  balance_gwei?: number | null;
+  balance_wei?: string;
+  address?: string;
+  block?: string;
+  block_hash?: string;
+  chain?: string;
+  metric?: string;
+  tx_count?: number | null;
+  verdict?: string;
+  confidence?: number;
+  checked_at?: string;
+  source?: string;
+}
+
 export interface CorporateRegistryResponse extends ReceiptedResponse {
   legal_name?: string;
   registration_id?: string;
