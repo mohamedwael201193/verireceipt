@@ -1,0 +1,44 @@
+{
+  "scope": "Self-recorded public source responses, not independently authenticated",
+  "captures": [
+    {
+      "file": "staking-wide.json",
+      "url": "https://hn.algolia.com/api/v1/search?query=lido%20liquid%20staking%20eth%20market%20share&tags=story&hitsPerPage=20&optionalWords=%5B%22lido%22%2C%22liquid%22%2C%22staking%22%2C%22eth%22%2C%22market%22%2C%22share%22%5D&numericFilters=created_at_i%3E1764094965",
+      "at": "2026-11-25T18:22:45.783Z",
+      "status": 200,
+      "bytes": 70799,
+      "sha256": "389ed8c0b909a0f8cc1f9313885e85f1c22919e07ea119444c7dc5db2d682bb2"
+    },
+    {
+      "file": "staking-reference.json",
+      "url": "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=Lido%20liquid%20staking%20ETH%20market%20share&srprop=timestamp&format=json",
+      "at": "2026-11-25T18:22:46.608Z",
+      "status": 200,
+      "bytes": 200,
+      "sha256": "063a7d85bce4177ef9e6d0aaeae477adb262a3d0f1b3803a46d7f33d01bad8e4"
+    },
+    {
+      "file": "staking-dispatch.json",
+      "url": "https://en.wikinews.org/w/api.php?action=query&list=search&srsearch=Lido%20liquid%20staking%20ETH%20market%20share&srprop=timestamp&format=json",
+      "at": "2026-11-25T18:22:46.852Z",
+      "status": 200,
+      "bytes": 200,
+      "sha256": "5a23a248ec416c73b22615db40151f4293fd96a7c1b52c5a56ce911334a81f91"
+    },
+    {
+      "file": "derivatives-wide.json",
+      "url": "https://hn.algolia.com/api/v1/search?query=synthetix%20v3%20perpetuals%20multi%20collateral&tags=story&hitsPerPage=20&optionalWords=%5B%22synthetix%22%2C%22v3%22%2C%22perpetuals%22%2C%22multi%22%2C%22collateral%22%5D&numericFilters=created_at_i%3E1764094967",
+      "at": "2026-11-25T18:22:47.101Z",
+      "status": 200,
+      "bytes": 26929,
+      "sha256": "c4058b9722d0d000c0ef4c89345de29b8008de28e0ad321e60ae9fe98e7c820c"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=liquid%20staking&srprop=timestamp&format=json",
+      "at": "2026-11-25T18:53:03.869Z",
+      "status": 200,
+      "sha256": "e2ede6db22f9c12135cff394c0fc5d6e9fa05146dd8acb97248a5fc8b2a10259",
+      "file": "reference-positive.json"
+    }
+  ]
+}

@@ -1,160 +1,61 @@
-// NEWS_SEARCH_GENERAL — GET /v1/news-search?query=<q>
-//
-// Zero-LLM. A deterministic digest of what the four NAMED keyless sources in
-// newsSources.ts carry for a query, with a SHA-256 receipt over the exact
-// upstream bodies. Never "all news".
-//
-// Intent contract (read 2026-11-22): request query (string); response
-// brief (scored, max 256 bytes); off-chain answer, result_count,
-// sources.
-//
-// HN uses a7-day recency window, widened to30days only if empty; Google News RSS and GDELT DOC 2.0 search their own
-// current indexes (GDELT artlist in hybrid relevance order); the BBC side
-// searches only its current World RSS feed (about 35 items) — every scope
-// is named in the brief.
-//
-// A query with zero matches is an honest 200 with result_count 0 and a
-// brief naming the sources searched — never a refusal for a well-formed
-// query. A 502 only when every named source is unreachable.
-import { badRequest, upstreamUnavailable } from "../core/errors";
-import { envelope, makeReceipt } from "../core/receipt";
-import { saveReceipt } from "../core/storage";
-import { withinNewsDeadline, BBC_INDEX, GDELT_INDEX, GNEWS_INDEX, HN_INDEX, INDEXES, NewsItem, allDown, fetchIndex, gdeltSearchUrl, gnewsSearchUrl, hnSearchUrl, parseBbcRss, parseGdelt, parseGnewsRss, parseHn, parsedSource, topicMatches, rankRecent, inWindow } from "./newsSources";
-
-const BBC_URL = "https://feeds.bbci.co.uk/news/world/rss.xml";
-// The contract budget is BYTES (response brief max_bytes 256), not
-// characters: multi-byte titles must never overflow it.
-const BRIEF_MAX_BYTES = 256;
-
-export const INTENT = "NEWS_SEARCH_GENERAL";
-
-/** Truncate to at most maxBytes UTF-8 bytes, ending with an ellipsis and never splitting a multi-byte character. */
-export function capBytes(text: string, maxBytes: number): string {
-  const enc = new TextEncoder();
-  if (enc.encode(text).length <= maxBytes) return text;
-  const ellipsis = "…"; // 3 UTF-8 bytes
-  const budget = maxBytes - enc.encode(ellipsis).length;
-  const truncated = new TextDecoder("utf-8").decode(enc.encode(text).slice(0, budget));
-  // The tolerant decoder maps a split code point to U+FFFD; drop any trailing partial.
-  return truncated.replace(/\uFFFD+$/, "") + ellipsis;
+// Named-source query search with explicitly disclosed closest-match fallback.
+import {badRequest,upstreamUnavailable} from '../core/errors';
+import {envelope,makeReceipt} from '../core/receipt';
+import {saveReceipt} from '../core/storage';
+import {withinNewsDeadline,NewsItem,fetchIndex,hnSearchUrl,parseBbcRss,parseHn,parsedSource,rankHn,rankRecent,topicMatches} from './newsSources';
+import {BBC_CATEGORIES,headlineFeed,headlineKeywords,anyHeadlineKeyword} from './newsHeadlineFeeds';
+import {relaxedSearchHn,referenceSearchUrl,parseReferenceSearch,REFERENCE_INDEX,DISPATCH_INDEX} from './newsSearchFallback';
+export const INTENT='NEWS_SEARCH_GENERAL';
+export function capBytes(text:string,maxBytes:number):string{
+ const enc=new TextEncoder();if(enc.encode(text).length<=maxBytes)return text;
+ return new TextDecoder().decode(enc.encode(text).slice(0,Math.max(0,maxBytes-3))).replace(/\uFFFD+$/,'')+'…';
 }
-
-export interface BriefGroup {
-  label: string;
-  items: NewsItem[];
+export interface BriefGroup{label:string;items:NewsItem[]}
+export function buildBrief(groups:BriefGroup[],maxBytes=256):string{
+ const counts=groups.map(g=>`${g.label}: ${g.items.length}`).join(', '),suffix='. Named sources only.',top=groups.flatMap(g=>g.items)[0];let mid='';
+ if(top){const pts=top.points!==null?` (${top.points} pts)`:'',fixed=new TextEncoder().encode(`${counts}. Top: ""${pts}${suffix}`).length,budget=maxBytes-fixed;if(budget>0)mid=`. Top: "${capBytes(top.title,budget)}"${pts}`;}
+ return capBytes(counts+mid+suffix,maxBytes);
 }
-
-/**
- * Deterministic 256-byte digest: per-source match counts, the single top
- * item (first non-empty group in source-priority order), and the scope
- * suffix. The title is capped to whatever budget the fixed parts leave so
- * the suffix is never truncated away.
- */
-export function buildBrief(groups: BriefGroup[]): string {
-  const counts = groups.map((g) => `${g.label}: ${g.items.length}`).join(", ");
-  const suffix = ". Named sources only.";
-  const topItem = groups.flatMap((g) => g.items)[0];
-  let mid = "";
-  if (topItem) {
-    const pts = topItem.points !== null ? ` (${topItem.points} pts)` : "";
-    const fixed = new TextEncoder().encode(`${counts}. Top: ""${pts}${suffix}`).length;
-    const budget = BRIEF_MAX_BYTES - fixed;
-    if (budget > 0) mid = `. Top: "${capBytes(topItem.title, budget)}"${pts}`;
-  }
-  const brief = counts + mid + suffix;
-  // Safety net: the fixed parts alone can never exceed the budget, but
-  // never ship a brief over 256 bytes whatever the inputs.
-  return capBytes(brief, BRIEF_MAX_BYTES);
-}
-
-export async function handleNewsSearch(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
-  const sourceDeadline=Date.now()+2500;
-  const q = query.query?.trim();
-  if (!q) throw badRequest("MISSING_PARAM", "query is required");
-  if (q.length > 120) throw badRequest("QUERY_TOO_LONG", "query must be at most 120 characters");
-  const fetchedAt = new Date().toISOString();
-  const now=Date.now();
-  let hnWindowDays=7;
-  let hnUrl = hnSearchUrl(q, Math.floor(now/1000)-7*86400);
-  const gnewsUrl = gnewsSearchUrl(q);
-  const gdeltUrl = gdeltSearchUrl(q, { sort: "hybridrel" });
-  let [hnRes, gnewsRes, gdeltRes, bbcRes] = await Promise.all([
-    fetchIndex(hnUrl,sourceDeadline), fetchIndex(gnewsUrl,sourceDeadline), fetchIndex(gdeltUrl,sourceDeadline), fetchIndex(BBC_URL,sourceDeadline),
-  ]);
-
-  // A transport-level 200 is not evidence of a valid search result.
-  let hnParsed = parsedSource(hnRes, parseHn);
-  const relevantRecent=(items:NewsItem[],days:number)=>rankRecent(items.filter(i=>topicMatches(q,i.title)&&inWindow(i,new Date(now-days*86400000).toISOString())&&Date.parse(i.published)<=now));
-  const initialHnBody=hnRes.body;
-  if(hnParsed!==null && relevantRecent(hnParsed,7).length===0){
-    hnWindowDays=30;hnUrl=hnSearchUrl(q,Math.floor(now/1000)-30*86400);
-    hnRes=await fetchIndex(hnUrl,sourceDeadline);hnParsed=parsedSource(hnRes,parseHn);
-  }
-  const gnewsParsed = parsedSource(gnewsRes, parseGnewsRss);
-  const gdeltParsed = parsedSource(gdeltRes, parseGdelt);
-  const bbcParsed = parsedSource(bbcRes, parseBbcRss);
-  const hnOk = hnParsed !== null;
-  const gnewsOk = gnewsParsed !== null;
-  const gdeltOk = gdeltParsed !== null;
-  const bbcOk = bbcParsed !== null;
-  if (!hnOk && !gnewsOk && !gdeltOk && !bbcOk) allDown();
-  const hnAll = hnParsed ?? [];
-  const gnewsAll = gnewsParsed ?? [];
-  const gdeltAll = gdeltParsed ?? [];
-  const bbcAll = bbcParsed ?? [];
-  // HN: Algolia relevance order as returned, title token-filtered locally.
-  // Google News and GDELT: upstream full-text searches, matches by
-  // construction, order as returned. BBC: title+description token match
-  // over the current feed.
-  const hn = relevantRecent(hnAll,hnWindowDays);
-  const gnews = gnewsAll;
-  const gdelt = gdeltAll;
-  const bbc = bbcAll
-    .filter((i) => topicMatches(q, `${i.title} ${(i as NewsItem & { description?: string }).description ?? ""}`));
-  const failed = [
-    !hnOk ? HN_INDEX : null,
-    !gnewsOk ? GNEWS_INDEX : null,
-    !gdeltOk ? GDELT_INDEX : null,
-    !bbcOk ? BBC_INDEX : null,
-  ].filter(Boolean) as string[];
-  const searched = [hnOk ? HN_INDEX : null, gnewsOk ? GNEWS_INDEX : null, gdeltOk ? GDELT_INDEX : null, bbcOk ? BBC_INDEX : null].filter(Boolean);
-  const groups: BriefGroup[] = [
-    { label: "HN", items: hn },
-    { label: "Google News", items: gnews },
-    { label: "GDELT", items: gdelt },
-    { label: "BBC World current feed", items: bbc },
-  ];
-  const brief = buildBrief(groups);
-  const resultCount = hn.length + gnews.length + gdelt.length + bbc.length;
-  const asOf = new Date().toISOString();
-  const evidence = JSON.stringify({ query: q, as_of: asOf, indexes: INDEXES, unavailable_indexes: failed,
-    hn_matches: hn, gnews_matches: gnews, gdelt_matches: gdelt, bbc_matches: bbc,
-    hn_window_days:hnWindowDays,hn_initial_raw_body:initialHnBody,source_policy: "four named keyless sources (HN Algolia 7-day window widened to30days only when empty, recency order plus local title relevance; Google News RSS search; GDELT DOC 2.0 artlist, hybrid relevance; BBC News World current RSS feed); never comprehensive news coverage",
-    raw_bodies: { hn: hnRes.body, gnews: gnewsRes.body, gdelt: gdeltRes.body, bbc: bbcRes.body }, fetched_at: fetchedAt });
-  const receipt = makeReceipt(INTENT, hnUrl, evidence, "four named keyless sources (HN Algolia + Google News RSS + GDELT DOC 2.0 + BBC World RSS), honestly scoped");
-  receipt.fetched_at = fetchedAt;
-  try {
-    await withinNewsDeadline(saveReceipt(receipt, evidence),sourceDeadline+450);
-  } catch {
-    throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
-  }
-  const fmt = (i: NewsItem) => `"${i.title}"${i.points !== null ? ` (${i.points} pts, ${i.published.slice(0, 10)})` : ` (${i.published.slice(0, 10)})`}`;
-  const top = rankRecent(groups.flatMap(g => g.items)).slice(0, 3);
-  const lead = top.length ? top.map(i => `"${i.title}" (${i.published.slice(0, 10)}, ${i.outlet ?? i.index}).`).join(" ") + " " : "No matching headlines found in the named sources. ";
-  const answer = lead + `${brief} ` +
-    (hn.length ? `HN top: ${hn.slice(0, 3).map(fmt).join("; ")}. ` : "") +
-    (gnews.length ? `Google News: ${gnews.slice(0, 3).map(fmt).join("; ")}. ` : "") +
-    (gdelt.length ? `GDELT: ${gdelt.slice(0, 3).map(fmt).join("; ")}. ` : "") +
-    (bbc.length ? `BBC World: ${bbc.slice(0, 3).map(fmt).join("; ")}. ` : "") +
-    (resultCount === 0 ? `Sources searched: ${searched.join("; ")} — zero matches. ` : "") +
-    (failed.length ? `Degraded: ${failed.join(", ")} unavailable. ` : "") +
-    `Coverage: ${INDEXES.join("; ")} — named sources, never comprehensive news coverage.`;
-  // `answer` is an envelope-reserved key; the digest travels there.
-  return envelope(INTENT, {
-    brief,
-    result_count: resultCount,
-    hn_window_days:hnWindowDays,
-    sources: INDEXES,
-  }, receipt, { answer, verdict: "verified", confidence: resultCount === 0 ? 0.5 : 0.8,
-    source: `${hnUrl} + ${gnewsUrl} + ${gdeltUrl} + ${BBC_URL}; named sources only; fetched ${fetchedAt}` });
+const FEED_INDEX='Current news feeds';
+const SEARCH_INDEX='Story search';
+export async function handleNewsSearch(query:Record<string,string|undefined>):Promise<Record<string,unknown>>{
+ const started=Date.now(),hnDeadline=started+2500,sourceDeadline=started+4500;
+ const q=query.query?.trim();if(!q)throw badRequest('MISSING_PARAM','query is required');if(q.length>120)throw badRequest('QUERY_TOO_LONG','query must be at most120characters');
+ console.info(JSON.stringify({event:'news_search_query',query_length:q.length}));
+ const now=Date.now(),fetchedAt=new Date(now).toISOString(),words=headlineKeywords(q),cutoff=new Date(now-365*86400000).toISOString();
+ const strictUrl=hnSearchUrl(q,Math.floor(now/1000)-7*86400),referenceUrl=referenceSearchUrl(q),dispatchUrl=referenceSearchUrl(q,true);
+ // Retry story search within its own2.5s budget while feeds and reference searches run.
+ const [stories,reference,dispatch,feeds]=await Promise.all([
+  relaxedSearchHn(q,strictUrl,hnDeadline,now),
+  fetchIndex(referenceUrl,sourceDeadline),fetchIndex(dispatchUrl,sourceDeadline),
+  Promise.all(BBC_CATEGORIES.map(async category=>({category,...await headlineFeed(category,sourceDeadline)}))),
+ ]);
+ const referenceItems=parsedSource(reference,r=>parseReferenceSearch(r)),dispatchItems=parsedSource(dispatch,r=>parseReferenceSearch(r,true));
+ const feedCaptures=feeds.map(f=>({...f,items:parsedSource(f.result,parseBbcRss)}));
+ const eligible=(i:NewsItem)=>Number.isFinite(Date.parse(i.published))&&i.published>=cutoff&&Date.parse(i.published)<=now&&/^https?:\/\//.test(i.url);
+ const feedItems=feedCaptures.flatMap(f=>(f.items??[]).map(i=>({...i,index:FEED_INDEX}))).filter(eligible);
+ const refs=(referenceItems??[]).filter(eligible),dispatches=(dispatchItems??[]).filter(eligible);
+ const exactOther=rankRecent([...feedItems,...dispatches].filter(i=>topicMatches(q,i.title)));
+ const exact=[...stories.exact.map(i=>({...i,index:SEARCH_INDEX})),...exactOther];
+ const unique=(items:NewsItem[])=>{const seen=new Set<string>();return items.filter(i=>{if(seen.has(i.url))return false;seen.add(i.url);return true;});};
+ let selected=unique(exact),scope='exact title keyword match in named sources';
+ if(!selected.length){
+  const storyClosest=rankHn(stories.closest.filter(eligible)).map(i=>({...i,index:SEARCH_INDEX}));
+  const overlap=rankRecent([...feedItems,...dispatches,...refs].filter(i=>anyHeadlineKeyword(words,i.title)));
+  selected=unique([...storyClosest,...overlap]).slice(0,10);scope='closest match only: any query keyword, story search widened to365days and ranked by points; current feeds and reference pages by date. Not an exact match';
+ }
+ const storyOk=stories.captures.some(c=>parsedSource(c.result,parseHn)!==null);
+ if(!storyOk&&referenceItems===null&&dispatchItems===null&&!feedCaptures.some(f=>f.items!==null))throw upstreamUnavailable('NEWS_INDEXES_UNREACHABLE','all named search sources failed; no answer is guessed');
+ const unavailable=[...(!storyOk?[SEARCH_INDEX]:[]),...(referenceItems===null?[REFERENCE_INDEX]:[]),...(dispatchItems===null?[DISPATCH_INDEX]:[]),...feedCaptures.filter(f=>f.items===null).map(f=>FEED_INDEX+': '+f.category)];
+ const indexes=[SEARCH_INDEX,REFERENCE_INDEX,DISPATCH_INDEX,FEED_INDEX];
+ const briefBase=selected.length&&exact.length===0?'Closest match only. ':'';
+ const brief=capBytes(briefBase+buildBrief([{label:'Stories',items:selected.filter(i=>i.points!==null)},{label:'Other named sources',items:selected.filter(i=>i.points===null)}],256-new TextEncoder().encode(briefBase).length),256);
+ const asOf=new Date().toISOString();
+ const evidence=JSON.stringify({query:q,query_length:q.length,as_of:asOf,fetched_at:fetchedAt,indexes,unavailable_indexes:unavailable,match_scope:scope,hn_window_days:stories.captures.length>1?365:7,hn_matches:stories.exact,closest_hn_matches:stories.closest,reference_matches:refs,dispatch_matches:dispatches,selected_items:selected,story_captures:stories.captures,reference_capture:{url:referenceUrl,...reference},dispatch_capture:{url:dispatchUrl,...dispatch},feed_captures:feeds.map(f=>({category:f.category,acquired_at:f.acquiredAt,body:f.result.body})),source_policy:'Named sources only; current feeds may be cached60seconds; reference timestamps are page revision times, not news publication. Closest matches do not verify the whole query. No comprehensive news claim.'});
+ const receipt=makeReceipt(INTENT,strictUrl,evidence,'named-source search with disclosed closest matches');receipt.fetched_at=fetchedAt;
+ try{await withinNewsDeadline(saveReceipt(receipt,evidence),sourceDeadline+450);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
+ const details=selected.map(i=>({title:i.title,url:i.url,date:i.published,date_kind:(i as NewsItem&{date_kind?:string}).date_kind??'source publication time',source:i.points!==null?SEARCH_INDEX:i.index,points:i.points}));
+ const lead=selected.length?(exact.length?'Exact title keyword matches. ':'Closest match only, not an exact answer to the full query. ')+details.slice(0,3).map(i=>`"${i.title}" (${i.date}, ${i.source}, ${i.date_kind}) ${i.url}`).join('; '):'No usable keyword match found in the named sources. Sources searched: '+indexes.join('; ')+'; zero matches.';
+ const answer=lead+' Scope: '+scope+'. Reference pages are background, not news articles. Feed cache up to60seconds; original acquisition times retained in receipt. Named sources only, never comprehensive news coverage.'+(unavailable.length?' Degraded: '+unavailable.join('; ')+' unavailable.':'');
+ return envelope(INTENT,{brief,result_count:selected.length,hn_window_days:stories.captures.length>1?365:7,sources:indexes,match_scope:scope,results:details,urls:details.map(i=>i.url)},receipt,{answer,verdict:'verified',confidence:exact.length?0.8:0.5,source:indexes.join(' + ')});
 }
