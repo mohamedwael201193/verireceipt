@@ -50,7 +50,7 @@
         "chain": "ethereum"
       },
       "expected_fields": {
-        "answer": "Current gas price on ethereum: 0.162859 gwei (3/3 sources agreed). 21,000-gas transfer ≈ $0.005883 = 0.162859 gwei x 21000 gas x ETH $1720.19 (Coinbase spot) / 1e9. Not a quote for a future transaction; the price moves block to block.",
+        "answer": "Base fee, priority fee and block context unavailable; not estimated. Current gas price on ethereum: 0.162859 gwei (3/3 sources agreed). 21,000-gas transfer \u2248 $0.005883 = 0.162859 gwei x 21000 gas x ETH $1720.19 (Coinbase spot) / 1e9. Not a quote for a future transaction; the price moves block to block.",
         "chain": "ethereum",
         "gas_price_gwei": 0.162859,
         "transfer_fee_usd": 0.005883,
@@ -58,7 +58,12 @@
         "verdict": "verified",
         "confidence": 1,
         "source": "EVM RPC quorum (ethereum, 2-of-3)",
-        "checked_at": "2026-11-22T10:34:43.395Z"
+        "checked_at": "2026-11-22T10:34:43.395Z",
+        "base_fee_gwei": null,
+        "priority_fee_gwei": null,
+        "block_number": null,
+        "fee_context_quorum": null,
+        "fee_context_scope": "fee context unavailable; no agreeing tuple of block, base fee and priority suggestion"
       },
       "expected_raw_text": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x9b50954\"}",
       "expected_raw_sha256": "2f2dad18b4d1ed859d5ae06ded8ae1c0255990eaa0e9365460956c3f54c9d19a",
