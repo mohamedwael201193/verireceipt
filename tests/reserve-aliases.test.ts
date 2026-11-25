@@ -1,0 +1,12 @@
+import {it,expect,vi,afterEach} from 'vitest';
+import {readFileSync} from 'node:fs';
+vi.mock('../src/core/storage',()=>({saveReceipt:vi.fn(async()=>{})}));
+import {handleReserveAttestation,resolveReserveAsset,reserveInputDiagnostic,POR_FEEDS} from '../src/handlers/reserveAttestation';
+import {sha256Hex} from '../src/core/receipt';
+const dec=readFileSync('tests/fixtures/reserve-attestation/wbtc-decimals-blastapi.json','utf8'),round=readFileSync('tests/fixtures/reserve-attestation/wbtc-round-blastapi.json','utf8');
+afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();vi.clearAllMocks();});
+it.each([['wrapped bitcoin','WBTC'],['wrapped btc','WBTC'],['coinbase wrapped bitcoin','CBBTC'],['coinbase wrapped btc','CBBTC'],['trueusd','TUSD'],['true usd','TUSD'],['lombard bitcoin','LBTC'],['kinesis gold','KAU'],['kinesis silver','KAG']])('exactalias%s resolves only%sfeed',async(alias,key)=>{
+ expect(resolveReserveAsset(alias)).toBe(key);const f=vi.fn(async(_u:any,o:any)=>{const call=JSON.parse(o.body).params[0];if(call.to.toLowerCase()!==POR_FEEDS[key].proxy.toLowerCase())throw Error('optional supply unavailable');return new Response(call.data==='0x313ce567'?dec:round);});vi.stubGlobal('fetch',f);const out=await handleReserveAttestation({asset:alias});expect(out.asset).toBe(POR_FEEDS[key].asset);expect(out.attested_reserve).toBe(116144745100);expect(out.collateral_ratio_pct).toBeNull();expect(f.mock.calls.some(([,o])=>JSON.parse(o.body).params[0].to===POR_FEEDS[key].proxy)).toBe(true);
+});
+it.each(['bitcoin','BTC','USDC','USDT','wrapped bitcoin scam','coinbase'])('unknown%s never silently becomes another feed',async asset=>{const f=vi.fn();vi.stubGlobal('fetch',f);const out=await handleReserveAttestation({asset});expect(out.attested_reserve).toBeNull();expect(f).not.toHaveBeenCalled();});
+it('fixeddiagnostic terms and hash never log free input identifiers or addresses',async()=>{const spy=vi.spyOn(console,'info').mockImplementation(()=>{});const input='USDC private.person@example.invalid 123456789 0xdeadbeef';const out=await handleReserveAttestation({asset:input});expect(out.attested_reserve).toBeNull();const record=JSON.parse(spy.mock.calls[0][0] as string);expect(record.asset_terms).toEqual(['usdc']);expect(record.asset_sha256).toBe(sha256Hex(input));expect(record.asset_length).toBe(input.length);const logged=JSON.stringify(spy.mock.calls);for(const secret of ['private','123456789','deadbeef','@'])expect(logged).not.toContain(secret);expect(reserveInputDiagnostic('WBTC reserve').asset_terms).toEqual(['wbtc','reserve']);});

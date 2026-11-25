@@ -29,7 +29,7 @@
 // never silently refreshed.
 import {withAnswerClass} from "../core/answerClass";
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
-import { envelope, makeReceipt } from "../core/receipt";
+import { envelope, makeReceipt, sha256Hex } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { CHAIN_RPCS } from "../config/chains";
 
@@ -148,14 +148,28 @@ export function parseRoundData(hex: string): RoundData {
   };
 }
 
+const RESERVE_ALIASES:Record<string,string>={
+ 'wrapped bitcoin':'WBTC','wrapped btc':'WBTC','coinbase wrapped bitcoin':'CBBTC','coinbase wrapped btc':'CBBTC','coinbase bitcoin':'CBBTC','trueusd':'TUSD','true usd':'TUSD',
+ 'ignition fbtc':'FBTC','lombard bitcoin':'LBTC','lombard btc':'LBTC','solv btc':'SOLVBTC','kinesis gold':'KAU','kinesis silver':'KAG'
+};
+export function resolveReserveAsset(input:string):string {
+ const exact=input.trim().toLowerCase().replace(/\s+/g,' ');
+ return RESERVE_ALIASES[exact]??input.trim().toUpperCase();
+}
+export function reserveInputDiagnostic(input:string):Record<string,unknown> {
+ const words=new Set(input.toLowerCase().split(/[^a-z0-9]+/));
+ const terms=['wbtc','cbbtc','tusd','usdc','usdt','dai','steth','fbtc','lbtc','bitcoin','wrapped','coinbase','trueusd','gold','silver','btc','eth','reserve','reserves'];
+ return {asset_terms:terms.filter(t=>words.has(t)),asset_sha256:sha256Hex(input),asset_length:input.length};
+}
 export async function handleReserveAttestation(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const assetRaw = query.asset?.trim();
   if (!assetRaw) throw badRequest("MISSING_PARAM", `asset is required, one of: ${Object.values(POR_FEEDS).map((f) => f.asset).join(", ")}`);
   // Exact Ethereum issuance-address aliases only; never prefixes or cross-chain guesses.
   const addressKey = Object.entries(ETHEREUM_TOKENS).find(([,token]) => token.address === assetRaw.toLowerCase())?.[0];
-  const key = addressKey ?? assetRaw.toUpperCase();
+  const key = addressKey ?? resolveReserveAsset(assetRaw);
   const feed = Object.hasOwn(POR_FEEDS, key) ? POR_FEEDS[key] : undefined;
   if (!feed) {
+    console.info(JSON.stringify({event:"reserve_asset_unmapped",...reserveInputDiagnostic(assetRaw)}));
     return withAnswerClass({ answer: `No probed-live Chainlink PoR feed is enabled for "${assetRaw.slice(0, 80)}". Covered assets: ${Object.values(POR_FEEDS).map(f => f.asset).join(", ")}. No reserve is asserted; this coverage-only response is outside the scored numeric attestation contract.`,
       asset: assetRaw.slice(0, 80), attested_reserve: null, ethereum_total_supply: null,
       reserve_vs_ethereum_supply_pct: null, collateral_ratio_pct: null,
