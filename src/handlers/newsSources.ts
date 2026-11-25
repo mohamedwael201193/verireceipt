@@ -81,7 +81,7 @@ export function parseHn(raw: string): NewsItem[] {
     if (!h || typeof h !== "object" || typeof h.title !== "string") throw new Error("invalid HN hit");
     const title = h.title.trim();
     if (!title) throw new Error("invalid HN title");
-    const validUrl=typeof h.url==='string'&&h.url.trim().length>0;
+    let validUrl=false;try{const u=new URL(typeof h.url==='string'?h.url.trim():'');validUrl=(u.protocol==='https:'||u.protocol==='http:')&&Boolean(u.hostname);}catch{/* malformed URL is not a healthy item */}
     const validId=typeof h.objectID==='string'&&/^[1-9][0-9]*$/.test(h.objectID);
     const stamp=typeof h.created_at_i==='number'&&Number.isSafeInteger(h.created_at_i)&&h.created_at_i>0?h.created_at_i*1000:typeof h.created_at==='string'?Date.parse(h.created_at):NaN;
     if((!validUrl&&!validId)||typeof h.points!=='number'||!Number.isSafeInteger(h.points)||h.points<0||!Number.isFinite(stamp)||stamp<=0||stamp>8640000000000000)throw new Error('invalid HN required metadata');
