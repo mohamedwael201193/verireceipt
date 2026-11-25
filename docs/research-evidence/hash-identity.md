@@ -1,0 +1,9 @@
+# Hashlookup identity and interpretation, 25 November 2026
+
+A successful hashlookup response must be a file object whose selected MD5, SHA-1 or SHA-256 string equals the requested hash, case-insensitively. A different hash, missing identity or malformed KnownMalicious flag refuses with HASHLOOKUP_MALFORMED before enrichment or receipt persistence. The optional malicious-source flag must be a string; absent, empty or whitespace-only means no flagged source in this record. HTTP404 unknown-to-database behavior remains unchanged, as does the separate blocklist path. No new source, account, key, route or declaration.
+
+Known unflagged files are no longer called legitimate. Presence in the database does not establish legitimacy or safety. CIRCL is a known-file index, not an antivirus clearance service. Positive flags remain source reports, and the existing EICAR test-sample context remains important. This change improves identity correctness and interpretation, not a promised score or rank.
+
+Official source https://circl.lu/services/hashlookup/ states that matches alone do not indicate maliciousness. Format reference https://www.ietf.org/archive/id/draft-dulaunoy-hashlookup-format-03.html documents hash keys and KnownMalicious source context; it is an expired Internet-Draft, not an adopted standard. Existing full real CIRCL fixtures provide both flagged EICAR and unflagged empty-file records with all selected identities. Tests alter recorded responses only for negative controls. No fixture copied from another provider.
+
+55tests/4suites pass offline, source tsc passes. Six targeted mutants killed: identity guard removal, wrong MD5/SHA1 field, flag type guard removal, whitespace flag accepted and legitimacy inference restored. Includes hash-context, malware-handler and sibling receipt-persistence suites. Unchanged source deadlines and404 handling are not claimed newly hardened by this slice.
