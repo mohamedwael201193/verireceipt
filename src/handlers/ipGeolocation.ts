@@ -1,3 +1,5 @@
+import {queryFallback,firstIp} from '../core/queryFallback';
+import {isIP} from 'node:net';
 // IP_GEOLOCATION_GENERAL — GET /v1/ip-geolocation?ip=8.8.8.8
 //
 // Zero-LLM. Resolves an IP address to its approximate location from two
@@ -23,7 +25,7 @@
 // into a wrong answer. City differences between sources are disclosed
 // in the answer. One source down serves the other alone at 0.9 with
 // the degradation named. Private/reserved addresses have no public
-// geolocation: 422 PRIVATE_IP.
+// geolocation: disclosed no_data, without coordinates.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
@@ -47,6 +49,7 @@ const V4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 const V6 = /^[0-9a-fA-F:]+$/;
 
 export function validatePublicIp(ip: string): void {
+  if (ip.includes("%") || !isIP(ip)) throw badRequest("INVALID_IP", "ip must be an IPv4 or IPv6 address");
   const m = V4.exec(ip);
   if (m) {
     const oct = m.slice(1).map(Number);
@@ -61,9 +64,17 @@ export function validatePublicIp(ip: string): void {
     }
     return;
   }
-  if (V6.test(ip) && ip.includes(":")) {
-    const low = ip.toLowerCase();
-    if (low === "::1" || low === "::" || low.startsWith("fc") || low.startsWith("fd") || /^fe[89ab]/.test(low) || low.startsWith("::ffff:10.") || low.startsWith("::ffff:192.168") || low.startsWith("::ffff:127.") || low.startsWith("::ffff:169.254") || low.startsWith("::ffff:172.1") || low.startsWith("::ffff:172.2") || low.startsWith("::ffff:172.3")) {
+  if (isIP(ip) === 6) {
+    const normalized = new URL(`http://[${ip}]/`).hostname.slice(1,-1).toLowerCase();
+    if (normalized.startsWith('::ffff:')) {
+      const tail=normalized.slice(7).split(':');
+      if(tail.length===2) {
+        const n=parseInt(tail[0],16)*65536+parseInt(tail[1],16);
+        return validatePublicIp(`${(n>>>24)&255}.${(n>>>16)&255}.${(n>>>8)&255}.${n&255}`);
+      }
+    }
+    const low = normalized;
+    if (low.startsWith("2001:db8:") || low.startsWith("ff") || low === "::1" || low === "::" || low.startsWith("fc") || low.startsWith("fd") || /^fe[89ab]/.test(low) || low.startsWith("::ffff:10.") || low.startsWith("::ffff:192.168") || low.startsWith("::ffff:127.") || low.startsWith("::ffff:169.254") || low.startsWith("::ffff:172.1") || low.startsWith("::ffff:172.2") || low.startsWith("::ffff:172.3")) {
       throw unprocessable("PRIVATE_IP", `${ip} is a private, reserved or special-use address; it has no public geolocation`);
     }
     return;
@@ -101,10 +112,17 @@ export function parseIpApi(raw: string): GeoResult {
 export const INTENT = "IP_GEOLOCATION_GENERAL";
 
 export async function handleIpGeolocation(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+  query=queryFallback(query,"ip",firstIp);
   const ip = query.ip?.trim();
   if (!ip) throw badRequest("MISSING_PARAM", "ip is required");
   if (ip.length > 45) throw badRequest("INVALID_IP", "ip is too long to be an IP address");
-  validatePublicIp(ip);
+  try { validatePublicIp(ip); } catch (error) {
+    if ((error as {code?:string}).code !== 'PRIVATE_IP') throw error;
+    return {intent:INTENT,ip,receipt:null,checked_at:new Date().toISOString(),
+      answer: `${ip}: PRIVATE_IP, private, reserved or documentation addresses have no public geolocation. No coordinates are available.`,
+      verdict: 'no_data', confidence: 0, source: 'local IP address classification',
+    };
+  }
   const whoUrl = `https://ipwho.is/${encodeURIComponent(ip)}`;
   const apiUrl = `http://ip-api.com/json/${encodeURIComponent(ip)}`;
   const fetchedAt = new Date().toISOString();

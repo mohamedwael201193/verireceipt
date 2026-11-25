@@ -1,3 +1,4 @@
+import {queryFallback} from '../core/queryFallback';
 // STORM_ALERT_GENERAL: aligned hourly model forecast plus available NWS alert evidence.
 // Forecast heuristic is disclosed, not an official warning or a contract risk formula.
 // NWS expiry-inside-window scoring policy is retained from the prior implementation.
@@ -79,6 +80,7 @@ async function fetchText(url: string, outerSignal?: AbortSignal): Promise<{ stat
 export const INTENT = "STORM_ALERT_GENERAL";
 
 export async function handleStormAlert(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+  query=queryFallback(query,"location",text=>text);
   // S1: "lat,lon" as before, or a place name through the geocoder (the
   // contract's "The place"). The resolved label is used in the answer.
   const rawLocation = query.location?.trim();

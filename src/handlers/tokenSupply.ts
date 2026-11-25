@@ -153,6 +153,7 @@ function agreeingPair(legs: SupplyLeg[]): { leg: SupplyLeg; count: number } | nu
 export async function handleTokenSupply(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
+  if (query.token?.trim()) { const {query: _ignored, ...declared}=query; query=declared; }
   const aliases=["token","query","q","input","symbol","asset"] as const;
   const supplied=aliases.flatMap(key=>query[key]?.trim()?[{key,value:query[key]!.trim()}]:[]);
   if(new Set(supplied.map(v=>v.value.toLowerCase())).size>1)throw badRequest("TOKEN_INPUT_CONFLICT","token aliases disagree; supply one exact token input");

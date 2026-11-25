@@ -1,0 +1,11 @@
+# Query fallback without declared-input replacement
+
+The listed handlers accept the existing declared input first. Only an absent declared key can use query: vulnerability triage extracts the first CVE identifier and uppercases it; geolocation selects the first valid IPv4/IPv6 token; holders uses the trimmed whole token query; TLS selects a hostname or URL host; storm uses the complete location string. Token supply already had query/q/input/symbol/asset aliases; a nonblank declared token now wins over query, while its established blank-token fallback and conflicts with other aliases remain unchanged.
+
+Email DNS accepts query as an additional exact key. Domain comes from the first hostname, record_type only from an explicit SPF/DKIM/DMARC/MX word. Either existing declared key wins independently. No record type is invented if absent. Other unknown keys keep their existing behavior: email refuses them, the other listed handlers retain ignored-key behavior. No manifest, consumer shaping or registration change.
+
+Private/reserved/documentation IPs return no_data with PRIVATE_IP in the answer, no coordinates and no source call or receipt. Invalid IP text remains400. Node IP validation rejects malformed IPv6 that the previous character-only test admitted. IPv6 canonicalization catches expanded loopback, mapped private IPv4 and documentation/multicast addresses. This is local address classification, not a geolocation observation or a claim about a network endpoint.
+
+Tests replay existing recorded CVE, IP, token supply, holders, DNS and storm bodies. The TLS alias control intentionally stops at a synthetic DNS failure and checks the exact extracted hostname; it does not invent a certificate. Existing TLS tests separately cover result/evidence behavior. Synthetic fault cases are not new live observations. Receipt/clock-only identifiers are excluded from paired-body equality; factual fields and answer text are compared at a fixed clock.
+
+V2 explicitly refuses zone-scoped IPv6 before URL canonicalization, including a scoped token extracted from query. Both paths assert400INVALID_IP with no network and have independent RED mutants, rather than exposing a raw invalid-URL exception.

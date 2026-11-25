@@ -1,3 +1,4 @@
+import {queryFallback,firstHostname} from '../core/queryFallback';
 // SSL_VERIFICATION_CERT: a real TLS handshake, with the peer's exact DER
 // certificate chain in the receipt. Trust means Node's installed CA set,
 // current clock and hostname verification, not an OCSP/revocation check.
@@ -110,6 +111,7 @@ async function probeTls(host: string, address: string, budgetMs: number): Promis
 }
 
 export async function handleSsl(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+  query=queryFallback(query,"host",firstHostname);
   if (!query.host?.trim()) throw badRequest("MISSING_PARAM", "host is required");
   const host = normalizeTlsHost(query.host);
   let timer: ReturnType<typeof setTimeout> | undefined;

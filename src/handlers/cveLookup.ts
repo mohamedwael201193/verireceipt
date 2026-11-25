@@ -1,3 +1,4 @@
+import {queryFallback} from '../core/queryFallback';
 // CVE_LOOKUP_CVSS: real CVSS v3 assessments from the published CVE record.
 // NVD is disabled by default. Literal CVE_NVD_ENABLED=true opts in only
 // after aggregate egress request ownership has been verified operationally.
@@ -197,6 +198,7 @@ export async function handleCve(query: Record<string, string | undefined>): Prom
 // published base severity score, not a prediction of exploitation.
 export const TRIAGE_INTENT = "VULNERABILITY_TRIAGE_GENERAL";
 export async function handleVulnTriage(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+  query=queryFallback(query,"cve_id",text=>text.match(/CVE-\d{4}-\d{4,}/i)?.[0].toUpperCase());
   const id = query.cve_id?.trim().toUpperCase();
   if (!id) throw badRequest("MISSING_PARAM", "cve_id is required");
   if (!/^CVE-\d{4}-\d{4,19}$/.test(id)) throw badRequest("INVALID_CVE", "cve_id must have CVE-YYYY-NNNN format");

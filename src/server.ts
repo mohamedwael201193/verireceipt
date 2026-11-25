@@ -313,7 +313,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/weather-check", async (request) => trackIntent("weather-check", () => handleWeatherCheck(asQuery(request.query))));
   app.get("/v1/event-outcome", async (request) => trackIntent("event-outcome", () => handleEventOutcome(asQuery(request.query))));
   app.get("/v1/travel-disruption", async (request) => trackIntent("travel-disruption", () => handleTravelDisruption(asQuery(request.query))));
-  app.get("/v1/email-security", async (request) => trackIntent("email-security", () => handleEmailSecurity(exactQuery(request.raw.url ?? "", ["domain", "record_type"])), "dns.google"));
+  app.get("/v1/email-security", async (request) => trackIntent("email-security", () => handleEmailSecurity(exactQuery(request.raw.url ?? "", ["domain", "record_type", "query"])), "dns.google"));
   app.get("/v1/filings", async (request) =>
     trackIntent("filings", () => {
       // A1 (2026-11-21): asQuery keeps only the FIRST value of a repeated

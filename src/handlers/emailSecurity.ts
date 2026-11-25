@@ -1,3 +1,4 @@
+import {queryFallback,firstHostname} from '../core/queryFallback';
 // EMAIL_SECURITY_GENERAL means observed DNS status, not email safety or record presence.
 // Same source-evidence receipt and envelope as the other VeriReceipt handlers.
 import { domainToASCII } from "node:url";
@@ -65,7 +66,9 @@ export function parseEmailDnsStatus(raw: string, domain: string, type: string): 
   return { status, truncated: object.TC === true };
 }
 export async function handleEmailSecurity(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
-  for (const key of Object.keys(query)) if (!["domain", "record_type"].includes(key)) throw badRequest("UNKNOWN_PARAM", `Unsupported query parameter: ${key}`);
+  query=queryFallback(query,"domain",firstHostname);
+  query=queryFallback(query,"record_type",text=>text.match(/\b(SPF|DKIM|DMARC|MX)\b/i)?.[0].toUpperCase());
+  for (const key of Object.keys(query)) if (!["domain", "record_type", "query"].includes(key)) throw badRequest("UNKNOWN_PARAM", `Unsupported query parameter: ${key}`);
   if (!query.domain?.trim() || !query.record_type?.trim()) throw badRequest("MISSING_PARAM", "domain and record_type are required");
   const domain = normalizeEmailDnsName(query.domain);
   const { name, type, mapping } = resolveEmailDnsQuery(domain, query.record_type);

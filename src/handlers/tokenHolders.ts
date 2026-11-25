@@ -1,3 +1,4 @@
+import {queryFallback} from '../core/queryFallback';
 import {markFailure,failureKind} from '../core/upstreamFailureDiagnostics';
 import {withAnswerClass} from '../core/answerClass';
 // TOKEN_HOLDER_COUNT_GENERAL — GET /v1/token-holders?token=&chain=
@@ -161,6 +162,7 @@ function parseGecko(rawBody: string, network: string, contract: string): Indexer
 export async function handleTokenHolders(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
+  query=queryFallback(query,"token",text=>text);
   const startedAt = Date.now();
   const deadlineAt = startedAt + 7_500;
   let tokenRaw = query.token?.trim();

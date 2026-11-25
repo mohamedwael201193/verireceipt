@@ -29,7 +29,7 @@ describe("IP_GEOLOCATION_GENERAL", () => {
     await expect(handleIpGeolocation({ ip: "999.1.2.3" })).rejects.toMatchObject({ status: 400, code: "INVALID_IP" });
     await expect(handleIpGeolocation({ ip: "not-an-ip" })).rejects.toMatchObject({ status: 400, code: "INVALID_IP" });
     for (const p of ["10.0.0.5", "192.168.1.1", "172.16.0.1", "127.0.0.1", "169.254.1.1", "100.64.0.1", "::1", "fd00::1", "192.0.2.1", "198.51.100.7", "203.0.113.9"]) {
-      await expect(handleIpGeolocation({ ip: p })).rejects.toMatchObject({ status: 422, code: "PRIVATE_IP" });
+      expect(await handleIpGeolocation({ ip: p })).toMatchObject({ verdict: "no_data", confidence: 0, receipt: null });
     }
     expect(() => validatePublicIp("8.8.8.8")).not.toThrow();
     expect(() => validatePublicIp("2606:4700:4700::1111")).not.toThrow();
