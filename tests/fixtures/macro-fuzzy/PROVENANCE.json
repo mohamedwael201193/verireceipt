@@ -1,0 +1,6 @@
+{
+  "url": "https://api.worldbank.org/v2/country?format=json&per_page=400",
+  "status": 200,
+  "sha256": "c9acf3932785191a649cbc04c3056af4cf64a236e5c3b49d49be25ddb0440bce",
+  "captured_at": "2026-11-25T16:20:49.193812+00:00"
+}

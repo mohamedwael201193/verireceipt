@@ -58,7 +58,7 @@ const INDICATOR_ALIASES = new Set([
 
 /** Normalize an indicator input; returns the canonical enum value when
  * it is a known variant, else null. */
-export function normalizeIndicator(input: string): string | null {
+export function normalizeIndicator(input: string, exactOnly=false): string | null {
   const stripped = input
     .toLowerCase()
     .replace(/[_\-.]+/g, " ")
@@ -86,7 +86,19 @@ export function normalizeIndicator(input: string): string | null {
     "ny.gdp.pcap.cd": "gdp per capita", population: "population", "sp.pop.totl": "population",
   };
   const match=Object.entries(aliases).find(([key])=>key.replace(/[_\-.]+/g," ")===stripped);
-  return match?.[1]??null;
+  if(match)return match[1];
+  if(exactOnly)return null;
+  // Bounded word overlap, never strip substantive population/measure qualifiers.
+  // Unknown leftover words reject instead of silently substituting a series.
+  const noise=new Set(['latest','current','annual','yearly','published','indicator','indicators','please','show','me','the','a','an','what','is','of','in','value','data','statistic']);
+  const tokens=(s:string)=>s.toLowerCase().replace(/[_\-.(),%?]+/g,' ').split(/\s+/).filter(w=>w&&!noise.has(w));
+  const wanted=tokens(stripped);if(!wanted.length)return null;
+  const candidates=new Map<string,number>();
+  for(const [name,canonical] of [...Object.keys(SERIES).map(k=>[k,k]),...Object.entries(aliases),...Array.from(INDICATOR_ALIASES,k=>[k,SUPPORTED_INDICATOR]),['exports','trade']]){
+    const words=new Set(tokens(name));
+    if(wanted.every(w=>words.has(w))&&[...words].every(w=>wanted.includes(w)))candidates.set(canonical,wanted.length);
+  }
+  return candidates.size===1?[...candidates.keys()][0]:null;
 }
 
 /**
@@ -270,8 +282,9 @@ export async function handleMacro(
     throw withAnswerClass(unprocessable(
       "UNSUPPORTED_INDICATOR",
       `unsupported indicator: ${query.indicator}; no default is substituted. Supported endpoint indicators: ${Object.keys(SERIES).join(", ")}`,
-    ), INTENT, {alias_known:false});
+    ), INTENT, {alias_known:false,indicator_selection:'rejected',indicator_rejection:'unsupported_or_qualified'});
   }
+  const closest=normalizeIndicator(indicatorRaw,true)===null;
   const series = SERIES[indicator];
   const indicatorNormalized = indicatorInput !== undefined && indicatorInput !== SUPPORTED_INDICATOR;
   if (yearRaw !== undefined && !/^\d{4}$/.test(yearRaw)) {
@@ -361,9 +374,9 @@ export async function handleMacro(
   }
 
   return withAnswerClass(envelope(INTENT, fields, receiptDoc, {
-    answer: `${observation.stale?`STALE cached World Bank observation for ${year}; acquired ${asOf}, cache age ${Math.floor((Date.now()-Date.parse(asOf))/1000)} seconds, upstream unavailable; not a fresh query. `:''}${indicator==='real interest rate'?'World Bank real interest rate: lending interest rate adjusted for inflation using the GDP deflator, not a policy rate. ':''}${indicatorNormalized ? `"${indicatorInput}" read as "${indicator}". ` : ""}Mapping: ${indicator} -> World Bank ${series.id}. ${country.name}${requestedYear === undefined ? " latest published observation" : ""}${year === undefined ? "" : ` in ${year}`}: ${hasValue ? `${value} ${series.unit}.${ratePct === null ? " rate_pct is null: this observation is outside the scored 0..100 percent field or is not a percentage." : ""}` : "no data published for the requested observation; rate_pct is null, not zero."}`,
+    answer: `${observation.stale?`STALE cached World Bank observation for ${year}; acquired ${asOf}, cache age ${Math.floor((Date.now()-Date.parse(asOf))/1000)} seconds, upstream unavailable; not a fresh query. `:''}${indicator==='real interest rate'?'World Bank real interest rate: lending interest rate adjusted for inflation using the GDP deflator, not a policy rate. ':''}${closest?`Closest series used: "${indicator}" (World Bank ${series.id}); requested wording is not an exact supported alias. ${indicator==='trade'?"This is total exports plus imports as %GDP, not exports alone. ":""}`:""}${indicatorNormalized ? `"${indicatorInput}" read as "${indicator}". ` : ""}Mapping: ${indicator} -> World Bank ${series.id}. ${country.name}${requestedYear === undefined ? " latest published observation" : ""}${year === undefined ? "" : ` in ${year}`}: ${hasValue ? `${value} ${series.unit}.${ratePct === null ? " rate_pct is null: this observation is outside the scored 0..100 percent field or is not a percentage." : ""}` : "no data published for the requested observation; rate_pct is null, not zero."}`,
     verdict: observation.stale?"stale":hasValue ? "verified" : "no_data",
     confidence: observation.stale ? 0.5 : hasValue ? 1.0 : 0,
     source: "World Bank API (api.worldbank.org, authoritative publisher)",
-  }), INTENT, {alias_known:true});
+  }), INTENT, {alias_known:true,matched_series:series.id,indicator_selection:closest?'closest':'exact'});
 }
