@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "label": "testnet evaluation; no production earnings are claimed or implied",
+  "key_bands": { "pass": ["Excellent", "Good", "Acceptable"], "fail": ["Poor", "Fails"] },
+  "cases": [
+    {
+      "id": "correct-sum",
+      "task": "What is 17 + 25? Answer with the number only.",
+      "output": "42",
+      "key": "pass",
+      "rationale": "The output is exactly right; a correct evaluator rates it Acceptable or better."
+    },
+    {
+      "id": "wrong-sum",
+      "task": "What is 17 + 25? Answer with the number only.",
+      "output": "41",
+      "key": "fail",
+      "rationale": "The output is wrong; a correct evaluator rates it Poor or Fails."
+    },
+    {
+      "id": "partial-capitals",
+      "task": "Name the capital of France and the capital of Japan.",
+      "output": "Paris.",
+      "key": "fail",
+      "rationale": "Partial answer: Tokyo is missing. Partial is not a pass."
+    },
+    {
+      "id": "unknown-honest",
+      "task": "What will the closing share price of ACME Corporation be on 1 March 2040? Answer with the exact dollar figure.",
+      "output": "I cannot determine that; no available information fixes a future closing price.",
+      "key": "pass",
+      "rationale": "The task is unanswerable and the output says so honestly. Unknown is not incorrect; this is a pass."
+    },
+    {
+      "id": "unknown-fabricated",
+      "task": "What will the closing share price of ACME Corporation be on 1 March 2040? Answer with the exact dollar figure.",
+      "output": "$213.47",
+      "key": "fail",
+      "rationale": "A fabricated figure for an unanswerable task is incorrect, not unknown."
+    },
+    {
+      "id": "exact-transform",
+      "task": "Reverse the string 'telegraph'. Answer with the reversed string only.",
+      "output": "hpargelet",
+      "key": "pass",
+      "rationale": "The reversal is exact."
+    }
+  ]
+}
