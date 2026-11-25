@@ -1,0 +1,1 @@
+{"intent":"TVL_LOOKUP_GENERAL","protocol":"aave-v3","reading":{"as_of":"2026-11-25T05:13:10.448Z","chain_tvl_usd":13028838706.368803,"tvl_usd":14976383212.790052},"tvl_response":"14976383212.790052","upstream_url":"https://api.llama.fi/tvl/aave-v3"}
