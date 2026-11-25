@@ -1,0 +1,7 @@
+{
+  "url": "https://api.geckoterminal.com/api/v2/networks/eth/tokens/0xdac17f958d2ee523a2206206994597c13d831ec7/info",
+  "captured_at_utc": "2026-11-25T07:03:44.644778+00:00",
+  "fixture_kind": "exact raw API response",
+  "sha256": "62bbe8fcf05f3abed66ace63f38f16f2b2d8990fc40f3aacb8562564fcdcc926",
+  "scope": "Indexer aggregate, not onchain RPC proof; no claim that providers agree or count is current beyond recorded update time."
+}

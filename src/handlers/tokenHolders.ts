@@ -195,10 +195,10 @@ export async function handleTokenHolders(
     requestedSymbol = tokenRaw.trim().toUpperCase();
   }
 
-  const url = network
+  let url = network
     ? `https://api.geckoterminal.com/api/v2/networks/${network}/tokens/${contract}/info`
     : `${indexer}/api/v2/tokens/${contract}`;
-  const sourceName = network ? "GeckoTerminal" : "Blockscout";
+  let sourceName = network ? "GeckoTerminal" : "Blockscout";
   let info: IndexerTokenInfo;
   let bodyFetchedAt: string;
   let staleReason: string | undefined;
@@ -211,10 +211,22 @@ export async function handleTokenHolders(
     if (staleReason) recordUpstreamError("geckoterminal", staleReason.includes("429") ? "UPSTREAM_RATE_LIMITED" : "INDEXER_UNREACHABLE");
     try{info = network ? parseGecko(observation.body, network, contract) : parseIndexerResponse(observation.body, url, contract);}catch(error){markFailure(error,'bad_payload');throw error;}
   } catch (err) {
-    throw withAnswerClass(upstreamUnavailable(
-      "INDEXER_UNREACHABLE",
-      `${sourceName} holder-count indexer failed for ${chain}: ${err instanceof Error ? err.message : String(err)}`,
-    ),INTENT,{upstream_name:network?'geckoterminal':'blockscout',upstream_failure:failureKind(err)});
+    if(chain==='ethereum'){
+      // Same token, second holder index. No estimated count or combined aggregate.
+      const fallbackUrl=`https://api.geckoterminal.com/api/v2/networks/eth/tokens/${contract}/info`;
+      try{
+        const observation=await cachedHolderBody(fallbackUrl,remaining=>fetchText(fallbackUrl,remaining),raw=>parseGecko(raw,'eth',contract),deadlineAt);
+        info=parseGecko(observation.body,'eth',contract);bodyFetchedAt=observation.fetchedAt;staleReason=observation.staleReason;
+        url=fallbackUrl;sourceName='GeckoTerminal (Ethereum fallback after Blockscout unavailable)';
+      }catch(fallbackError){
+        throw withAnswerClass(upstreamUnavailable('INDEXER_UNREACHABLE','Blockscout and GeckoTerminal Ethereum holder indexes unavailable; no count invented'),INTENT,{upstream_name:'geckoterminal',upstream_failure:failureKind(fallbackError)});
+      }
+    }else{
+      throw withAnswerClass(upstreamUnavailable(
+        "INDEXER_UNREACHABLE",
+        `${sourceName} holder-count indexer failed for ${chain}: ${err instanceof Error ? err.message : String(err)}`,
+      ),INTENT,{upstream_name:network?'geckoterminal':'blockscout',upstream_failure:failureKind(err)});
+    }
   }
 
   // A symbol request must match the indexer's own symbol for the
@@ -259,7 +271,7 @@ export async function handleTokenHolders(
     answer: `${staleReason ? "STALE CACHED OBSERVATION, not a current count. " : ""}${symbol} (${contract}) on ${chain} has ${info.holdersCount} distinct holder addresses (${sourceName} indexer, as of ${asOf}).${staleReason ? " Upstream lookup failed (" + staleReason + "). This is the last real cached value observed at " + asOf + "; no count has been estimated or updated." : ""}`,
     verdict: staleReason ? "stale" : "verified",
     confidence: staleReason ? 0.5 : 0.9,
-    source: `${sourceName} indexer (${url}, keyless, receipted); holder aggregate, not RPC state${network ? "; original body may be reused for up to 5 minutes (5 additional minutes disclosed stale on failure, maximum 10-minute acquisition age and 24h source-age bound); as_of is provider holders.last_updated" : ""}`,
+    source: `${sourceName} indexer (${url}, keyless, receipted); holder aggregate, not RPC state${(network||sourceName.startsWith("GeckoTerminal")) ? "; original body may be reused for up to 5 minutes (5 additional minutes disclosed stale on failure, maximum 10-minute acquisition age and 24h source-age bound); as_of is provider holders.last_updated" : ""}`,
   });
 }
 
