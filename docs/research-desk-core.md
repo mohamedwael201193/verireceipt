@@ -165,3 +165,16 @@ or A2 packets. It explains whether source evidence supports a provider's raw
 number while the node's convenience shape differs. A clean next run still
 requires a shaped value that reproduces exactly under a documented rule, or
 an explicitly reviewed new policy with a different evidence contract.
+
+### Selector pinning for templates G and H
+
+Template G pins a finalized Ethereum block resolved from chain state at
+freeze time; finality makes the selector stable. Template H pins the Bitcoin
+tip height reported by mempool.space at freeze time: a single-source,
+shallow-tip value that can in principle reorg. The pinned height stays a
+valid historical selector even if the block at that height is replaced, and
+the weekly-series basis the handler serves at the tip changes negligibly
+across a shallow reorg; the disclosed single-block basis below the tip is
+unaffected. Both the template and every run are testnet-labelled. If a
+stronger pin is ever wanted, the freeze step can move to tip minus N
+confirmations, mirroring G's finalized block.

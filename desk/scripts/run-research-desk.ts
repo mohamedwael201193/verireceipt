@@ -10,7 +10,7 @@ import {liveResearchAdapter,localResearchStore} from '../src/researchLiveAdapter
 import {runResearchDesk} from '../src/researchDeskRunner.js';
 import {researchTemplate} from '../src/researchTemplates.js';
 const [id,out,...extra]=process.argv.slice(2);
-if(!['A','B','C','D','E','F','G','H'].includes(id)||!out||extra.length)throw new Error('Usage: run-research-desk.ts A|B|C|D|E|F|G|H NEW_PRIVATE_OUTPUT_DIRECTORY');
+if(!['A','C','D','E','F','G','H'].includes(id)||!out||extra.length)throw new Error('Usage: run-research-desk.ts A|C|D|E|F|G|H NEW_PRIVATE_OUTPUT_DIRECTORY');
 const secrets=process.env.DESK_SECRETS_FILE;if(!secrets)throw new Error('DESK_SECRETS_FILE is required');
 const expected=process.env.DESK_PAYER_ADDRESS?.toLowerCase();if(!expected||!/^0x[0-9a-f]{40}$/.test(expected))throw new Error('explicit DESK_PAYER_ADDRESS required');
 const ledgerDir=resolve(process.env.DESK_LEDGER_DIR??join(dirname(fileURLToPath(import.meta.url)),'../ledger'));
