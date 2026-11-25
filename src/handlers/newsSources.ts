@@ -79,13 +79,17 @@ export function parseHn(raw: string): NewsItem[] {
   const out: NewsItem[] = [];
   for (const h of d.hits as Record<string, unknown>[]) {
     if (!h || typeof h !== "object" || typeof h.title !== "string") throw new Error("invalid HN hit");
-    const title = String(h.title ?? "").trim();
-    if (!title) continue;
+    const title = h.title.trim();
+    if (!title) throw new Error("invalid HN title");
+    const validUrl=typeof h.url==='string'&&h.url.trim().length>0;
+    const validId=typeof h.objectID==='string'&&/^[1-9][0-9]*$/.test(h.objectID);
+    const stamp=typeof h.created_at_i==='number'&&Number.isSafeInteger(h.created_at_i)&&h.created_at_i>0?h.created_at_i*1000:typeof h.created_at==='string'?Date.parse(h.created_at):NaN;
+    if((!validUrl&&!validId)||typeof h.points!=='number'||!Number.isSafeInteger(h.points)||h.points<0||!Number.isFinite(stamp)||stamp<=0||stamp>8640000000000000)throw new Error('invalid HN required metadata');
     out.push({
       index: HN_INDEX, title,
-      url: String(h.url ?? `https://news.ycombinator.com/item?id=${String(h.objectID ?? "")}`),
-      points: typeof h.points === "number" ? h.points : null,
-      published: typeof h.created_at_i === "number" ? new Date(h.created_at_i * 1000).toISOString() : String(h.created_at ?? ""),
+      url: validUrl ? String(h.url).trim() : `https://news.ycombinator.com/item?id=${h.objectID}`,
+      points: h.points as number,
+      published: new Date(stamp).toISOString(),
     });
   }
   return out;

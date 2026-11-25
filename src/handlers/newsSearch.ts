@@ -35,7 +35,7 @@ export async function handleNewsSearch(query:Record<string,string|undefined>):Pr
  const eligible=(i:NewsItem)=>Number.isFinite(Date.parse(i.published))&&i.published>=cutoff&&Date.parse(i.published)<=now&&/^https?:\/\//.test(i.url);
  const feedItems=feedCaptures.flatMap(f=>(f.items??[]).map(i=>({...i,index:FEED_INDEX}))).filter(eligible);
  const refs=(referenceItems??[]).filter(eligible),dispatches=(dispatchItems??[]).filter(eligible);
- const exactOther=rankRecent([...feedItems,...dispatches].filter(i=>topicMatches(q,i.title)));
+ const exactOther=rankRecent([...feedItems,...dispatches].filter(i=>words.length>0&&words.every(w=>anyHeadlineKeyword([w],i.title))));
  const exact=[...stories.exact.map(i=>({...i,index:SEARCH_INDEX})),...exactOther];
  const unique=(items:NewsItem[])=>{const seen=new Set<string>();return items.filter(i=>{if(seen.has(i.url))return false;seen.add(i.url);return true;});};
  let selected=unique(exact),scope='exact title keyword match in named sources';
