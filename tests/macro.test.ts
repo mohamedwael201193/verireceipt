@@ -385,3 +385,12 @@ describe("World Bank endpoint aliases from captured Germany 2022 observations", 
     expect(out.answer).toContain("FP.CPI.TOTL.ZG"); expect(out.verdict).toBe("no_data");
   });
 });
+
+describe('punctuation and descriptive total-unemployment aliases',()=>{
+ it.each(['unemployment_rate','UNEMPLOYMENT-RATE','unemployment.rate','SL_UEM_TOTL_ZS','Unemployment, total (% of total labor force) (modeled ILO estimate)','unemployment total labour force percentage'])('normalizes %s with disclosed series binding and raw source receipt',async(input)=>{
+  const unemployment=readFileSync(resolve('tests/fixtures/macro-unemployment-deu-2022.json'),'utf8');
+  vi.stubGlobal('fetch',async(url:unknown)=>{if(String(url).includes('/indicator/')){expect(String(url)).toContain('/SL.UEM.TOTL.ZS?date=2022');return new Response(unemployment);}return new Response(JSON.stringify([{},[{id:'DEU',iso2Code:'DE',name:'Germany',region:{value:'Europe'}}]]));});
+  const out=await handleMacro({indicator:input,country:'DEU',year:'2022'});expect(out.indicator).toBe('unemployment rate');expect(out.indicator_id).toBe('SL.UEM.TOTL.ZS');expect(out.answer).toContain('read as "unemployment rate"');expect((out.receipt as any).raw_response_sha256).toBe(sha256Hex(unemployment));expect(out.rate_pct).toBe(Math.round(JSON.parse(unemployment)[1][0].value*1e6)/1e6);
+ });
+ it.each(['national unemployment rate','youth unemployment rate','female unemployment','long-term unemployment rate','unemployment benefit spending','employment rate','not unemployment','underemployment rate','GDP','unemployment inflation'])('refuses unrelated or qualified series %s before fetching',async(input)=>{const f=vi.fn();vi.stubGlobal('fetch',f);await expectApiError(handleMacro({indicator:input,country:'DEU'}),422,'UNSUPPORTED_INDICATOR');expect(f).not.toHaveBeenCalled();});
+});

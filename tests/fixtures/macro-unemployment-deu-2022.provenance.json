@@ -1,0 +1,6 @@
+{
+  "acquisition_url": "https://api.worldbank.org/v2/country/DE/indicator/SL.UEM.TOTL.ZS?date=2022&format=json&per_page=100",
+  "captured_at_utc": "2026-11-25T06:46:53Z",
+  "raw_sha256": "d909f8f197d039e6837babd2c68c212beb406fff0ed435755c191f99bf0b27df",
+  "fixture_kind": "exact captured API response body"
+}

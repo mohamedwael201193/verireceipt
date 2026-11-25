@@ -38,7 +38,8 @@ const HTTP_TIMEOUT_MS = 12000;
 const CATALOG_TTL_MS = 60 * 60 * 1000;
 
 const SUPPORTED_INDICATOR = "unemployment rate";
-// Exact aliases only; unsupported requests keep a disclosed refusal.
+// Canonical punctuation normalization plus bounded total-unemployment wording.
+// Youth/sex/age/employment and other qualified series are not substituted.
 const INDICATOR_ALIASES = new Set([
   "unemployment rate",
   "unemployment",
@@ -56,11 +57,17 @@ const INDICATOR_ALIASES = new Set([
 export function normalizeIndicator(input: string): string | null {
   const stripped = input
     .toLowerCase()
+    .replace(/[_\-.]+/g, " ")
     .replace(/\(\s*(%|percent|percentage)\s*\)/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^the\s+/, "");
-  if (INDICATOR_ALIASES.has(stripped)) return SUPPORTED_INDICATOR;
+  const normalizedAliases = Array.from(INDICATOR_ALIASES, x => x.replace(/[_\-.]+/g, " "));
+  if (normalizedAliases.includes(stripped)) return SUPPORTED_INDICATOR;
+  // Accept descriptive total-series variants, never a different population or measure.
+  const words=stripped.replace(/[(),%]/g," ").split(/\s+/).filter(Boolean);
+  const totalSeriesWords=new Set(["unemployment","rate","total","of","the","labor","labour","force","percent","percentage","modeled","modelled","ilo","estimate"]);
+  if(words.includes("unemployment")&&words.every(w=>totalSeriesWords.has(w)))return SUPPORTED_INDICATOR;
   const aliases: Record<string, string> = {
     inflation: "inflation", cpi: "inflation", "consumer prices": "inflation",
     "fp.cpi.totl.zg": "inflation", "gdp growth": "gdp growth",
@@ -68,7 +75,8 @@ export function normalizeIndicator(input: string): string | null {
     "bn.cab.xoka.gd.zs": "current account", "gdp per capita": "gdp per capita",
     "ny.gdp.pcap.cd": "gdp per capita", population: "population", "sp.pop.totl": "population",
   };
-  return Object.hasOwn(aliases, stripped) ? aliases[stripped] : null;
+  const match=Object.entries(aliases).find(([key])=>key.replace(/[_\-.]+/g," ")===stripped);
+  return match?.[1]??null;
 }
 
 /**
