@@ -1,3 +1,4 @@
+import {queryFallback} from '../core/queryFallback';
 // VENDOR_VERIFY_GENERAL — GET /v1/vendor-verify?vendor=<name>&vat_number=<EU VAT>
 //
 // Zero-LLM. Verifies an EU VAT registration number against the European
@@ -60,6 +61,7 @@ export function extractVat(raw: string): { cc: string; num: string } | null {
 }
 
 export async function handleVendorVerify(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+  query=queryFallback(query,"vendor",text=>text);
   const vendor = query.vendor?.trim();
   if (vendor && vendor.length > 300) throw badRequest("INVALID_VENDOR", "vendor is over 300 characters");
   const vatRaw = query.vat_number?.trim();
@@ -72,7 +74,11 @@ export async function handleVendorVerify(query: Record<string, string | undefine
     if (unique.size > 1) throw badRequest("AMBIGUOUS_VAT", "multiple VAT-shaped numbers found; supply vat_number explicitly");
     parsed = [...unique.values()][0] ?? null;
   }
-  if (!parsed) throw badRequest("MISSING_PARAM", "a VAT number is required, explicitly or in a text parameter");
+  if (!parsed) return {
+    intent:INTENT,vendor:vendor||null,vat_number:null,valid:null,receipt:null,
+    answer:`No VAT number was supplied (vendor: ${vendor || 'none given'}). VIES verifies EU VAT numbers only and a vendor name alone is never matched to a registration; no validity verdict is given.`,
+    verdict:'no_data',confidence:0,source:'no VAT number supplied; no registry lookup',checked_at:new Date().toISOString(),
+  };
   if (!VIES_STATES.has(parsed.cc)) {
     throw unprocessable("VIES_SCOPE", `${parsed.cc} is not a VIES member-state code; only VIES-supported VAT numbers are served; GB HMRC lookup required authentication in the live probe, so no result is guessed`);
   }

@@ -59,7 +59,7 @@ describe("VENDOR_VERIFY_GENERAL", () => {
   it("missing and malformed params are 400", async () => {
     stub();
     expect((await handleVendorVerify({ vat_number: "LU26375245" })).valid).toBe(true);
-    await expect(handleVendorVerify({ vendor: "X" })).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
+    expect(await handleVendorVerify({ vendor: "X" })).toMatchObject({ verdict: "no_data", valid: null, confidence: 0 });
     await expect(handleVendorVerify({ vendor: "X", vat_number: "26375245" })).rejects.toMatchObject({ status: 400, code: "INVALID_VAT" });
   });
   it("fails closed 502 when VIES is down, errors, or returns a service-limitation userError", async () => {
