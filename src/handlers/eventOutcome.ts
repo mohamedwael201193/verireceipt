@@ -22,8 +22,10 @@ import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
 import { wikipediaEventOutcome } from './eventWikipedia';
+import {wikidataEventOutcome} from './eventWikidata';
+import {eventBody} from './eventSource';
 
-const SOURCE_TIMEOUT_MS = 8000;
+
 const UA = "VeriReceipt/2.0 event-resolution observer (+https://verireceipt.vercel.app)";
 
 export const INTENT = "EVENT_OUTCOME_RESOLUTION_GENERAL";
@@ -35,6 +37,7 @@ export interface PmMarket {
 
 export function parseSearch(raw: string): PmMarket[] {
   const d = JSON.parse(raw) as { events?: unknown };
+  if(!Array.isArray(d.events))throw upstreamUnavailable("POLYMARKET_BAD_PAYLOAD","market search response is invalid");
   const out: PmMarket[] = [];
   for (const e of (Array.isArray(d.events) ? d.events : []) as Record<string, unknown>[]) {
     for (const m of (Array.isArray(e.markets) ? e.markets : []) as Record<string, unknown>[]) {
@@ -54,7 +57,7 @@ export function parseSearch(raw: string): PmMarket[] {
   return out;
 }
 
-function norm(s: string): string {
+export function norm(s: string): string {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
@@ -99,6 +102,12 @@ export function resolveMarket(m: PmMarket): Resolution {
 }
 
 export async function handleEventOutcome(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+  const deadlineAt=Date.now()+2700;
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  try{return await Promise.race([handleEvent(query,deadlineAt),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(upstreamUnavailable('EVENT_SOURCE_TIMEOUT','event request budget exceeded')),2900);})]);}
+  finally{clearTimeout(timer);}
+}
+async function handleEvent(query: Record<string, string | undefined>,deadlineAt:number): Promise<Record<string, unknown>> {
   const event = query.event?.trim();
   if (!event) throw badRequest("MISSING_PARAM", "event is required (the market question)");
   if (event.length > 200) throw badRequest("EVENT_TOO_LONG", "event must be at most 200 characters");
@@ -106,15 +115,7 @@ export async function handleEventOutcome(query: Record<string, string | undefine
   const fetchedAt = new Date().toISOString();
   let body: string;
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-    try {
-      const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      body = await res.text();
-    } finally {
-      clearTimeout(timer);
-    }
+    body = (await eventBody(url,deadlineAt)).raw;
   } catch {
     throw upstreamUnavailable("POLYMARKET_UNREACHABLE", "the Polymarket gamma API could not be reached");
   }
@@ -123,7 +124,15 @@ export async function handleEventOutcome(query: Record<string, string | undefine
   try { market = matchMarket(markets, event); }
   catch (error) {
     // Only a genuine no-match enables fallback; matched markets never use it.
-    if (error instanceof ApiError && error.code === 'EVENT_NOT_FOUND') return wikipediaEventOutcome(event, body, url);
+    if (error instanceof ApiError && error.code === 'EVENT_NOT_FOUND') {
+      try{return await wikipediaEventOutcome(event,body,url,deadlineAt);}catch(wikiError){
+        if(!(wikiError instanceof ApiError)||wikiError.code!=='EVENT_NOT_FOUND')throw wikiError;
+      }
+      const result=await wikidataEventOutcome(event,body,url,deadlineAt);
+      if(result)return result;
+      const answer='No resolved Polymarket market, Wikipedia page or Wikidata record matched this event; nothing was inferred, outcome is unresolved.';
+      return withAnswerClass({answer,event,outcome:'unresolved',resolved_yes:false,sources:[],verdict:'unresolved',confidence:0,source:'none',checked_at:new Date().toISOString()},INTENT,{outcome:'unresolved',source:'none'});
+    }
     throw error;
   }
   const r = resolveMarket(market);

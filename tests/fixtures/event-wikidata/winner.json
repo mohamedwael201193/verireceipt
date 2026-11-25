@@ -1,0 +1,14 @@
+{
+  "entities": {
+    "Q79800": {
+      "id": "Q79800",
+      "type": "item",
+      "labels": {
+        "en": {
+          "language": "en",
+          "value": "Argentina national football team"
+        }
+      }
+    }
+  }
+}

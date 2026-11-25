@@ -12,7 +12,7 @@ const title='2020 United States presidential election';
 const summary=JSON.parse(read('summary'));
 afterEach(()=>{vi.unstubAllGlobals();vi.clearAllMocks();});
 function stub() {
- const f=vi.fn(async(url:unknown)=>new Response(String(url).includes('polymarket')?read('polymarket'):String(url).includes('/search/')?read('search'):read('summary')));
+ const f=vi.fn(async(url:unknown)=>new Response(String(url).includes('polymarket')?read('polymarket'):String(url).includes('wbsearchentities')?JSON.stringify({search:[]}):String(url).includes('/search/')?read('search'):read('summary')));
  vi.stubGlobal('fetch',f);return f;
 }
 it('real captured no-match falls back to explicit Wikipedia winner and preserves all bodies and digest',async()=>{
@@ -26,7 +26,7 @@ it('supports who-won phrasing without changing named-event meaning',async()=>{
  stub();expect((await handleEventOutcome({event:'Who won the '+title+'?'})).winner).toBe('Joe Biden');
 });
 it.each(['Did Donald Trump win the '+title+'?','Who won the '+title+' in Texas?','2020 United States presidential election and recount','United States presidential election'])('refuses unsupported conditions or incomplete identity: %s',async(event)=>{
- stub();await expect(handleEventOutcome({event})).rejects.toMatchObject({code:'EVENT_NOT_FOUND'});expect(saveReceipt).not.toHaveBeenCalled();
+ stub();expect(await handleEventOutcome({event})).toMatchObject({outcome:'unresolved',resolved_yes:false});expect(saveReceipt).not.toHaveBeenCalled();
 });
 it('refuses missing, negated, prospective or contradictory winner evidence',()=>{
  for(const changed of [
@@ -44,7 +44,7 @@ it('refuses a generic sports summary with no explicit winner rather than use art
 it('rejects duplicate exact search identities and no exact match',async()=>{
  for(const pages of [[{title,key:'x'},{title,key:'y'}],[{title:title+' in Texas',key:'x'}]]) {
   vi.stubGlobal('fetch',async(url:unknown)=>new Response(String(url).includes('polymarket')?read('polymarket'):JSON.stringify({pages})));
-  await expect(handleEventOutcome({event:title})).rejects.toMatchObject({code:'EVENT_NOT_FOUND'});
+  expect(await handleEventOutcome({event:title})).toMatchObject({outcome:'unresolved',resolved_yes:false});
  }
  expect(saveReceipt).not.toHaveBeenCalled();
 });

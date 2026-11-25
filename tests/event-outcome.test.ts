@@ -54,8 +54,7 @@ describe("EVENT_OUTCOME_RESOLUTION_GENERAL", () => {
     stub();
     await expect(handleEventOutcome({ event: "finish in the top 3 of the 2026 Ballon d'Or" }))
       .rejects.toMatchObject({ status: 422, code: "AMBIGUOUS_EVENT" });
-    await expect(handleEventOutcome({ event: "zzq nonexistent market" }))
-      .rejects.toMatchObject({ status: 422, code: "EVENT_NOT_FOUND" });
+    expect(await handleEventOutcome({ event: "zzq nonexistent market" })).toMatchObject({outcome:"unresolved",resolved_yes:false});
   });
   it("unresolved or unclean markets are refused, never inferred", () => {
     const markets = parseSearch(search);

@@ -1,6 +1,6 @@
 import {withAnswerClass} from "../core/answerClass";
 import {unprocessable, upstreamUnavailable} from '../core/errors';
-import {readPublicBody} from '../core/publicSource';
+import {eventBody} from './eventSource';
 import {envelope, makeReceipt} from '../core/receipt';
 import {saveReceipt} from '../core/storage';
 
@@ -25,16 +25,17 @@ export function electionWinner(summary: any, expectedTitle: string): {winner: st
         throw unprocessable('EVENT_NOT_FOUND', 'Wikipedia summary does not explicitly establish a supported winner; no outcome is guessed');
     return {winner, sentence, sourceUrl};
 }
-export async function wikipediaEventOutcome(event: string, primaryBody: string, primaryUrl: string): Promise<Record<string, unknown>> {
+export async function wikipediaEventOutcome(event: string, primaryBody: string, primaryUrl: string, deadlineAt=Date.now()+2700): Promise<Record<string, unknown>> {
     const title = namedEvent(event);
     const searchUrl = 'https://en.wikipedia.org/w/rest.php/v1/search/page?q=' + encodeURIComponent(title) + '&limit=3';
-    const search = await readPublicBody(searchUrl, 200000, 2500);
+    const search = await eventBody(searchUrl, deadlineAt);
     const pages = JSON.parse(search.raw).pages;
+    if(!Array.isArray(pages))throw upstreamUnavailable('WIKIPEDIA_BAD_PAYLOAD','encyclopedia search response is invalid');
     const matches = Array.isArray(pages) ? pages.filter((p: any) => typeof p.title === 'string' && normalize(p.title) === normalize(title)) : [];
     if (matches.length !== 1 || typeof matches[0].key !== 'string')
         throw unprocessable('EVENT_NOT_FOUND', 'Wikipedia search has no unique exact event-title match');
     const summaryUrl = 'https://en.wikipedia.org/api/rest_v1/page/summary/' + encodeURIComponent(matches[0].key);
-    const body = await readPublicBody(summaryUrl, 200000, 2500);
+    const body = await eventBody(summaryUrl, deadlineAt);
     const summary = JSON.parse(body.raw);
     const result = electionWinner(summary, title);
     const evidence = JSON.stringify({event, title: summary.title, winner: result.winner, source_url: result.sourceUrl,

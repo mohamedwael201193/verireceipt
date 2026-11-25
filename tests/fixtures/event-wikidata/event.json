@@ -1,0 +1,254 @@
+{
+  "entities": {
+    "Q284163": {
+      "id": "Q284163",
+      "type": "item",
+      "labels": {
+        "en": {
+          "language": "en",
+          "value": "2022 FIFA World Cup"
+        }
+      },
+      "claims": {
+        "P1346": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P1346",
+              "hash": "d92ee08ba765478ec9c461f9c225839d73fe401c",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "numeric-id": 79800,
+                  "id": "Q79800"
+                },
+                "type": "wikibase-entityid"
+              },
+              "datatype": "wikibase-item"
+            },
+            "type": "statement",
+            "qualifiers": {
+              "P1545": [
+                {
+                  "snaktype": "value",
+                  "property": "P1545",
+                  "hash": "0e979f28bf306fefdcd352b4eb8dee5da2153a6d",
+                  "datavalue": {
+                    "value": "3",
+                    "type": "string"
+                  },
+                  "datatype": "string"
+                }
+              ]
+            },
+            "qualifiers-order": [
+              "P1545"
+            ],
+            "id": "Q284163$fbd3c248-4fbb-0f70-7d3b-adaf95e80999",
+            "rank": "normal"
+          }
+        ],
+        "P585": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P585",
+              "hash": "2158d4b68f82b8f36f47c98bd3609a99913faa59",
+              "datavalue": {
+                "value": {
+                  "time": "+2022-00-00T00:00:00Z",
+                  "timezone": 0,
+                  "before": 0,
+                  "after": 0,
+                  "precision": 9,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "datatype": "time"
+            },
+            "type": "statement",
+            "id": "Q284163$8B9D196E-A1D9-4A6F-8B49-60B24A78C767",
+            "rank": "normal"
+          }
+        ],
+        "P580": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P580",
+              "hash": "f612e9605a4b64745a135c4d20d628f0cac89583",
+              "datavalue": {
+                "value": {
+                  "time": "+2022-11-20T00:00:00Z",
+                  "timezone": 0,
+                  "before": 0,
+                  "after": 0,
+                  "precision": 11,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "datatype": "time"
+            },
+            "type": "statement",
+            "id": "Q284163$e52e5b7c-4159-3a16-95eb-366ee6bdacea",
+            "rank": "normal",
+            "references": [
+              {
+                "hash": "63fa4774b7d79f13d3a854256f3b8e727df733df",
+                "snaks": {
+                  "P248": [
+                    {
+                      "snaktype": "value",
+                      "property": "P248",
+                      "hash": "d1d1b10a05a8f3fc5d26bb4aeb6849617ad81fc7",
+                      "datavalue": {
+                        "value": {
+                          "entity-type": "item",
+                          "numeric-id": 5375741,
+                          "id": "Q5375741"
+                        },
+                        "type": "wikibase-entityid"
+                      },
+                      "datatype": "wikibase-item"
+                    }
+                  ],
+                  "P1417": [
+                    {
+                      "snaktype": "value",
+                      "property": "P1417",
+                      "hash": "44b6c4c71c3a2ea6d9eb346854dedc8ae8f5a1be",
+                      "datavalue": {
+                        "value": "sports/2022-FIFA-World-Cup",
+                        "type": "string"
+                      },
+                      "datatype": "external-id"
+                    }
+                  ],
+                  "P813": [
+                    {
+                      "snaktype": "value",
+                      "property": "P813",
+                      "hash": "7f0dfa43261621a38524db1db96fcb200ea2361d",
+                      "datavalue": {
+                        "value": {
+                          "time": "+2026-07-01T00:00:00Z",
+                          "timezone": 0,
+                          "before": 0,
+                          "after": 0,
+                          "precision": 11,
+                          "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                        },
+                        "type": "time"
+                      },
+                      "datatype": "time"
+                    }
+                  ]
+                },
+                "snaks-order": [
+                  "P248",
+                  "P1417",
+                  "P813"
+                ]
+              }
+            ]
+          }
+        ],
+        "P582": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P582",
+              "hash": "bc5d1bcb85b9e14b7bc60b8add988ee55c367d30",
+              "datavalue": {
+                "value": {
+                  "time": "+2022-12-18T00:00:00Z",
+                  "timezone": 0,
+                  "before": 0,
+                  "after": 0,
+                  "precision": 11,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "datatype": "time"
+            },
+            "type": "statement",
+            "id": "Q284163$5b79d2ff-4c71-cfc3-0497-c9ecb711d8a0",
+            "rank": "normal",
+            "references": [
+              {
+                "hash": "63fa4774b7d79f13d3a854256f3b8e727df733df",
+                "snaks": {
+                  "P248": [
+                    {
+                      "snaktype": "value",
+                      "property": "P248",
+                      "hash": "d1d1b10a05a8f3fc5d26bb4aeb6849617ad81fc7",
+                      "datavalue": {
+                        "value": {
+                          "entity-type": "item",
+                          "numeric-id": 5375741,
+                          "id": "Q5375741"
+                        },
+                        "type": "wikibase-entityid"
+                      },
+                      "datatype": "wikibase-item"
+                    }
+                  ],
+                  "P1417": [
+                    {
+                      "snaktype": "value",
+                      "property": "P1417",
+                      "hash": "44b6c4c71c3a2ea6d9eb346854dedc8ae8f5a1be",
+                      "datavalue": {
+                        "value": "sports/2022-FIFA-World-Cup",
+                        "type": "string"
+                      },
+                      "datatype": "external-id"
+                    }
+                  ],
+                  "P813": [
+                    {
+                      "snaktype": "value",
+                      "property": "P813",
+                      "hash": "7f0dfa43261621a38524db1db96fcb200ea2361d",
+                      "datavalue": {
+                        "value": {
+                          "time": "+2026-07-01T00:00:00Z",
+                          "timezone": 0,
+                          "before": 0,
+                          "after": 0,
+                          "precision": 11,
+                          "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                        },
+                        "type": "time"
+                      },
+                      "datatype": "time"
+                    }
+                  ]
+                },
+                "snaks-order": [
+                  "P248",
+                  "P1417",
+                  "P813"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "sitelinks": {
+        "enwiki": {
+          "site": "enwiki",
+          "title": "2022 FIFA World Cup",
+          "badges": [
+            "Q17437798"
+          ],
+          "url": "https://en.wikipedia.org/wiki/2022_FIFA_World_Cup"
+        }
+      }
+    }
+  }
+}
