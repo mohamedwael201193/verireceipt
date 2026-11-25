@@ -16,6 +16,8 @@ it('retains failed-attempt exposure on withheld fact cards',()=>{const p={versio
 
 it('discloses auto-route fallback without claiming a live ranking check',()=>{render(<ResearchDesk/>);expect(screen.getByText(/Client-ranked direct selection and provider escalation are not enabled/)).toBeInTheDocument();expect(screen.getByText(/does not fetch live rankings/)).toBeInTheDocument();});
 
+it('discloses the run C2 provenance plainly',()=>{render(<ResearchDesk/>);expect(screen.getByText(/not a live READY run/)).toBeInTheDocument();expect(screen.getByText(/13:52:55Z/)).toBeInTheDocument();expect(screen.getByText(/No second payment/)).toBeInTheDocument();expect(screen.getByText(/byte-identical to the recorded run.s stored observations/)).toBeInTheDocument();});
+
 it('labels contract valuation without claiming aggregate FDV',()=>{render(<ResearchDesk/>);expect(screen.getByText(/Ethereum-contract implied valuation, not aggregate economic FDV/)).toBeInTheDocument();});
 
 it('offers the recorded-run examples without preloading any result',()=>{render(<ResearchDesk/>);expect(screen.getByText('Open the READY packet')).toBeInTheDocument();expect(screen.getByText('Open the NOT_SUPPORTED control')).toBeInTheDocument();const b2=screen.getByText('Download B2');expect(b2.getAttribute('href')).toBe('/packets/b2-research-packet.json');expect(b2.getAttribute('download')).toBe('b2-research-packet.json');expect(screen.queryByText(/FILE-REPORTED READY/)).toBeNull();});

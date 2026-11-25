@@ -210,13 +210,14 @@ cd frontend && npm ci && npm test && cd ..
 npm --prefix desk ci`}
         </pre>
         <p>
-          The wallet-free replay verifies the two recorded Sepolia desk runs. Download the packets
+          The wallet-free replay verifies the recorded Sepolia desk runs. Download the packets
           this site serves, then replay them — pinned spec hash, stored source-byte digests and
           recorded calculations:
         </p>
         <pre className="rd-command" tabIndex={0}>
 {`curl -O https://verireceipt.vercel.app/packets/b2-research-packet.json
-curl -O https://verireceipt.vercel.app/packets/b3-research-packet.json`}
+curl -O https://verireceipt.vercel.app/packets/b3-research-packet.json
+curl -O https://verireceipt.vercel.app/packets/c-rerun2-research-packet.json`}
         </pre>
         <pre className="rd-command" tabIndex={0}>
           npx tsx desk/scripts/replay-desk-packet.ts b2-research-packet.json 0be670693eb9b00082ce07115f5a52f5368be88855f1f06ee6dd4d44cc36090f
@@ -224,6 +225,13 @@ curl -O https://verireceipt.vercel.app/packets/b3-research-packet.json`}
         <pre className="rd-command" tabIndex={0}>
           npx tsx desk/scripts/replay-desk-packet.ts b3-research-packet.json edd3e3e17a84cbc2fa29d13731b48c8d6be5c12c8964ea534f2e0cc5d245e433
         </pre>
+        <pre className="rd-command" tabIndex={0}>
+          npx tsx desk/scripts/replay-desk-packet.ts c-rerun2-research-packet.json c64a0a83ff71a83fdca6de9d3077b14dcf663b22469a360cb5c4d7bc6b34772b
+        </pre>
+        <p>
+          Run C2's filings leg is a disclosed offline re-assembly on stored paid bytes, not a live
+          READY run; the research desk page states the exact provenance next to the packet.
+        </p>
         <p className="rp-muted">
           Limits, plainly: the replay is packet-integrity verification, not a live receipt check,
           not source-origin authentication and not settlement proof. Everything on this page is
