@@ -1,0 +1,41 @@
+{
+  "capture_date": "2026-11-26",
+  "fixtures": [
+    {
+      "file": "tesla-Assets.json",
+      "source_url": "https://data.sec.gov/api/xbrl/companyconcept/CIK0001318605/us-gaap/Assets.json",
+      "sha256": "63382296dc6fc2235445af96209b585a15d0fbebaea521fd59725df30989794b",
+      "extraction": "exact readable source body"
+    },
+    {
+      "file": "tesla-RevenueFromContractWithCustomerExcludingAssessedTax.json",
+      "source_url": "https://data.sec.gov/api/xbrl/companyconcept/CIK0001318605/us-gaap/RevenueFromContractWithCustomerExcludingAssessedTax.json",
+      "sha256": "ebeef2b314340a1ae35ec9c0c14d4ef9bd8883920b1e1381960109f5ba935750",
+      "extraction": "exact readable source body"
+    },
+    {
+      "file": "sec-tsla-shares.json",
+      "source_url": "https://data.sec.gov/api/xbrl/companyconcept/CIK0001318605/dei/EntityCommonStockSharesOutstanding.json",
+      "sha256": "6deb024415846b87f0f9cd50c43808f629dd7a53a880be323db1fcb50091b89f",
+      "extraction": "exact readable source body"
+    },
+    {
+      "file": "tesla-NetIncomeLoss.json",
+      "source_url": "https://data.sec.gov/api/xbrl/companyconcept/CIK0001318605/us-gaap/NetIncomeLoss.json",
+      "sha256": "e3c629153c05f2d6b3903fccbafec92dcdb35990b45f5366026f90ea8a2c2eb6",
+      "extraction": "exact readable source body"
+    },
+    {
+      "file": "yahoo-tsla.json",
+      "source_url": "https://query1.finance.yahoo.com/v8/finance/chart/TSLA?interval=1d&range=1d",
+      "sha256": "12fc4683fe12b5bd69d137b458ca917212a8d7207d89cba77878a2ae683686a8",
+      "extraction": "exact readable source body"
+    },
+    {
+      "file": "tesla-index-excerpt.json",
+      "source_url": "https://www.sec.gov/files/company_tickers.json",
+      "sha256": "6f58c14c286de205fdd151354f649c2e293931344d73aba84a8c392ab7af2d6e",
+      "extraction": "single SEC TSLA row"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import {annualFinancialMetrics} from './annualFinancialMetrics';
 import {financialCoin} from './financialCoins';
 import {internationalEquity} from './financialInternational';
 import {withAnswerClass} from '../core/answerClass';
@@ -128,7 +129,9 @@ export function latestShares(raw: string): { val: number; end: string; filed: st
 }
 
 async function financialData(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
-  const asset = query.asset?.trim();
+  const supplied=[query.asset,query.ticker,query.symbol,query.company,query.query].filter(v=>v?.trim()).map(v=>v!.trim());
+  if(supplied.length>1&&supplied.some(v=>v.toLowerCase()!==supplied[0].toLowerCase()))throw badRequest('CONFLICTING_ASSET','asset aliases disagree');
+  const asset = supplied[0];
   if (!asset) throw badRequest("MISSING_PARAM", "asset is required: a US-listed company/ticker, BTC, ETH or SOL");
   if (new TextEncoder().encode(asset).length > 256) throw badRequest("BAD_ASSET", "asset must be at most 256 UTF-8 bytes");
   const fetchedAt = new Date().toISOString();
@@ -245,12 +248,6 @@ async function financialData(query: Record<string, string | undefined>): Promise
   sharesBody=sharesObservation.body;
   const secObservations={company_index_fetched_at:indexObservation.fetchedAt,shares_fetched_at:sharesObservation.fetchedAt,company_index_cache_max_age_seconds:3600,shares_cache_max_age_seconds:900};
   chartBody = quote.body;
-  const quoteAgeSeconds = Math.floor((Date.now()-Date.parse(quote.fetchedAt))/1000);
-  const quoteStale = Boolean(quote.staleReason);
-  const searchStale = Boolean(searchObservation?.staleReason), anyStale = quoteStale || searchStale;
-  const staleReason = [quote.staleReason, searchStale ? `name-to-ticker resolution: ${searchObservation!.staleReason}` : undefined].filter(Boolean).join("; ");
-  const resolutionEvidence = searchObservation ? { stale:searchStale, fetched_at:searchObservation.fetchedAt,
-    age_seconds:Math.floor((Date.now()-Date.parse(searchObservation.fetchedAt))/1000), stale_reason:searchObservation.staleReason } : null;
   let shares: ReturnType<typeof latestShares>;
   let meta: Record<string, unknown> | undefined;
   try { JSON.parse(sharesBody); } catch { throw upstreamUnavailable("SEC_MALFORMED", "SEC shares response was malformed JSON"); }
@@ -272,9 +269,22 @@ async function financialData(query: Record<string, string | undefined>): Promise
   // carries only the latest regular session, so the field is null.
   const volumeUsd: number | null = null;
   const sessionVolumeUsd = Number.isFinite(volumeShares) && volumeShares >= 0 ? Math.round(volumeShares * price) : null;
+  const annual=await annualFinancialMetrics(cik10,ua,fetchText);
+  const quoteAgeSeconds = Math.floor((Date.now()-Date.parse(quote.fetchedAt))/1000);
+  const quoteStale = Boolean(quote.staleReason)||quoteAgeSeconds>=300;
+  const searchAgeSeconds=searchObservation?Math.floor((Date.now()-Date.parse(searchObservation.fetchedAt))/1000):null;
+  const searchStale = Boolean(searchObservation?.staleReason)||(searchAgeSeconds!==null&&searchAgeSeconds>=300), anyStale = quoteStale || searchStale;
+  if(quoteAgeSeconds<0||quoteAgeSeconds>=900||searchAgeSeconds!==null&&(searchAgeSeconds<0||searchAgeSeconds>=900)||Date.now()-Number(meta.regularMarketTime)*1000>7*86400000)throw upstreamUnavailable('SOURCE_EXPIRED','source observation expired during optional enrichment');
+  const quoteStaleReason=quote.staleReason??(quoteStale?'quote crossed5minute freshness boundary during optional enrichment':undefined);
+  const searchStaleReason=searchObservation?.staleReason??(searchStale?'resolution crossed5minute freshness boundary during optional enrichment':undefined);
+  const staleReason = [quoteStaleReason, searchStale ? `name-to-ticker resolution: ${searchStaleReason}` : undefined].filter(Boolean).join("; ");
+  const resolutionEvidence = searchObservation ? { stale:searchStale, fetched_at:searchObservation.fetchedAt,
+    age_seconds:Math.floor((Date.now()-Date.parse(searchObservation.fetchedAt))/1000), stale_reason:searchStaleReason } : null;
+  const annualPublic=Object.fromEntries(Object.entries(annual).map(([k,v])=>{const {raw_body,...fields}=v as Record<string,unknown>;return[k,fields];}));
+  const structuredMetrics={shares_outstanding:{value:shares.val,period_end:shares.end,filed:shares.filed,accession:shares.accn},price:{value_usd:price,market_time:marketTime},market_cap_method:'regularMarketPrice times latest SEC shares outstanding; mixed-age estimate',latest_regular_session:{volume_shares:Number.isFinite(volumeShares)&&volumeShares>=0?volumeShares:null,volume_usd_estimate:sessionVolumeUsd,method:'regularMarketPrice times latest regular-session share volume, NOT actual traded-dollar turnover or rolling24hours',market_time:marketTime,exchange_timezone:typeof meta.exchangeTimezoneName==='string'?meta.exchangeTimezoneName:null},...annualPublic};
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({ asset: ticker, as_of: quote.fetchedAt, derivation_at: asOf, cik: cik10, stale: anyStale, quote_stale: quoteStale, resolution_observation: resolutionEvidence, stale_reason: staleReason || undefined, quote_fetched_at: quote.fetchedAt, quote_age_seconds: quoteAgeSeconds,
-    sec_observations:secObservations,
+    sec_observations:secObservations,annual_financial_metrics:annual,structured_metrics:structuredMetrics,
     derivation: "market_cap_usd = Yahoo regularMarketPrice x SEC EDGAR dei:EntityCommonStockSharesOutstanding (latest reported); volume_24h_usd is null: the contract field is rolling 24h USD volume and Yahoo's keyless chart carries only the latest regular session (reported separately in metrics); Yahoo's own market-cap endpoints are crumb-gated, so the cap is derived, not copied",
     price_usd: price, market_time: marketTime, shares_outstanding: shares.val,
     shares_as_of: shares.end, shares_filed: shares.filed, shares_accession: shares.accn,
@@ -290,15 +300,15 @@ async function financialData(query: Record<string, string | undefined>): Promise
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
   const answer = `${quoteStale ? "STALE CACHED QUOTE, not current market data. " : ""}${ticker} market cap: $${cap.toLocaleString("en-US")}, derived as the Yahoo regular-market price ($${price}, exchange time ${marketTime}) x ${shares.val.toLocaleString("en-US")} shares outstanding reported to the SEC as of ${shares.end} (filed ${shares.filed}, accession ${shares.accn}). ` +
-    (sessionVolumeUsd !== null ? `Rolling 24h USD volume is not served (the keyless source carries only the latest regular session: $${sessionVolumeUsd.toLocaleString("en-US")} in that session). ` : "Volume is not served: the price source carried none. ") +
-    `The cap is derived from two named sources, not copied from a vendor; the quote may be delayed. P/E, revenue, net income and EPS are not served: those figures are not present in the retrieved shares/price records.`;
+    (sessionVolumeUsd !== null ? `Rolling 24h USD volume is not served (the keyless source carries only the latest regular session estimate: $${sessionVolumeUsd.toLocaleString("en-US")}, current price times session shares, not actual dollar turnover). ` : "Volume is not served: the price source carried none. ") +
+    `The cap is derived from two named sources, not copied from a vendor; the quote may be delayed. Annual SEC revenue, net income and total assets are separately reported in structured metrics when available, each with its own period and filing date. P/E and EPS are not asserted.`;
   return envelope(INTENT, {
     asset: ticker, asset_type: "equity", symbol: ticker, name: row.title, resolved_name: row.title, market_cap_usd: cap, volume_24h_usd: volumeUsd,
-    metrics: [`shares_outstanding=${shares.val} as of ${shares.end} (filed ${shares.filed}, ${shares.accn})`, `price_usd=${price} at ${marketTime}`, "derivation=price x shares outstanding",
-      `latest_regular_session_volume_usd=${sessionVolumeUsd ?? "none"} (not rolling 24h)`].join("; "),
+    metrics:[`shares_outstanding=${shares.val} as of ${shares.end} (filed ${shares.filed})`,`price_usd=${price} at ${marketTime}`,'market_cap=price x shares outstanding (mixed-age estimate)',`latest_regular_session.volume_usd_estimate=${sessionVolumeUsd??'unavailable'}; method=current price x regular-session shares, not actual dollar turnover or rolling24h`,...Object.entries(annualPublic).map(([key,value])=>{const v=value as any,f=v.fact;return f?`${key}=${f.value_usd} USD; period=${f.period_start??'instant'} to ${f.period_end}; filed=${f.filed}; concept=${f.concept}`:`${key}=${v.status}`;})].join('; '),
+    structured_metrics:structuredMetrics,
     sec_observations:secObservations,
     as_of: quote.fetchedAt, stale: anyStale, quote_stale: quoteStale, resolution_observation: resolutionEvidence, quote_fetched_at: quote.fetchedAt, quote_age_seconds: quoteAgeSeconds, ...(anyStale ? {stale_reason:staleReason}:{}),
-  }, receipt, { answer: (searchStale ? `STALE CACHED NAME-TO-TICKER RESOLUTION. Original search acquired ${searchObservation!.fetchedAt}, age ${resolutionEvidence!.age_seconds}s; ${searchObservation!.staleReason}; revalidated against the bounded-cache SEC index, not a fresh search. ` : "") + answer + ` SEC company index acquired ${indexObservation.fetchedAt} (cached up to1hour); shares acquired ${sharesObservation.fetchedAt} (cached up to15minutes). Mixed-age derivation, no source timestamp advanced by cache reuse. Quote acquired ${quote.fetchedAt}, age ${quoteAgeSeconds}s; exchange time ${marketTime}. ${quoteStale ? quote.staleReason + "; original exact quote retained; SEC shares acquired independently at their disclosed timestamp, mixed-age derivation, no price estimated or updated." : "Quote may be cached up to5minutes."}`, verdict: anyStale ? "stale" : "verified", confidence: anyStale ? 0.5 : 0.85,
+  }, receipt, { answer: (searchStale ? `STALE CACHED NAME-TO-TICKER RESOLUTION. Original search acquired ${searchObservation!.fetchedAt}, age ${resolutionEvidence!.age_seconds}s; ${searchStaleReason}; revalidated against the bounded-cache SEC index, not a fresh search. ` : "") + answer + ` SEC company index acquired ${indexObservation.fetchedAt} (cached up to1hour); shares acquired ${sharesObservation.fetchedAt} (cached up to15minutes). Mixed-age derivation, no source timestamp advanced by cache reuse. Quote acquired ${quote.fetchedAt}, age ${quoteAgeSeconds}s; exchange time ${marketTime}. ${quoteStale ? quoteStaleReason + "; original exact quote retained; SEC shares acquired independently at their disclosed timestamp, mixed-age derivation, no price estimated or updated." : "Quote may be cached up to5minutes."}`, verdict: anyStale ? "stale" : "verified", confidence: anyStale ? 0.5 : 0.85,
     source: `SEC EDGAR (${TICKERS_URL} + companyconcept) + Yahoo chart; fetched ${fetchedAt}` });
 }
 

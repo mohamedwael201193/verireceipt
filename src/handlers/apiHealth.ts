@@ -4,7 +4,7 @@
 // receipted. Answers ONLY what was measured from this server's vantage:
 // status code, latency, whether the target answered at all. SSRF
 // hardening lives in ssrfGuard.ts (public hosts only, no redirects,
-// strict timeout, one check per target per minute).
+// strict timeout, exact-URL reuse within one minute; four fresh paths per host per minute).
 import {diagnosticErrorCode} from '../core/requestMetrics';
 import { upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, sha256Hex } from "../core/receipt";
