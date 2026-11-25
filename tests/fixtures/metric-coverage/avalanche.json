@@ -1,0 +1,389 @@
+{
+  "chain": "avalanche",
+  "address": "0x0000000000000000000000000000000000000000",
+  "block": "101368133",
+  "sources": [
+    {
+      "url": "https://api.avax.network/ext/bc/C/rpc",
+      "raw": [
+        "{\"result\":\"0xa86a\",\"id\":1,\"jsonrpc\":\"2.0\"}",
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"baseFeePerGas\":\"0x1caf8287e\",\"blobGasUsed\":\"0x0\",\"blockExtraData\":\"0x\",\"blockGasCost\":\"0x0\",\"difficulty\":\"0x1\",\"excessBlobGas\":\"0x0\",\"extDataGasUsed\":\"0x0\",\"extDataHash\":\"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",\"extraData\":\"0x000000000000\",\"gasLimit\":\"0x4c4b400\",\"gasUsed\":\"0x2e18bf\",\"hash\":\"0x30f3fb0edf8d696550bc64fbfa70dcf7f01ba18aacb94a9368eeb5de64a31f64\",\"logsBloom\":\"0x0000000004000000000000000000000144000004000480002000084000000000000040000000000000508000000400000008000000042882000002000080000000008000004000080000040c000000000000000000080000000000008000140000000001000000100000400304000000002000400000010080400012000980012000030008000000080000010000000000100000000000000200000000400000000000000390000080000000000000000000001200004021100000000040000020000002000000200000000000000000000000000000002000400080800000000000200000008000000000100008000000041080000000000001000000000002\",\"minDelayExcess\":\"0x68d13a\",\"minPriceExponent\":\"0x83378b98482090ea\",\"miner\":\"0x0100000000000000000000000000000000000000\",\"mixHash\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"nonce\":\"0x0000000000000000\",\"number\":\"0x60ac1a9\",\"parentBeaconBlockRoot\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"parentHash\":\"0xe5736fb0b702558db0168b9f88d6a49bdc72fb8e35c00e8fd85578508dab5744\",\"receiptsRoot\":\"0x84f520add1f9e8789175795089b6c0a4e21a7d0aed90e6893b9b7ca173ca92f4\",\"settledExcess\":\"0x1d7db00b9\",\"settledGasNumerator\":\"0xb8d5f\",\"settledGasUnix\":\"0x6b07183b\",\"settledHeight\":\"0x60ac1a6\",\"sha3Uncles\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"size\":\"0x1587\",\"stateRoot\":\"0xd233a71d0a43174cc39f63cbb4266c1781dd2665419b1ad43b533b3953c04832\",\"targetExponent\":\"0x2c5c860\",\"timestamp\":\"0x6b071840\",\"timestampMilliseconds\":\"0x1a213b6bcbd\",\"totalDifficulty\":\"0x0\",\"transactions\":[\"0x1be03751d19ffdc949dfa9adf0b9a2edb43433d3e470cb94c9daf5c6386ebdc5\",\"0x39364c450868ea638f8861805ad3a26ab4888b9cfdc9605acc6a6e57d14c24be\",\"0xe7ce03ff8f0f20995fa1d28ab8ba632369b0ecf74ced5e7990afc5051caa1173\",\"0xe2bfbe6e4f5c809a80f472f7e9c06dcedf6fb56f6e0e04227569d8526b71a49d\",\"0x25e9a87c7fddc697b910d461a7e48e61d8eb67e5b42adf1bf606ff13807c25d0\",\"0xd2efcbb72a2a6e551495d9f4425ec9f549cf1ffcba3cf05df4b6f5fa37d4b5d9\",\"0xfb9a6352624eace8d3265c09e0966371c6c14a92f58a5975db6af044ba4d8f89\",\"0x3574fbe4ffa6f35fdda345742a863640ba92bbfd9d95b7a58e62d605f583f516\",\"0x9cac4910e779315afd2e77b1fd10863d7dd586ec8e47d24fcf7a88901a21e3e7\",\"0xcfa5d22ee647ef5747a06997acb7d985ea5252dc792b545104d84f837494aa2c\",\"0xd3d99c5e221fe1c205bdb1bee39b61e2a02b31a2654dc1cda34443b5832867bb\",\"0x0c702765fe892c7ab88cc14d4a795639961a99c3da87f5efdaaf16c76cfae704\",\"0xcce210a2c671fe320650741902a594e1b9961855de0b5c8a2617cd3fbbb8abd7\"],\"transactionsRoot\":\"0x2db2b0a940c460787fc515ccb2ef92d6b729edb5726de2c5f962c512b93cd682\",\"uncles\":[]}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"baseFeePerGas\":\"0x1bf08eb00\",\"blobGasUsed\":\"0x0\",\"blockExtraData\":\"0x\",\"blockGasCost\":\"0x0\",\"difficulty\":\"0x1\",\"excessBlobGas\":\"0x0\",\"extDataGasUsed\":\"0x0\",\"extDataHash\":\"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",\"extraData\":\"0x000000000000\",\"gasLimit\":\"0x4c4b400\",\"gasUsed\":\"0xfde8\",\"hash\":\"0xd36bc201cf40f00c606d03e5d700416cffdbe13f2fb6fa989fe4802a03bd5a36\",\"logsBloom\":\"0x00000842000000000c000440010000210c0000042004010020101040000000800000400000080020095086000000000000180004040828000400022068200020000080002042041800600408040208000200000000180020003000000004088000062000000008c0400000000c800000040040008000010080040092000900002000000018010000440000010100000010900050100000100000c0021610000002080000409010a008024000000000010000000208000001804000500c0000808020000a0004002000900004508002000001081000000008004000000004080040102040000000008040000201005440000002800404800a0801000000000022\",\"minDelayExcess\":\"0x68d13a\",\"minPriceExponent\":\"0x83378b98482090ea\",\"miner\":\"0x0100000000000000000000000000000000000000\",\"mixHash\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"nonce\":\"0x0000000000000000\",\"number\":\"0x60ac145\",\"parentBeaconBlockRoot\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"parentHash\":\"0xfb732fda1ebf43d47eeb65eeeebda550f767c350cfe94f9b38bf5ad210d0d5a0\",\"receiptsRoot\":\"0xdb5d3ea62a43065d692dc2fb85044f5f4a0f496195427eb1d5f8e4e01c5f3c5c\",\"settledExcess\":\"0x1d7b757c5\",\"settledGasNumerator\":\"0x465bf7\",\"settledGasUnix\":\"0x6b0717e4\",\"settledHeight\":\"0x60ac13e\",\"sha3Uncles\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"size\":\"0x31a\",\"stateRoot\":\"0xb654daaa65a759aeed0001fa48367e457eb19ff2f032a13d00c7705776182d1c\",\"targetExponent\":\"0x2c5c860\",\"timestamp\":\"0x6b0717e9\",\"timestampMilliseconds\":\"0x1a213b568d1\",\"totalDifficulty\":\"0x0\",\"transactions\":[\"0xb1ce49837b937a3b5255c5b5ea116210eb6ec0c9bf296b91c1a579165f878ee2\"],\"transactionsRoot\":\"0xfbbb22d89c6ab18d19f5a8ca683e766e60f9a0eea2581225bfe6118de05f4312\",\"uncles\":[]}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x1c618c69cdc692a26a\"}",
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0\"}",
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"baseFeePerGas\":\"0x1bf08eb00\",\"blobGasUsed\":\"0x0\",\"blockExtraData\":\"0x\",\"blockGasCost\":\"0x0\",\"difficulty\":\"0x1\",\"excessBlobGas\":\"0x0\",\"extDataGasUsed\":\"0x0\",\"extDataHash\":\"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",\"extraData\":\"0x000000000000\",\"gasLimit\":\"0x4c4b400\",\"gasUsed\":\"0xfde8\",\"hash\":\"0xd36bc201cf40f00c606d03e5d700416cffdbe13f2fb6fa989fe4802a03bd5a36\",\"logsBloom\":\"0x00000842000000000c000440010000210c0000042004010020101040000000800000400000080020095086000000000000180004040828000400022068200020000080002042041800600408040208000200000000180020003000000004088000062000000008c0400000000c800000040040008000010080040092000900002000000018010000440000010100000010900050100000100000c0021610000002080000409010a008024000000000010000000208000001804000500c0000808020000a0004002000900004508002000001081000000008004000000004080040102040000000008040000201005440000002800404800a0801000000000022\",\"minDelayExcess\":\"0x68d13a\",\"minPriceExponent\":\"0x83378b98482090ea\",\"miner\":\"0x0100000000000000000000000000000000000000\",\"mixHash\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"nonce\":\"0x0000000000000000\",\"number\":\"0x60ac145\",\"parentBeaconBlockRoot\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"parentHash\":\"0xfb732fda1ebf43d47eeb65eeeebda550f767c350cfe94f9b38bf5ad210d0d5a0\",\"receiptsRoot\":\"0xdb5d3ea62a43065d692dc2fb85044f5f4a0f496195427eb1d5f8e4e01c5f3c5c\",\"settledExcess\":\"0x1d7b757c5\",\"settledGasNumerator\":\"0x465bf7\",\"settledGasUnix\":\"0x6b0717e4\",\"settledHeight\":\"0x60ac13e\",\"sha3Uncles\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"size\":\"0x31a\",\"stateRoot\":\"0xb654daaa65a759aeed0001fa48367e457eb19ff2f032a13d00c7705776182d1c\",\"targetExponent\":\"0x2c5c860\",\"timestamp\":\"0x6b0717e9\",\"timestampMilliseconds\":\"0x1a213b568d1\",\"totalDifficulty\":\"0x0\",\"transactions\":[\"0xb1ce49837b937a3b5255c5b5ea116210eb6ec0c9bf296b91c1a579165f878ee2\"],\"transactionsRoot\":\"0xfbbb22d89c6ab18d19f5a8ca683e766e60f9a0eea2581225bfe6118de05f4312\",\"uncles\":[]}}"
+      ],
+      "observations": [
+        {
+          "captured_at": "2026-11-25T17:18:01.048Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "sha256": "44ea664f8d84c21b03c48843e8bc21887f869f5eb40154a88147a7bba467ab58",
+          "bytes": 42,
+          "headers": {
+            "content-length": "42",
+            "content-type": "application/json;charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:18:01 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:01.152Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "sha256": "e703f2ff97017273deb4841ce0ec2d020d130c29e403e4609dadf5631760a8be",
+          "bytes": 2893,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:18:01 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:01.174Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x60ac145",
+              false
+            ]
+          },
+          "status": 200,
+          "sha256": "a1de1f5bd606489c6bb75e0dca382cfdb2d69fdc2a423fc6bd7198c51cf7a461",
+          "bytes": 2063,
+          "headers": {
+            "content-type": "application/json;charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:18:01 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:01.191Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x60ac145"
+            ]
+          },
+          "status": 200,
+          "sha256": "6f17bc12fe4ef2ee5b2707b572817554cd9d4917eee55f18a709f42943953952",
+          "bytes": 56,
+          "headers": {
+            "content-type": "application/json;charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:18:01 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:01.209Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x60ac145"
+            ]
+          },
+          "status": 200,
+          "sha256": "b0b17a2167550f78381234d8284565462e60c99813ae88d7dc4f310662d3f65c",
+          "bytes": 39,
+          "headers": {
+            "content-length": "39",
+            "content-type": "application/json;charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:18:01 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:01.232Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x60ac145",
+              false
+            ]
+          },
+          "status": 200,
+          "sha256": "a1de1f5bd606489c6bb75e0dca382cfdb2d69fdc2a423fc6bd7198c51cf7a461",
+          "bytes": 2063,
+          "headers": {
+            "content-type": "application/json;charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:18:01 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "url": "https://avalanche.drpc.org",
+      "raw": [
+        "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0xa86a\"}",
+        "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"baseFeePerGas\":\"0x1caf8287e\",\"blobGasUsed\":\"0x0\",\"blockExtraData\":\"0x\",\"blockGasCost\":\"0x0\",\"difficulty\":\"0x1\",\"excessBlobGas\":\"0x0\",\"extDataGasUsed\":\"0x0\",\"extDataHash\":\"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",\"extraData\":\"0x000000000000\",\"gasLimit\":\"0x4c4b400\",\"gasUsed\":\"0x2e18bf\",\"hash\":\"0x30f3fb0edf8d696550bc64fbfa70dcf7f01ba18aacb94a9368eeb5de64a31f64\",\"logsBloom\":\"0x0000000004000000000000000000000144000004000480002000084000000000000040000000000000508000000400000008000000042882000002000080000000008000004000080000040c000000000000000000080000000000008000140000000001000000100000400304000000002000400000010080400012000980012000030008000000080000010000000000100000000000000200000000400000000000000390000080000000000000000000001200004021100000000040000020000002000000200000000000000000000000000000002000400080800000000000200000008000000000100008000000041080000000000001000000000002\",\"minDelayExcess\":\"0x68d13a\",\"minPriceExponent\":\"0x83378b98482090ea\",\"miner\":\"0x0100000000000000000000000000000000000000\",\"mixHash\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"nonce\":\"0x0000000000000000\",\"number\":\"0x60ac1a9\",\"parentBeaconBlockRoot\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"parentHash\":\"0xe5736fb0b702558db0168b9f88d6a49bdc72fb8e35c00e8fd85578508dab5744\",\"receiptsRoot\":\"0x84f520add1f9e8789175795089b6c0a4e21a7d0aed90e6893b9b7ca173ca92f4\",\"settledExcess\":\"0x1d7db00b9\",\"settledGasNumerator\":\"0xb8d5f\",\"settledGasUnix\":\"0x6b07183b\",\"settledHeight\":\"0x60ac1a6\",\"sha3Uncles\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"size\":\"0x1587\",\"stateRoot\":\"0xd233a71d0a43174cc39f63cbb4266c1781dd2665419b1ad43b533b3953c04832\",\"targetExponent\":\"0x2c5c860\",\"timestamp\":\"0x6b071840\",\"timestampMilliseconds\":\"0x1a213b6bcbd\",\"totalDifficulty\":\"0x0\",\"transactions\":[\"0x1be03751d19ffdc949dfa9adf0b9a2edb43433d3e470cb94c9daf5c6386ebdc5\",\"0x39364c450868ea638f8861805ad3a26ab4888b9cfdc9605acc6a6e57d14c24be\",\"0xe7ce03ff8f0f20995fa1d28ab8ba632369b0ecf74ced5e7990afc5051caa1173\",\"0xe2bfbe6e4f5c809a80f472f7e9c06dcedf6fb56f6e0e04227569d8526b71a49d\",\"0x25e9a87c7fddc697b910d461a7e48e61d8eb67e5b42adf1bf606ff13807c25d0\",\"0xd2efcbb72a2a6e551495d9f4425ec9f549cf1ffcba3cf05df4b6f5fa37d4b5d9\",\"0xfb9a6352624eace8d3265c09e0966371c6c14a92f58a5975db6af044ba4d8f89\",\"0x3574fbe4ffa6f35fdda345742a863640ba92bbfd9d95b7a58e62d605f583f516\",\"0x9cac4910e779315afd2e77b1fd10863d7dd586ec8e47d24fcf7a88901a21e3e7\",\"0xcfa5d22ee647ef5747a06997acb7d985ea5252dc792b545104d84f837494aa2c\",\"0xd3d99c5e221fe1c205bdb1bee39b61e2a02b31a2654dc1cda34443b5832867bb\",\"0x0c702765fe892c7ab88cc14d4a795639961a99c3da87f5efdaaf16c76cfae704\",\"0xcce210a2c671fe320650741902a594e1b9961855de0b5c8a2617cd3fbbb8abd7\"],\"transactionsRoot\":\"0x2db2b0a940c460787fc515ccb2ef92d6b729edb5726de2c5f962c512b93cd682\",\"uncles\":[]}}",
+        "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"baseFeePerGas\":\"0x1bf08eb00\",\"blobGasUsed\":\"0x0\",\"blockExtraData\":\"0x\",\"blockGasCost\":\"0x0\",\"difficulty\":\"0x1\",\"excessBlobGas\":\"0x0\",\"extDataGasUsed\":\"0x0\",\"extDataHash\":\"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",\"extraData\":\"0x000000000000\",\"gasLimit\":\"0x4c4b400\",\"gasUsed\":\"0xfde8\",\"hash\":\"0xd36bc201cf40f00c606d03e5d700416cffdbe13f2fb6fa989fe4802a03bd5a36\",\"logsBloom\":\"0x00000842000000000c000440010000210c0000042004010020101040000000800000400000080020095086000000000000180004040828000400022068200020000080002042041800600408040208000200000000180020003000000004088000062000000008c0400000000c800000040040008000010080040092000900002000000018010000440000010100000010900050100000100000c0021610000002080000409010a008024000000000010000000208000001804000500c0000808020000a0004002000900004508002000001081000000008004000000004080040102040000000008040000201005440000002800404800a0801000000000022\",\"minDelayExcess\":\"0x68d13a\",\"minPriceExponent\":\"0x83378b98482090ea\",\"miner\":\"0x0100000000000000000000000000000000000000\",\"mixHash\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"nonce\":\"0x0000000000000000\",\"number\":\"0x60ac145\",\"parentBeaconBlockRoot\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"parentHash\":\"0xfb732fda1ebf43d47eeb65eeeebda550f767c350cfe94f9b38bf5ad210d0d5a0\",\"receiptsRoot\":\"0xdb5d3ea62a43065d692dc2fb85044f5f4a0f496195427eb1d5f8e4e01c5f3c5c\",\"settledExcess\":\"0x1d7b757c5\",\"settledGasNumerator\":\"0x465bf7\",\"settledGasUnix\":\"0x6b0717e4\",\"settledHeight\":\"0x60ac13e\",\"sha3Uncles\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"size\":\"0x31a\",\"stateRoot\":\"0xb654daaa65a759aeed0001fa48367e457eb19ff2f032a13d00c7705776182d1c\",\"targetExponent\":\"0x2c5c860\",\"timestamp\":\"0x6b0717e9\",\"timestampMilliseconds\":\"0x1a213b568d1\",\"totalDifficulty\":\"0x0\",\"transactions\":[\"0xb1ce49837b937a3b5255c5b5ea116210eb6ec0c9bf296b91c1a579165f878ee2\"],\"transactionsRoot\":\"0xfbbb22d89c6ab18d19f5a8ca683e766e60f9a0eea2581225bfe6118de05f4312\",\"uncles\":[]}}",
+        "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x1c618c69cdc692a26a\"}",
+        "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0\"}",
+        "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"baseFeePerGas\":\"0x1bf08eb00\",\"blobGasUsed\":\"0x0\",\"blockExtraData\":\"0x\",\"blockGasCost\":\"0x0\",\"difficulty\":\"0x1\",\"excessBlobGas\":\"0x0\",\"extDataGasUsed\":\"0x0\",\"extDataHash\":\"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",\"extraData\":\"0x000000000000\",\"gasLimit\":\"0x4c4b400\",\"gasUsed\":\"0xfde8\",\"hash\":\"0xd36bc201cf40f00c606d03e5d700416cffdbe13f2fb6fa989fe4802a03bd5a36\",\"logsBloom\":\"0x00000842000000000c000440010000210c0000042004010020101040000000800000400000080020095086000000000000180004040828000400022068200020000080002042041800600408040208000200000000180020003000000004088000062000000008c0400000000c800000040040008000010080040092000900002000000018010000440000010100000010900050100000100000c0021610000002080000409010a008024000000000010000000208000001804000500c0000808020000a0004002000900004508002000001081000000008004000000004080040102040000000008040000201005440000002800404800a0801000000000022\",\"minDelayExcess\":\"0x68d13a\",\"minPriceExponent\":\"0x83378b98482090ea\",\"miner\":\"0x0100000000000000000000000000000000000000\",\"mixHash\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"nonce\":\"0x0000000000000000\",\"number\":\"0x60ac145\",\"parentBeaconBlockRoot\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"parentHash\":\"0xfb732fda1ebf43d47eeb65eeeebda550f767c350cfe94f9b38bf5ad210d0d5a0\",\"receiptsRoot\":\"0xdb5d3ea62a43065d692dc2fb85044f5f4a0f496195427eb1d5f8e4e01c5f3c5c\",\"settledExcess\":\"0x1d7b757c5\",\"settledGasNumerator\":\"0x465bf7\",\"settledGasUnix\":\"0x6b0717e4\",\"settledHeight\":\"0x60ac13e\",\"sha3Uncles\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"size\":\"0x31a\",\"stateRoot\":\"0xb654daaa65a759aeed0001fa48367e457eb19ff2f032a13d00c7705776182d1c\",\"targetExponent\":\"0x2c5c860\",\"timestamp\":\"0x6b0717e9\",\"timestampMilliseconds\":\"0x1a213b568d1\",\"totalDifficulty\":\"0x0\",\"transactions\":[\"0xb1ce49837b937a3b5255c5b5ea116210eb6ec0c9bf296b91c1a579165f878ee2\"],\"transactionsRoot\":\"0xfbbb22d89c6ab18d19f5a8ca683e766e60f9a0eea2581225bfe6118de05f4312\",\"uncles\":[]}}"
+      ],
+      "observations": [
+        {
+          "captured_at": "2026-11-25T17:18:01.369Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "sha256": "431cce5c936d147d144c6ec1d892266cf78d77c55f26faf09b00fc5b15cdad08",
+          "bytes": 42,
+          "headers": {
+            "content-length": "46",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:18:01 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:01.438Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "sha256": "45060c52839876142737161c533765d8fa7762396368ba8fa5793aea52c32515",
+          "bytes": 2893,
+          "headers": {
+            "content-length": "1417",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:18:01 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:01.494Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x60ac145",
+              false
+            ]
+          },
+          "status": 200,
+          "sha256": "b219757eff3f93ee950820cd6ed1571d9368c6c389dafefd84515f8630221815",
+          "bytes": 2063,
+          "headers": {
+            "content-length": "1032",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:18:01 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:01.547Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x60ac145"
+            ]
+          },
+          "status": 200,
+          "sha256": "143349dc820c529cc3f6264e0b0645ce0a58bfe401593bd8ba50810ff11fb861",
+          "bytes": 56,
+          "headers": {
+            "content-length": "60",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:18:01 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:01.604Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x60ac145"
+            ]
+          },
+          "status": 200,
+          "sha256": "29d0810d962dcae9ba2b6e2f513b2574094d4afc8d8b3a7ac19b6ef3e8ed8d6a",
+          "bytes": 39,
+          "headers": {
+            "content-length": "43",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:18:01 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:01.655Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x60ac145",
+              false
+            ]
+          },
+          "status": 200,
+          "sha256": "b219757eff3f93ee950820cd6ed1571d9368c6c389dafefd84515f8630221815",
+          "bytes": 2063,
+          "headers": {
+            "content-length": "1032",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:18:01 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "url": "https://avalanche-c-chain-rpc.publicnode.com",
+      "raw": [
+        "{\"jsonrpc\":\"2.0\",\"result\":\"0xa86a\",\"id\":1}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"baseFeePerGas\":\"0x1caf8287e\",\"blobGasUsed\":\"0x0\",\"blockExtraData\":\"0x\",\"blockGasCost\":\"0x0\",\"difficulty\":\"0x1\",\"excessBlobGas\":\"0x0\",\"extDataGasUsed\":\"0x0\",\"extDataHash\":\"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",\"extraData\":\"0x000000000000\",\"gasLimit\":\"0x4c4b400\",\"gasUsed\":\"0x2e18bf\",\"hash\":\"0x30f3fb0edf8d696550bc64fbfa70dcf7f01ba18aacb94a9368eeb5de64a31f64\",\"logsBloom\":\"0x0000000004000000000000000000000144000004000480002000084000000000000040000000000000508000000400000008000000042882000002000080000000008000004000080000040c000000000000000000080000000000008000140000000001000000100000400304000000002000400000010080400012000980012000030008000000080000010000000000100000000000000200000000400000000000000390000080000000000000000000001200004021100000000040000020000002000000200000000000000000000000000000002000400080800000000000200000008000000000100008000000041080000000000001000000000002\",\"minDelayExcess\":\"0x68d13a\",\"minPriceExponent\":\"0x83378b98482090ea\",\"miner\":\"0x0100000000000000000000000000000000000000\",\"mixHash\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"nonce\":\"0x0000000000000000\",\"number\":\"0x60ac1a9\",\"parentBeaconBlockRoot\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"parentHash\":\"0xe5736fb0b702558db0168b9f88d6a49bdc72fb8e35c00e8fd85578508dab5744\",\"receiptsRoot\":\"0x84f520add1f9e8789175795089b6c0a4e21a7d0aed90e6893b9b7ca173ca92f4\",\"settledExcess\":\"0x1d7db00b9\",\"settledGasNumerator\":\"0xb8d5f\",\"settledGasUnix\":\"0x6b07183b\",\"settledHeight\":\"0x60ac1a6\",\"sha3Uncles\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"size\":\"0x1587\",\"stateRoot\":\"0xd233a71d0a43174cc39f63cbb4266c1781dd2665419b1ad43b533b3953c04832\",\"targetExponent\":\"0x2c5c860\",\"timestamp\":\"0x6b071840\",\"timestampMilliseconds\":\"0x1a213b6bcbd\",\"totalDifficulty\":\"0x0\",\"transactions\":[\"0x1be03751d19ffdc949dfa9adf0b9a2edb43433d3e470cb94c9daf5c6386ebdc5\",\"0x39364c450868ea638f8861805ad3a26ab4888b9cfdc9605acc6a6e57d14c24be\",\"0xe7ce03ff8f0f20995fa1d28ab8ba632369b0ecf74ced5e7990afc5051caa1173\",\"0xe2bfbe6e4f5c809a80f472f7e9c06dcedf6fb56f6e0e04227569d8526b71a49d\",\"0x25e9a87c7fddc697b910d461a7e48e61d8eb67e5b42adf1bf606ff13807c25d0\",\"0xd2efcbb72a2a6e551495d9f4425ec9f549cf1ffcba3cf05df4b6f5fa37d4b5d9\",\"0xfb9a6352624eace8d3265c09e0966371c6c14a92f58a5975db6af044ba4d8f89\",\"0x3574fbe4ffa6f35fdda345742a863640ba92bbfd9d95b7a58e62d605f583f516\",\"0x9cac4910e779315afd2e77b1fd10863d7dd586ec8e47d24fcf7a88901a21e3e7\",\"0xcfa5d22ee647ef5747a06997acb7d985ea5252dc792b545104d84f837494aa2c\",\"0xd3d99c5e221fe1c205bdb1bee39b61e2a02b31a2654dc1cda34443b5832867bb\",\"0x0c702765fe892c7ab88cc14d4a795639961a99c3da87f5efdaaf16c76cfae704\",\"0xcce210a2c671fe320650741902a594e1b9961855de0b5c8a2617cd3fbbb8abd7\"],\"transactionsRoot\":\"0x2db2b0a940c460787fc515ccb2ef92d6b729edb5726de2c5f962c512b93cd682\",\"uncles\":[]}}\n",
+        "{\"jsonrpc\":\"2.0\",\"result\":{\"baseFeePerGas\":\"0x1bf08eb00\",\"blobGasUsed\":\"0x0\",\"blockExtraData\":\"0x\",\"blockGasCost\":\"0x0\",\"difficulty\":\"0x1\",\"excessBlobGas\":\"0x0\",\"extDataGasUsed\":\"0x0\",\"extDataHash\":\"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",\"extraData\":\"0x000000000000\",\"gasLimit\":\"0x4c4b400\",\"gasUsed\":\"0xfde8\",\"hash\":\"0xd36bc201cf40f00c606d03e5d700416cffdbe13f2fb6fa989fe4802a03bd5a36\",\"logsBloom\":\"0x00000842000000000c000440010000210c0000042004010020101040000000800000400000080020095086000000000000180004040828000400022068200020000080002042041800600408040208000200000000180020003000000004088000062000000008c0400000000c800000040040008000010080040092000900002000000018010000440000010100000010900050100000100000c0021610000002080000409010a008024000000000010000000208000001804000500c0000808020000a0004002000900004508002000001081000000008004000000004080040102040000000008040000201005440000002800404800a0801000000000022\",\"minDelayExcess\":\"0x68d13a\",\"minPriceExponent\":\"0x83378b98482090ea\",\"miner\":\"0x0100000000000000000000000000000000000000\",\"mixHash\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"nonce\":\"0x0000000000000000\",\"number\":\"0x60ac145\",\"parentBeaconBlockRoot\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"parentHash\":\"0xfb732fda1ebf43d47eeb65eeeebda550f767c350cfe94f9b38bf5ad210d0d5a0\",\"receiptsRoot\":\"0xdb5d3ea62a43065d692dc2fb85044f5f4a0f496195427eb1d5f8e4e01c5f3c5c\",\"settledExcess\":\"0x1d7b757c5\",\"settledGasNumerator\":\"0x465bf7\",\"settledGasUnix\":\"0x6b0717e4\",\"settledHeight\":\"0x60ac13e\",\"sha3Uncles\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"size\":\"0x31a\",\"stateRoot\":\"0xb654daaa65a759aeed0001fa48367e457eb19ff2f032a13d00c7705776182d1c\",\"targetExponent\":\"0x2c5c860\",\"timestamp\":\"0x6b0717e9\",\"timestampMilliseconds\":\"0x1a213b568d1\",\"totalDifficulty\":\"0x0\",\"transactions\":[\"0xb1ce49837b937a3b5255c5b5ea116210eb6ec0c9bf296b91c1a579165f878ee2\"],\"transactionsRoot\":\"0xfbbb22d89c6ab18d19f5a8ca683e766e60f9a0eea2581225bfe6118de05f4312\",\"uncles\":[]},\"id\":1}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x1c618c69cdc692a26a\"}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0\"}\n",
+        "{\"jsonrpc\":\"2.0\",\"result\":{\"baseFeePerGas\":\"0x1bf08eb00\",\"blobGasUsed\":\"0x0\",\"blockExtraData\":\"0x\",\"blockGasCost\":\"0x0\",\"difficulty\":\"0x1\",\"excessBlobGas\":\"0x0\",\"extDataGasUsed\":\"0x0\",\"extDataHash\":\"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",\"extraData\":\"0x000000000000\",\"gasLimit\":\"0x4c4b400\",\"gasUsed\":\"0xfde8\",\"hash\":\"0xd36bc201cf40f00c606d03e5d700416cffdbe13f2fb6fa989fe4802a03bd5a36\",\"logsBloom\":\"0x00000842000000000c000440010000210c0000042004010020101040000000800000400000080020095086000000000000180004040828000400022068200020000080002042041800600408040208000200000000180020003000000004088000062000000008c0400000000c800000040040008000010080040092000900002000000018010000440000010100000010900050100000100000c0021610000002080000409010a008024000000000010000000208000001804000500c0000808020000a0004002000900004508002000001081000000008004000000004080040102040000000008040000201005440000002800404800a0801000000000022\",\"minDelayExcess\":\"0x68d13a\",\"minPriceExponent\":\"0x83378b98482090ea\",\"miner\":\"0x0100000000000000000000000000000000000000\",\"mixHash\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"nonce\":\"0x0000000000000000\",\"number\":\"0x60ac145\",\"parentBeaconBlockRoot\":\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"parentHash\":\"0xfb732fda1ebf43d47eeb65eeeebda550f767c350cfe94f9b38bf5ad210d0d5a0\",\"receiptsRoot\":\"0xdb5d3ea62a43065d692dc2fb85044f5f4a0f496195427eb1d5f8e4e01c5f3c5c\",\"settledExcess\":\"0x1d7b757c5\",\"settledGasNumerator\":\"0x465bf7\",\"settledGasUnix\":\"0x6b0717e4\",\"settledHeight\":\"0x60ac13e\",\"sha3Uncles\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"size\":\"0x31a\",\"stateRoot\":\"0xb654daaa65a759aeed0001fa48367e457eb19ff2f032a13d00c7705776182d1c\",\"targetExponent\":\"0x2c5c860\",\"timestamp\":\"0x6b0717e9\",\"timestampMilliseconds\":\"0x1a213b568d1\",\"totalDifficulty\":\"0x0\",\"transactions\":[\"0xb1ce49837b937a3b5255c5b5ea116210eb6ec0c9bf296b91c1a579165f878ee2\"],\"transactionsRoot\":\"0xfbbb22d89c6ab18d19f5a8ca683e766e60f9a0eea2581225bfe6118de05f4312\",\"uncles\":[]},\"id\":1}\n"
+      ],
+      "observations": [
+        {
+          "captured_at": "2026-11-25T17:18:01.835Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "sha256": "365c8f50ac2b8e672b53525e5bfc052fa805e55ddf41309f8f8bf6809bfb483d",
+          "bytes": 43,
+          "headers": {
+            "content-length": "43",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:18:01 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:02.025Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "sha256": "831a3f8aeb3804505851c9d0dd1291dd025bd62a429f47859cf32ac2f8e60db8",
+          "bytes": 2894,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:18:02 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:02.144Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x60ac145",
+              false
+            ]
+          },
+          "status": 200,
+          "sha256": "9c46c564e55967f0f7db7e7e49532ccbbe65cb4c9f9c21ea84608fb6b1800db7",
+          "bytes": 2064,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:18:02 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:02.262Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x60ac145"
+            ]
+          },
+          "status": 200,
+          "sha256": "fc40cc807d95247e8b4dbb0e0e5b30c7569a3ea4f8853dc158a3bb930079de7d",
+          "bytes": 57,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:18:02 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:02.387Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x60ac145"
+            ]
+          },
+          "status": 200,
+          "sha256": "b2f1f2440efe85b924be1f873fb1ccd6f3ef9c6bfeef3cfef6bb70ae6ddcb3fc",
+          "bytes": 40,
+          "headers": {
+            "content-length": "40",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:18:02 GMT"
+          }
+        },
+        {
+          "captured_at": "2026-11-25T17:18:02.516Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x60ac145",
+              false
+            ]
+          },
+          "status": 200,
+          "sha256": "9c46c564e55967f0f7db7e7e49532ccbbe65cb4c9f9c21ea84608fb6b1800db7",
+          "bytes": 2064,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:18:02 GMT"
+          }
+        }
+      ]
+    }
+  ]
+}

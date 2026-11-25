@@ -1,0 +1,31 @@
+{
+  "captured_at": "2026-11-25T17:18:07.780Z",
+  "scope": "Self-recorded read-only RPC responses, not independently authenticated",
+  "files": [
+    {
+      "file": "base.json",
+      "sha256": "715a00f3bb3d095ec30ba46580a8ba0a8e9ca0b9ba6c9ed9f6aedf240b629d06",
+      "bytes": 63402
+    },
+    {
+      "file": "optimism.json",
+      "sha256": "1788810ffac3e5e944c4f4a562402f2588d63bd05a75a816352cb4fde6e20ab4",
+      "bytes": 56438
+    },
+    {
+      "file": "bsc.json",
+      "sha256": "73f69b4eed3bb76e598c1517cf647f1071b182679e5dc05ca1316d722dd423bf",
+      "bytes": 102666
+    },
+    {
+      "file": "avalanche.json",
+      "sha256": "4b9674597740bc5061b191342a02834bb3ebdad6d9968ba118fd07aa7bbbc4f3",
+      "bytes": 34301
+    },
+    {
+      "file": "gnosis.json",
+      "sha256": "4eba7a51ab771fd2c432cb940e456751a0a2eddd93c10e767d4c04cf76faa36a",
+      "bytes": 79953
+    }
+  ]
+}

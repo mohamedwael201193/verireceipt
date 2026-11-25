@@ -6,12 +6,34 @@ import { saveReceipt } from '../core/storage';
 import { CHAIN_RPCS } from '../config/chains';
 import { normalizeChain } from './txLookup';
 import { ADDRESS_RE } from './tokenContracts';
+import {queryFallback} from '../core/queryFallback';
 /** Exact native-unit text for presentation only; canonical numeric Gwei is unchanged. */
 export function metricNativeText(wei: bigint): string {
     const fraction = (wei % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '');
     return `${wei / 10n ** 18n}${fraction ? '.' + fraction : ''}`;
 }
-const IDS: Record<string, string> = { ethereum: '0x1', polygon: '0x89', arbitrum: '0xa4b1' };
+const IDS: Record<string, string> = { ethereum: '0x1', polygon: '0x89', arbitrum: '0xa4b1', base:'0x2105', optimism:'0xa', bsc:'0x38', avalanche:'0xa86a', gnosis:'0x64' };
+const METRIC_RPCS:Record<string,string[]>={...CHAIN_RPCS,gnosis:['https://rpc.gnosischain.com','https://gnosis.drpc.org','https://gnosis-rpc.publicnode.com']};
+const NATIVE:Record<string,string>={polygon:'POL',bsc:'BNB',avalanche:'AVAX',gnosis:'xDAI'};
+class ArchiveUnavailable extends Error {constructor(readonly raw:string){super('archive state unavailable');}}
+export function metricQueryFallback(q:Record<string,string|undefined>){
+ const text=q.query??'';
+ const addresses=[...text.matchAll(/(?:^|[^a-z0-9])(0x[0-9a-f]{40})(?![a-z0-9])/gi)].map(m=>m[1]);
+ const explicitBlocks=[...text.matchAll(/\bblock\b\s*(\S*)/gi)].map(m=>m[1]);
+ const malformedBlock=explicitBlocks.some(value=>!/^\d+[?;!,]?$/.test(value));
+ const blocks=[...text.matchAll(/\bblock\s+(\d+)\b(?![.,]\d)/gi)].map(m=>m[1]);
+ const bare=[...text.replace(/0x[0-9a-f]+/gi,'').replace(/\bblock\s+\d+\b/gi,'').matchAll(/(?:^|\s)(\d{6,})(?![.,]\d)(?=\s|[.,;?!]|$)/g)].map(m=>m[1]);
+ const chains=[...text.matchAll(/\b(ethereum|mainnet|polygon|arbitrum|base|optimism|bsc|bnb|avalanche|gnosis)\b/gi)].map(m=>m[1].toLowerCase());
+ const explicitChains=[...text.matchAll(/\b(?:in|on)\s+([a-z][a-z0-9-]*)\b/gi)].map(m=>m[1].toLowerCase());
+ const unsupportedChain=explicitChains.some(c=>!['ethereum','mainnet','polygon','arbitrum','base','optimism','bsc','bnb','avalanche','gnosis'].includes(c));
+ const metrics=[...text.matchAll(/\b(transaction[ _-]+count|tx_count|nonce|transactions|balance)\b/gi)].map(m=>m[1].toLowerCase()==='balance'?'balance':'tx_count');
+ const remaining=text.replace(/\b(?:in|on)\s+[a-z][a-z0-9-]*\b/gi,'').replace(/0x[0-9a-f]+/gi,'').replace(/\bblock\s+[+-]?[\d.,]+/gi,'').replace(/\b\d{6,}\b/g,'').replace(/\b(transaction[ _-]+count|tx_count|nonce|transactions|balance|ethereum|mainnet|polygon|arbitrum|base|optimism|bsc|bnb|avalanche|gnosis)\b/gi,'').replace(/\b(the|a|an|of|on|at|for|address|account|wallet|what|is|was|verify|check|please|show|me|held|by|in|and)\b/gi,'').replace(/[\s?.,:;!]/g,'');
+ q=queryFallback(q,'address',()=>addresses.length>1?'invalid_address':addresses[0]);
+ q=queryFallback(q,'block',()=>malformedBlock||blocks.length+bare.length>1?'invalid_block':blocks[0]??bare[0]);
+ q=queryFallback(q,'chain',()=>unsupportedChain||chains.length>1||!!remaining&&q.metric!==undefined?'unsupported_chain':chains[0]);
+ q=queryFallback(q,'metric',()=>metrics.length>1||remaining?'unsupported_metric':metrics[0]);return q;
+}
+
 interface Leg {
     url: string;
     hash: string;
@@ -77,6 +99,7 @@ async function call(url: string, method: string, params: unknown[], deadline: nu
         diagnosticStage='bad_payload';
         const raw = Buffer.concat(parts).toString('utf8');
         const j = JSON.parse(raw);
+        if(j.jsonrpc==='2.0'&&j.id===1&&j.error&&!Object.hasOwn(j,'result')&&['eth_getBalance','eth_getTransactionCount'].includes(method)&&Number.isInteger(j.error.code)&&typeof j.error.message==='string'&&j.error.message.length<=500&&/archive requests require|missing trie node|no state found for block|unknown state|historical state.*unavailable|state.*pruned/i.test(j.error.message))throw new ArchiveUnavailable(raw);
         if (j.jsonrpc !== '2.0' || j.id !== 1 || j.error || !Object.hasOwn(j, 'result'))
             throw new Error('invalid RPC envelope');
         return { result: j.result, raw };
@@ -102,6 +125,7 @@ const qty = (x: unknown): bigint => { if (typeof x !== 'string' || !/^0x(?:0|[1-
 interface OverlapGroup { active: number; sawOverlap: boolean }
 const metricOverlaps = new Map<string,OverlapGroup>();
 export async function handleOnchainMetric(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+    query=metricQueryFallback(query);
     const address = query.address?.trim();
     if (!address || !ADDRESS_RE.test(address))
         throw badRequest('INVALID_ADDRESS', 'an explicit EVM address is required');
@@ -110,9 +134,9 @@ export async function handleOnchainMetric(query: Record<string, string | undefin
         throw badRequest('INVALID_BLOCK', 'block must be an integer from 0 to 1000000000000');
     const block = BigInt(b);
     const tag = '0x' + block.toString(16);
-    const chain = normalizeChain(query.chain ?? 'ethereum');
+    const chain = normalizeChain(query.chain?.trim().toLowerCase()==='bnb'?'bsc':query.chain ?? 'ethereum');
     if (!chain || !IDS[chain])
-        throw badRequest('UNSUPPORTED_CHAIN', 'supported chains: ethereum, polygon, arbitrum');
+        throw badRequest('UNSUPPORTED_CHAIN', 'supported chains: ethereum, polygon, arbitrum, base, optimism, bsc, avalanche, gnosis');
     const metric = query.metric ?? 'balance';
     if (!['balance', 'tx_count'].includes(metric))
         throw badRequest('INVALID_METRIC', 'metric must be balance or tx_count');
@@ -142,10 +166,11 @@ async function runMetricWorkflow(address:string,block:bigint,tag:string,chain:st
     const deadline = Date.now() + 9000;
     const legs: Leg[] = [];
     const errors: string[] = [];
+    const archiveEvidence:{url:string;raw:string}[]=[];
     let deadlineHit = false;
     const providerFailures: ProviderFailure[] = [];
     const diagnosticFailures:Array<{upstream_name:string;upstream_failure:FailureClass}>=[];
-    for (const url of CHAIN_RPCS[chain]) {
+    for (const url of METRIC_RPCS[chain]) {
         try {
             const raw: string[] = [];
             const request = async (m: string, p: unknown[]) => { const x = await call(url, m, p, deadline); raw.push(x.raw); return x.result; };
@@ -167,6 +192,7 @@ async function runMetricWorkflow(address:string,block:bigint,tag:string,chain:st
             legs.push({ url, hash: before.hash.toLowerCase(), balance: balance.toString(), nonce: nonce.toString(), raw });
         }
         catch (err) {
+            if(err instanceof ArchiveUnavailable)archiveEvidence.push({url,raw:err.raw});
             if (err instanceof MetricDeadline) deadlineHit = true;
             try{diagnosticFailures.push({upstream_name:metricUpstream(url),upstream_failure:err instanceof MetricProviderFailure?err.failureClass==='rate_limited'?'rate_limited':err.failureClass==='timeout'?'unreachable':'other':failureKind(err)});}catch{}
             providerFailures.push(err instanceof MetricProviderFailure ? err.failureClass : 'other');
@@ -184,12 +210,18 @@ async function runMetricWorkflow(address:string,block:bigint,tag:string,chain:st
         const wei = BigInt(w.balance);
         const balanceGwei = Number(wei / 1000000000n) + Number(wei % 1000000000n) / 1e9;
         const count = Number(w.nonce);
-        const nativeSymbol = chain === 'polygon' ? 'POL' : 'ETH';
+        const nativeSymbol = NATIVE[chain]??'ETH';
         const balanceSentence = `${address} held exactly ${metricNativeText(wei)} ${nativeSymbol} (${balanceGwei} Gwei) on ${chain} at finalized block ${block}.`;
         const evidence = JSON.stringify({ chain, address: address.toLowerCase(), block: block.toString(), block_hash: w.hash, balance_wei: w.balance, tx_count: w.nonce, sources: legs, unavailable_sources: errors });
-        const receipt = makeReceipt('ONCHAIN_METRIC_VERIFY_GENERAL', w.url, evidence, `${wins.length}/${CHAIN_RPCS[chain].length} same finalized block hash, balance and nonce`);
+        const receipt = makeReceipt('ONCHAIN_METRIC_VERIFY_GENERAL', w.url, evidence, `${wins.length}/${METRIC_RPCS[chain].length} same finalized block hash, balance and nonce`);
         await saveReceipt(receipt, evidence);
-        return withAnswerClass(envelope('ONCHAIN_METRIC_VERIFY_GENERAL', { address, chain, block: block.toString(), block_hash: w.hash, balance_gwei: balanceGwei, balance_wei: w.balance, tx_count: count, metric }, receipt, { answer: metric === 'balance' ? balanceSentence : `${address} had sent ${count} transactions (nonce) on ${chain} at finalized block ${block}. ${balanceSentence}`, verdict: 'verified', confidence: wins.length === CHAIN_RPCS[chain].length ? 1 : 0.95, source: `Block-pinned RPC agreement; ${w.url}; balance is Gwei, not ETH/POL; nonce is not received transfers.` }),'ONCHAIN_METRIC_VERIFY_GENERAL',{metric_kind:metric,leg:'quorum',result:'value',...providerDiagnostics(providerFailures,legs.length)});
+        return withAnswerClass(envelope('ONCHAIN_METRIC_VERIFY_GENERAL', { address, chain, block: block.toString(), block_hash: w.hash, balance_gwei: balanceGwei, balance_wei: w.balance, tx_count: count, metric }, receipt, { answer: metric === 'balance' ? balanceSentence : `${address} had sent ${count} transactions (nonce) on ${chain} at finalized block ${block}. ${balanceSentence}`, verdict: 'verified', confidence: wins.length === METRIC_RPCS[chain].length ? 1 : 0.95, source: `Block-pinned RPC agreement; ${w.url}; balance is Gwei (10^-9 native units); nonce is not received transfers.` }),'ONCHAIN_METRIC_VERIFY_GENERAL',{metric_kind:metric,leg:'quorum',result:'value',...providerDiagnostics(providerFailures,legs.length)});
+    }
+    if(archiveEvidence.length>=2&&archiveEvidence.length===errors.length&&legs.length<2){
+        const notice='Archive-block disclosure: the public RPC sources did not provide enough historical state for this exact block. No balance or transaction count is verified; unavailable is not zero.';
+        const evidence=JSON.stringify({chain,address:address.toLowerCase(),block:block.toString(),metric,reason_code:'archive_state_unavailable',archive_errors:archiveEvidence,partial_sources:legs});
+        const receipt=makeReceipt('ONCHAIN_METRIC_VERIFY_GENERAL',archiveEvidence[0].url,evidence,'archive state unavailable; no value quorum');await saveReceipt(receipt,evidence);
+        return withAnswerClass(envelope('ONCHAIN_METRIC_VERIFY_GENERAL',{address,chain,block:block.toString(),block_hash:null,balance_gwei:null,balance_wei:null,tx_count:null,metric,status:'no_data',reason_code:'archive_state_unavailable'},receipt,{answer:notice,verdict:'unverified',confidence:0,source:'Public block-pinned RPC archive availability only; no verified metric value'}),'ONCHAIN_METRIC_VERIFY_GENERAL',{metric_kind:metric,leg:'none',result:'null',full_leg_count:legs.length});
     }
     let refusalReason = deadlineHit ? 'deadline' : 'insufficient_providers';
     if (!deadlineHit && legs.length >= 2) {

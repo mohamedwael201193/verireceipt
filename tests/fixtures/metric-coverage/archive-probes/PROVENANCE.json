@@ -1,0 +1,2201 @@
+{
+  "captured_at": "2026-11-25T17:16:37.551Z",
+  "scope": "Self-recorded read-only RPC responses, recent finalized and archive-state probe; no independently authenticated provenance",
+  "results": [
+    {
+      "chain": "base",
+      "url": "https://base.drpc.org",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:29.721Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "base-1-0.json",
+          "sha256": "603e6c54211eac5fb5f3133ce0c8d52b375c58dcdfd80b3a3cea9d9b58b64a85",
+          "bytes": 42,
+          "headers": {
+            "content-length": "46",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:29 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:29.869Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "base-1-1.json",
+          "sha256": "bd4be3a423e1cb288aef9ceec8dc5913c59f90327f3b4dafb1409929d5878681",
+          "bytes": 6017,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:29 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:29.940Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x3b4bcff",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "base-1-2.json",
+          "sha256": "bd4be3a423e1cb288aef9ceec8dc5913c59f90327f3b4dafb1409929d5878681",
+          "bytes": 6017,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.015Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x3b4bcff"
+            ]
+          },
+          "status": 200,
+          "file": "base-1-3.json",
+          "sha256": "2cd4c35fc9682948e379a4a42f502f5576b561ca8014b62e53ba9e852800dae6",
+          "bytes": 54,
+          "headers": {
+            "content-length": "58",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.093Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x3b4bcff"
+            ]
+          },
+          "status": 200,
+          "file": "base-1-4.json",
+          "sha256": "3b70bf6de4196d8e39b9a647b81c4012d2f45250b92e375bf72dab36bdfdb2a5",
+          "bytes": 39,
+          "headers": {
+            "content-length": "43",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.157Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x3b4bcff",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "base-1-5.json",
+          "sha256": "bd4be3a423e1cb288aef9ceec8dc5913c59f90327f3b4dafb1409929d5878681",
+          "bytes": 6017,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.222Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 200,
+          "file": "base-1-6.json",
+          "sha256": "29d0810d962dcae9ba2b6e2f513b2574094d4afc8d8b3a7ac19b6ef3e8ed8d6a",
+          "bytes": 39,
+          "headers": {
+            "content-length": "43",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "base",
+      "url": "https://mainnet.base.org",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:29.721Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "base-2-0.json",
+          "sha256": "395c4282d446999297cdcba9e50c3df13687008bc4eecc206a5d616be7f6d227",
+          "bytes": 42,
+          "headers": {
+            "content-length": "42",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:29 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:29.866Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "base-2-1.json",
+          "sha256": "2d61494073d51997e512bde987a42bc6be36a2c2eb53a8d35d6fc84347b3c745",
+          "bytes": 3808,
+          "headers": {
+            "content-length": "2119",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:29 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:29.979Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x3b4c41b",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "base-2-2.json",
+          "sha256": "2d61494073d51997e512bde987a42bc6be36a2c2eb53a8d35d6fc84347b3c745",
+          "bytes": 3808,
+          "headers": {
+            "content-length": "2119",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.056Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x3b4c41b"
+            ]
+          },
+          "status": 200,
+          "file": "base-2-3.json",
+          "sha256": "46bd65ccd5156c080d711b52df4e520977a3f42da508994b6d32ea2e70c70b3a",
+          "bytes": 54,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.131Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x3b4c41b"
+            ]
+          },
+          "status": 200,
+          "file": "base-2-4.json",
+          "sha256": "3810ba8bf7da558bbd986a9be98d6006d4f723ea10fc3507c2551d8406e57d9e",
+          "bytes": 39,
+          "headers": {
+            "content-length": "39",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.206Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x3b4c41b",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "base-2-5.json",
+          "sha256": "2d61494073d51997e512bde987a42bc6be36a2c2eb53a8d35d6fc84347b3c745",
+          "bytes": 3808,
+          "headers": {
+            "content-length": "2119",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.283Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 200,
+          "file": "base-2-6.json",
+          "sha256": "b0b17a2167550f78381234d8284565462e60c99813ae88d7dc4f310662d3f65c",
+          "bytes": 39,
+          "headers": {
+            "content-length": "39",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "base",
+      "url": "https://base-mainnet.public.blastapi.io",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:29.701Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "base-0-0.json",
+          "sha256": "395c4282d446999297cdcba9e50c3df13687008bc4eecc206a5d616be7f6d227",
+          "bytes": 42,
+          "headers": {
+            "content-length": "42",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:29 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:29.919Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "base-0-1.json",
+          "sha256": "9a5ff4b65aeeeae40194f952136bd0fd1f5931129fbecc7a02b99eb34ea86817",
+          "bytes": 3808,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.102Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x3b4c41b",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "base-0-2.json",
+          "sha256": "9a5ff4b65aeeeae40194f952136bd0fd1f5931129fbecc7a02b99eb34ea86817",
+          "bytes": 3808,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.228Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x3b4c41b"
+            ]
+          },
+          "status": 200,
+          "file": "base-0-3.json",
+          "sha256": "46bd65ccd5156c080d711b52df4e520977a3f42da508994b6d32ea2e70c70b3a",
+          "bytes": 54,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.345Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x3b4c41b"
+            ]
+          },
+          "status": 200,
+          "file": "base-0-4.json",
+          "sha256": "e9bcdad771c33e0a058c47a7de871a85646199321368eed2fbcd640dc56b72fa",
+          "bytes": 40,
+          "headers": {
+            "content-length": "40",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.477Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x3b4c41b",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "base-0-5.json",
+          "sha256": "9a5ff4b65aeeeae40194f952136bd0fd1f5931129fbecc7a02b99eb34ea86817",
+          "bytes": 3808,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.596Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 200,
+          "file": "base-0-6.json",
+          "sha256": "b0b17a2167550f78381234d8284565462e60c99813ae88d7dc4f310662d3f65c",
+          "bytes": 39,
+          "headers": {
+            "content-length": "39",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "optimism",
+      "url": "https://optimism.gateway.tenderly.co",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:30.714Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "optimism-2-0.json",
+          "sha256": "e239b5418c696242a0eaa7ca19f116dd64b0508f117ee85f044ca6c5074878aa",
+          "bytes": 39,
+          "headers": {
+            "content-length": "39",
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.880Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "optimism-2-1.json",
+          "sha256": "610343ffdb73db4fba3811421a6a79e37b6d6f04f23078cefeb69a356c9e5593",
+          "bytes": 5089,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.001Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x9899c12",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "optimism-2-2.json",
+          "sha256": "610343ffdb73db4fba3811421a6a79e37b6d6f04f23078cefeb69a356c9e5593",
+          "bytes": 5089,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.085Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x9899c12"
+            ]
+          },
+          "status": 200,
+          "file": "optimism-2-3.json",
+          "sha256": "b9e3a32256097c4b3ef321f72933c366c3e0a946bf2cd10e4b7e19bed6b39621",
+          "bytes": 54,
+          "headers": {
+            "content-length": "54",
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.165Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x9899c12"
+            ]
+          },
+          "status": 200,
+          "file": "optimism-2-4.json",
+          "sha256": "e239b5418c696242a0eaa7ca19f116dd64b0508f117ee85f044ca6c5074878aa",
+          "bytes": 39,
+          "headers": {
+            "content-length": "39",
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.248Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x9899c12",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "optimism-2-5.json",
+          "sha256": "610343ffdb73db4fba3811421a6a79e37b6d6f04f23078cefeb69a356c9e5593",
+          "bytes": 5089,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.325Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 200,
+          "file": "optimism-2-6.json",
+          "sha256": "e594f8c4c07b6d9e4af8253a999c80739e2b366ded9ecd2c44449aaa685e6a0f",
+          "bytes": 152,
+          "headers": {
+            "content-length": "152",
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "optimism",
+      "url": "https://optimism.drpc.org",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:30.713Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "optimism-0-0.json",
+          "sha256": "e239b5418c696242a0eaa7ca19f116dd64b0508f117ee85f044ca6c5074878aa",
+          "bytes": 39,
+          "headers": {
+            "content-length": "43",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.891Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "optimism-0-1.json",
+          "sha256": "3e7972fb30320ddd3a03209f22031df20cd8eb3bf4e4b2c47e2f6fb9551b05af",
+          "bytes": 5089,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.136Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x9899c12",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "optimism-0-2.json",
+          "sha256": "3e7972fb30320ddd3a03209f22031df20cd8eb3bf4e4b2c47e2f6fb9551b05af",
+          "bytes": 5089,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.254Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x9899c12"
+            ]
+          },
+          "status": 200,
+          "file": "optimism-0-3.json",
+          "sha256": "b9e3a32256097c4b3ef321f72933c366c3e0a946bf2cd10e4b7e19bed6b39621",
+          "bytes": 54,
+          "headers": {
+            "content-length": "58",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.399Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x9899c12"
+            ]
+          },
+          "status": 200,
+          "file": "optimism-0-4.json",
+          "sha256": "e239b5418c696242a0eaa7ca19f116dd64b0508f117ee85f044ca6c5074878aa",
+          "bytes": 39,
+          "headers": {
+            "content-length": "43",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.586Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x9899c12",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "optimism-0-5.json",
+          "sha256": "3e7972fb30320ddd3a03209f22031df20cd8eb3bf4e4b2c47e2f6fb9551b05af",
+          "bytes": 5089,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.733Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 200,
+          "file": "optimism-0-6.json",
+          "sha256": "29d0810d962dcae9ba2b6e2f513b2574094d4afc8d8b3a7ac19b6ef3e8ed8d6a",
+          "bytes": 39,
+          "headers": {
+            "content-length": "43",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "optimism",
+      "url": "https://mainnet.optimism.io",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:30.714Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "optimism-1-0.json",
+          "sha256": "30f888a61faf6834b77b24f6c2a6fed186db37b394aabc2fa88cf350a705913b",
+          "bytes": 40,
+          "headers": {
+            "content-length": "40",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:30 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:30.937Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "optimism-1-1.json",
+          "sha256": "96e6ca0700bbe4f4fda0c1b85a3541ece10d6aa5d81da8bdbb86581e41c1aa1a",
+          "bytes": 3640,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.167Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x9899d1a",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "optimism-1-2.json",
+          "sha256": "96e6ca0700bbe4f4fda0c1b85a3541ece10d6aa5d81da8bdbb86581e41c1aa1a",
+          "bytes": 3640,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.347Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x9899d1a"
+            ]
+          },
+          "status": 200,
+          "file": "optimism-1-3.json",
+          "sha256": "e421b84f20503354e406e7a0779c22d70283cf73ffdca233c7005359dc558c43",
+          "bytes": 55,
+          "headers": {
+            "content-length": "55",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.528Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x9899d1a"
+            ]
+          },
+          "status": 200,
+          "file": "optimism-1-4.json",
+          "sha256": "30f888a61faf6834b77b24f6c2a6fed186db37b394aabc2fa88cf350a705913b",
+          "bytes": 40,
+          "headers": {
+            "content-length": "40",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.707Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x9899d1a",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "optimism-1-5.json",
+          "sha256": "96e6ca0700bbe4f4fda0c1b85a3541ece10d6aa5d81da8bdbb86581e41c1aa1a",
+          "bytes": 3640,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:31.886Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 200,
+          "file": "optimism-1-6.json",
+          "sha256": "75f1f04336b1c1319a3788bf2201e884fa94acef9d7a7b4257ac9ef64f89659d",
+          "bytes": 40,
+          "headers": {
+            "content-length": "40",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:31 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "bsc",
+      "url": "https://bsc-dataseed.binance.org",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:32.065Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "bsc-0-0.json",
+          "sha256": "ce50ba55ecf1a9410c6f5503d09da66974203165305ff8f5a2b520f49a705c07",
+          "bytes": 40,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.331Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "bsc-0-1.json",
+          "sha256": "333bf8921b0c3e31e0af5ff3f39a51983805c9ca237cace25b332bdeebb8ac96",
+          "bytes": 8775,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.397Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x81683a7",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "bsc-0-2.json",
+          "sha256": "333bf8921b0c3e31e0af5ff3f39a51983805c9ca237cace25b332bdeebb8ac96",
+          "bytes": 8775,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.463Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x81683a7"
+            ]
+          },
+          "status": 200,
+          "file": "bsc-0-3.json",
+          "sha256": "4adb8c6146e73ecc7d33304f012e434d527367f1e967c4806ab9bc210b2b41d9",
+          "bytes": 58,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.528Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x81683a7"
+            ]
+          },
+          "status": 200,
+          "file": "bsc-0-4.json",
+          "sha256": "b0b17a2167550f78381234d8284565462e60c99813ae88d7dc4f310662d3f65c",
+          "bytes": 39,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.594Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x81683a7",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "bsc-0-5.json",
+          "sha256": "333bf8921b0c3e31e0af5ff3f39a51983805c9ca237cace25b332bdeebb8ac96",
+          "bytes": 8775,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.660Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 200,
+          "file": "bsc-0-6.json",
+          "sha256": "9d40e719cf3d56ef4cfed35e92d21221da875c527cc9cd5a4cbb577b22c76b1a",
+          "bytes": 78,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "bsc",
+      "url": "https://bsc-dataseed1.defibit.io",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:32.066Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "bsc-1-0.json",
+          "sha256": "ce50ba55ecf1a9410c6f5503d09da66974203165305ff8f5a2b520f49a705c07",
+          "bytes": 40,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.393Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "bsc-1-1.json",
+          "sha256": "333bf8921b0c3e31e0af5ff3f39a51983805c9ca237cace25b332bdeebb8ac96",
+          "bytes": 8775,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.469Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x81683a7",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "bsc-1-2.json",
+          "sha256": "333bf8921b0c3e31e0af5ff3f39a51983805c9ca237cace25b332bdeebb8ac96",
+          "bytes": 8775,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.546Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x81683a7"
+            ]
+          },
+          "status": 200,
+          "file": "bsc-1-3.json",
+          "sha256": "4adb8c6146e73ecc7d33304f012e434d527367f1e967c4806ab9bc210b2b41d9",
+          "bytes": 58,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.621Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x81683a7"
+            ]
+          },
+          "status": 200,
+          "file": "bsc-1-4.json",
+          "sha256": "b0b17a2167550f78381234d8284565462e60c99813ae88d7dc4f310662d3f65c",
+          "bytes": 39,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.697Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x81683a7",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "bsc-1-5.json",
+          "sha256": "333bf8921b0c3e31e0af5ff3f39a51983805c9ca237cace25b332bdeebb8ac96",
+          "bytes": 8775,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.773Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 200,
+          "file": "bsc-1-6.json",
+          "sha256": "9d40e719cf3d56ef4cfed35e92d21221da875c527cc9cd5a4cbb577b22c76b1a",
+          "bytes": 78,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "bsc",
+      "url": "https://bsc-rpc.publicnode.com",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:32.066Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "bsc-2-0.json",
+          "sha256": "7c7ca3f8749c429839490413a34f1b23784b90f18ac1d8638aef1864f3a127b3",
+          "bytes": 41,
+          "headers": {
+            "content-length": "41",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.266Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "bsc-2-1.json",
+          "sha256": "7e14b4b4031e7a292bb41f38df6a7fca73381c59b41cb72e38c37afc35906d82",
+          "bytes": 8086,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.451Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x81683a8",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "bsc-2-2.json",
+          "sha256": "7e14b4b4031e7a292bb41f38df6a7fca73381c59b41cb72e38c37afc35906d82",
+          "bytes": 8086,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.576Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x81683a8"
+            ]
+          },
+          "status": 200,
+          "file": "bsc-2-3.json",
+          "sha256": "203c8d7e0e25cd241a1459ae7bec516100086fbbc5e9ad31b9ca9f1b820a2f69",
+          "bytes": 59,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.717Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x81683a8"
+            ]
+          },
+          "status": 200,
+          "file": "bsc-2-4.json",
+          "sha256": "b2f1f2440efe85b924be1f873fb1ccd6f3ef9c6bfeef3cfef6bb70ae6ddcb3fc",
+          "bytes": 40,
+          "headers": {
+            "content-length": "40",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.839Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x81683a8",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "bsc-2-5.json",
+          "sha256": "ec151af747f4e98425ebd1c5f1e4db8e7194d39927d63884a6cfd2a909092e42",
+          "bytes": 8086,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:32 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:32.956Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 403,
+          "file": "bsc-2-6.json",
+          "sha256": "9a9c4cad7278f824736e3f2579d619b818ecf0c17cab024fb739e1cb63fe82e8",
+          "bytes": 152,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "avalanche",
+      "url": "https://api.avax.network/ext/bc/C/rpc",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:33.060Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "avalanche-0-0.json",
+          "sha256": "44ea664f8d84c21b03c48843e8bc21887f869f5eb40154a88147a7bba467ab58",
+          "bytes": 42,
+          "headers": {
+            "content-length": "42",
+            "content-type": "application/json;charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.114Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-0-1.json",
+          "sha256": "a1de1f5bd606489c6bb75e0dca382cfdb2d69fdc2a423fc6bd7198c51cf7a461",
+          "bytes": 2063,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.207Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x60ac145",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-0-2.json",
+          "sha256": "a1de1f5bd606489c6bb75e0dca382cfdb2d69fdc2a423fc6bd7198c51cf7a461",
+          "bytes": 2063,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.270Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x60ac145"
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-0-3.json",
+          "sha256": "6f17bc12fe4ef2ee5b2707b572817554cd9d4917eee55f18a709f42943953952",
+          "bytes": 56,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.332Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x60ac145"
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-0-4.json",
+          "sha256": "b0b17a2167550f78381234d8284565462e60c99813ae88d7dc4f310662d3f65c",
+          "bytes": 39,
+          "headers": {
+            "content-length": "39",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.403Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x60ac145",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-0-5.json",
+          "sha256": "a1de1f5bd606489c6bb75e0dca382cfdb2d69fdc2a423fc6bd7198c51cf7a461",
+          "bytes": 2063,
+          "headers": {
+            "content-type": "application/json;charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.428Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-0-6.json",
+          "sha256": "57a29ea1174451454294bdb740d4b963fda31dd28cfcc58e33ec35091658d811",
+          "bytes": 116,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "avalanche",
+      "url": "https://avalanche.drpc.org",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:33.060Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "avalanche-1-0.json",
+          "sha256": "431cce5c936d147d144c6ec1d892266cf78d77c55f26faf09b00fc5b15cdad08",
+          "bytes": 42,
+          "headers": {
+            "content-length": "46",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.189Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-1-1.json",
+          "sha256": "f7531378a0bc1ec25d455287bbe4d47ad05975df5e6f47ba493efd8db8489cec",
+          "bytes": 2203,
+          "headers": {
+            "content-length": "935",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.246Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x60ac146",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-1-2.json",
+          "sha256": "f7531378a0bc1ec25d455287bbe4d47ad05975df5e6f47ba493efd8db8489cec",
+          "bytes": 2203,
+          "headers": {
+            "content-length": "935",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.301Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x60ac146"
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-1-3.json",
+          "sha256": "143349dc820c529cc3f6264e0b0645ce0a58bfe401593bd8ba50810ff11fb861",
+          "bytes": 56,
+          "headers": {
+            "content-length": "60",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.373Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x60ac146"
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-1-4.json",
+          "sha256": "29d0810d962dcae9ba2b6e2f513b2574094d4afc8d8b3a7ac19b6ef3e8ed8d6a",
+          "bytes": 39,
+          "headers": {
+            "content-length": "43",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.427Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x60ac146",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-1-5.json",
+          "sha256": "f7531378a0bc1ec25d455287bbe4d47ad05975df5e6f47ba493efd8db8489cec",
+          "bytes": 2203,
+          "headers": {
+            "content-length": "935",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.489Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 400,
+          "file": "avalanche-1-6.json",
+          "sha256": "8bec0a4e89b41217b7deaf167cadd6ca811795372489472559a3b58042c9a2fe",
+          "bytes": 98,
+          "headers": {
+            "content-length": "102",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "avalanche",
+      "url": "https://avalanche-c-chain-rpc.publicnode.com",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:33.060Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "avalanche-2-0.json",
+          "sha256": "365c8f50ac2b8e672b53525e5bfc052fa805e55ddf41309f8f8bf6809bfb483d",
+          "bytes": 43,
+          "headers": {
+            "content-length": "43",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.255Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-2-1.json",
+          "sha256": "38d80601ec3ca709a590c47b1bdd8bda8463e2cd49d265a7c79eb5e7327630c8",
+          "bytes": 2204,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.454Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x60ac146",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-2-2.json",
+          "sha256": "38d80601ec3ca709a590c47b1bdd8bda8463e2cd49d265a7c79eb5e7327630c8",
+          "bytes": 2204,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.579Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x60ac146"
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-2-3.json",
+          "sha256": "fc40cc807d95247e8b4dbb0e0e5b30c7569a3ea4f8853dc158a3bb930079de7d",
+          "bytes": 57,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.687Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x60ac146"
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-2-4.json",
+          "sha256": "b2f1f2440efe85b924be1f873fb1ccd6f3ef9c6bfeef3cfef6bb70ae6ddcb3fc",
+          "bytes": 40,
+          "headers": {
+            "content-length": "40",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.801Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x60ac146",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-2-5.json",
+          "sha256": "38d80601ec3ca709a590c47b1bdd8bda8463e2cd49d265a7c79eb5e7327630c8",
+          "bytes": 2204,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:33 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:33.922Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 200,
+          "file": "avalanche-2-6.json",
+          "sha256": "b2f1f2440efe85b924be1f873fb1ccd6f3ef9c6bfeef3cfef6bb70ae6ddcb3fc",
+          "bytes": 40,
+          "headers": {
+            "content-length": "40",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:34 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "gnosis",
+      "url": "https://gnosis-rpc.publicnode.com",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:34.043Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "gnosis-2-0.json",
+          "sha256": "f26ebd93364ea1fbf5eee54873c963360a9a599ecfd6092ffd5d45649e000671",
+          "bytes": 41,
+          "headers": {
+            "content-length": "41",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:34 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:34.244Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-2-1.json",
+          "sha256": "91245acb5a8151cb1393c3cb6d3f624ee1187582fcd6a00448c5553599056f16",
+          "bytes": 7579,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:34 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:34.442Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x2f2c6f4",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-2-2.json",
+          "sha256": "8a4f7430d43f80578d94c095fe6d0baf817708a0c6583a9c8c7031c0672427c6",
+          "bytes": 7579,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:34 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:34.566Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x2f2c6f4"
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-2-3.json",
+          "sha256": "106850d9657002d9681ab86b1ddca693d8cf9ac047bdbf9730d1f5ac4fbb6e3d",
+          "bytes": 62,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:34 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:34.692Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x2f2c6f4"
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-2-4.json",
+          "sha256": "75f1f04336b1c1319a3788bf2201e884fa94acef9d7a7b4257ac9ef64f89659d",
+          "bytes": 40,
+          "headers": {
+            "content-length": "40",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:34 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:34.811Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x2f2c6f4",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-2-5.json",
+          "sha256": "8a4f7430d43f80578d94c095fe6d0baf817708a0c6583a9c8c7031c0672427c6",
+          "bytes": 7579,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:34 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:34.932Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-2-6.json",
+          "sha256": "75f1f04336b1c1319a3788bf2201e884fa94acef9d7a7b4257ac9ef64f89659d",
+          "bytes": 40,
+          "headers": {
+            "content-length": "40",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:35 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "gnosis",
+      "url": "https://gnosis.drpc.org",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:34.042Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "gnosis-1-0.json",
+          "sha256": "fa212fdd5f9e629e5f2e6ffcdb2770dfce383910728a26758af725098c556662",
+          "bytes": 40,
+          "headers": {
+            "content-length": "44",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:34 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:34.206Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-1-1.json",
+          "sha256": "e0a5c13e3ee01e2c29a3d583825968f848bbf0eca0b2138e092ce16d9750da23",
+          "bytes": 7516,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:34 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:34.411Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x2f2c6f4",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-1-2.json",
+          "sha256": "e0a5c13e3ee01e2c29a3d583825968f848bbf0eca0b2138e092ce16d9750da23",
+          "bytes": 7516,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:34 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:34.615Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x2f2c6f4"
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-1-3.json",
+          "sha256": "ec03c48a588b052a13d73aa6c2ded661074e8bdfa60943c85b55d58ae0471a30",
+          "bytes": 61,
+          "headers": {
+            "content-length": "65",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:34 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:34.814Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x2f2c6f4"
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-1-4.json",
+          "sha256": "29d0810d962dcae9ba2b6e2f513b2574094d4afc8d8b3a7ac19b6ef3e8ed8d6a",
+          "bytes": 39,
+          "headers": {
+            "content-length": "43",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:35 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:35.011Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x2f2c6f4",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-1-5.json",
+          "sha256": "e0a5c13e3ee01e2c29a3d583825968f848bbf0eca0b2138e092ce16d9750da23",
+          "bytes": 7516,
+          "headers": {
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:35 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:35.230Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-1-6.json",
+          "sha256": "29d0810d962dcae9ba2b6e2f513b2574094d4afc8d8b3a7ac19b6ef3e8ed8d6a",
+          "bytes": 39,
+          "headers": {
+            "content-length": "43",
+            "content-type": "application/json",
+            "date": "Wed, 25 Nov 2026 17:16:35 GMT"
+          }
+        }
+      ]
+    },
+    {
+      "chain": "gnosis",
+      "url": "https://rpc.gnosischain.com",
+      "observations": [
+        {
+          "at": "2026-11-25T17:16:34.042Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_chainId",
+            "params": []
+          },
+          "status": 200,
+          "file": "gnosis-0-0.json",
+          "sha256": "fa212fdd5f9e629e5f2e6ffcdb2770dfce383910728a26758af725098c556662",
+          "bytes": 40,
+          "headers": {
+            "content-length": "40",
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:34 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:34.266Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "finalized",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-0-1.json",
+          "sha256": "115c103ba2b07cb7f9863c93ff6b89812456bcb202ddf65050ec9eb6873a69d7",
+          "bytes": 7516,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:34 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:34.914Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x2f2c6f4",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-0-2.json",
+          "sha256": "115c103ba2b07cb7f9863c93ff6b89812456bcb202ddf65050ec9eb6873a69d7",
+          "bytes": 7516,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:35 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:35.106Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x2f2c6f4"
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-0-3.json",
+          "sha256": "ec03c48a588b052a13d73aa6c2ded661074e8bdfa60943c85b55d58ae0471a30",
+          "bytes": 61,
+          "headers": {
+            "content-length": "61",
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:35 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:35.691Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionCount",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x2f2c6f4"
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-0-4.json",
+          "sha256": "29d0810d962dcae9ba2b6e2f513b2574094d4afc8d8b3a7ac19b6ef3e8ed8d6a",
+          "bytes": 39,
+          "headers": {
+            "content-length": "39",
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:36 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:36.275Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": [
+              "0x2f2c6f4",
+              false
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-0-5.json",
+          "sha256": "115c103ba2b07cb7f9863c93ff6b89812456bcb202ddf65050ec9eb6873a69d7",
+          "bytes": 7516,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:36 GMT"
+          }
+        },
+        {
+          "at": "2026-11-25T17:16:36.466Z",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBalance",
+            "params": [
+              "0x0000000000000000000000000000000000000000",
+              "0x1"
+            ]
+          },
+          "status": 200,
+          "file": "gnosis-0-6.json",
+          "sha256": "29d0810d962dcae9ba2b6e2f513b2574094d4afc8d8b3a7ac19b6ef3e8ed8d6a",
+          "bytes": 39,
+          "headers": {
+            "content-length": "39",
+            "content-type": "application/json; charset=utf-8",
+            "date": "Wed, 25 Nov 2026 17:16:37 GMT"
+          }
+        }
+      ]
+    }
+  ]
+}

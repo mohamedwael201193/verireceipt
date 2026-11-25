@@ -134,7 +134,7 @@ function bucket(intent: string): Counts {
   return value;
 }
 const CHAIN_ROUTES = new Set(["/v1/tx", "/v1/gas-price", "/v1/transaction-risk", "/v1/balance", "/v1/token-supply", "/v1/token-holders", "/v1/onchain-metric"]);
-const CHAINS = new Set(["ethereum", "base", "arbitrum", "optimism", "polygon", "bsc", "avalanche", "sepolia", "base-sepolia"]);
+const CHAINS = new Set(["ethereum", "base", "arbitrum", "optimism", "polygon", "bsc", "avalanche", "gnosis", "sepolia", "base-sepolia"]);
 const FORMS = new Set(EDGAR_FORM_TYPES);
 /** Own data properties only: diagnostics never execute request getters. */
 function ownString(query: unknown, key: string): string | undefined {

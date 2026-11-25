@@ -296,7 +296,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/stock-price", async (request) => trackIntent("stock-price", () => handleStockPrice(asQuery(request.query))));
   app.get("/v1/sanctions-screen", async (request) => trackIntent("sanctions-screen", () => handleSanctionsScreen(asQuery(request.query))));
   app.get("/v1/ip-geolocation", async (request) => trackIntent("ip-geolocation", () => handleIpGeolocation(asQuery(request.query))));
-  app.get("/v1/onchain-metric", async (request) => trackIntent("onchain-metric", () => handleOnchainMetric(exactQuery(request.raw.url ?? "", ["address", "block", "chain", "metric"]))));
+  app.get("/v1/onchain-metric", async (request) => trackIntent("onchain-metric", () => handleOnchainMetric(exactQuery(request.raw.url ?? "", ["address", "block", "chain", "metric", "query"]))));
   app.get("/v1/security-review", async (request) => trackIntent("security-review", () => handlePackageSecurity(exactQuery(request.raw.url ?? "", ["target"]))));
   app.get("/v1/game-result", async (request) => trackIntent("game-result", () => handleGameResult(asQuery(request.query))));
   app.get("/v1/corporate-registry", async (request) => trackIntent("corporate-registry", () => handleCorporateRegistry(asQuery(request.query))));
