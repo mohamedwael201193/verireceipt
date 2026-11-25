@@ -28,11 +28,12 @@ function stub(opts: Opts = {}): void {
   });
 }
 describe("CROSS_CHAIN_STATE_VERIFY_GENERAL", () => {
-  it("validates the reference and the chain list", async () => {
+  it("validates only missing reference and missing chain list", async () => {
     await expect(handleCrossChainState({})).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
-    await expect(handleCrossChainState({ reference: "abc", chains: "ethereum,base" })).rejects.toMatchObject({ status: 400, code: "INVALID_REFERENCE" });
-    await expect(handleCrossChainState({ reference: TX_HASH, chains: "ethereum" })).rejects.toMatchObject({ status: 400, code: "TOO_FEW_CHAINS" });
-    await expect(handleCrossChainState({ reference: TX_HASH, chains: "ethereum,solana" })).rejects.toMatchObject({ status: 400, code: "UNSUPPORTED_CHAIN" });
+    await expect(handleCrossChainState({reference:TX_HASH})).rejects.toMatchObject({status:400,code:'MISSING_PARAM'});
+    stub();expect(await handleCrossChainState({ reference: "abc", chains: "ethereum,base" })).toMatchObject({consistent:false,complete:false,status:'not verifiable here'});
+    expect(await handleCrossChainState({ reference: TX_HASH, chains: "ethereum" })).toMatchObject({consistent:false,complete:false});
+    expect(await handleCrossChainState({ reference: TX_HASH, chains: "ethereum,solana" })).toMatchObject({consistent:false,complete:false});
   });
   it("present on one chain and absent on the other is NOT consistent, no bridge claim", async () => {
     stub();

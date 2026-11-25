@@ -73,21 +73,31 @@ export async function addressState(chain:string,rpcs:string[],address:string):Pr
  return {chain,found:null,code_present:best[0]!=='0x',status:null,code:best[0],bodies:best[1].bodies};
 }
 
+const CHAIN_ALIASES:Record<string,string>={eth:'ethereum',mainnet:'ethereum','ethereum mainnet':'ethereum',arb:'arbitrum','arbitrum one':'arbitrum',op:'optimism',matic:'polygon','polygon pos':'polygon',avax:'avalanche',bnb:'bsc','bnb chain':'bsc'};
+export function parseCrossChains(raw:string):string[]{
+ return [...new Set(raw.trim().toLowerCase().replace(/^from\s+/,'').split(/\s*(?:->|→|=>|\bto\b|\band\b|[\/|;,])\s*/).map(c=>c.trim()).filter(Boolean).map(c=>CHAIN_ALIASES[c]??c))];
+}
 export async function handleCrossChainState(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const reference = query.reference?.trim().toLowerCase();
   if (!reference) throw badRequest("MISSING_PARAM", "reference is required as a tx hash (0x + 64 hex)");
-  if (!/^0x(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(reference)) throw badRequest('INVALID_REFERENCE','reference must be a 0x-prefixed EVM address or transaction hash');
+
   const mode=reference.length===42?'address-runtime-code':'transaction-receipt-status';
   const chainsRaw = query.chains?.trim();
   if (!chainsRaw) throw badRequest("MISSING_PARAM", `chains is required as a comma-separated list of at least two of: ${Object.keys(CHAIN_RPCS).join(", ")}`);
-  const chains = [...new Set(chainsRaw.split(",").map((c) => c.trim().toLowerCase()).filter(Boolean))];
-  if (chains.length < 2) throw badRequest("TOO_FEW_CHAINS", "at least two distinct chains are required for a cross-chain check");
-  for (const c of chains) {
-    if (!CHAIN_RPCS[c]) throw badRequest("UNSUPPORTED_CHAIN", `chain "${c}" is not configured; supported: ${Object.keys(CHAIN_RPCS).join(", ")}`);
+  const chains = parseCrossChains(chainsRaw);
+  const unsupported=chains.filter(c=>!Object.prototype.hasOwnProperty.call(CHAIN_RPCS,c));
+  const validReference=/^0x(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(reference);
+  const supported=chains.filter(c=>Object.prototype.hasOwnProperty.call(CHAIN_RPCS,c));
+  const limitations=[...(!validReference?['Reference is not a 0x-prefixed EVM address or transaction hash; this format is not supported']:[]),
+    ...(unsupported.length?['Unsupported chains: '+unsupported.join(', ')]:[]),
+    ...(chains.length<2?['A second distinct chain was missing; fewer than two chains were parsed']:[])];
+  if(!validReference||!supported.length){
+    const summary=limitations.join('. ')+'. Consistency could not be verified here; consistent=false means unverified, not a proven inconsistency. Nothing was inferred; no bridge transfer was verified or refuted.';
+    return {answer:summary,consistent:false,complete:false,reference_type:validReference?mode:'unsupported',per_chain:[],address:reference,status:'not verifiable here',chains,summary,verdict:'unverified',confidence:0,source:'none',checked_at:new Date().toISOString()};
   }
   const fetchedAt = new Date().toISOString();
   const states: ChainState[] = [];
-  const reads=await Promise.all(chains.map(async c=>{
+  const reads=await Promise.all(supported.map(async c=>{
     try{return mode==='address-runtime-code'?await addressState(c,CHAIN_RPCS[c],reference):await chainState(c,CHAIN_RPCS[c],reference);}
     catch(error){
       const raw=error instanceof ApiError&&'receiptEvidence' in error?(error as ApiError&{receiptEvidence:unknown}).receiptEvidence:null;
@@ -97,11 +107,11 @@ export async function handleCrossChainState(query: Record<string, string | undef
   }));
   states.push(...reads);
   const first = states[0];
-  const complete=states.every(s=>!s.error);
+  const complete=!limitations.length&&states.every(s=>!s.error);
   const consistent = complete && states.every((s) => s.found === first.found && s.status === first.status && s.code===first.code);
   const asOf = new Date().toISOString();
   const statusDesc = (s: ChainState) => s.error?'unreadable ('+s.error+')':mode==='address-runtime-code'?(s.code==='0x'?'empty runtime code (not proof of account absence)':'nonempty runtime code, '+((s.code!.length-2)/2)+' bytes'):s.found ? `present, status ${s.status === 1 ? "success" : "reverted"}` : "absent";
-  const evidence = JSON.stringify({ reference, chains, mode, complete, as_of: asOf,
+  const evidence = JSON.stringify({ reference, chains, mode, complete, limitations, as_of: asOf,
     narrowing: "consistent means only that the reference resolves to the same terminal state on every listed chain, each checked independently via its own 2-of-N RPC quorum; bridge-transfer completion is NOT verified or claimed",
     address_scope:'Address mode compares exact runtime code at independent latest snapshots only, not ownership, balances, nonce, token identity or bridge state; no synchronized-height guarantee. Empty code is not account absence.',
     per_chain: states.map(({bodies,...state}) => state),
@@ -119,16 +129,16 @@ export async function handleCrossChainState(query: Record<string, string | undef
       `This means only that every listed chain independently reports the same state; it does NOT verify any bridge transfer between them.`
     : `NOT consistent: ${reference.slice(0, 10)}… differs across chains (${perChain}). ` +
       `Each chain was checked independently via its own RPC quorum; this says nothing about why the states differ and does NOT verify or refute a bridge transfer.`;
-  const summary=!complete?`Consistency NOT established: unreadable chain(s) (${perChain}). consistent=false means incomplete evidence, not a proven state mismatch. No bridge transfer is verified or refuted.`:mode==='address-runtime-code'?`${consistent?'CONSISTENT':'NOT consistent'} runtime-code snapshots: ${perChain}. Exact runtime code only, independent latest heights; not balance, nonce, ownership or bridge verification. Empty code does not mean account absence.`:baseSummary;
+  const summary=limitations.length?`${limitations.join('. ')}. Checked only: ${perChain}. Consistency could not be verified here; consistent=false means unverified, not a proven inconsistency. Nothing was inferred; no bridge transfer was verified or refuted.`:!complete?`Consistency NOT established: unreadable chain(s) (${perChain}). consistent=false means incomplete evidence, not a proven state mismatch. No bridge transfer is verified or refuted.`:mode==='address-runtime-code'?`${consistent?'CONSISTENT':'NOT consistent'} runtime-code snapshots: ${perChain}. Exact runtime code only, independent latest heights; not balance, nonce, ownership or bridge verification. Empty code does not mean account absence.`:baseSummary;
   return envelope(INTENT, {
     consistent,
     complete,
     reference_type:mode,
     per_chain:states.map(({bodies,...state})=>state),
     address: reference,
-    status: states.map((s) => `${s.chain}: ${statusDesc(s)}`).join("; "),
+    status: limitations.length?'not verifiable here':states.map((s) => `${s.chain}: ${statusDesc(s)}`).join('; '),
     chains,
     summary,
   }, receipt, { answer: summary, verdict: complete?"verified":"unverified", confidence: complete?0.9:0,
-    source: `per-chain 2-of-N RPC quorums over ${chains.join(", ")}; fetched ${fetchedAt}` });
+    source: `per-chain 2-of-N RPC quorums over ${supported.join(", ")}; fetched ${fetchedAt}` });
 }
