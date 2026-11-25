@@ -32,7 +32,8 @@ describe("TRAVEL_DISRUPTION_GENERAL", () => {
     const san = parseNasStatus(nas, "SAN");
     expect(san.entries.some((e) => e.kind === "arrival/departure delay" && /Compacted Demand/.test(e.reason))).toBe(true);
     const lax = parseNasStatus(nas, "LAX");
-    expect(lax.entries.some((e) => e.kind === "airport closure")).toBe(true);
+    expect(lax.entries.some((e) => e.kind === "airport closure")).toBe(false);
+    expect(lax.excluded_closures).toHaveLength(1);
   });
   it("a disrupted airport reports status, delay minutes and reason, airport-level only", async () => {
     stub();

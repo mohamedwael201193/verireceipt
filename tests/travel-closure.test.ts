@@ -1,0 +1,13 @@
+import {expect,it} from 'vitest';import {readFileSync} from 'node:fs';import {join} from 'node:path';import {parseNasStatus} from '../src/handlers/travelDisruption';
+const raw=readFileSync(join(__dirname,'fixtures/travel-disruption/faa-nas-status-snapshot.xml'),'utf8');
+it('real restricted-GA NOTAM is not an airport-wide LAX disruption',()=>{const r=parseNasStatus(raw,'LAX');expect(r.entries.some(e=>e.kind==='airport closure')).toBe(false);});
+import {classifyNasClosure} from '../src/handlers/travelDisruption';
+const time='Wed Nov 25 04:07:14 2026 GMT';
+it('real excluded restriction retains its exact reason and exclusion in parser evidence',()=>{const r=parseNasStatus(raw,'LAX');expect(r.excluded_closures).toHaveLength(1);expect(r.excluded_closures[0].reason).toContain('2605271826-2705281600');expect(r.excluded_closures[0].exclusion).toContain('general aviation');});
+it('PPR alone and emergency exceptions do not suppress a general closure',()=>{for(const prefix of ['AD AP CLSD EXC 24HR PPR','AD AP CLSD EXC HEL','AD AP CLSD'])expect(classifyNasClosure(prefix+' 2611250000-2611260000',time).active).toBe(true);});
+it.each([['2611250407-2611260000',true],['2611250408-2611260000',false],['2611240407-2611250407',false],['2611240407-2611250408',true],['2612312300-2701010100',false]])('uses explicit UTC boundaries %s', (range,active)=>{expect(classifyNasClosure('AD AP CLSD '+range,time).active).toBe(active);});
+it('year-crossing window is active in January without guessing November year for display dates',()=>{expect(classifyNasClosure('AD AP CLSD 2612312300-2701010100','Fri Jan 01 00:00:00 2027 GMT').active).toBe(true);});
+it.each(['','2611320000-2701010000','2612312400-2701010100','2611250460-2611260000','2611260000-2611250000','2611250000-PERM','2611250000-2611250000'])('unresolved/invalid dated closure refuses, never no-disruption %s',range=>{expect(()=>classifyNasClosure('AD AP CLSD '+range,time)).toThrow();});
+it('restricted GA classification is narrow and case insensitive',()=>{expect(classifyNasClosure('ad ap clsd to non-sked transient ga acft exc ppr 2611250000-2611260000',time).active).toBe(false);expect(classifyNasClosure('AD AP CLSD EXC GA ACFT PPR 2611250000-2611260000',time).active).toBe(true);});
+it('invalid snapshot time refuses',()=>{expect(()=>classifyNasClosure('AD AP CLSD 2611250000-2611260000','bad date')).toThrow();});
+it('closure ends exactly at its explicit UTC end and begins exactly at start',()=>{const reason='AD AP CLSD 2611250407-2611250408';expect(classifyNasClosure(reason,'Wed Nov 25 04:07:00 2026 GMT').active).toBe(true);expect(classifyNasClosure(reason,'Wed Nov 25 04:08:00 2026 GMT').active).toBe(false);});

@@ -41,9 +41,25 @@ function minutesOf(text: string): number | null {
   return h || m ? total : null;
 }
 
-export function parseNasStatus(raw: string, airport: string): { updateTime: string; entries: AirportStatusEntry[] } {
+function notamTime(token: string): number | null {
+  if (!/^\d{10}$/.test(token)) return null;
+  const year=2000+Number(token.slice(0,2)),month=Number(token.slice(2,4)),day=Number(token.slice(4,6)),hour=Number(token.slice(6,8)),minute=Number(token.slice(8,10));
+  const time=Date.UTC(year,month-1,day,hour,minute),d=new Date(time);
+  return d.getUTCFullYear()===year&&d.getUTCMonth()===month-1&&d.getUTCDate()===day&&d.getUTCHours()===hour&&d.getUTCMinutes()===minute ? time : null;
+}
+export function classifyNasClosure(reason:string,updateTime:string): {active:boolean; exclusion:string|null} {
+  // NOTAMs contain explicit two-digit-year UTC ranges, unlike display dates.
+  const match=/(?:^|\s)(\d{10})-(\d{10})(?:\s|$)/.exec(reason.trim());
+  const start=match?notamTime(match[1]):null,end=match?notamTime(match[2]):null,asOf=Date.parse(updateTime);
+  if(start===null||end===null||end<=start||!Number.isFinite(asOf))throw upstreamUnavailable('FAA_CLOSURE_WINDOW_UNRESOLVED','FAA closure has no valid explicit dated window; refusing an airport-wide verdict');
+  if(asOf<start||asOf>=end)return {active:false,exclusion:'outside explicit NOTAM UTC window'};
+  if(/\bCLSD\s+TO\s+NON[ -]SKED\s+TRANSIENT\s+GA\s+ACFT\b/i.test(reason))return {active:false,exclusion:'restriction applies only to non-scheduled transient general aviation, not an airport-wide closure'};
+  return {active:true,exclusion:null};
+}
+export function parseNasStatus(raw: string, airport: string): { updateTime: string; entries: AirportStatusEntry[]; excluded_closures:{reason:string;exclusion:string}[] } {
   const updateTime = /<Update_Time>([^<]*)<\/Update_Time>/.exec(raw)?.[1] ?? "";
   const entries: AirportStatusEntry[] = [];
+  const excluded_closures:{reason:string;exclusion:string}[]=[];
   const arptRe = new RegExp(`<ARPT>${airport}</ARPT>`);
   for (const block of raw.match(/<Ground_Delay>[\s\S]*?<\/Ground_Delay>/g) ?? []) {
     if (!arptRe.test(block)) continue;
@@ -68,11 +84,14 @@ export function parseNasStatus(raw: string, airport: string): { updateTime: stri
   }
   for (const block of raw.match(/<Airport>[\s\S]*?<\/Airport>/g) ?? []) {
     if (!arptRe.test(block)) continue;
+    const reason=/<Reason>([^<]*)<\/Reason>/.exec(block)?.[1] ?? "";
+    const classification=classifyNasClosure(reason,updateTime);
+    if(!classification.active){excluded_closures.push({reason,exclusion:classification.exclusion!});continue;}
     entries.push({ kind: "airport closure",
-      reason: (/<Reason>([^<]*)<\/Reason>/.exec(block)?.[1] ?? "").slice(0, 200),
+      reason: reason.slice(0, 200),
       avg: "", max: "", trend: "" });
   }
-  return { updateTime, entries };
+  return { updateTime, entries, excluded_closures };
 }
 
 async function handleTravelDisruptionInternal(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
@@ -109,9 +128,9 @@ async function handleTravelDisruptionInternal(query: Record<string, string | und
     throw unprocessable("NO_USABLE_STATUS", "the FAA answer was not a NAS status document; nothing is guessed");
   }
   const airportStatuses=resolutions.map(({airport})=>{
-    const {updateTime,entries}=parseNasStatus(body,airport);
+    const {updateTime,entries,excluded_closures}=parseNasStatus(body,airport);
     const delays=entries.map(e=>minutesOf(e.avg)).filter((v):v is number=>v!==null);
-    return {airport,update_time:updateTime,entries,disrupted:entries.length>0,delay_minutes:delays.length?Math.max(...delays):null};
+    return {airport,update_time:updateTime,entries,excluded_closures,disrupted:entries.length>0,delay_minutes:delays.length?Math.max(...delays):null};
   });
   const updateTime=airportStatuses[0].update_time;
   const entries=airportStatuses.flatMap(s=>s.entries);
@@ -136,6 +155,7 @@ async function handleTravelDisruptionInternal(query: Record<string, string | und
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
   const namePrefix = resolvedFrom ? `"${resolvedFrom.name}" resolved to ${airport} (${resolvedFrom.label}) via the bundled airport list. ` : "";
+  const excludedCount=airportStatuses.reduce((n,s)=>n+s.excluded_closures.length,0);
   const answer = route
     ? `${resolvedRoute}: ${airportStatuses.map(s=>s.airport+(s.disrupted?' has '+s.entries.map(e=>e.kind+(e.reason?' ('+e.reason+')':'')).join('; '):' has no active FAA-listed disruption')).join('; ')}. FAA NAS status as of ${updateTime}. Both endpoints checked against one snapshot. Airport-level status only, not flight tracking or route delay; an unlisted condition is not claimed normal.`
     : disrupted
@@ -152,7 +172,8 @@ async function handleTravelDisruptionInternal(query: Record<string, string | und
     delay_minutes: maxDelay,
     delay_semantics: "maximum reported airport average, not route or flight delay",
     reason: reason || null,
-  }, receipt, { answer, verdict: "verified", confidence: 0.9,
+    closure_policy: "Only active dated airport-wide closures count; restricted non-scheduled transient GA notices are disclosed separately and are not flight status",
+  }, receipt, { answer:answer+(excludedCount ? ` ${excludedCount} restricted or out-of-window closure notice(s) excluded from airport-wide disruption; full details retained per airport.` : ""), verdict: "verified", confidence: 0.9,
     source: `${NAS_URL}; FAA NAS status snapshot, airport-level only; feed updated ${updateTime}; fetched ${fetchedAt}` });
 }
 
