@@ -1,0 +1,7 @@
+import {afterAll,expect,it,vi} from 'vitest';import {mkdtempSync,readFileSync,rmSync} from 'node:fs';import {join} from 'node:path';
+const dir=mkdtempSync('/tmp/extract-storage-');process.env.SQLITE_PATH=join(dir,'r.sqlite');afterAll(()=>rmSync(dir,{recursive:true,force:true}));
+import {handleContentExtraction} from '../src/handlers/contentExtractionReceipt';import {getReceiptEvidence} from '../src/core/storage';import {sha256Hex} from '../src/core/receipt';
+it('persists real source excerpt bytes and serves hash-verifiable retained extraction',async()=>{
+ const html=readFileSync(join(__dirname,'fixtures/content-extraction-sample-invoice.html'),'utf8');const start=html.indexOf('Invoice #: 123');expect(start).toBeGreaterThanOrEqual(0);const content=html.slice(start,html.indexOf('Due: February 3, 2016')+'Due: February 3, 2016'.length);expect(Buffer.byteLength(content)).toBeLessThanOrEqual(256);
+ const f=vi.fn();vi.stubGlobal('fetch',f);try{const r=await handleContentExtraction({content,fields:'invoice_number,date'});const receipt=r.receipt as any;const stored=await getReceiptEvidence(receipt.receipt_id);expect(stored.found).toBe(true);expect(sha256Hex(stored.evidence!)).toBe(receipt.raw_response_sha256);const e=JSON.parse(stored.evidence!.toString());expect(e.supplied_content).toBe(content);expect(e.requested_fields).toBe('invoice_number,date');expect(e.extracted.brief).toBe('invoice_number: "123"; date: "January 3, 2016"');expect(f).not.toHaveBeenCalled();}finally{vi.unstubAllGlobals();}
+});
