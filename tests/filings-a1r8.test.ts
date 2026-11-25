@@ -190,6 +190,19 @@ async function refuse(query: Record<string, string>, status: number, code?: stri
   throw new Error(`expected ${status} for ${JSON.stringify(query)}, got an answer`);
 }
 
+async function expectNoCompanyData(entity: string, period: string, fetchImpl?: typeof fetch) {
+  const out = await handleFilings({ entity, period }, fetchImpl ? { fetchImpl } : undefined);
+  expect(out.verdict, entity).toBe('no_data');
+  expect(out.data_status, entity).toBe('no_data');
+  expect(out.entity, entity).toBe(entity);
+  expect(out, entity).not.toHaveProperty('filing_count');
+  expect(out, entity).not.toHaveProperty('matched_legal_name');
+  expect(out.filings, entity).toEqual([]);
+  expect(out.answer, entity).toContain('No filing count is asserted');
+  expect(out.answer, entity).toContain(entity);
+  return out;
+}
+
 describe('A1 r8 stubbed: findings', () => {
   beforeEach(() => {
     process.env.SEC_USER_AGENT = TEST_UA;
@@ -197,13 +210,14 @@ describe('A1 r8 stubbed: findings', () => {
     __seedTickersCacheForTests(R8_TICKERS as never);
   });
 
-  it('J1-M1: a ticker or name plus an unconsumed token is 422 and never reaches the Federal Register', async () => {
+  it('J1-M1: a ticker or name plus residue returns disclosed no-data, never a different company', async () => {
     for (const [entity, period] of [
       ['AAPL X', '2023'], ['TSLA X', '2019'], ['AAPL Q', '2023'], ['AAPL 10', '2023'], ['AAPL 2023', '2023'],
       ['Microsoft X', '2023'], ['IBM X', '2023'], ['MICROSOFT CORP X', '2023'],
     ]) {
       const calls = newCalls();
-      await refuse({ entity, period }, 422, undefined, stub({ calls }));
+      await expectNoCompanyData(entity, period, stub({ calls }));
+      expect(calls.urls.filter(url => url.includes('browse-edgar'))).toHaveLength(1);
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -277,12 +291,13 @@ describe('A1 r8 stubbed: findings', () => {
     expect(await n({ entity: 'Apple Inc.', period: '2023', form_type: 'SC13G/A' })).toMatchObject({ count: 1, form: 'SC 13G/A' });
   });
 
-  it('J2-M1: homoglyphs — Cyrillic letters fold; digit/letter spoofs (1O, l0, F0rm) refuse', async () => {
+  it('J2-M1: homoglyphs — Cyrillic letters fold; digit/letter spoofs (1O, l0, F0rm) never select Apple', async () => {
     expect(await n({ entity: 'Apple Inc. F\u043erm 10-K', period: '2023' })).toMatchObject({ count: 1, form: '10-K' });
     expect(await n({ entity: 'Apple Inc. 10-\u041a', period: '2023' })).toMatchObject({ count: 1, form: '10-K' });
     for (const entity of ['Apple Inc. F0rm 10-K', 'Apple Inc. 1O-Q', 'Apple Inc. l0-Q']) {
       const calls = newCalls();
-      if(['Google','Facebook','7-Eleven','Environmental Protection Agency','Airbus S E'].includes(entity)){const out=await handleFilings({entity,period:'2023'},{fetchImpl:stub({calls})});expect(out.verdict).toBe('no_data');expect(out).not.toHaveProperty('filing_count');}else await refuse({ entity, period: '2023' }, 422, undefined, stub({ calls }));
+      await expectNoCompanyData(entity, '2023', stub({ calls }));
+      expect(calls.urls.filter(url => url.includes('browse-edgar'))).toHaveLength(1);
       expect(calls.fedreg + calls.submissions, entity).toBe(0);
     }
     for (const form of ['1O-Q', 'l0-Q', '1O-K']) {
@@ -327,10 +342,11 @@ describe('A1 r8 stubbed: findings', () => {
     await refuse({ entity: 'Apple Inc. 10-K/A-1', period: '2023' }, 422, 'INVALID_FORM_TYPE');
   });
 
-  it('J2-M5 / decision 1: former names and non-titles are 422 ENTITY_NOT_FOUND; FedReg is never fetched', async () => {
+  it('J2-M5 / decision 1: former names and non-titles disclose no-data without a filing count; FedReg is never fetched', async () => {
     for (const entity of ['Tesla Motors', 'Google', 'Facebook', '7-Eleven', 'Tesla quarterly', 'Environmental Protection Agency', 'Airbus S E', 'Apple Inc. Form']) {
       const calls = newCalls();
-      if(['Google','Facebook','7-Eleven','Environmental Protection Agency','Airbus S E'].includes(entity)){const out=await handleFilings({entity,period:'2023'},{fetchImpl:stub({calls})});expect(out.verdict).toBe('no_data');expect(out).not.toHaveProperty('filing_count');}else await refuse({ entity, period: '2023' }, 422, undefined, stub({ calls }));
+      await expectNoCompanyData(entity, '2023', stub({ calls }));
+      expect(calls.urls.filter(url => url.includes('browse-edgar'))).toHaveLength(1);
       expect(calls.fedreg, entity).toBe(0);
       expect(calls.submissions, entity).toBe(0);
     }
@@ -503,9 +519,15 @@ describe('A1 r8 LIVE (real SEC EDGAR)', () => {
     console.log(`LIVE MS last 60 months: filing_count=${r.filing_count}`);
   }, 300_000);
 
-  it('former names / non-SEC entities are 422 live (Tesla Motors, Google, Facebook, 7-Eleven, Apple Inc.—10-K is 1)', async () => {
+  it('former names / non-SEC entities disclose no-data live, while Apple Inc.—10-K is 1', async () => {
     for (const entity of ['Tesla Motors', 'Google', 'Facebook', '7-Eleven', 'Tesla quarterly']) {
-      await expect(handleFilings({ entity, period: '2023' }), entity).rejects.toMatchObject({ status: 422 });
+      try {
+        await expectNoCompanyData(entity, '2023');
+      } catch (error) {
+        // A partial search cannot prove absence and must not invent a match.
+        expect(error, entity).toBeInstanceOf(ApiError);
+        expect(error, entity).toMatchObject({ status: 422, code: 'AMBIGUOUS_ENTITY' });
+      }
     }
     expect((await live({ entity: 'Apple Inc.\u201410-K', period: '2023' })).filing_count).toBe(1);
   }, 120_000);

@@ -206,6 +206,25 @@ async function expectNoSecData(p:Promise<unknown>):Promise<Record<string,unknown
 // Unit tests
 // ---------------------------------------------------------------------------
 
+async function expectCurrentMicrosoft(out: Awaited<ReturnType<typeof handleFilings>>) {
+  const response = await fetch('https://data.sec.gov/submissions/CIK0000789019.json', {
+    headers: { 'User-Agent': process.env.SEC_USER_AGENT || TEST_UA },
+  });
+  expect(response.ok).toBe(true);
+  const current = await response.json() as {
+    cik: string; name: string;
+    filings: { recent: { filingDate: string[]; accessionNumber: string[] } };
+  };
+  expect(Number(current.cik)).toBe(789019);
+  expect(out.matched_legal_name).toBe(current.name);
+  expect(out.verdict).toBe('verified');
+  const rows = current.filings.recent;
+  const expected = rows.accessionNumber.filter((_accession, i) => rows.filingDate[i].startsWith('2026-'));
+  expect(expected.length).toBeGreaterThanOrEqual(157);
+  expect(out.filing_count).toBe(expected.length);
+  expect((out.filings_detail as Array<{ accession: string }>).map(row => row.accession)).toEqual(expected);
+}
+
 describe('handleFilings — validation (400s)', () => {
   beforeAll(() => {
     process.env.SEC_USER_AGENT = TEST_UA;
@@ -4417,15 +4436,16 @@ describe('handleFilings — ROUND 9 live: U+2800 variants + controls (real SEC E
     async () => {
       const msft = await handleFilings({ entity: 'Microsoft Corp', period: '2026' });
       expect(msft.source).toBe('SEC EDGAR Submissions API');
-      expect(msft.filing_count).toBe(157);
-      expect((msft.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0000789019-26-000236');
+      expect(msft.filing_count as number).toBeGreaterThanOrEqual(157);
+      await expectCurrentMicrosoft(msft);
       const sap = await handleFilings({ entity: 'SAP SE', period: '2026' });
       expect(sap.source).toBe('SEC EDGAR Submissions API');
       expect(sap.filing_count).toBe(10);
       expect((sap.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0001104659-26-118617');
       const ms = await handleFilings({ entity: 'Microsoft', period: '2026' });
       expect(ms.source).toBe('SEC EDGAR Submissions API');
-      expect(ms.filing_count).toBe(157);
+      expect(ms.filing_count as number).toBeGreaterThanOrEqual(157);
+      await expectCurrentMicrosoft(ms);
       console.log(
         `LIVE R9 controls: MSFT Corp 2026=${msft.filing_count}, SAP SE 2026=${sap.filing_count}, Microsoft 2026=${ms.filing_count}`,
       );
@@ -4833,8 +4853,8 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
       await expectDiscoveryOutcome(handleFilings({ entity: 'Airbus S E', period: '2026' }));
       const msft = await handleFilings({ entity: 'Microsoft Corp', period: '2026' });
       expect(msft.source).toBe('SEC EDGAR Submissions API');
-      expect(msft.filing_count).toBe(157);
-      expect((msft.filings_detail as Array<Record<string, string>>)[0].accession).toBe('0000789019-26-000236');
+      expect(msft.filing_count as number).toBeGreaterThanOrEqual(157);
+      await expectCurrentMicrosoft(msft);
       const sap = await handleFilings({ entity: 'SAP SE', period: '2026' });
       expect(sap.source).toBe('SEC EDGAR Submissions API');
       expect(sap.filing_count).toBe(10);
@@ -4850,7 +4870,8 @@ describe('handleFilings — ROUND 10 live: U+13441/U+13442/U+303F + U+1DA7F/U+1D
       expect(appleNbsp.filing_count).toBe(100);
       const msftNbsp = await handleFilings({ entity: 'Microsoft\u00A0Corporation', period: '2026' });
       expect(msftNbsp.source).toBe('SEC EDGAR Submissions API');
-      expect(msftNbsp.filing_count).toBe(157);
+      expect(msftNbsp.filing_count as number).toBeGreaterThanOrEqual(157);
+      await expectCurrentMicrosoft(msftNbsp);
       for (const entity of ['L\'Or\u00E9al\u00A0SA', 'L\'Or\u00E9al SA']) {
         await expectDiscoveryOutcome(handleFilings({ entity, period: '2026' }));
       }
