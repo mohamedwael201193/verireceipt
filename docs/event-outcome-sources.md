@@ -6,4 +6,6 @@ The structured resolver accepts only a dated or Roman-numeral who-won event phra
 
 Only genuine EVENT_NOT_FOUND misses across all resolvers produce a no-source unresolved response: resolved_yes is false, no winner, no receipt and sources is empty. This does not mean NO. Matched structured ambiguity, missing winner/English label, incomplete or future dates and multiple winners keep distinct refusal codes, never a no-record claim. Upstream HTTP, timeout, malformed payload and receipt-storage errors never become this response.
 
-Event requests have a2900ms response ceiling, a2700ms source-work budget and650ms per-read ceiling. URL-identical reads share ownership until the underlying fetch and body settle, even if callers time out. Concurrent source reads are capped at32. No new request starts after its budget expires. Timing out does not assert an event result.
+Event requests have a2900ms response ceiling, a2700ms source-work budget and1200ms per-read ceiling, with a2MB response-body limit. URL-identical reads share ownership until the underlying fetch and body settle, even if callers time out. Concurrent source reads are capped at32. No new request starts after its budget expires. Timing out does not assert an event result.
+
+A source outage can fall through to the next named source, disclosed in a successful fallback answer. If no source answers and any source was unavailable, return an upstream502, never the all-sources-missed unresolved response. Body-read failures are upstream errors, not INTERNAL.

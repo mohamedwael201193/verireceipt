@@ -105,6 +105,7 @@ export async function handleEventOutcome(query: Record<string, string | undefine
   const deadlineAt=Date.now()+2700;
   let timer:ReturnType<typeof setTimeout>|undefined;
   try{return await Promise.race([handleEvent(query,deadlineAt),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(upstreamUnavailable('EVENT_SOURCE_TIMEOUT','event request budget exceeded')),2900);})]);}
+  catch(error){throw error instanceof ApiError?error:upstreamUnavailable('EVENT_SOURCE_UNAVAILABLE','event source response could not be read');}
   finally{clearTimeout(timer);}
 }
 async function handleEvent(query: Record<string, string | undefined>,deadlineAt:number): Promise<Record<string, unknown>> {
@@ -113,28 +114,34 @@ async function handleEvent(query: Record<string, string | undefined>,deadlineAt:
   if (event.length > 200) throw badRequest("EVENT_TOO_LONG", "event must be at most 200 characters");
   const url = `https://gamma-api.polymarket.com/public-search?q=${encodeURIComponent(event)}&limit_per_type=3`;
   const fetchedAt = new Date().toISOString();
-  let body: string;
-  try {
-    body = (await eventBody(url,deadlineAt)).raw;
-  } catch {
-    throw upstreamUnavailable("POLYMARKET_UNREACHABLE", "the Polymarket gamma API could not be reached");
-  }
-  const markets = parseSearch(body);
-  let market: PmMarket;
-  try { market = matchMarket(markets, event); }
-  catch (error) {
-    // Only a genuine no-match enables fallback; matched markets never use it.
-    if (error instanceof ApiError && error.code === 'EVENT_NOT_FOUND') {
-      try{return await wikipediaEventOutcome(event,body,url,deadlineAt);}catch(wikiError){
-        if(!(wikiError instanceof ApiError)||wikiError.code!=='EVENT_NOT_FOUND')throw wikiError;
-      }
-      const result=await wikidataEventOutcome(event,body,url,deadlineAt);
-      if(result)return result;
-      const answer='No resolved Polymarket market, Wikipedia page or Wikidata record matched this event; nothing was inferred, outcome is unresolved.';
-      return withAnswerClass({answer,event,outcome:'unresolved',resolved_yes:false,sources:[],verdict:'unresolved',confidence:0,source:'none',checked_at:new Date().toISOString()},INTENT,{outcome:'unresolved',source:'none'});
+  let body='';
+  let unavailable:ApiError|undefined;
+  try { body=(await eventBody(url,deadlineAt)).raw; }
+  catch { unavailable=upstreamUnavailable('POLYMARKET_UNREACHABLE','the Polymarket gamma API could not be reached'); }
+  let market:PmMarket|undefined;
+  if(!unavailable){
+    const markets=parseSearch(body);
+    try{market=matchMarket(markets,event);}catch(error){
+      if(!(error instanceof ApiError)||error.code!=='EVENT_NOT_FOUND')throw error;
     }
-    throw error;
   }
+  if(!market){
+    const unavailableSources:string[]=unavailable?['Polymarket']:[];
+    const disclose=(result:Record<string,unknown>)=>{
+      if(unavailableSources.length){const note=unavailableSources.join(' and ')+' unavailable; this answer uses the next named source, not confirmation from the unavailable source.';result.answer=String(result.answer)+' '+note;result.source=String(result.source)+'; '+note;}
+      return result;
+    };
+    try{return disclose(await wikipediaEventOutcome(event,body,url,deadlineAt));}catch(error){
+      if(error instanceof ApiError&&error.code==='EVENT_NOT_FOUND'){/* genuine miss */}
+      else if(error instanceof ApiError&&error.status===502&&error.code!=='RECEIPT_PERSIST_FAILED'){unavailable??=error;unavailableSources.push('Wikipedia');}
+      else throw error;
+    }
+    const result=await wikidataEventOutcome(event,body,url,deadlineAt);if(result)return disclose(result);
+    if(unavailable)throw unavailable;
+    const answer='No resolved Polymarket market, Wikipedia page or Wikidata record matched this event; nothing was inferred, outcome is unresolved.';
+    return withAnswerClass({answer,event,outcome:'unresolved',resolved_yes:false,sources:[],verdict:'unresolved',confidence:0,source:'none',checked_at:new Date().toISOString()},INTENT,{outcome:'unresolved',source:'none'});
+  }
+  const markets=parseSearch(body);
   const r = resolveMarket(market);
   const asOf = new Date().toISOString();
   if(r.outcome==='unresolved'){
