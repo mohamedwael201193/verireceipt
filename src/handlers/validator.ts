@@ -82,13 +82,12 @@ import {withAnswerClass} from "../core/answerClass";
 // index), rejected if the node flags it execution_optimistic (except
 // the Stakely root-pin bind described above), and rejected if its
 // status is outside the nine-value beacon status enum.
-// At least two sources 404 and none returning the validator means the
-// validator does not exist: 422
-// VALIDATOR_NOT_FOUND (repo precedent: filings 404 -> 422
-// ENTITY_NOT_FOUND, TVL unknown -> 422 PROTOCOL_NOT_FOUND).
+// At least two source404s and no returned validator is a disclosed200
+// no-data response with effective_balance:null, never a zero or verified value.
+// A lone404, dissent or failed root quorum remains a source failure.
 //
-// effective_balance is returned as a NUMBER in gwei. 0 is a real 0
-// (an exited / fully-withdrawn validator), never null. The beacon API
+// Found effective_balance is a NUMBER in gwei. 0 is a real 0
+// (an exited / fully-withdrawn validator); only quorum no-data is null. The beacon API
 // serves it as a JSON string ("32000000000"); the handler parses it to
 // a safe integer and refuses a leg whose value is not a digit string.
 //
@@ -104,7 +103,7 @@ import {withAnswerClass} from "../core/answerClass";
 // re-hash of GET /receipts/:id/raw always matches. The receipt's
 // upstream_url is that leg's full request URL.
 
-import { ApiError, badRequest, unprocessable } from "../core/errors";
+import { ApiError, badRequest } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { TIMEOUT_MS } from "../config/limits";
@@ -887,6 +886,12 @@ interface FetchSourceOpts {
  * equals expectedRoot. Stakely may be accepted optimistic iff the
  * states/{root}/root bind succeeds.
  */
+export function isValidatorAbsenceBody(raw:string,index:number|string):boolean {
+ try{const j=JSON.parse(raw);if(j?.code!==404||typeof j.message!=="string")return false;
+ return j.message==="Validator index from future state"&&typeof index==="number" || j.message===`NOT_FOUND: unknown validator: ${index}`;
+ }catch{return false;}
+}
+
 async function fetchValidatorFromSource(
   base: string,
   index: ValidatorIdentifier,
@@ -953,11 +958,13 @@ async function fetchValidatorFromSource(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), attemptMs);
     let res: Response;
+    let validatorAbsent=false;
     try {
       res = await fetchImpl(sourceUrl, {
         headers: { accept: "application/json" },
         signal: controller.signal,
       });
+      if(res.status===404)validatorAbsent=isValidatorAbsenceBody(await res.text(),index);
       if (res.ok) {
         const rawBody = await res.text();
         try {
@@ -1001,8 +1008,9 @@ async function fetchValidatorFromSource(
     const err = new Error(
       `beacon source ${base} returned HTTP ${res.status} for validator ${index}` +
         (attempt > 1 ? ` (attempt ${attempt} of ${VALIDATOR_MAX_ATTEMPTS})` : ""),
-    ) as Error & { httpStatus: number };
+    ) as Error & { httpStatus: number; validatorAbsent:boolean };
     err.httpStatus = res.status;
+    err.validatorAbsent=validatorAbsent;
     if (res.status === 429) {
       noteSource429(base, parseRetryAfterMs(retryAfterHeader(res)));
     }
@@ -1264,6 +1272,7 @@ async function handleValidatorObserved(
   const legResults: Array<ValidatorLeg | undefined> = BEACON_SOURCES.map(() => undefined);
   const legHttpStatus: Array<number | undefined> = BEACON_SOURCES.map(() => undefined);
   const legFailure: Array<string | undefined> = BEACON_SOURCES.map(() => undefined);
+  const legAbsent:boolean[]=BEACON_SOURCES.map(()=>false);
   const legSettled: boolean[] = BEACON_SOURCES.map(() => false);
   const arrival: number[] = [];
   let requestSettled = false;
@@ -1321,7 +1330,7 @@ async function handleValidatorObserved(
       const pending = legSettled.filter((x) => !x).length;
       if (pending === 0) return finish();
       const group = largestGroup();
-      const n404 = legHttpStatus.filter((st) => st === 404).length;
+      const n404 = legAbsent.filter(Boolean).length;
       if (group.length >= VALIDATOR_MIN_AGREEING) {
         // Conflict already certain: an answer outside the group, or a
         // 404 next to a pair that found the validator.
@@ -1368,6 +1377,7 @@ async function handleValidatorObserved(
         (err: unknown) => {
           if (finished) return;
           legHttpStatus[i] = httpStatusOf(err);
+          legAbsent[i]=Boolean((err as any)?.validatorAbsent);
           legFailure[i] = shortLegFailure(err);
           legSettled[i] = true;
           check();
@@ -1393,7 +1403,7 @@ async function handleValidatorObserved(
   // decide(): one rule over the final snapshot, independent of order.
   const group = largestGroup();
   const answeredCount = arrival.length;
-  const n404 = legHttpStatus.filter((st) => st === 404).length;
+  const n404 = legAbsent.filter(Boolean).length;
   if (group.length >= VALIDATOR_MIN_AGREEING) {
     // VR + v-m1 (J2 round 2): any answer outside the agreeing group, or
     // a 404 ("does not exist") from a source while the others found the
@@ -1408,14 +1418,16 @@ async function handleValidatorObserved(
     }
   } else {
     // F4 + VR: "does not exist" needs the same two-source standard as an
-    // answer — at least VALIDATOR_MIN_AGREEING sources observed 404 and
-    // NO source returned the validator (repo precedent: filings 404 ->
-    // 422 ENTITY_NOT_FOUND, TVL unknown -> 422 PROTOCOL_NOT_FOUND).
+    // no-data result: at least VALIDATOR_MIN_AGREEING sources observed 404 and
+    // NO source returned the validator. No-data is not a verified balance.
     if (n404 >= VALIDATOR_MIN_AGREEING && answeredCount === 0) {
-      throw unprocessable(
-        "VALIDATOR_NOT_FOUND",
-        `validator ${index} does not exist (${n404} of ${n} beacon sources returned 404)`,
-      );
+      return withAnswerClass({
+        validator_index:index, effective_balance:null, effective_balance_unit:"gwei",
+        status:"not_found", verdict:"no_data", confidence:0, receipt:null,
+        finalized_state_root:agreedRoot,
+        answer:`Validator ${index} was not found at finalized state root ${agreedRoot}; ${n404} of ${n} beacon sources returned recognized validator-not-found404 and none returned a validator. effective_balance is null (unknown/not found), not zero. No validator value is verified and no value receipt is issued.`,
+        source:BEACON_SOURCES.filter((_,i)=>legAbsent[i]).join(" + "),
+      },INTENT,{validator_outcome:"not_found",validator_state:"finalized",effective_balance:null});
     }
     throw new ApiError(
       502,

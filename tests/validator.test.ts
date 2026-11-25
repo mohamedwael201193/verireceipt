@@ -341,7 +341,7 @@ describe("handleValidator fail-closed (stub fetch)", () => {
         {
           fetchImpl: makeStubFetch([
             { status: 200, body: beaconBody(1, "32000000000", "active_ongoing") },
-            { status: 404, body: JSON.stringify({ code: 404, message: "validator not found" }) },
+            { status: 404, body: JSON.stringify({ code:404,message:"Validator index from future state" }) },
           ]),
         },
       ),
@@ -438,21 +438,17 @@ describe("handleValidator fail-closed (stub fetch)", () => {
     expect((await receiptCount())).toBe(before);
   });
 
-  it("F4: both legs 404 (nonexistent validator) -> 422 VALIDATOR_NOT_FOUND, no receipt", async () => {
+  it("F4: both legs 404 (nonexistent validator) -> 200 no-data (null effective_balance), no receipt", async () => {
     const before = (await receiptCount());
-    await expectApiError(
-      handleValidator(
+    expect(await handleValidator(
         { validator_index: "99999999" },
         {
           fetchImpl: makeStubFetch([
-            { status: 404, body: JSON.stringify({ code: 404, message: "validator not found" }) },
-            { status: 404, body: JSON.stringify({ code: 404, message: "validator not found" }) },
+            { status: 404, body: JSON.stringify({ code:404,message:"Validator index from future state" }) },
+            { status: 404, body: JSON.stringify({ code:404,message:"Validator index from future state" }) },
           ]),
         },
-      ),
-      422,
-      "VALIDATOR_NOT_FOUND",
-    );
+      )).toMatchObject({effective_balance:null,status:"not_found",verdict:"no_data",receipt:null});
     expect((await receiptCount())).toBe(before);
   });
 
@@ -466,8 +462,8 @@ describe("handleValidator fail-closed (stub fetch)", () => {
     const before = (await receiptCount());
     const hanging = (_url: unknown) => new Promise<Response>(() => {});
     const fast404 = makeStubFetch([
-      { status: 404, body: "nf" },
-      { status: 404, body: "nf" },
+      { status: 404, body: JSON.stringify({code:404,message:"Validator index from future state"}) },
+      { status: 404, body: JSON.stringify({code:404,message:"Validator index from future state"}) },
     ]);
     const mixed = (async (url: string | URL | Request) => {
       const s = String(url);
@@ -498,8 +494,8 @@ describe("handleValidator fail-closed (stub fetch)", () => {
       } as unknown as Response;
     };
     const fast404 = makeStubFetch([
-      { status: 404, body: "nf" },
-      { status: 404, body: "nf" },
+      { status: 404, body: JSON.stringify({code:404,message:"Validator index from future state"}) },
+      { status: 404, body: JSON.stringify({code:404,message:"Validator index from future state"}) },
     ]);
     const mixed = (async (url: string | URL | Request) => {
       const s = String(url);
@@ -518,26 +514,22 @@ describe("handleValidator fail-closed (stub fetch)", () => {
     expect((await receiptCount())).toBe(before);
   }, 5000);
 
-  it("F6: both 404 with 2nd leg delayed 300ms -> still 422 VALIDATOR_NOT_FOUND", async () => {
+  it("F6: both 404 with 2nd leg delayed 300ms -> still 200 no-data (null effective_balance)", async () => {
     const before = (await receiptCount());
     const delayed404 = async (_url: unknown): Promise<Response> => {
       await new Promise<void>((r) => setTimeout(r, 300));
-      return { ok: false, status: 404, text: async () => "nf" } as unknown as Response;
+      return { ok: false, status: 404, text: async () => JSON.stringify({code:404,message:"Validator index from future state"}) } as unknown as Response;
     };
     const fast404 = makeStubFetch([
-      { status: 404, body: "nf" },
-      { status: 404, body: "nf" },
+      { status: 404, body: JSON.stringify({code:404,message:"Validator index from future state"}) },
+      { status: 404, body: JSON.stringify({code:404,message:"Validator index from future state"}) },
     ]);
     const mixed = (async (url: string | URL | Request) => {
       const s = String(url);
       if (s.startsWith(BEACON_SOURCES[1])) return delayed404(s);
       return fast404(url);
     }) as unknown as typeof fetch;
-    await expectApiError(
-      handleValidator({ validator_index: "99999999" }, { fetchImpl: mixed, timeoutMs: 1000 }),
-      422,
-      "VALIDATOR_NOT_FOUND",
-    );
+    expect(await handleValidator({ validator_index: "99999999" }, { fetchImpl: mixed, timeoutMs: 1000 })).toMatchObject({effective_balance:null,status:"not_found",verdict:"no_data",receipt:null});
     expect((await receiptCount())).toBe(before);
   }, 5000);
 

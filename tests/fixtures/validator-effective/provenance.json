@@ -1,0 +1,87 @@
+{
+  "fixture_kind": "exact captured raw response bodies",
+  "sources": [
+    {
+      "file": "publicnode-root.json",
+      "url": "https://ethereum-beacon-api.publicnode.com/eth/v1/beacon/states/finalized/root",
+      "http_status": 200,
+      "captured_at_utc": "2026-11-25T06:49:08.498597+00:00",
+      "raw_sha256": "532c3f0165decd762e313487235cd50a915a179668074e414b32feaf909526a5"
+    },
+    {
+      "file": "publicnode-0.json",
+      "url": "https://ethereum-beacon-api.publicnode.com/eth/v1/beacon/states/0x9ceb0b6146a267133cc0c206d3aed264fc19ba6d126c3f4ddd79d158aab97692/validators/0",
+      "http_status": 200,
+      "captured_at_utc": "2026-11-25T06:49:16.838690+00:00",
+      "raw_sha256": "4c5086eed91d9909b8d1c68a09d7bb33168fc36074d93beae88f2b351fab3806"
+    },
+    {
+      "file": "publicnode-99999999.json",
+      "url": "https://ethereum-beacon-api.publicnode.com/eth/v1/beacon/states/0x9ceb0b6146a267133cc0c206d3aed264fc19ba6d126c3f4ddd79d158aab97692/validators/99999999",
+      "http_status": 404,
+      "captured_at_utc": "2026-11-25T06:49:17.022692+00:00",
+      "raw_sha256": "97b20ddaff38fb6ee37ea667a72c5bd2cb61de8165b2c5bb7586edad63bc4ea4"
+    },
+    {
+      "file": "stakely-root.json",
+      "url": "https://ethereum-beacon-api.stakely.io/eth/v1/beacon/states/finalized/root",
+      "http_status": 200,
+      "captured_at_utc": "2026-11-25T06:49:08.846601+00:00",
+      "raw_sha256": "532c3f0165decd762e313487235cd50a915a179668074e414b32feaf909526a5"
+    },
+    {
+      "file": "stakely-0.json",
+      "url": "https://ethereum-beacon-api.stakely.io/eth/v1/beacon/states/0x9ceb0b6146a267133cc0c206d3aed264fc19ba6d126c3f4ddd79d158aab97692/validators/0",
+      "http_status": 200,
+      "captured_at_utc": "2026-11-25T06:49:17.338696+00:00",
+      "raw_sha256": "4c5086eed91d9909b8d1c68a09d7bb33168fc36074d93beae88f2b351fab3806"
+    },
+    {
+      "file": "stakely-99999999.json",
+      "url": "https://ethereum-beacon-api.stakely.io/eth/v1/beacon/states/0x9ceb0b6146a267133cc0c206d3aed264fc19ba6d126c3f4ddd79d158aab97692/validators/99999999",
+      "http_status": 500,
+      "captured_at_utc": "2026-11-25T06:49:24.754778+00:00",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "chainsafe-99999999.json",
+      "url": "https://lodestar-mainnet.chainsafe.io/eth/v1/beacon/states/0x9ceb0b6146a267133cc0c206d3aed264fc19ba6d126c3f4ddd79d158aab97692/validators/99999999",
+      "http_status": 404,
+      "captured_at_utc": "2026-11-25T06:49:33.562876+00:00",
+      "raw_sha256": "928c7514854b5811ad4bed9a9432b61e8a0f83e14360b61027929f5deea6857d"
+    }
+  ],
+  "scope": "Two independent value records agree on effective balance at exact root. Missing-index evidence from two404s; Stakely500 is unavailable, never a missing vote. Tests inject no optional-performance responses.",
+  "replay_limit": "Historical root is no longer guaranteed available. Later old-root PublicNode returned state-unavailable404 even for validator0; this is NOT validator absence. No claim that historical fixtures replay live. Stakely availability may vary.",
+  "fresh_capture": {
+    "root": "0x9620714139e2c93b517bc89deb9b998d1511d1b612a45dd364b188d08f670831",
+    "files": {
+      "fresh-root": {
+        "raw_sha256": "859274e8ca1ee7f1181bf105874555bfd5cbd6605352381ca653a2a8da0236b5",
+        "captured_at_utc": "2026-11-25T06:56:35.466924+00:00"
+      },
+      "fresh-publicnode-0": {
+        "raw_sha256": "8188c05d80f8b586e291ee7873215b23ce4c39c642856048a37317a79deeda68",
+        "captured_at_utc": "2026-11-25T06:56:35.646926+00:00"
+      },
+      "fresh-publicnode-99999999": {
+        "raw_sha256": "97b20ddaff38fb6ee37ea667a72c5bd2cb61de8165b2c5bb7586edad63bc4ea4",
+        "captured_at_utc": "2026-11-25T06:56:35.850928+00:00"
+      },
+      "fresh-chainsafe-0": {
+        "raw_sha256": "0a0f3d7c95831f45287add9c00c3ed8314c43846623b14516f1d9158c52bfdbf",
+        "captured_at_utc": "2026-11-25T06:56:36.454935+00:00"
+      },
+      "missing-state": {
+        "raw_sha256": "00df0b26e388f5e5bb94061212433fbef8e49cb37cdd6f98c3d079ef5bf3084d",
+        "captured_at_utc": "2026-11-25T06:56:52.831117+00:00"
+      }
+    },
+    "sources": {
+      "publicnode": "https://ethereum-beacon-api.publicnode.com",
+      "chainsafe": "https://lodestar-mainnet.chainsafe.io"
+    },
+    "paths": "/eth/v1/beacon/states/{root}/validators/{0|99999999}; fresh-root is PublicNode states/finalized/root",
+    "limit": "Fresh PublicNode0 and ChainSafe0 captured200. PublicNode futureindex404 recognized; ChainSafe futureindex429 not retried or used. Historical ChainSafe future-index404 remains recorded original evidence."
+  }
+}

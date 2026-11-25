@@ -158,7 +158,7 @@ function scripted(script: Array<Step[] | undefined>): {
 }
 
 const OK1 = { status: 200, body: beaconBody(1, "32000000000", "active_ongoing") };
-const NF = { status: 404, body: JSON.stringify({ code: 404, message: "NOT_FOUND: validator" }) };
+const NF = { status: 404, body: JSON.stringify({ code:404,message:"Validator index from future state" }) };
 
 describe("parseRetryAfterMs (RFC 9110 Retry-After)", () => {
   const now = Date.parse("2026-11-21T01:00:00Z");
@@ -288,7 +288,7 @@ describe("VR: retry on transient errors (stub fetch)", () => {
       expect(s.count(0)).toBe(1);
     }
     const s404 = scripted([[NF], [NF], [NF]]);
-    await expectApiError(handleValidator({ validator_index: "99999999" }, { fetchImpl: s404.fetchImpl }), 422, "VALIDATOR_NOT_FOUND");
+    expect(await handleValidator({ validator_index: "99999999" }, { fetchImpl: s404.fetchImpl })).toMatchObject({effective_balance:null,status:"not_found",verdict:"no_data",receipt:null});
     expect([s404.count(0), s404.count(1), s404.count(2)]).toEqual([1, 1, 1]);
     const sNet = scripted([[new Error("ECONNRESET")], [OK1], undefined]);
     await expectApiError(handleValidator({ validator_index: "1" }, { fetchImpl: sNet.fetchImpl }), 502, "QUORUM_UNREACHABLE");
@@ -401,16 +401,8 @@ describe("VR: third source fallback (stub fetch)", () => {
   it("not-found needs two 404s and no answer", async () => {
     const before = (await receiptCount());
     resetValidatorCachesForTests();
-    await expectApiError(
-      handleValidator({ validator_index: "99999999" }, { fetchImpl: scripted([[NF], [NF], undefined]).fetchImpl }),
-      422,
-      "VALIDATOR_NOT_FOUND",
-    );
-    await expectApiError(
-      handleValidator({ validator_index: "99999999" }, { fetchImpl: scripted([[NF], [{ status: 429 }], [NF]]).fetchImpl }),
-      422,
-      "VALIDATOR_NOT_FOUND",
-    );
+    expect(await handleValidator({ validator_index: "99999999" }, { fetchImpl: scripted([[NF], [NF], undefined]).fetchImpl })).toMatchObject({effective_balance:null,status:"not_found",verdict:"no_data",receipt:null});
+    expect(await handleValidator({ validator_index: "99999999" }, { fetchImpl: scripted([[NF], [{ status: 429 }], [NF]]).fetchImpl })).toMatchObject({effective_balance:null,status:"not_found",verdict:"no_data",receipt:null});
     // a single 404 is not "does not exist"
     await expectApiError(
       handleValidator({ validator_index: "99999999" }, { fetchImpl: scripted([[NF], [{ status: 429 }], [{ status: 503 }]]).fetchImpl }),
