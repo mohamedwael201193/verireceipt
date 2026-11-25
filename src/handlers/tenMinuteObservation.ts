@@ -12,7 +12,10 @@ export class TenMinuteObservation{
  clear(){this.rows.clear();this.pending.clear();}
  async get(key:string,load:()=>Promise<Record<string,unknown>>,boundary?:(result:Record<string,unknown>)=>number):Promise<Record<string,unknown>>{
   const now=Date.now(),prior=this.rows.get(key);
-  if(prior&&now>=prior.at&&now<prior.until&&await this.verify(prior.result))return this.describe(prior.result,prior.at,true);
+  if(prior&&now>=prior.at&&now<prior.until&&await this.verify(prior.result)){
+   const checkedAt=Date.now();
+   if(this.rows.get(key)===prior&&checkedAt>=prior.at&&checkedAt<prior.until)return this.describe(prior.result,prior.at,true);
+  }
   if(this.pending.has(key)){const shared=structuredClone(await this.pending.get(key)!);return{...shared,observation_cached:true,observation_shared_inflight:true,answer:'SHARED IN-FLIGHT OBSERVATION, not a separate source check. '+String(shared.answer??'')};}
   if(this.pending.size>=128)throw Error('observation cache capacity');
   const work=(async()=>{
