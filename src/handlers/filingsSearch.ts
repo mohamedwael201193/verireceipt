@@ -56,15 +56,30 @@ export function matchSecCompany(companies:SecSearchCompany[],query:string):SecSe
  if(unique.size>1)throw unprocessable('AMBIGUOUS_ENTITY','multiple SEC legal names match; use the exact CIK');
  return [...unique.values()][0]??null;
 }
-/** Atom relation is a whitespace-separated token set; XML attribute spacing is insignificant. */
+/** Quote-aware XML start-tag scanning: quoted angle brackets never end a tag. */
 export function hasNextSecCompanyPage(body:string):boolean{
- for(const link of body.matchAll(/<(?:[A-Za-z_][\w.-]*:)?link\b([^<>]*)\/?>/g)){
-  const attrs=new Map<string,string>();
-  for(const attr of link[1].matchAll(/([A-Za-z_][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)){
-   if(attrs.has(attr[1]))throw upstreamUnavailable('SEC_UNAVAILABLE','duplicate Atom link attribute');
-   attrs.set(attr[1],text(attr[2]??attr[3]));
+ try{
+  assertXmlNesting(body);
+  let next=false;
+  for(let i=0;i<body.length;i++){
+   if(body[i]!=='<')continue;
+   if(body.startsWith('<!--',i)){const end=body.indexOf('-->',i+4);if(end<0)throw Error('comment');i=end+2;continue;}
+   let end=i+1,quote='';
+   for(;end<body.length;end++){const c=body[end];if(quote){if(c===quote)quote='';}else if(c==='"'||c==="'")quote=c;else if(c==='>')break;}
+   if(end===body.length||quote)throw Error('tag');
+   const tag=body.slice(i+1,end);i=end;
+   if(tag.startsWith('/')||tag.startsWith('?'))continue;
+   const name=/^([A-Za-z_][\w:.-]*)/.exec(tag);if(!name)throw Error('name');
+   let cursor=name[0].length;const attrs=new Map<string,string>();
+   while(cursor<tag.length){
+    const rest=tag.slice(cursor);if(/^\s*\/?\s*$/.test(rest))break;
+    const attr=/^\s+([A-Za-z_][\w:.-]*)\s*=\s*(["'])/.exec(rest);if(!attr)throw Error('attribute');
+    cursor+=attr[0].length;const stop=tag.indexOf(attr[2],cursor);if(stop<0||attrs.has(attr[1]))throw Error('attribute');
+    const value=tag.slice(cursor,stop);if(value.includes('<'))throw Error('attribute markup');
+    attrs.set(attr[1],text(value));cursor=stop+1;
+   }
+   if(name[1].split(':').at(-1)==='link'&&(attrs.get('rel')??'').split(/\s+/).includes('next'))next=true;
   }
-  if((attrs.get('rel')??'').split(/\s+/).includes('next'))return true;
- }
- return false;
+  return next;
+ }catch{throw upstreamUnavailable('SEC_UNAVAILABLE','SEC company-search pagination cannot be parsed safely');}
 }
