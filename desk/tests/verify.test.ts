@@ -83,6 +83,22 @@ describe("verifyPurchase on a real escrow purchase", () => {
     const v = await verifyPurchase(input, stubFetch({ meta: JSON.stringify({ raw_response_sha256: "0".repeat(64) }) }));
     expect(v.verified).toBe(false);
   });
+  it("check details carry no provider slugs or names (publication sweep)", async () => {
+    // Sentinel inputs: any interpolation of the caller's slug or host into a
+    // check name/detail must show up here, even though verification fails.
+    const sentinel = { ...input, minerSlug: "zz-sentinel-provider-x", minerBaseUrl: "https://zz-sentinel-host.invalid" };
+    const joined = (v: VerifyOutput) => v.checks.map((c) => `${c.name}: ${c.detail ?? ""}`).join("\n");
+    for (const v of [
+      await verifyPurchase(sentinel, stubFetch()),
+      // raw-bytes-mismatch early-return path
+      await verifyPurchase(sentinel, stubFetch({ raw: Uint8Array.from(raw, (b, i) => (i === 0 ? b ^ 1 : b)) })),
+    ]) {
+      const details = joined(v);
+      expect(details).not.toContain("zz-sentinel-provider-x");
+      expect(details).not.toContain("zz-sentinel-host");
+      expect(details).not.toMatch(/slug=|praman|datawire|a1-preflight|metricwire|miner_name/i);
+    }
+  });
 });
 
 describe("deliveryIsOk (J2 Minor 2)", () => {
