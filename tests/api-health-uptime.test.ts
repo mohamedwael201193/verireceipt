@@ -9,8 +9,8 @@ vi.mock("node:http", async importOriginal => ({ ...await importOriginal<typeof i
 const scratch = mkdtempSync("/tmp/api-health-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-afterEach(() => { resetUptimeRefusalsForTests(); vi.unstubAllGlobals(); vi.clearAllMocks(); __setLookupForTests(null); });
-import { handleApiHealth } from "../src/handlers/apiHealth";
+afterEach(() => { resetHealthReuseForTests(); resetUptimeRefusalsForTests(); vi.unstubAllGlobals(); vi.clearAllMocks(); __setLookupForTests(null); });
+import { handleApiHealth, resetHealthReuseForTests } from "../src/handlers/apiHealth";
 import { handleServerUptime, resetUptimeRefusalsForTests } from "../src/handlers/serverUptime";
 import { guardPublicHttpUrl, __setLookupForTests, __clearRateLimitsForTests } from "../src/handlers/ssrfGuard";
 import { buildServer } from "../src/server";
@@ -190,7 +190,7 @@ it('API health records failed DNS as a real negative observation, never an inven
  const receipt=result.receipt as any;const stored=await getReceiptEvidence(receipt.receipt_id);expect(stored.evidence).toBeTruthy();
  expect(sha256Hex(stored.evidence!)).toBe(receipt.raw_response_sha256);const raw=JSON.parse(stored.evidence!.toString());
  expect(raw.dns_observation).toMatchObject({kind:'resolution_failed',http_attempted:false});expect(raw.resolved_addresses).toEqual([]);expect(raw.measured.http_status).toBeNull();
- await expect(handleApiHealth({url:'https://api.example.com/status'})).rejects.toMatchObject({code:'RATE_LIMITED'});
+ expect(await handleApiHealth({url:'https://api.example.com/status'})).toMatchObject({reused_measurement:true});
 });
 it('DNS empty result is not connection refused and uptime discloses not-probed',async()=>{
  fakeDns({'empty.example.com':[]});
@@ -243,4 +243,19 @@ it('guard refusal capacity admits1024distinct input hashes, refuses1025without r
   const before=count();await expect(handleServerUptime({host:'overflow.internal'})).rejects.toMatchObject({code:'RATE_LIMITED'});expect(count()).toBe(before);
   await vi.advanceTimersByTimeAsync(60000);expect(await handleServerUptime({host:'overflow.internal'})).toMatchObject({http_attempted:false});expect(count()).toBe(before+1);
  }finally{log.mockRestore();vi.useRealTimers();}
+});
+
+it('health exactURLreuse is evidence-backed, different paths get4realchecks then disclosed priorURLreuse',async()=>{
+ fakeDns({'example.com':['93.184.216.34']});stubFetch(200);
+ const first=await handleApiHealth({url:'https://example.com/a'});const second=await handleApiHealth({url:'https://example.com/a'});
+ expect(second.reused_measurement).toBe(true);expect(second.receipt).toEqual(first.receipt);expect(httpsRequest).toHaveBeenCalledTimes(1);
+ for(const path of ['b','c','d']){const out=await handleApiHealth({url:'https://example.com/'+path});expect(out.reused_measurement).toBeUndefined();}
+ expect(httpsRequest).toHaveBeenCalledTimes(4);const capped=await handleApiHealth({url:'https://example.com/e'});expect(capped.requested_url).toBe('https://example.com/e');expect(capped.url).toBe('https://example.com/d');expect(capped.reuse_scope).toContain('NOT checked');expect(httpsRequest).toHaveBeenCalledTimes(4);
+});
+it('health reuse never bypasses new private DNS or port guard',async()=>{
+ fakeDns({'example.com':['93.184.216.34']});stubFetch(200);await handleApiHealth({url:'https://example.com/a'});
+ fakeDns({'example.com':['10.0.0.1']});await expect(handleApiHealth({url:'https://example.com/a'})).rejects.toMatchObject({code:'PRIVATE_HOST'});await expect(handleApiHealth({url:'https://example.com:22/a'})).rejects.toMatchObject({code:'PORT_NOT_CHECKED'});expect(httpsRequest).toHaveBeenCalledTimes(1);
+});
+it('expired health measurement rechecks exactURL instead of reusing',async()=>{
+ fakeDns({'example.com':['93.184.216.34']});stubFetch(200);await handleApiHealth({url:'https://example.com/a'});const now=Date.now();const clock=vi.spyOn(Date,'now').mockReturnValue(now+60001);try{expect((await handleApiHealth({url:'https://example.com/a'})).reused_measurement).toBeUndefined();expect(httpsRequest).toHaveBeenCalledTimes(2);}finally{clock.mockRestore();}
 });

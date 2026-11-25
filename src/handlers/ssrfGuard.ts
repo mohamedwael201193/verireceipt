@@ -36,7 +36,8 @@ export function dnsProbeFailure(error:unknown):DnsProbeFailure|undefined {
  try{return error&&typeof error==='object'?dnsProbeFailures.get(error):undefined;}catch{return undefined;}
 }
 
-function reserveProbeSlot(hostname:string,port:number):void {
+function reserveProbeSlot(hostname:string,port:number,health=false):void {
+  if(health)return; // API health owns exact-URL reuse and a separate bounded host budget.
   const key = `${hostname}:${port}`;
   const last = lastCheck.get(key);
   if (last !== undefined && Date.now() - last < RATE_LIMIT_MS) {
@@ -47,7 +48,7 @@ function reserveProbeSlot(hostname:string,port:number):void {
   lastCheck.set(key, Date.now());
 }
 
-export async function guardPublicHttpUrl(raw: string | undefined, param: string, recordDnsObservation = false): Promise<GuardedTarget> {
+export async function guardPublicHttpUrl(raw: string | undefined, param: string, recordDnsObservation = false, healthBudget=false): Promise<GuardedTarget> {
   if (!raw) throw badRequest("MISSING_PARAM", `${param} is required`);
   if (raw.length > 300) throw badRequest("URL_TOO_LONG", `${param} must be at most 300 characters`);
   let u: URL;
@@ -80,7 +81,7 @@ export async function guardPublicHttpUrl(raw: string | undefined, param: string,
     let temporaryFailure=false;
     const dnsStarted=Date.now();let dnsTimedOut=false;
     const refuseDns=(kind:DnsProbeFailure['kind'],message:string):never=>{
-      if(recordDnsObservation)reserveProbeSlot(hostname,port);
+      if(recordDnsObservation)reserveProbeSlot(hostname,port,healthBudget);
       const error=unprocessable('DNS_UNRESOLVABLE',message);
       if(recordDnsObservation)dnsProbeFailures.set(error,{url:u.toString(),hostname,port,latency_ms:Date.now()-dnsStarted,kind,...(temporaryFailure?{temporary_failure:true}:{})});
       throw error;
@@ -112,7 +113,7 @@ export async function guardPublicHttpUrl(raw: string | undefined, param: string,
     throw unprocessable("PRIVATE_HOST",
       `${hostname} resolves to a private, reserved or special-use address; internal targets are never checked`);
   }
-  reserveProbeSlot(hostname,port);
+  reserveProbeSlot(hostname,port,healthBudget);
   return { url: u.toString(), hostname, port, addresses };
 }
 
