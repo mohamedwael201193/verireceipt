@@ -1,0 +1,37 @@
+{
+  "type": "event",
+  "id": "8f495d1eadb2dd5267d43a8225f2f7a9",
+  "time": "2026-11-25T01:44:57.8644366Z",
+  "source": "barentswatch",
+  "license": "NLOD-2.0",
+  "attribution": "Open Waters AIS (https://openwaters.io/ais/). Data delivered by BarentsWatch. Contains data under the Norwegian licence for Open Government data (NLOD) distributed by the Norwegian Coastal Administration.",
+  "station": "barentswatch/terra",
+  "channel": "",
+  "nmea": [
+    "!AIVDM,1,1,,A,13mdlc00000GV<vR6Ah7uUsj0000,0*0A"
+  ],
+  "mmsi": 257635500,
+  "msg_type": "PositionReport",
+  "lat": 59.590720000000005,
+  "lon": 5.154825,
+  "message": {
+    "MessageID": 1,
+    "RepeatIndicator": 0,
+    "UserID": 257635500,
+    "Valid": true,
+    "NavigationalStatus": 0,
+    "RateOfTurn": 0,
+    "Sog": 0,
+    "PositionAccuracy": false,
+    "Longitude": 5.154825,
+    "Latitude": 59.590720000000005,
+    "Cog": 203.8,
+    "TrueHeading": 189,
+    "Timestamp": 57,
+    "SpecialManoeuvreIndicator": 0,
+    "Spare": 0,
+    "Raim": false,
+    "CommunicationState": 0
+  },
+  "synthesized": true
+}
