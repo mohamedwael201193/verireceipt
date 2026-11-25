@@ -185,3 +185,22 @@ it("cached CI pass retains original acquisition time in receipt and evidence aft
  expect(evidence.fetched_at).toBe(a.fetched_at);expect(evidence.as_of).toBe(a.fetched_at);
  }finally{spy.mockRestore()}
 });
+
+it.each(['skipped','neutral'] as const)('success with %s passes, rule disclosed in answer and exact-body evidence',async(nonblocking)=>{
+ const j=JSON.parse(checks);j.check_runs[0].conclusion=nonblocking;
+ stub({checks:JSON.stringify(j)}); // Actual captured legacy success plus changed check conclusion control.
+ const out=await handleCodePatchVerify({patch:'mohamedwael201193/verireceipt@'+SHA});
+ expect(out.passed).toBe(true);expect(out.conclusion).toBe('success');expect(out.answer).toContain('at least one success');expect(out.answer).toContain('branch protection rules not inspected');
+ const stored=await getReceiptEvidence((out.receipt as any).receipt_id);const e=JSON.parse(String(stored.evidence));expect(e.raw_bodies.check_runs).toBe(JSON.stringify(j));expect(e.source_policy).toContain('skipped/neutral');
+});
+it.each(['failure','timed_out','pending','cancelled'] as const)('%s blocks success even alongside skipped/neutral',block=>{
+ expect(aggregateConclusions(['success','skipped','neutral',block])).toBe(block);
+});
+it.each([['skipped'],['neutral'],['skipped','neutral']] as const)('no actual success never passes for %j',(...input)=>{
+ const parts=input.flat() as ('skipped'|'neutral')[];expect(aggregateConclusions(parts)).not.toBe('success');
+});
+it.each([403,429])('HTTP%s does not produce/cache a pass, recovery uses fresh requests',async(code)=>{
+ let blocked=true;const f=vi.fn(async(u:unknown)=>blocked?new Response('rate limit',{status:code,headers:{'x-ratelimit-remaining':'0'}}):new Response(String(u).includes('check-runs')?checks:status));vi.stubGlobal('fetch',f);
+ await expect(handleCodePatchVerify({patch:'mohamedwael201193/verireceipt@'+SHA})).rejects.toMatchObject({code:'GITHUB_RATE_LIMITED',status:503});expect(f).toHaveBeenCalledTimes(2);
+ blocked=false;const out=await handleCodePatchVerify({patch:'mohamedwael201193/verireceipt@'+SHA});expect(f).toHaveBeenCalledTimes(4);expect(out.passed).toBe(true);
+});

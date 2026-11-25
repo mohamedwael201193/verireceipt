@@ -18,10 +18,12 @@
 // is mixed in: CircleCI/GitLab read different pipelines, so this
 // handler verifies GITHUB patches only and says so in its input errors.
 //
-// AGGREGATION DOCTRINE (worst-of, never averaged): any failing run or
+// AGGREGATION DOCTRINE (blocking-first; skipped/neutral non-blocking alongside success; not a branch-protection verdict): any failing run or
 // failing/error status => failure; any timed_out => timed_out; any
 // still-running or queued check => pending; then cancelled, neutral,
-// skipped, and only an all-green set serves success. `passed` is true
+// skipped. With at least one success and no blocking result, neutral/skipped
+// are non-blocking, matching GitHub required-checks semantics. This does
+// not inspect branch rules or prove mergeability. `passed` is true
 // exactly when the aggregate conclusion is success. A commit with no
 // checks and no statuses serves neutral with passed=false and says
 // there is nothing to verify — never an invented pass.
@@ -84,7 +86,7 @@ function checked(owner: string, repo: string, kind: "commit" | "pr" | "run" | "h
 }
 
 type Conclusion = "success" | "failure" | "cancelled" | "skipped" | "neutral" | "timed_out" | "pending";
-const PRECEDENCE: Conclusion[] = ["failure", "timed_out", "pending", "cancelled", "neutral", "skipped", "success"];
+const PRECEDENCE: Conclusion[] = ["failure", "timed_out", "pending", "cancelled", "success", "neutral", "skipped"];
 
 export function aggregateConclusions(parts: Conclusion[]): Conclusion {
   if (!parts.length) return "neutral";
@@ -179,9 +181,9 @@ export async function handleCodePatchVerify(query: Record<string, string | undef
   const checksFound = checks.runs.length + status.contexts.length;
   const evidence = JSON.stringify({ patch: raw.trim(), resolved: { owner: ref.owner, repo: ref.repo, kind: ref.kind, commit: sha },
     as_of: fetchedAt, conclusion, checks_found: checksFound,
-    source_policy: "GitHub REST API, unauthenticated keyless (60 requests/hour per caller IP); check runs plus combined commit status, worst-of aggregation",
+    source_policy: "GitHub REST API, unauthenticated keyless (60 requests/hour per caller IP); check runs plus combined commit status, blocking-first aggregation; success plus skipped/neutral passes only with at least one success and no failure, timeout, pending or cancelled result; branch protection rules not inspected",
     raw_bodies: { pull: prRaw, check_runs: checksRaw, commit_status: statusRaw }, fetched_at: fetchedAt });
-  const receipt = makeReceipt(INTENT, checksUrl, evidence, "GitHub check runs + combined commit status, worst-of conclusion; never averaged");
+  const receipt = makeReceipt(INTENT, checksUrl, evidence, "GitHub check runs + combined commit status, blocking-first conclusion; skipped/neutral non-blocking only alongside success; never averaged");
   receipt.fetched_at = fetchedAt;
   try {
     await saveReceipt(receipt, evidence);
@@ -193,7 +195,7 @@ export async function handleCodePatchVerify(query: Record<string, string | undef
   const answerBody = checksFound === 0
     ? `${ref.owner}/${ref.repo}@${sha}: no CI check runs and no commit statuses exist — there is nothing to verify. Conclusion: neutral; the patch is NOT verified as passing.`
     : `${ref.owner}/${ref.repo}@${sha}: conclusion ${conclusion.toUpperCase()} (${passed ? "checks passed" : "checks did not pass"}). ` +
-      `${incomplete ? "Coverage is paginated and incomplete within the three-call budget; no all-green pass is asserted. " : ""}${checksFound} check(s)/status(es), worst-of aggregation: ${runList}. ` +
+      `${incomplete ? "Coverage is paginated and incomplete within the three-call budget; no all-green pass is asserted. " : ""}${checksFound} check(s)/status(es), blocking-first aggregation; success plus skipped/neutral passes only with at least one success and no failure, timeout, pending or cancelled result; branch protection rules not inspected: ${runList}. ` +
       (conclusion === "pending" ? "Some checks are still running; this is the state at fetch time, not a final result. " : "") +
       "Source: GitHub API (check runs + combined commit status); responses may be cached for up to60 seconds.";
   return envelope(INTENT, { conclusion, passed, commit: sha, pipeline }, receipt, {
@@ -203,6 +205,6 @@ export async function handleCodePatchVerify(query: Record<string, string | undef
     // pass/fail; verdict carries source confidence only.
     verdict: "verified",
     confidence: conclusion === "pending" ? 0.7 : 0.9,
-    source: `${checksUrl} + ${statusUrl}${prUrl ? ` + ${prUrl}` : ""}; GitHub API unauthenticated; worst-of, never averaged; fetched ${fetchedAt}`,
+    source: `${checksUrl} + ${statusUrl}${prUrl ? ` + ${prUrl}` : ""}; GitHub API unauthenticated; blocking-first; skipped/neutral non-blocking alongside success; not a branch-protection verdict; fetched ${fetchedAt}`,
   });
 }
