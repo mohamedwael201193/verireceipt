@@ -1,3 +1,4 @@
+import {vendorNameChecks} from './vendorNameChecks';
 import {queryFallback} from '../core/queryFallback';
 // VENDOR_VERIFY_GENERAL — GET /v1/vendor-verify?vendor=<name>&vat_number=<EU VAT>
 //
@@ -74,6 +75,7 @@ export async function handleVendorVerify(query: Record<string, string | undefine
     if (unique.size > 1) throw badRequest("AMBIGUOUS_VAT", "multiple VAT-shaped numbers found; supply vat_number explicitly");
     parsed = [...unique.values()][0] ?? null;
   }
+  if (!parsed && vendor) return vendorNameChecks(vendor);
   if (!parsed) return {
     intent:INTENT,vendor:vendor||null,vat_number:null,valid:null,receipt:null,
     answer:`No VAT number was supplied (vendor: ${vendor || 'none given'}). VIES verifies EU VAT numbers only and a vendor name alone is never matched to a registration; no validity verdict is given.`,

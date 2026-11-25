@@ -60,3 +60,12 @@ export async function handleGleifRegistry(company:string,jurisdictionRaw:string)
  const answer=match?`${fields.legal_name}, registration ${fields.registration_id}, jurisdiction ${jurisdiction}, entity status ${e.status}; registered address ${address}; entity creation date ${creation??'not supplied'}. ${notice}`:`No exact legal-name match for ${company} in ${jurisdiction} in GLEIF. ${notice}`;
  return envelope('CORPORATE_REGISTRY_LOOKUP_GENERAL',fields,receipt,{answer,verdict:match?'verified':'not_found',confidence:match?0.85:0,source:url.toString()});
 }
+
+/** Global name search for vendor research, not an assertion of legal identity. */
+export async function searchGleifVendor(company:string):Promise<Record<string,unknown>> {
+ const url=new URL('https://api.gleif.org/api/v1/lei-records');url.searchParams.set('filter[entity.legalName]',company);url.searchParams.set('page[size]','100');
+ const body=await readGleif(url.toString());const data=JSON.parse(body.raw);
+ if(!Array.isArray(data.data)||!Number.isInteger(data.meta?.pagination?.total)||data.meta.pagination.total<data.data.length)throw Error('invalid GLEIF vendor search');
+ const candidates=data.data.filter((r:any)=>typeof r.attributes?.entity?.legalName?.name==='string'&&typeof r.attributes?.lei==='string'&&/^[A-Z0-9]{20}$/.test(r.attributes.lei)).map((r:any)=>({legal_name:r.attributes.entity.legalName.name,lei:r.attributes.lei,jurisdiction:r.attributes.entity.jurisdiction??null,status:r.attributes.entity.status??null,exact_name:norm(r.attributes.entity.legalName.name)===norm(company)}));
+ return {status:'completed',source_url:url.toString(),raw_body:body.raw,fetched_at:body.fetchedAt,total:data.meta.pagination.total,page_complete:data.meta.pagination.total===data.data.length,candidates:candidates.slice(0,20),exact_name_candidates:candidates.filter((r:any)=>r.exact_name).slice(0,20),scope:'GLEIF name search only, not identity confirmation. LEI coverage is incomplete; a miss does not prove nonexistence and a name match does not validate VAT.'};
+}
