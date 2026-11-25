@@ -7,7 +7,7 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 import { handleNewsHeadlines } from "../src/handlers/newsHeadlines";
 import { handleNewsSearch, buildBrief } from "../src/handlers/newsSearch";
-import { parseHn, parseBbcRss, parseGnewsRss, parseGdelt, gdeltSeendateToIso, topicMatches, HN_INDEX, BBC_INDEX, GNEWS_INDEX, GDELT_INDEX, NewsItem } from "../src/handlers/newsSources";
+import { parseHn, parseBbcRss, parseGnewsRss, parseGdelt, gdeltSeendateToIso, topicMatches, HN_INDEX, BBC_INDEX, GNEWS_INDEX, GDELT_INDEX, NewsItem, rankRecent } from "../src/handlers/newsSources";
 import { buildServer } from "../src/server";
 import { getReceiptEvidence } from "../src/core/storage";
 import { sha256Hex } from "../src/core/receipt";
@@ -305,17 +305,17 @@ describe("news bounded source diagnostics", () => {
 });
 it("search answer leads with three dated publisher-attributed captured headlines",async()=>{
  stub();const out=await handleNewsSearch({query:"openai"});
- const items=parseHn(hn).slice(0,3);
+ const items=rankRecent([...parseHn(hn).filter(i=>topicMatches("openai",i.title)&&Date.parse(i.published)>=Date.now()-30*86400000),...parseGnewsRss(gnews),...(parseGdelt(gdelt)??[])]).slice(0,3);
  const lead=items.map(i=>`"${i.title}" (${i.published.slice(0,10)}, ${i.outlet??i.index}).`).join(" ")+" ";
  expect(items).toHaveLength(3);expect(String(out.answer).startsWith(lead)).toBe(true);
 });
-it("GDELT timeout breaker expires at five minutes and recovered source is retried",async()=>{
+it("GDELT timeout breaker expires at one minute and recovered source is retried",async()=>{
  const {fetchIndex,resetNewsCircuitForTests}=await import("../src/handlers/newsSources");resetNewsCircuitForTests();
  const now=Date.now();const clock=vi.spyOn(Date,"now").mockReturnValue(now);const warn=vi.spyOn(console,"warn").mockImplementation(()=>{});
  const f=vi.fn().mockRejectedValueOnce(Object.assign(new Error("timeout"),{name:"AbortError"})).mockImplementation(async()=>new Response(gdelt));vi.stubGlobal("fetch",f);
  try{await fetchIndex("https://api.gdeltproject.org/api/v2/doc/doc?query=test");
- clock.mockReturnValue(now+299999);expect((await fetchIndex("https://api.gdeltproject.org/api/v2/doc/doc?query=test")).failure_reason).toBe("circuit_open");expect(f).toHaveBeenCalledTimes(1);
- clock.mockReturnValue(now+300000);const recovered=await fetchIndex("https://api.gdeltproject.org/api/v2/doc/doc?query=test");expect(f).toHaveBeenCalledTimes(2);expect(recovered.body).toBe(gdelt);
+ clock.mockReturnValue(now+59999);expect((await fetchIndex("https://api.gdeltproject.org/api/v2/doc/doc?query=test")).failure_reason).toBe("circuit_open");expect(f).toHaveBeenCalledTimes(1);
+ clock.mockReturnValue(now+60000);const recovered=await fetchIndex("https://api.gdeltproject.org/api/v2/doc/doc?query=test");expect(f).toHaveBeenCalledTimes(2);expect(recovered.body).toBe(gdelt);
  }finally{clock.mockRestore();warn.mockRestore();resetNewsCircuitForTests()}
 });
 it('headline answer starts with up to five unique captured dated outlet-attributed items, retaining scored top',async()=>{
@@ -330,4 +330,23 @@ it('headline answer starts with up to five unique captured dated outlet-attribut
 it('one available headline is not padded or duplicated to three',async()=>{
  vi.useFakeTimers();vi.setSystemTime(FROZEN);stub({hn:JSON.stringify({hits:[]}),gdelt:JSON.stringify({articles:[]}),bbc:'<rss><channel></channel></rss>'});
  const out=await handleNewsHeadlines({topic:'openai',window_hours:'168'});expect((out.headline_details as any[]).length).toBe(1);
+});
+
+it('search HN requests7days then30onlyifempty, excludes old captured matches and preserves both bodies',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(new Date('2026-12-20T01:00:00Z'));const seen:string[]=[];
+ vi.stubGlobal('fetch',async(u:any)=>{const url=String(u);seen.push(url);if(url.includes('algolia'))return new Response(hn);if(url.includes('google'))return new Response(gnews);if(url.includes('gdelt'))return new Response(gdelt);return new Response(bbc);});
+ const out=await handleNewsSearch({query:'openai'});expect(out.hn_window_days).toBe(30);const urls=seen.filter(u=>u.includes('algolia'));expect(urls).toHaveLength(2);expect(urls.every(u=>u.includes('search_by_date'))).toBe(true);expect(decodeURIComponent(urls[0])).toContain('created_at_i>'+Math.floor((Date.now()-7*86400000)/1000));expect(decodeURIComponent(urls[1])).toContain('created_at_i>'+Math.floor((Date.now()-30*86400000)/1000));
+ const stored=await getReceiptEvidence((out.receipt as any).receipt_id);const e=JSON.parse(Buffer.from(stored.evidence!).toString());expect(e.hn_initial_raw_body).toBe(hn);expect(e.hn_matches.every((i:any)=>Date.parse(i.published)>=Date.now()-30*86400000)).toBe(true);
+});
+it('Google429 gets exactly one bounded retry, Google503 gets none',async()=>{
+ vi.useFakeTimers();const {fetchIndex}=await import('../src/handlers/newsSources');const f=vi.fn().mockResolvedValueOnce(new Response('rate',{status:429})).mockResolvedValueOnce(new Response(gnews));vi.stubGlobal('fetch',f);const p=fetchIndex('https://news.google.com/rss/search?q=openai');await vi.advanceTimersByTimeAsync(1000);expect((await p).body).toBe(gnews);expect(f).toHaveBeenCalledTimes(2);
+ const g=vi.fn(async()=>new Response('unavailable',{status:503}));vi.stubGlobal('fetch',g);expect((await fetchIndex('https://news.google.com/rss/search?q=openai')).ok).toBe(false);expect(g).toHaveBeenCalledTimes(1);
+});
+it.each(['https://news.google.com/rss/search?q=test','https://api.gdeltproject.org/api/v2/doc/doc?query=test'])('source budget4500ms for %s',async url=>{
+ vi.useFakeTimers();const {fetchIndex,resetNewsCircuitForTests}=await import('../src/handlers/newsSources');resetNewsCircuitForTests();const f=vi.fn((_u:any,o:any)=>new Promise<Response>((_resolve,reject)=>o.signal.addEventListener('abort',()=>reject(Object.assign(new Error('timeout'),{name:'AbortError'})))));vi.stubGlobal('fetch',f);let done=false;const p=fetchIndex(url).then(r=>{done=true;return r;});await vi.advanceTimersByTimeAsync(4499);expect(done).toBe(false);await vi.advanceTimersByTimeAsync(1);expect((await p).failure_reason).toBe('timeout');resetNewsCircuitForTests();
+});
+it('recent relevant7day HN match stays7days with one request, future hit excluded from matches and dated lead',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(FROZEN);const captured=JSON.parse(hn);const recent=captured.hits.find((h:any)=>h.title&&topicMatches('openai',h.title)&&h.created_at_i<=Date.now()/1000&&h.created_at_i>=Date.now()/1000-7*86400);expect(recent).toBeDefined();const future={...recent,title:'OpenAI future control',created_at_i:Math.floor(Date.now()/1000)+86400};const body=JSON.stringify({...captured,hits:[future,recent]});let calls=0;
+ vi.stubGlobal('fetch',async(u:any)=>{if(String(u).includes('algolia')){calls++;return new Response(body);}throw Error('other source down');});
+ const out=await handleNewsSearch({query:'openai'});expect(out.hn_window_days).toBe(7);expect(calls).toBe(1);expect(out.answer).not.toContain(future.title);const st=await getReceiptEvidence((out.receipt as any).receipt_id);const e=JSON.parse(Buffer.from(st.evidence!).toString());expect(e.hn_matches).toHaveLength(1);expect(e.hn_matches[0].title).toBe(recent.title);
 });

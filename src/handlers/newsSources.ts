@@ -44,9 +44,9 @@ export interface NewsItem {
   outlet?: string; // publisher name when the source provides one
 }
 
-export async function fetchText(url: string): Promise<string> {
+export async function fetchText(url: string, timeoutMs=SOURCE_TIMEOUT_MS): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "*/*" } });
     if (!res.ok || res.redirected) throw Object.assign(new Error("source response unavailable"), { safeReason: res.redirected ? "redirect" : "http_error", safeStatus: res.status });
@@ -57,7 +57,7 @@ export async function fetchText(url: string): Promise<string> {
 }
 
 export function hnSearchUrl(query: string, cutoffUnix: number | null): string {
-  const base = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(query)}&tags=story&hitsPerPage=10`;
+  const base = `https://hn.algolia.com/api/v1/${cutoffUnix===null?"search":"search_by_date"}?query=${encodeURIComponent(query)}&tags=story&hitsPerPage=10`;
   return cutoffUnix === null ? base : `${base}&numericFilters=${encodeURIComponent(`created_at_i>${cutoffUnix}`)}`;
 }
 
@@ -229,11 +229,18 @@ export async function fetchIndex(url: string): Promise<FetchResult> {
   const gdelt = host === "api.gdeltproject.org";
   if (gdelt && Date.now() < gdeltBlockedUntil) return { ok: false, body: "", failure_reason: "circuit_open" };
   try {
-    return { ok: true, body: await fetchText(url) };
+    let body:string;
+    try {body=await fetchText(url,gdelt||host==='news.google.com'?4500:SOURCE_TIMEOUT_MS);}
+    catch(e){
+      if(host!=='news.google.com'||(e as any).safeStatus!==429)throw e;
+      await new Promise(r=>setTimeout(r,1000));
+      body=await fetchText(url,4500);
+    }
+    return { ok: true, body };
   } catch (error) {
     const e = error as { name?: string; safeReason?: string; safeStatus?: number };
     const reason = e.name === "AbortError" || e.name === "TimeoutError" ? "timeout" : e.safeReason ?? "transport_error";
-    if (gdelt && reason === "timeout") gdeltBlockedUntil = Date.now() + 5 * 60000;
+    if (gdelt && reason === "timeout") gdeltBlockedUntil = Date.now() + 60000;
     console.warn(JSON.stringify({ event: "news_source_failure", source: host, reason, ...(e.safeStatus ? { status: e.safeStatus } : {}) }));
     return { ok: false, body: "", failure_reason: reason };
   }

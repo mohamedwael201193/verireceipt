@@ -8,8 +8,7 @@
 // brief (scored, max 256 bytes); off-chain answer, result_count,
 // sources.
 //
-// No window: the HN Algolia search runs in its default relevance order over
-// the whole story index; Google News RSS and GDELT DOC 2.0 search their own
+// HN uses a7-day recency window, widened to30days only if empty; Google News RSS and GDELT DOC 2.0 search their own
 // current indexes (GDELT artlist in hybrid relevance order); the BBC side
 // searches only its current World RSS feed (about 35 items) — every scope
 // is named in the brief.
@@ -20,7 +19,7 @@
 import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
-import { BBC_INDEX, GDELT_INDEX, GNEWS_INDEX, HN_INDEX, INDEXES, NewsItem, allDown, fetchIndex, gdeltSearchUrl, gnewsSearchUrl, hnSearchUrl, parseBbcRss, parseGdelt, parseGnewsRss, parseHn, parsedSource, topicMatches } from "./newsSources";
+import { BBC_INDEX, GDELT_INDEX, GNEWS_INDEX, HN_INDEX, INDEXES, NewsItem, allDown, fetchIndex, gdeltSearchUrl, gnewsSearchUrl, hnSearchUrl, parseBbcRss, parseGdelt, parseGnewsRss, parseHn, parsedSource, topicMatches, rankRecent, inWindow } from "./newsSources";
 
 const BBC_URL = "https://feeds.bbci.co.uk/news/world/rss.xml";
 // The contract budget is BYTES (response brief max_bytes 256), not
@@ -73,15 +72,23 @@ export async function handleNewsSearch(query: Record<string, string | undefined>
   if (!q) throw badRequest("MISSING_PARAM", "query is required");
   if (q.length > 120) throw badRequest("QUERY_TOO_LONG", "query must be at most 120 characters");
   const fetchedAt = new Date().toISOString();
-  const hnUrl = hnSearchUrl(q, null);
+  const now=Date.now();
+  let hnWindowDays=7;
+  let hnUrl = hnSearchUrl(q, Math.floor(now/1000)-7*86400);
   const gnewsUrl = gnewsSearchUrl(q);
   const gdeltUrl = gdeltSearchUrl(q, { sort: "hybridrel" });
-  const [hnRes, gnewsRes, gdeltRes, bbcRes] = await Promise.all([
+  let [hnRes, gnewsRes, gdeltRes, bbcRes] = await Promise.all([
     fetchIndex(hnUrl), fetchIndex(gnewsUrl), fetchIndex(gdeltUrl), fetchIndex(BBC_URL),
   ]);
 
   // A transport-level 200 is not evidence of a valid search result.
-  const hnParsed = parsedSource(hnRes, parseHn);
+  let hnParsed = parsedSource(hnRes, parseHn);
+  const relevantRecent=(items:NewsItem[],days:number)=>rankRecent(items.filter(i=>topicMatches(q,i.title)&&inWindow(i,new Date(now-days*86400000).toISOString())&&Date.parse(i.published)<=now));
+  const initialHnBody=hnRes.body;
+  if(hnParsed!==null && relevantRecent(hnParsed,7).length===0){
+    hnWindowDays=30;hnUrl=hnSearchUrl(q,Math.floor(now/1000)-30*86400);
+    hnRes=await fetchIndex(hnUrl);hnParsed=parsedSource(hnRes,parseHn);
+  }
   const gnewsParsed = parsedSource(gnewsRes, parseGnewsRss);
   const gdeltParsed = parsedSource(gdeltRes, parseGdelt);
   const bbcParsed = parsedSource(bbcRes, parseBbcRss);
@@ -98,7 +105,7 @@ export async function handleNewsSearch(query: Record<string, string | undefined>
   // Google News and GDELT: upstream full-text searches, matches by
   // construction, order as returned. BBC: title+description token match
   // over the current feed.
-  const hn = hnAll.filter((i) => topicMatches(q, i.title));
+  const hn = relevantRecent(hnAll,hnWindowDays);
   const gnews = gnewsAll;
   const gdelt = gdeltAll;
   const bbc = bbcAll
@@ -121,7 +128,7 @@ export async function handleNewsSearch(query: Record<string, string | undefined>
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({ query: q, as_of: asOf, indexes: INDEXES, unavailable_indexes: failed,
     hn_matches: hn, gnews_matches: gnews, gdelt_matches: gdelt, bbc_matches: bbc,
-    source_policy: "four named keyless sources (HN Algolia story index, whole index, relevance order; Google News RSS search; GDELT DOC 2.0 artlist, hybrid relevance; BBC News World current RSS feed); never comprehensive news coverage",
+    hn_window_days:hnWindowDays,hn_initial_raw_body:initialHnBody,source_policy: "four named keyless sources (HN Algolia 7-day window widened to30days only when empty, recency order plus local title relevance; Google News RSS search; GDELT DOC 2.0 artlist, hybrid relevance; BBC News World current RSS feed); never comprehensive news coverage",
     raw_bodies: { hn: hnRes.body, gnews: gnewsRes.body, gdelt: gdeltRes.body, bbc: bbcRes.body }, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, hnUrl, evidence, "four named keyless sources (HN Algolia + Google News RSS + GDELT DOC 2.0 + BBC World RSS), honestly scoped");
   receipt.fetched_at = fetchedAt;
@@ -131,7 +138,7 @@ export async function handleNewsSearch(query: Record<string, string | undefined>
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
   const fmt = (i: NewsItem) => `"${i.title}"${i.points !== null ? ` (${i.points} pts, ${i.published.slice(0, 10)})` : ` (${i.published.slice(0, 10)})`}`;
-  const top = groups.flatMap(g => g.items).slice(0, 3);
+  const top = rankRecent(groups.flatMap(g => g.items)).slice(0, 3);
   const lead = top.length ? top.map(i => `"${i.title}" (${i.published.slice(0, 10)}, ${i.outlet ?? i.index}).`).join(" ") + " " : "No matching headlines found in the named sources. ";
   const answer = lead + `${brief} ` +
     (hn.length ? `HN top: ${hn.slice(0, 3).map(fmt).join("; ")}. ` : "") +
@@ -145,6 +152,7 @@ export async function handleNewsSearch(query: Record<string, string | undefined>
   return envelope(INTENT, {
     brief,
     result_count: resultCount,
+    hn_window_days:hnWindowDays,
     sources: INDEXES,
   }, receipt, { answer, verdict: "verified", confidence: resultCount === 0 ? 0.5 : 0.8,
     source: `${hnUrl} + ${gnewsUrl} + ${gdeltUrl} + ${BBC_URL}; named sources only; fetched ${fetchedAt}` });
