@@ -34,6 +34,7 @@ function stub(opts: { hn?: string; gnews?: string; gdelt?: string; bbc?: string 
       if (opts.gdelt === "ERR") throw new Error("test outage");
       return new Response(opts.gdelt ?? gdelt, { status: 200 });
     }
+    if(u.includes("/technology/"))throw new Error("topic feed not captured in legacy control");
     if (opts.bbc === "ERR") throw new Error("test outage");
     return new Response(opts.bbc ?? bbc, { status: 200 });
   });
@@ -322,7 +323,7 @@ it('headline answer starts with up to five unique captured dated outlet-attribut
  vi.useFakeTimers();vi.setSystemTime(FROZEN);stub();
  const out=await handleNewsHeadlines({topic:'openai',window_hours:'168'});
  const items=out.headline_details as {title:string;outlet:string;published:string;url:string}[];
- expect(items).toHaveLength(5);expect(new Set(items.map(i=>i.url)).size).toBe(5);
+ expect(items).toHaveLength(10);expect(new Set(items.map(i=>i.url)).size).toBe(10);
  const lead=items.map(h=>`"${h.title}" (${h.outlet}, ${h.published}).`).join(' ');
  expect(String(out.answer).startsWith(lead)).toBe(true);expect(items[0].title).toBe(out.top_headline);
  for(const item of items)expect(item.published).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -349,4 +350,20 @@ it('recent relevant7day HN match stays7days with one request, future hit exclude
  vi.useFakeTimers();vi.setSystemTime(FROZEN);const captured=JSON.parse(hn);const recent=captured.hits.find((h:any)=>h.title&&topicMatches('openai',h.title)&&h.created_at_i<=Date.now()/1000&&h.created_at_i>=Date.now()/1000-7*86400);expect(recent).toBeDefined();const future={...recent,title:'OpenAI future control',created_at_i:Math.floor(Date.now()/1000)+86400};const body=JSON.stringify({...captured,hits:[future,recent]});let calls=0;
  vi.stubGlobal('fetch',async(u:any)=>{if(String(u).includes('algolia')){calls++;return new Response(body);}throw Error('other source down');});
  const out=await handleNewsSearch({query:'openai'});expect(out.hn_window_days).toBe(7);expect(calls).toBe(1);expect(out.answer).not.toContain(future.title);const st=await getReceiptEvidence((out.receipt as any).receipt_id);const e=JSON.parse(Buffer.from(st.evidence!).toString());expect(e.hn_matches).toHaveLength(1);expect(e.hn_matches[0].title).toBe(recent.title);
+});
+
+it('mapped technology feed supplies10dated outlet items with exact raw proof, not a single HN story',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(new Date('2026-11-25T07:00:00Z'));
+ const raw=readFileSync(join(__dirname,'fixtures/news/bbc-technology-20261125.xml'),'utf8');const seen:string[]=[];
+ vi.stubGlobal('fetch',async(u:any)=>{const url=String(u);seen.push(url);if(url.includes('/technology/'))return new Response(raw);throw Error('other source down');});
+ const out=await handleNewsHeadlines({topic:'technology',window_hours:'720'});const details=out.headline_details as any[];expect(details.length).toBeGreaterThanOrEqual(5);expect(details.length).toBeLessThanOrEqual(10);expect(details[0].title).toBe(out.top_headline);expect(details.every(i=>i.outlet==='BBC technology current RSS'&&Number.isFinite(Date.parse(i.published)))).toBe(true);expect(seen).toContain('https://feeds.bbci.co.uk/news/technology/rss.xml');const st=await getReceiptEvidence((out.receipt as any).receipt_id);expect(JSON.parse(Buffer.from(st.evidence!).toString()).raw_bodies.topic_feed).toBe(raw);
+});
+it('topic feeds are closed mapping and ambiguous categories never silently choose one',async()=>{const {topicFeed}=await import('../src/handlers/newsHeadlines');expect(topicFeed('business')?.url).toBe('https://feeds.bbci.co.uk/news/business/rss.xml');expect(topicFeed('health')?.url).toContain('/health/');expect(topicFeed('climate')?.url).toContain('/science_and_environment/');expect(topicFeed('technology business')).toBeNull();expect(topicFeed('../../private')).toBeNull();});
+it('topical feed excludes future and expired items in exact answer and evidence',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(FROZEN);const one=(title:string,date:string)=>`<item><title>${title}</title><link>https://example.org/${title}</link><pubDate>${date}</pubDate></item>`;const raw='<rss><channel>'+one('valid','Sun, 22 Nov 2026 23:00:00 GMT')+one('future','Tue, 24 Nov 2026 23:00:00 GMT')+one('expired','Thu, 19 Nov 2026 23:00:00 GMT')+'</channel></rss>';
+ vi.stubGlobal('fetch',async(u:any)=>{if(String(u).includes('/technology/'))return new Response(raw);throw Error('down');});const out=await handleNewsHeadlines({topic:'technology'});expect(out.top_headline).toBe('valid');expect(out.headlines).toEqual(['valid']);expect(out.answer).toContain('Topic mapping is category coverage, not an exact keyword search.');const st=await getReceiptEvidence((out.receipt as any).receipt_id);expect(JSON.parse(Buffer.from(st.evidence!).toString()).topic_feed_items.map((i:any)=>i.title)).toEqual(['valid']);
+});
+it('empty sole topical feed remains searched and reachable, mapped failure is degraded',async()=>{
+ vi.stubGlobal('fetch',async(u:any)=>{if(String(u).includes('/technology/'))return new Response('<rss><channel></channel></rss>');throw Error('down');});const out=await handleNewsHeadlines({topic:'technology'});expect(out.top_headline).toBeNull();expect(out.answer).toContain('BBC technology current RSS');expect(out.source).not.toContain('no source reachable');let st=await getReceiptEvidence((out.receipt as any).receipt_id);expect(JSON.parse(Buffer.from(st.evidence!).toString()).indexes).toContain('BBC technology current RSS');
+ stub();const failed=await handleNewsHeadlines({topic:'technology'});expect(failed.answer).toContain('BBC technology current RSS unavailable');st=await getReceiptEvidence((failed.receipt as any).receipt_id);expect(JSON.parse(Buffer.from(st.evidence!).toString()).unavailable_indexes).toContain('BBC technology current RSS');
 });

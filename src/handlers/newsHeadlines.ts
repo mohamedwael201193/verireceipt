@@ -1,6 +1,6 @@
 // NEWS_HEADLINES_GENERAL — GET /v1/news-headlines?topic=<t>&window_hours=<h>
 //
-// Zero-LLM. Top headline for a topic from the four NAMED keyless sources in
+// Zero-LLM. Top headline for a topic from the NAMED keyless sources plus mapped topical BBC RSS in
 // newsSources.ts (Hacker News via Algolia, Google News RSS search, GDELT
 // DOC 2.0, current BBC News World RSS), with a SHA-256 receipt over the
 // exact upstream bodies. Never "all news".
@@ -28,6 +28,13 @@ import { BBC_INDEX, GDELT_INDEX, GNEWS_INDEX, HN_INDEX, INDEXES, NewsItem, allDo
 const BBC_URL = "https://feeds.bbci.co.uk/news/world/rss.xml";
 
 export const INTENT = "NEWS_HEADLINES_GENERAL";
+export function topicFeed(topic:string):{url:string;label:string}|null{
+ const words=topic.toLowerCase().split(/[^a-z0-9]+/);
+ const categories:[string,string[]][]=[['technology',['technology','tech','ai','openai','software','computing','cybersecurity']],['business',['business','economy','economic','finance','markets','banking']],['science_and_environment',['science','climate','environment','space']],['health',['health','medicine','medical']]];
+ const matches=categories.filter(([,keys])=>words.some(w=>keys.includes(w)));
+ if(matches.length!==1)return null;
+ return{url:`https://feeds.bbci.co.uk/news/${matches[0][0]}/rss.xml`,label:`BBC ${matches[0][0]} current RSS`};
+}
 
 export async function handleNewsHeadlines(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const topic = query.topic?.trim();
@@ -46,11 +53,14 @@ export async function handleNewsHeadlines(query: Record<string, string | undefin
   const hnUrl = hnSearchUrl(topic, cutoffUnix);
   const gnewsUrl = gnewsSearchUrl(topic);
   const gdeltUrl = gdeltSearchUrl(topic, { windowHours, sort: "datedesc" });
-  const [hnRes, gnewsRes, gdeltRes, bbcRes] = await Promise.all([
-    fetchIndex(hnUrl), fetchIndex(gnewsUrl), fetchIndex(gdeltUrl), fetchIndex(BBC_URL),
+  const feed=topicFeed(topic);
+  const [hnRes, gnewsRes, gdeltRes, bbcRes,topicRes] = await Promise.all([
+    fetchIndex(hnUrl), fetchIndex(gnewsUrl), fetchIndex(gdeltUrl), fetchIndex(BBC_URL),feed?fetchIndex(feed.url):Promise.resolve(null),
   ]);
 
   // A transport-level 200 is not evidence of a valid search result.
+  const topicParsed=topicRes?parsedSource(topicRes,parseBbcRss):null;
+  const topicItems=rankRecent((topicParsed??[]).filter(i=>inWindow(i,cutoffIso)&&Date.parse(i.published)<=now).map(i=>({...i,index:feed!.label,outlet:feed!.label})));
   const hnParsed = parsedSource(hnRes, parseHn);
   const gnewsParsed = parsedSource(gnewsRes, parseGnewsRss);
   const gdeltParsed = parsedSource(gdeltRes, parseGdelt);
@@ -59,7 +69,7 @@ export async function handleNewsHeadlines(query: Record<string, string | undefin
   const gnewsOk = gnewsParsed !== null;
   const gdeltOk = gdeltParsed !== null;
   const bbcOk = bbcParsed !== null;
-  if (!hnOk && !gnewsOk && !gdeltOk && !bbcOk) allDown();
+  if (!hnOk && !gnewsOk && !gdeltOk && !bbcOk && topicParsed===null) allDown();
   const hnAll = hnParsed ?? [];
   const gnewsAll = gnewsParsed ?? [];
   const gdeltAll = gdeltParsed ?? [];
@@ -74,29 +84,32 @@ export async function handleNewsHeadlines(query: Record<string, string | undefin
   const gdelt = rankRecent(gdeltAll.filter((i) => inWindow(i, cutoffIso)));
   const bbc = rankRecent(bbcAll
     .filter((i) => topicMatches(topic, `${i.title} ${(i as NewsItem & { description?: string }).description ?? ""}`) && inWindow(i, cutoffIso)));
+  const indexes=[...INDEXES,...(feed?[feed.label]:[])];
   const failed = [
+    feed&&topicParsed===null?feed.label:null,
     !hnOk ? HN_INDEX : null,
     !gnewsOk ? GNEWS_INDEX : null,
     !gdeltOk ? GDELT_INDEX : null,
     !bbcOk ? BBC_INDEX : null,
   ].filter(Boolean) as string[];
   const searched = [
+    ...(feed&&topicParsed!==null?[feed.label]:[]),
     ...(hnOk ? [HN_INDEX] : []),
     ...(gnewsOk ? [GNEWS_INDEX] : []),
     ...(gdeltOk ? [GDELT_INDEX] : []),
     ...(bbcOk ? [BBC_INDEX] : []),
   ];
   const recent = rankRecent([...gnews, ...gdelt, ...bbc]);
-  const top: NewsItem | null = hn[0] ?? recent[0] ?? null;
-  const headlines = [...hn.slice(0, 10), ...gnews.slice(0, 10), ...gdelt.slice(0, 10), ...bbc.slice(0, 10)];
+  const top: NewsItem | null = topicItems[0] ?? hn[0] ?? recent[0] ?? null;
+  const headlines = [...topicItems.slice(0,10),...hn.slice(0, 10), ...gnews.slice(0, 10), ...gdelt.slice(0, 10), ...bbc.slice(0, 10)];
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({ topic, window_hours: windowHours, cutoff: cutoffIso, as_of: asOf,
-    indexes: INDEXES, unavailable_indexes: failed,
-    top_rule: "highest-points HN story in window, else most recent match across Google News RSS search, GDELT DOC 2.0 and BBC World current feed; ties by source priority then title",
+    indexes, unavailable_indexes: failed,topic_feed:feed,topic_feed_items:topicItems,topic_feed_available:topicParsed!==null,
+    top_rule: "most recent item from explicitly mapped topical outlet feed, else highest-points HN story in window, else most recent match across Google News RSS search, GDELT DOC 2.0 and BBC World current feed; ties by source priority then title",
     hn_matches: hn, gnews_matches: gnews, gdelt_matches: gdelt, bbc_matches: bbc,
-    source_policy: "four named keyless sources (HN Algolia story index; Google News RSS search; GDELT DOC 2.0 artlist; BBC News World current RSS feed); never represented as comprehensive news coverage",
-    raw_bodies: { hn: hnRes.body, gnews: gnewsRes.body, gdelt: gdeltRes.body, bbc: bbcRes.body }, fetched_at: fetchedAt });
-  const receipt = makeReceipt(INTENT, hnUrl, evidence, "four named keyless sources (HN Algolia + Google News RSS + GDELT DOC 2.0 + BBC World RSS), honestly scoped");
+    source_policy: "named keyless sources (HN Algolia story index; Google News RSS search; GDELT DOC 2.0 artlist; BBC News World current RSS feed; mapped BBC topic category feed when available); never represented as comprehensive news coverage",
+    raw_bodies: { topic_feed:topicRes?.body??null,hn: hnRes.body, gnews: gnewsRes.body, gdelt: gdeltRes.body, bbc: bbcRes.body }, fetched_at: fetchedAt });
+  const receipt = makeReceipt(INTENT, hnUrl, evidence, "named keyless sources (HN Algolia + Google News RSS + GDELT DOC 2.0 + BBC World RSS + mapped BBC topical RSS when available), honestly scoped");
   receipt.fetched_at = fetchedAt;
   try {
     await saveReceipt(receipt, evidence);
@@ -125,17 +138,17 @@ export async function handleNewsHeadlines(query: Record<string, string | undefin
   const leadItems = orderedHeadlines.filter(h => {
     const key=h.url || h.title.toLowerCase();
     if(seen.has(key))return false;seen.add(key);return true;
-  }).slice(0,5);
+  }).slice(0,10);
   const lead=leadItems.map(h=>`"${h.title}" (${h.outlet ?? h.index}, ${h.published}).`).join(' ');
   const answer = lead + ` Topic "${topic}", last ${windowHours}h. ` +
-    `Top rule: highest-points matching HN story, else most recent named-source match. ` +
-    `Coverage: ${INDEXES.join('; ')}; named sources, never comprehensive news coverage${degraded}.`;
+    `Top rule: mapped topical BBC feed by recency when available, else highest-points matching HN story, else most recent named-source match. Topic mapping is category coverage, not an exact keyword search. ` +
+    `Coverage: ${indexes.join('; ')}; named sources, never comprehensive news coverage${degraded}.`;
   return envelope(INTENT, {
-    topic, top_headline: top.title,
+    topic, top_headline: top.title,topic_feed:feed,
     headlines: orderedHeadlines.map((h) => h.title),
     headline_details: leadItems.map(h=>({title:h.title,outlet:h.outlet??h.index,published:h.published,url:h.url})),
     urls: orderedHeadlines.map((h) => h.url),
     window: `${windowHours}h`,
   }, receipt, { answer, verdict: "verified", confidence: 0.8,
-    source: `${hnUrl} + ${gnewsUrl} + ${gdeltUrl} + ${BBC_URL}; named sources only; fetched ${fetchedAt}` });
+    source: `${hnUrl} + ${gnewsUrl} + ${gdeltUrl} + ${BBC_URL}${feed?" + "+feed.url:""}; named sources only; fetched ${fetchedAt}` });
 }
