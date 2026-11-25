@@ -66,6 +66,7 @@ import { exactQuery } from "./core/exactQuery";
 import { intentFor, diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
 import { handleMacro } from "./handlers/macroEconomic";
 import { handleTokenHolders, holderUpstreamForQuery } from "./handlers/tokenHolders";
+import {handleBuoySensor} from "./handlers/buoyWired";
 import {handleVesselPosition} from "./handlers/vesselWired";
 import { createWiredFinanceHandlers } from "./handlers/financeWired";
 import { createWiredWeatherHandlers } from "./handlers/weatherWired";
@@ -410,6 +411,7 @@ export function buildServer(): FastifyInstance {
   app.get("/v1/liquidity", async (request) =>
     trackIntent("liquidity", () => wiredFinance.liquidity(asQuery(request.query))),
   );
+  app.get("/v1/sensor-telemetry",async(request)=>trackIntent("sensor-telemetry",()=>handleBuoySensor(asQuery(request.query))));
   app.get("/v1/vessel-telemetry", async(request)=>trackIntent("vessel-telemetry",()=>handleVesselPosition(asQuery(request.query))));
   app.get("/v1/yield", async (request) =>
     trackIntent("yield", () => wiredFinance.yield(asQuery(request.query))),
