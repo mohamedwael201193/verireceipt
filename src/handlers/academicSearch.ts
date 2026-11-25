@@ -1,3 +1,4 @@
+import{academicDate,academicSortKey,academicDatePolicy}from'./academicDate';
 import {openAlexAnswer} from './openAlexAcademic';
 // ACADEMIC_SEARCH_GENERAL: DOI-bearing scholarly metadata.
 // OpenAlex primary, Crossref fallback. Each answer names exactly one index;
@@ -19,7 +20,8 @@ const MAX_QUERY_BYTES = 256;
 const UA = "VeriReceipt/2.0 academic-search observer (+https://verireceipt.vercel.app)";
 
 export interface AcademicPaper {
-  publication_date?: string;
+  publication_date?: string|null;
+  date_precision?:string;
   title: string;
   doi: string;
   authors: string[];
@@ -79,9 +81,7 @@ export function parseCrossrefWorks(raw: string, limit: number = ROWS,includeDate
       if (!title || typeof doi !== "string" || !doi.trim()) { skipped++; continue; }
       const metadata=paperMetadata(item as Record<string, unknown>);
       const parts=(item as any).published?.['date-parts']?.[0];
-      const date=Array.isArray(parts)&&metadata.publication_year!==null?[String(metadata.publication_year).padStart(4,'0'),String(parts[1]??1).padStart(2,'0'),String(parts[2]??1).padStart(2,'0')].join('-'):null;
-      const validDate=date&&/^\d{4}-\d{2}-\d{2}$/.test(date)&&Number.isFinite(Date.parse(date))&&new Date(date).toISOString().slice(0,10)===date?date:metadata.publication_year===null?null:String(metadata.publication_year).padStart(4,'0')+'-01-01';
-      papers.push({ title, doi: doi.trim(), ...metadata,...(includeDates?{publication_date:validDate??undefined}:{}) });
+      papers.push({ title, doi: doi.trim(), ...metadata,...(includeDates?academicDate(parts,metadata.publication_year):{}) });
     }
   }
   return { total: Math.floor(totalRaw), papers, skipped };
@@ -107,7 +107,7 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
   const ageSeconds=Math.floor((Date.now()-Date.parse(fetchedAt))/1000),stale=Boolean(staleReason);
   const parsedWorks=parseCrossrefWorks(raw,recent?20:ROWS,Boolean(recent));
   const total=parsedWorks.total,eligible=parsedWorks.papers.filter(p=>(p.publication_year!==null||p.venue!==null)&&(year===undefined||p.publication_year===year)&&(!recent||(p.publication_year!==null&&p.publication_year>=recent.minYear&&p.publication_year<=recent.maxYear&&p.crossref_citation_count!==null&&p.crossref_citation_count>=1)));
-  if(recent)eligible.sort((a,b)=>(b.publication_date??'').localeCompare(a.publication_date??'')||(b.crossref_citation_count??0)-(a.crossref_citation_count??0));
+  if(recent)eligible.sort((a,b)=>academicSortKey(b).localeCompare(academicSortKey(a))||(b.crossref_citation_count??0)-(a.crossref_citation_count??0));
   const papers=eligible.slice(0,ROWS),skipped=parsedWorks.skipped+parsedWorks.papers.length-eligible.length;
   const asOf = fetchedAt;
   const titles = papers.map((p) => p.title);
@@ -126,7 +126,7 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
     ? `${papers.length} of ${total} Crossref matches; top: ${papers[0].title}`
     : `No Crossref matches for this query`;
   const brief = Array.from((stale ? "STALE cached search; " : "")+briefRaw).slice(0, 80).join("");
-  const evidence = JSON.stringify({ query: q, as_of: asOf, total_matches: total,...(recent?{recent_window:recent,citation_floor:1,sort:'publication date descending'}:{}),
+  const evidence = JSON.stringify({ query: q, as_of: asOf, total_matches: total,...(recent?{recent_window:recent,citation_floor:1,sort:'publication date descending',date_policy:academicDatePolicy}:{}),
     papers, skipped_items: skipped, stale, stale_reason:staleReason, age_seconds:ageSeconds,
     source_policy: "Crossref REST API, keyless public pool (no mailto: maintainer decision 2026-11-23; project User-Agent instead); single source; sorting mode disclosed",
     raw_body: raw, fetched_at: fetchedAt });
@@ -141,14 +141,14 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
   // The contract's "answer" response field is the envelope's own
   // answer (meta below); the fields object carries the off-chain lists.
   return envelope(INTENT, {
-    papers,...(recent?{recent_window:recent,citation_floor:1,sort:'publication date descending'}:{}),
+    papers,...(recent?{recent_window:recent,citation_floor:1,sort:'publication date descending',date_policy:academicDatePolicy}:{}),
     metadata_scope: "Crossref deposited metadata; work type is not proof of peer review; citation counts are Crossref-only",
     paper_titles: titles,
     dois,
     total_matches: total,
     brief, as_of:asOf, fetched_at:fetchedAt, age_seconds:ageSeconds, stale, ...(stale?{stale_reason:staleReason}:{}),
   }, receipt, {
-    answer: (recent?`Recent publication window ${recent.minYear}-${recent.maxYear}; at least 1 Crossref citation; newest publication first. `:'') + (stale ? `STALE CACHED SEARCH, not a current index query. ${staleReason}; exact result acquired ${fetchedAt}, age ${ageSeconds}s, no titles or counts updated. ` : `Crossref observation acquired ${fetchedAt}, age ${ageSeconds}s; may be cached up to15minutes. `) + (papers.length
+    answer: (recent?`Recent publication window ${recent.minYear}-${recent.maxYear}; at least 1 Crossref citation; newest publication first. ${academicDatePolicy} `:'') + (stale ? `STALE CACHED SEARCH, not a current index query. ${staleReason}; exact result acquired ${fetchedAt}, age ${ageSeconds}s, no titles or counts updated. ` : `Crossref observation acquired ${fetchedAt}, age ${ageSeconds}s; may be cached up to15minutes. `) + (papers.length
       ? `Crossref index: ${total} works match "${q}". Top ${papers.length} by ${recent?'publication date':'Crossref relevance'}: ${listing}. ` +
         (skipped ? `${skipped} returned item(s) lacked title/DOI or both publication year and venue, or did not meet the year/citation filter, and were skipped. ` : "") +
         (recent?"The ranking uses publication date after the citation floor, not a quality judgment;":"The ranking is Crossref's own relevance order, not a quality judgment;")+ " the count is Crossref's index match count, not all scholarly papers on the topic. Metadata is as deposited; work type is not proof of peer review, and citation counts are Crossref-only."
