@@ -53,3 +53,14 @@ it('storage failure propagates once without a second source receipt',async()=>{v
 it('parent abort closes a stalled reader and cannot save',async()=>{vi.stubGlobal('fetch',vi.fn(async()=>response([])));const c=new AbortController();const pending=barentswatchPositionSource(approval).read(q,c.signal).catch(e=>e);await vi.advanceTimersByTimeAsync(1);c.abort();expect(await pending).toBeInstanceOf(Error);expect(cancel).toHaveBeenCalledTimes(1);expect(saveReceipt).not.toHaveBeenCalled();});
 it('stream ending without a position refuses',async()=>{vi.stubGlobal('fetch',vi.fn(async()=>new Response(new ReadableStream({start(c){c.close();}}),{headers:{'content-type':'text/event-stream'}})));await expect(createVesselObservationHandler(approval)(q)).rejects.toMatchObject({status:502});expect(saveReceipt).not.toHaveBeenCalled();});
 it('irrelevant query URL cannot override the fixed source',async()=>{const f=vi.fn(async()=>valid());vi.stubGlobal('fetch',f);await createVesselObservationHandler(approval)({...q,url:'https://invalid.test'});expect(f.mock.calls[0][0]).toBe('https://ais.openwaters.io/v1/stream?mmsi=257635500&snapshot=1');});
+
+function responseBytes(parts:Uint8Array[]){return new Response(new ReadableStream({start(c){for(const b of parts)c.enqueue(b);},cancel}),{headers:{'content-type':'text/event-stream'}});}
+it('invalid UTF8 inside otherwise-valid irrelevant event text refuses rather than replaces',async()=>{
+ const e=JSON.parse(raw);e.padding='MARK';const bytes=Buffer.from('data: '+JSON.stringify(e)+'\n');const index=bytes.indexOf('MARK');bytes[index]=0xff;
+ vi.stubGlobal('fetch',vi.fn(async()=>responseBytes([bytes])));await expect(createVesselObservationHandler(approval)(q)).rejects.toMatchObject({status:502});expect(saveReceipt).not.toHaveBeenCalled();
+});
+it('valid multibyte UTF8 may span chunks without replacement',async()=>{
+ const e=JSON.parse(raw);e.padding='船';const bytes=Buffer.from('data: '+JSON.stringify(e)+'\n');const index=bytes.indexOf(Buffer.from('船'));
+ vi.stubGlobal('fetch',vi.fn(async()=>responseBytes([bytes.subarray(0,index+1),bytes.subarray(index+1,index+2),bytes.subarray(index+2)])));
+ const result=await createVesselObservationHandler(approval)(q);expect(result.speed_knots).toBe(0);const evidence=JSON.parse(vi.mocked(saveReceipt).mock.calls[0][1]);expect(JSON.parse(evidence.raw_body).padding).toBe('船');
+});
