@@ -153,7 +153,11 @@ function agreeingPair(legs: SupplyLeg[]): { leg: SupplyLeg; count: number } | nu
 export async function handleTokenSupply(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
-  let tokenRaw = query.token?.trim();
+  const aliases=["token","query","q","input","symbol","asset"] as const;
+  const supplied=aliases.flatMap(key=>query[key]?.trim()?[{key,value:query[key]!.trim()}]:[]);
+  if(new Set(supplied.map(v=>v.value.toLowerCase())).size>1)throw badRequest("TOKEN_INPUT_CONFLICT","token aliases disagree; supply one exact token input");
+  const tokenInput=supplied[0]?.value;
+  let tokenRaw = tokenInput;
   let chainRaw = query.chain?.trim();
   // The contract packs chain into the token param: "USDC on ethereum".
   const onChainMatch = tokenRaw?.match(/^(.+?)\s+on\s+(.+)$/i);
@@ -264,7 +268,7 @@ export async function handleTokenSupply(
     block_tag: "finalized",
     chain,
     chain_resolution: homeChain
-      ? { input: query.token?.trim(), resolved_chain: homeChain, note: "no chain given; resolved to the symbol's canonical home chain in the registry, disclosed, never a silent pick" }
+      ? { input: tokenInput, resolved_chain: homeChain, note: "no chain given; resolved to the symbol's canonical home chain in the registry, disclosed, never a silent pick" }
       : "not used (chain given)",
     total_supply_scope: "chain-specific ERC-20 totalSupply, decimals applied; not a global asset or circulating supply",
     decimals: winner.decimals,

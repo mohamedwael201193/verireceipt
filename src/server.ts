@@ -157,6 +157,16 @@ async function trackIntent<T>(
 
 type Query = Record<string, string | undefined>;
 
+// Preserve legacy ignored extra keys while rejecting ambiguous recognized inputs.
+function supplyQuery(rawUrl: string): Record<string, string> {
+  const allowed = new Set(["token", "chain", "query", "q", "input", "symbol", "asset"]);
+  const selected = new URLSearchParams();
+  const params = new URLSearchParams(rawUrl.includes("?") ? rawUrl.slice(rawUrl.indexOf("?") + 1) : "");
+  for (const [key, value] of params) if (allowed.has(key)) selected.append(key, value);
+  return exactQuery("?" + selected.toString(), [...allowed]);
+}
+
+
 /**
  * Normalise Fastify's parsed query (string | string[] | undefined values)
  * to the flat string map the handlers accept. Repeated params take the
@@ -373,7 +383,7 @@ export function buildServer(): FastifyInstance {
     trackIntent("balance", () => handleBalance(asQuery(request.query))),
   );
   app.get("/v1/token-supply", async (request) =>
-    trackIntent("token-supply", () => handleTokenSupply(asQuery(request.query))),
+    trackIntent("token-supply", () => handleTokenSupply(supplyQuery(request.raw.url ?? ""))),
   );
   app.get("/v1/macro", async (request) =>
     trackIntent("macro", () => handleMacro(asQuery(request.query))),
