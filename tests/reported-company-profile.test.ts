@@ -48,3 +48,13 @@ it('report-date binding cannot drift independently of its reviewed document',()=
  const raw=changed(d=>{const i=d.filings.recent.form.findIndex((f:string)=>f==='10-K');d.filings.recent.reportDate[i]='2026-06-29';});
  expect(()=>parseMicrosoftReportedProfile(raw,report,now)).toThrow();
 });
+it('exact reviewed accession cannot drift independently of its report and document',()=>{
+ const raw=changed(d=>{const i=d.filings.recent.form.findIndex((f:string)=>f==='10-K');d.filings.recent.accessionNumber[i]='0001193125-26-323661';});
+ expect(()=>parseMicrosoftReportedProfile(raw,report,now)).toThrow();
+});
+it('a syntactically valid count above canonical range is refused',()=>{
+ expect(()=>parseMicrosoftReportedProfile(submissions,report.replace('223,000 people on a full-time basis','100,000,001 people on a full-time basis'),now)).toThrow();
+});
+it('the reported numeric count is extracted rather than hardcoded',()=>{
+ expect(parseMicrosoftReportedProfile(submissions,report.replace('223,000 people on a full-time basis','223,001 people on a full-time basis'),now).employee_count).toBe(223001);
+});
