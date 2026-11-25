@@ -98,8 +98,12 @@ async function handleTravelDisruptionInternal(query: Record<string, string | und
   const rawInput = query.route_or_flight?.trim();
   if (!rawInput) throw badRequest("MISSING_PARAM", "route_or_flight is required as a 3-letter airport code, e.g. LGA, or a US airport name");
   if (rawInput.length > 200 || /[\x00-\x1f]/.test(rawInput)) throw badRequest('INVALID_ROUTE','route_or_flight must be at most 200 printable characters');
-  const route = /^(.+?)\s+to\s+(.+)$/i.exec(rawInput) ?? /^([a-z]{3})\s*[-/]\s*([a-z]{3})$/i.exec(rawInput);
-  const names = route ? [route[1].trim(),route[2].trim()] : [rawInput];
+  // A supplied airport route is context, never a dated flight-to-airport lookup.
+  const suppliedFlight = /^([A-Za-z]{2,3}\s*\d{1,4}[A-Za-z]?)\s+(.+)$/i.exec(rawInput);
+  const routeInput = suppliedFlight ? suppliedFlight[2].trim() : rawInput;
+  const route = /^(.+?)\s+to\s+(.+)$/i.exec(routeInput) ?? /^([a-z]{3})\s*[-/]\s*([a-z]{3})$/i.exec(routeInput);
+  if (suppliedFlight && !route) throw badRequest("AIRPORT_ROUTE_REQUIRED", "A flight number requires an explicit airport route, e.g. UA123 LGA-SFO; no route or flight status is inferred");
+  const names = route ? [route[1].trim(),route[2].trim()] : [routeInput];
   const resolutions = names.map(name => {
     if (/^[a-z]{3}$/i.test(name)) return {airport:name.toUpperCase(),resolvedFrom:null};
     const matches=resolveAirportName(name);
@@ -142,7 +146,8 @@ async function handleTravelDisruptionInternal(query: Record<string, string | und
   const reason=entries.map(e=>e.reason).filter(Boolean).join('; ');
   const resolvedRoute=route?resolutions.map(r=>r.airport).join('-'):airport;
   const asOf = new Date().toISOString();
-  const evidence = JSON.stringify({ route_or_flight: resolvedRoute, airport_statuses:airportStatuses, route_name_resolutions:resolutions, as_of: asOf, feed_update_time: updateTime, entries,
+  const flightContext = suppliedFlight ? {flight_number:suppliedFlight[1].replace(/\s/g," ").trim().toUpperCase(),route_binding:"caller-supplied, not independently verified",flight_level_status:null,flight_level_data_available:false} : null;
+  const evidence = JSON.stringify({ route_or_flight: resolvedRoute, flight_context:flightContext, airport_statuses:airportStatuses, route_name_resolutions:resolutions, as_of: asOf, feed_update_time: updateTime, entries,
     name_resolution: resolvedFrom ? { input: resolvedFrom.name, resolved_to: airport, label: resolvedFrom.label, source: "bundled static US airport list (in-repo table, not a live directory)" } : "not used (3-letter code given directly)",
     input_narrowing: "route_or_flight resolved to one or two airport codes: FAA airport-level NAS status only, never flight-level tracking; the feed ignores its airport parameter so filtering is local",
     source_policy: "FAA NAS status snapshot (ground delay programs, ground stops, arrival/departure delays, closures); airport-level only",
@@ -167,13 +172,15 @@ async function handleTravelDisruptionInternal(query: Record<string, string | und
   return envelope(INTENT, {
     disrupted,
     route_or_flight: resolvedRoute,
+    flight_context: flightContext,
+    disruption_scope: "FAA airport-level only, not the flight",
     airport_statuses: airportStatuses,
     status,
     delay_minutes: maxDelay,
     delay_semantics: "maximum reported airport average, not route or flight delay",
     reason: reason || null,
     closure_policy: "Only active dated airport-wide closures count; restricted non-scheduled transient GA notices are disclosed separately and are not flight status",
-  }, receipt, { answer:answer+(excludedCount ? ` ${excludedCount} restricted or out-of-window closure notice(s) excluded from airport-wide disruption; full details retained per airport.` : ""), verdict: "verified", confidence: 0.9,
+  }, receipt, { answer:answer+(flightContext ? " Flight-level data not available. The caller supplied this airport route; it is not a verified route for the flight number. disrupted describes only the supplied airports, not this flight." : "")+(excludedCount ? ` ${excludedCount} restricted or out-of-window closure notice(s) excluded from airport-wide disruption; full details retained per airport.` : ""), verdict: "verified", confidence: 0.9,
     source: `${NAS_URL}; FAA NAS status snapshot, airport-level only; feed updated ${updateTime}; fetched ${fetchedAt}` });
 }
 

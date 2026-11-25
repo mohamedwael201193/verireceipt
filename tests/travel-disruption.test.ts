@@ -150,3 +150,9 @@ describe('two-airport route status',()=>{
   const f=vi.fn();vi.stubGlobal('fetch',f);await expect(handleTravelDisruption({route_or_flight})).rejects.toMatchObject({code:'AIRPORT_CODE_REQUIRED'});expect(f).not.toHaveBeenCalled();
  });
 });
+
+describe('flight number with explicitly supplied airport route',()=>{
+ it.each(['UA123 LGA-SFO','ua 123 LGA to SFO','UA123 LGA/SFO'])('%s observes only supplied airports, never claims a flight lookup',async route_or_flight=>{stub();const out=await handleTravelDisruption({route_or_flight});expect(out).toMatchObject({route_or_flight:'LGA-SFO',disrupted:true,disruption_scope:'FAA airport-level only, not the flight',flight_context:{route_binding:'caller-supplied, not independently verified',flight_level_status:null,flight_level_data_available:false}});expect(out.answer).toContain('Flight-level data not available');expect(out.answer).toContain('not a verified route for the flight number');const receipt=out.receipt as any;const stored=await getReceiptEvidence(receipt.receipt_id);expect(sha256Hex(stored.evidence!)).toBe(receipt.raw_response_sha256);expect(JSON.parse(Buffer.from(stored.evidence!).toString()).flight_context).toEqual(out.flight_context);});
+ it.each(['UA123','UA123 SFO','UA123 mystery route'])('%s never guesses the dated flight route or a clean flight status',async route_or_flight=>{const f=vi.fn();vi.stubGlobal('fetch',f);await expect(handleTravelDisruption({route_or_flight})).rejects.toMatchObject({status:400});expect(f).not.toHaveBeenCalled();});
+ it('airport-only response remains independent of flight number',async()=>{stub();const out=await handleTravelDisruption({route_or_flight:'SFO-SEA'});expect(out.flight_context).toBeNull();expect(out.answer).not.toContain('caller supplied');});
+});
