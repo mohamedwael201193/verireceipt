@@ -29,8 +29,7 @@ import { ApiError, badRequest, unprocessable, upstreamUnavailable } from "../cor
 import { envelope, makeReceipt, sha256Hex } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
-const SOURCE_TIMEOUT_MS = 15000;
-const UA = "VeriReceipt/2.0 weather-forecast observer (+https://verireceipt.vercel.app)";
+import {readForecastSource,rememberForecastSource} from './forecastSourceCache';
 
 export const INTENT = "WEATHER_FORECAST_GENERAL";
 
@@ -46,20 +45,6 @@ const WMO_CONDITIONS: Record<number, string> = {
   85: "slight snow showers", 86: "heavy snow showers",
   95: "thunderstorm", 96: "thunderstorm with slight hail", 99: "thunderstorm with heavy hail",
 };
-
-async function fetchText(url: string, what: string): Promise<string> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.text();
-  } catch (e) {
-    throw upstreamUnavailable("UPSTREAM_UNREACHABLE", `${what} could not be reached: ${e instanceof Error ? e.message : String(e)}`);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 interface GeoHit { name: string; latitude: number; longitude: number; country?: string; admin1?: string; country_code?: string; timezone?: string; selection?: string }
 
@@ -110,17 +95,20 @@ export async function handleWeatherForecast(query: Record<string, string | undef
     if (lat < -90 || lat > 90 || lon < -180 || lon > 180) throw badRequest("INVALID_LOCATION", "lat,lon out of range (lat -90..90, lon -180..180)");
     resolvedName = `${lat.toFixed(4)}, ${lon.toFixed(4)} (coordinates given directly, not geocoded)`;
   } else {
-    const geocode = async (name: string): Promise<{ url: string; body: string }> => {
+    const geocode = async (name: string): Promise<{ url: string; body: string; fetchedAt:string }> => {
       const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=10&language=en&format=json`;
-      return { url, body: await fetchText(url, "the Open-Meteo geocoder") };
+      try { const entry=await readForecastSource('geocode',url);return {url,...entry}; }
+      catch { throw upstreamUnavailable('UPSTREAM_UNREACHABLE','Open-Meteo geocode source unavailable'); }
     };
     const nameOf = (hit: GeoHit) =>
       `${hit.name}${hit.admin1 ? `, ${hit.admin1}` : ""}${hit.country ? `, ${hit.country}` : ""} (${hit.latitude.toFixed(4)}, ${hit.longitude.toFixed(4)})`;
     let resolved: { lat: number; lon: number; name: string } | null = null;
     let notFound: ApiError | null = null;
-    const first = await geocode(location);
+    let first: Awaited<ReturnType<typeof geocode>>;
+    try { first=await geocode(location); } catch { throw upstreamUnavailable('UPSTREAM_UNREACHABLE','Open-Meteo geocode source unavailable'); }
     try {
       const hit = resolveGeocode(first.body, location);
+      rememberForecastSource('geocode',first.url,first);
       geoUrl = first.url; geoBody = first.body; locationSelection = hit.selection!;
       resolved = { lat: hit.latitude, lon: hit.longitude, name: nameOf(hit) };
     } catch (e) {
@@ -147,6 +135,7 @@ export async function handleWeatherForecast(query: Record<string, string | undef
           (r.country ?? "").toLowerCase() === hint || (r.country_code ?? "").toLowerCase() === hint);
         if (matches.length > 0) {
           const selected = resolveGeocode(JSON.stringify({ results: matches }), location);
+          rememberForecastSource('geocode',retry.url,retry);
           locationSelection = `chose ${selected.name} at ${selected.latitude},${selected.longitude}; rank 1 among ${matches.length} country-matching results for "${hint}" (${hits.length} total upstream matches; provider order within country filter; not confirmed unique)`;
           geoUrl = retry.url; geoBody = retry.body;
           resolved = { lat: matches[0].latitude, lon: matches[0].longitude, name: nameOf(matches[0]) };
@@ -163,7 +152,10 @@ export async function handleWeatherForecast(query: Record<string, string | undef
   const forecastDays = Math.min(16, Math.ceil(windowHours / 24) + 1);
   const fcUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
     `&hourly=temperature_2m,precipitation_probability,weather_code&forecast_days=${forecastDays}&timezone=auto`;
-  const fcBody = await fetchText(fcUrl, "the Open-Meteo forecast API");
+  let fcEntry: {body:string;fetchedAt:string};
+  try { fcEntry=await readForecastSource('forecast',fcUrl); }
+  catch { throw upstreamUnavailable('UPSTREAM_UNREACHABLE','Open-Meteo forecast source unavailable'); }
+  const fcBody=fcEntry.body;
 
   interface FcBody { utc_offset_seconds?: number; timezone?: string; timezone_abbreviation?: string; latitude?: number; longitude?: number;
     hourly_units?: {time?:string;temperature_2m?:string;precipitation_probability?:string;weather_code?:string};
@@ -214,7 +206,8 @@ export async function handleWeatherForecast(query: Record<string, string | undef
     throw upstreamUnavailable('FORECAST_MALFORMED','requested WMO weather-code window is incomplete or invalid');
   const codes=codesRaw as number[];
   const condition=dominantCondition(codes);
-  const asOf = new Date().toISOString();
+  rememberForecastSource('forecast',fcUrl,fcEntry);
+  const asOf = fcEntry.fetchedAt;
   const when = `${times[0]} to ${times[times.length - 1]} ${tzAbbr} (${windowHours}h window)`;
 
   const evidence = JSON.stringify({
