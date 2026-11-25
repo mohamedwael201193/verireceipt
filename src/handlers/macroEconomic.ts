@@ -236,11 +236,17 @@ export function resetMacroCachesForTests(): void {
   resetMacroSourceCacheForTests();
 }
 
-async function loadCatalog(deadline:number): Promise<WbCountry[]> {
+async function loadCatalog(deadline:number, canStart:()=>boolean=()=>true): Promise<WbCountry[]> {
   if (catalogCache && Date.now() - catalogCache.at < CATALOG_TTL_MS) {
     return catalogCache.countries;
   }
-  const raw = await readMacroText(`${WB_BASE}/country?format=json&per_page=400`,Math.min(deadline,Date.now()+12000));
+  let raw: string;
+  try {
+    raw = await readMacroText(`${WB_BASE}/country?format=json&per_page=400`,Math.min(deadline,Date.now()+9500));
+  } catch (error) {
+    if ((error as {retryable?:boolean})?.retryable === false || Date.now() >= deadline || !canStart()) throw error;
+    raw = await readMacroText(`${WB_BASE}/country?format=json&per_page=400`,deadline);
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -304,6 +310,8 @@ function observeMacro(url: string, deadline: number, requestedYear?: number, can
 // Boot-only fixed latest observations. Uses the exact request-path validators/cache.
 let bootWarmStarted = false;
 let bootWarmStopped = false;
+// Stops future starts only. In-flight shared I/O retains ownership until settlement
+// or its deadline; stopping boot must not abort another request using that URL.
 export function stopMacroBootWarm(): void { bootWarmStopped = true; }
 export function startMacroBootWarm(): void {
   if (bootWarmStarted) return;
@@ -319,22 +327,17 @@ async function warmMacroBoot(): Promise<void> {
   const deadline = Date.now() + 120000;
   const pause = () => new Promise<void>(r => { const timer=setTimeout(r,1000); timer.unref?.(); });
   try {
-    let countries: WbCountry[];
-    try { countries = await loadCatalog(Math.min(deadline,Date.now()+20000)); }
-    catch (error) {
-      if ((error as {retryable?:boolean})?.retryable === false || bootWarmStopped) return;
-      await pause();
-      if (bootWarmStopped || Date.now() >= deadline) return;
-      countries = await loadCatalog(Math.min(deadline,Date.now()+20000));
-    }
+    // loadCatalog owns the sole retry budget. Never wrap it in another retry.
+    const countries = await loadCatalog(Math.min(deadline,Date.now()+20000),()=>!bootWarmStopped);
     for (const iso of ['US','DE']) {
       const country=resolveCountry(countries,iso);
       if (!country) continue;
-      for (const indicator of ['unemployment rate','inflation','gdp growth','trade']) {
+      for (const indicator of ['youth unemployment','gdp per capita growth',...Object.keys(SERIES).filter(k=>!['youth unemployment','gdp per capita growth'].includes(k))]) {
         await pause();
         if (bootWarmStopped || Date.now() >= deadline) return;
         const url = `${WB_BASE}/country/${encodeURIComponent(country.iso2Code || country.id)}/indicator/${SERIES[indicator].id}?mrnev=1&format=json&per_page=100`;
-        await observeMacro(url,Math.min(deadline,Date.now()+20000),undefined,()=>!bootWarmStopped);
+        try { await observeMacro(url,Math.min(deadline,Date.now()+20000),undefined,()=>!bootWarmStopped); }
+        catch { /* A failed series never prevents warming another explicit series. */ }
       }
     }
   } catch { /* A source failure ends this bounded boot run. No invented cache entry. */ }

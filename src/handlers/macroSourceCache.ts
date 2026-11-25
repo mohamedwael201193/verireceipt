@@ -1,7 +1,7 @@
 // The exact URL binds country, series and explicit-year/latest selector.
 const FRESH_TTL_MS = 15 * 60_000;
 const MAX_STALE_MS = 24 * 60 * 60_000;
-const ATTEMPT_MS = 18_000;
+const ATTEMPT_MS = 9_500;
 interface Observation { body: string; fetchedAt: string; stale?: boolean }
 const cache = new Map<string, Observation>();
 // Ownership includes body reads, even when I/O ignores cancellation.
