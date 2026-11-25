@@ -1,3 +1,4 @@
+import{TenMinuteObservation}from'./tenMinuteObservation';
 import {queryFallback,firstHostname} from '../core/queryFallback';
 // SSL_VERIFICATION_CERT: a real TLS handshake, with the peer's exact DER
 // certificate chain in the receipt. Trust means Node's installed CA set,
@@ -110,7 +111,7 @@ async function probeTls(host: string, address: string, budgetMs: number): Promis
   });
 }
 
-export async function handleSsl(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+async function loadSsl(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   query=queryFallback(query,"host",firstHostname);
   if (!query.host?.trim()) throw badRequest("MISSING_PARAM", "host is required");
   const host = normalizeTlsHost(query.host);
@@ -162,4 +163,16 @@ export async function handleSsl(query: Record<string, string | undefined>): Prom
     }
   }
   throw upstreamUnavailable("TLS_PROBE_UNAVAILABLE", `no TLS probe for ${host} produced a saved, verifiable certificate receipt`);
+}
+
+const sslCache=new TenMinuteObservation();
+export function resetSslCacheForTests(){sslCache.clear();}
+export async function handleSsl(query:Record<string,string|undefined>):Promise<Record<string,unknown>>{
+ const filled=queryFallback(query,'host',firstHostname);
+ if(!filled.host?.trim())return loadSsl(filled);
+ const host=normalizeTlsHost(filled.host);
+ return sslCache.get(host,()=>loadSsl({...filled,host}),result=>{
+  const now=Date.now(),dates=[Date.parse(String(result.valid_from)),Date.parse(String(result.valid_to))].filter(d=>Number.isFinite(d)&&d>now);
+  return dates.length?Math.min(...dates):Infinity;
+ });
 }

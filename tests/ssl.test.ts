@@ -16,8 +16,8 @@ vi.mock("node:dns/promises", async (importOriginal) => {
 const scratch = mkdtempSync("/tmp/ssl-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-afterEach(() => vi.restoreAllMocks());
-import { certificateVerdict, handleSsl, isPublicTlsAddress, normalizeTlsHost } from "../src/handlers/sslVerification";
+afterEach(() => {vi.restoreAllMocks();resetSslCacheForTests();});
+import { resetSslCacheForTests, certificateVerdict, handleSsl, isPublicTlsAddress, normalizeTlsHost } from "../src/handlers/sslVerification";
 import { getReceiptEvidence } from "../src/core/storage";
 import { sha256Hex } from "../src/core/receipt";
 
@@ -124,3 +124,4 @@ describe("real live TLS peers, no simulated certificates", () => {
     }, 15000);
   }
 });
+it('SSL cached real observation preserves DER receipt and expires by ten minutes',async()=>{const a=await handleSsl({host:'google.com'});const start=Date.now(),calls=vi.mocked(tls.connect).mock.calls.length;vi.useFakeTimers();try{vi.setSystemTime(start+599999);const b=await handleSsl({host:'GOOGLE.COM.'});expect(vi.mocked(tls.connect).mock.calls.length).toBe(calls);expect(b.receipt).toEqual(a.receipt);expect(b.as_of).toBe(a.as_of);expect(b.observation_cached).toBe(true);expect(b.answer).toContain('not a new source check');vi.setSystemTime(start+600001);vi.mocked(dns.lookup).mockRejectedValueOnce(Error('test unavailable'));await expect(handleSsl({host:'google.com'})).rejects.toMatchObject({code:'TLS_DNS_UNAVAILABLE'});}finally{vi.useRealTimers();}},15000);
