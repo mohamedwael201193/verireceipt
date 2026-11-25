@@ -25,8 +25,9 @@
 import { upstreamUnavailable } from "../core/errors";
 
 const SOURCE_TIMEOUT_MS = 2500;
-let gdeltBlockedUntil = 0;
-export function resetNewsCircuitForTests(): void { gdeltBlockedUntil = 0; }
+const blockedUntil=new Map<string,number>();
+const activeSlowHosts=new Set<string>();
+export function resetNewsCircuitForTests(): void { blockedUntil.clear();activeSlowHosts.clear(); }
 const UA = "VeriReceipt/2.0 news observer (+https://verireceipt.vercel.app)";
 
 export const HN_INDEX = "Hacker News story index (Algolia API)";
@@ -44,16 +45,17 @@ export interface NewsItem {
   outlet?: string; // publisher name when the source provides one
 }
 
-export async function fetchText(url: string, timeoutMs=SOURCE_TIMEOUT_MS): Promise<string> {
+export async function fetchText(url: string, timeoutMs=SOURCE_TIMEOUT_MS,onSettled?:()=>void): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "*/*" } });
-    if (!res.ok || res.redirected) throw Object.assign(new Error("source response unavailable"), { safeReason: res.redirected ? "redirect" : "http_error", safeStatus: res.status });
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  const io=(async()=>{
+    const res=await fetch(url,{signal:controller.signal,headers:{"User-Agent":UA,Accept:"*/*"}});
+    if(!res.ok||res.redirected)throw Object.assign(new Error("source response unavailable"),{safeReason:res.redirected?"redirect":"http_error",safeStatus:res.status});
     return await res.text();
-  } finally {
-    clearTimeout(timer);
-  }
+  })().finally(()=>onSettled?.());
+  try{return await Promise.race([io,new Promise<never>((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Object.assign(new Error("source deadline"),{name:"TimeoutError"}));},Math.max(1,timeoutMs));})]);}
+  finally{clearTimeout(timer);}
+
 }
 
 export function hnSearchUrl(query: string, cutoffUnix: number | null): string {
@@ -224,28 +226,35 @@ export function inWindow(item: NewsItem, cutoffIso: string): boolean {
 
 export interface FetchResult { ok: boolean; body: string; failure_reason?: string }
 
-export async function fetchIndex(url: string): Promise<FetchResult> {
-  const host = new URL(url).hostname;
-  const gdelt = host === "api.gdeltproject.org";
-  if (gdelt && Date.now() < gdeltBlockedUntil) return { ok: false, body: "", failure_reason: "circuit_open" };
-  try {
-    let body:string;
-    try {body=await fetchText(url,gdelt||host==='news.google.com'?4500:SOURCE_TIMEOUT_MS);}
-    catch(e){
-      if(host!=='news.google.com'||(e as any).safeStatus!==429)throw e;
-      await new Promise(r=>setTimeout(r,1000));
-      body=await fetchText(url,4500);
-    }
-    return { ok: true, body };
-  } catch (error) {
-    const e = error as { name?: string; safeReason?: string; safeStatus?: number };
-    const reason = e.name === "AbortError" || e.name === "TimeoutError" ? "timeout" : e.safeReason ?? "transport_error";
-    if (gdelt && reason === "timeout") gdeltBlockedUntil = Date.now() + 60000;
-    console.warn(JSON.stringify({ event: "news_source_failure", source: host, reason, ...(e.safeStatus ? { status: e.safeStatus } : {}) }));
-    return { ok: false, body: "", failure_reason: reason };
+export async function fetchIndex(url:string,deadlineAt=Date.now()+SOURCE_TIMEOUT_MS):Promise<FetchResult>{
+ const host=new URL(url).hostname,slow=host==='api.gdeltproject.org'||host==='news.google.com';
+ if(slow&&(Date.now()<(blockedUntil.get(host)??0)||activeSlowHosts.has(host)))return{ok:false,body:"",failure_reason:"circuit_open"};
+ if(Date.now()>=deadlineAt)return{ok:false,body:"",failure_reason:"timeout"};
+ let outstanding=0,workflowDone=false;
+ const release=()=>{if(slow&&workflowDone&&outstanding===0)activeSlowHosts.delete(host);};
+ if(slow)activeSlowHosts.add(host);
+ try{
+  const attempt=async()=>{outstanding++;return fetchText(url,Math.min(SOURCE_TIMEOUT_MS,deadlineAt-Date.now()),()=>{outstanding--;release();});};
+  let body:string;
+  try{body=await attempt();}catch(e){
+   if(host!=='news.google.com'||(e as any).safeStatus!==429||deadlineAt-Date.now()<=1100)throw e;
+   await new Promise(r=>setTimeout(r,1000));body=await attempt();
   }
+  return{ok:true,body};
+ }catch(error){
+  const e=error as {name?:string;safeReason?:string;safeStatus?:number};
+  const reason=e.name==='AbortError'||e.name==='TimeoutError'?'timeout':e.safeReason??'transport_error';
+  if(slow)blockedUntil.set(host,Date.now()+60000);
+  console.warn(JSON.stringify({event:'news_source_failure',source:host,reason,...(e.safeStatus?{status:e.safeStatus}:{})}));
+  return{ok:false,body:"",failure_reason:reason};
+ }finally{workflowDone=true;release();}
 }
 
 export function allDown(): never {
   throw upstreamUnavailable("NEWS_INDEXES_UNREACHABLE", `all named news sources failed (${INDEXES.join("; ")}); no answer is guessed`);
+}
+
+export async function withinNewsDeadline<T>(work:Promise<T>,deadline:number):Promise<T>{
+ let timer:ReturnType<typeof setTimeout>|undefined;
+ try{return await Promise.race([work,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(Error('news persistence deadline')),Math.max(1,deadline-Date.now()));})]);}finally{clearTimeout(timer);}
 }

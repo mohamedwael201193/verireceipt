@@ -23,7 +23,7 @@
 import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
-import { BBC_INDEX, GDELT_INDEX, GNEWS_INDEX, HN_INDEX, INDEXES, NewsItem, allDown, fetchIndex, gdeltSearchUrl, gnewsSearchUrl, hnSearchUrl, inWindow, parseBbcRss, parseGdelt, parseGnewsRss, parseHn, parsedSource, rankHn, rankRecent, topicMatches } from "./newsSources";
+import { withinNewsDeadline, BBC_INDEX, GDELT_INDEX, GNEWS_INDEX, HN_INDEX, INDEXES, NewsItem, allDown, fetchIndex, gdeltSearchUrl, gnewsSearchUrl, hnSearchUrl, inWindow, parseBbcRss, parseGdelt, parseGnewsRss, parseHn, parsedSource, rankHn, rankRecent, topicMatches } from "./newsSources";
 
 const BBC_URL = "https://feeds.bbci.co.uk/news/world/rss.xml";
 
@@ -37,6 +37,7 @@ export function topicFeed(topic:string):{url:string;label:string}|null{
 }
 
 export async function handleNewsHeadlines(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+  const sourceDeadline=Date.now()+2500;
   const topic = query.topic?.trim();
   if (!topic) throw badRequest("MISSING_PARAM", "topic is required");
   if (topic.length > 120) throw badRequest("TOPIC_TOO_LONG", "topic must be at most 120 characters");
@@ -55,7 +56,7 @@ export async function handleNewsHeadlines(query: Record<string, string | undefin
   const gdeltUrl = gdeltSearchUrl(topic, { windowHours, sort: "datedesc" });
   const feed=topicFeed(topic);
   const [hnRes, gnewsRes, gdeltRes, bbcRes,topicRes] = await Promise.all([
-    fetchIndex(hnUrl), fetchIndex(gnewsUrl), fetchIndex(gdeltUrl), fetchIndex(BBC_URL),feed?fetchIndex(feed.url):Promise.resolve(null),
+    fetchIndex(hnUrl,sourceDeadline), fetchIndex(gnewsUrl,sourceDeadline), fetchIndex(gdeltUrl,sourceDeadline), fetchIndex(BBC_URL,sourceDeadline),feed?fetchIndex(feed.url,sourceDeadline):Promise.resolve(null),
   ]);
 
   // A transport-level 200 is not evidence of a valid search result.
@@ -112,7 +113,7 @@ export async function handleNewsHeadlines(query: Record<string, string | undefin
   const receipt = makeReceipt(INTENT, hnUrl, evidence, "named keyless sources (HN Algolia + Google News RSS + GDELT DOC 2.0 + BBC World RSS + mapped BBC topical RSS when available), honestly scoped");
   receipt.fetched_at = fetchedAt;
   try {
-    await saveReceipt(receipt, evidence);
+    await withinNewsDeadline(saveReceipt(receipt, evidence),sourceDeadline+450);
   } catch {
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }

@@ -19,7 +19,7 @@
 import { badRequest, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
-import { BBC_INDEX, GDELT_INDEX, GNEWS_INDEX, HN_INDEX, INDEXES, NewsItem, allDown, fetchIndex, gdeltSearchUrl, gnewsSearchUrl, hnSearchUrl, parseBbcRss, parseGdelt, parseGnewsRss, parseHn, parsedSource, topicMatches, rankRecent, inWindow } from "./newsSources";
+import { withinNewsDeadline, BBC_INDEX, GDELT_INDEX, GNEWS_INDEX, HN_INDEX, INDEXES, NewsItem, allDown, fetchIndex, gdeltSearchUrl, gnewsSearchUrl, hnSearchUrl, parseBbcRss, parseGdelt, parseGnewsRss, parseHn, parsedSource, topicMatches, rankRecent, inWindow } from "./newsSources";
 
 const BBC_URL = "https://feeds.bbci.co.uk/news/world/rss.xml";
 // The contract budget is BYTES (response brief max_bytes 256), not
@@ -68,6 +68,7 @@ export function buildBrief(groups: BriefGroup[]): string {
 }
 
 export async function handleNewsSearch(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+  const sourceDeadline=Date.now()+2500;
   const q = query.query?.trim();
   if (!q) throw badRequest("MISSING_PARAM", "query is required");
   if (q.length > 120) throw badRequest("QUERY_TOO_LONG", "query must be at most 120 characters");
@@ -78,7 +79,7 @@ export async function handleNewsSearch(query: Record<string, string | undefined>
   const gnewsUrl = gnewsSearchUrl(q);
   const gdeltUrl = gdeltSearchUrl(q, { sort: "hybridrel" });
   let [hnRes, gnewsRes, gdeltRes, bbcRes] = await Promise.all([
-    fetchIndex(hnUrl), fetchIndex(gnewsUrl), fetchIndex(gdeltUrl), fetchIndex(BBC_URL),
+    fetchIndex(hnUrl,sourceDeadline), fetchIndex(gnewsUrl,sourceDeadline), fetchIndex(gdeltUrl,sourceDeadline), fetchIndex(BBC_URL,sourceDeadline),
   ]);
 
   // A transport-level 200 is not evidence of a valid search result.
@@ -87,7 +88,7 @@ export async function handleNewsSearch(query: Record<string, string | undefined>
   const initialHnBody=hnRes.body;
   if(hnParsed!==null && relevantRecent(hnParsed,7).length===0){
     hnWindowDays=30;hnUrl=hnSearchUrl(q,Math.floor(now/1000)-30*86400);
-    hnRes=await fetchIndex(hnUrl);hnParsed=parsedSource(hnRes,parseHn);
+    hnRes=await fetchIndex(hnUrl,sourceDeadline);hnParsed=parsedSource(hnRes,parseHn);
   }
   const gnewsParsed = parsedSource(gnewsRes, parseGnewsRss);
   const gdeltParsed = parsedSource(gdeltRes, parseGdelt);
@@ -133,7 +134,7 @@ export async function handleNewsSearch(query: Record<string, string | undefined>
   const receipt = makeReceipt(INTENT, hnUrl, evidence, "four named keyless sources (HN Algolia + Google News RSS + GDELT DOC 2.0 + BBC World RSS), honestly scoped");
   receipt.fetched_at = fetchedAt;
   try {
-    await saveReceipt(receipt, evidence);
+    await withinNewsDeadline(saveReceipt(receipt, evidence),sourceDeadline+450);
   } catch {
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
