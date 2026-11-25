@@ -257,16 +257,11 @@ export async function handleGasPrice(
     );
   }
 
-  // G3: a served value of exactly 0 gwei fails closed on EVERY chain —
-  // either an agreeing pair at raw 0x0, or a dust value that rounds to
-  // 0 at the served 6dp precision (live 2026-11-23: sepolia legs agree
-  // on 19 wei, which serves as "0 gwei"). A zero fee level is a
-  // degenerate answer even where that is the true eth_gasPrice state
-  // (testnets with no fee market). A partial-zero split still fails
-  // closed via the quorum rules above or serves the non-zero agreement.
+  // Mainnet G3 keeps six-decimal zero refusal. Testnets refuse exact zero only.
+  const testnet = chain === 'sepolia' || chain === 'base-sepolia';
   const winner = round.successes.find((leg) => leg.weiHex === pair!.weiHex)!;
-  const gasPriceGwei = Math.round((Number(winner.wei) / 1e9) * 1e6) / 1e6;
-  if (gasPriceGwei === 0) {
+  const gasPriceGwei = testnet ? Number(winner.wei) / 1e9 : Math.round((Number(winner.wei) / 1e9) * 1e6) / 1e6;
+  if (testnet ? winner.wei === 0n : gasPriceGwei === 0) {
     throw upstreamUnavailable(
       "IMPLAUSIBLE_ZERO",
       `implausible eth_gasPrice 0 gwei on ${chain}: ${pair.count} of ${total} sources agreed on ${winner.weiHex === "0x0" ? "exactly zero" : `${winner.wei} wei, which rounds to 0 gwei`}; refusing to serve an implausible fee level`,
@@ -280,17 +275,17 @@ export async function handleGasPrice(
   // the answer and the receipt; an unavailable spot refuses the answer.
   const tokenSymbol = GAS_TOKEN[chain] ?? "ETH";
   const spotBodies: string[] = [];
-  const tokenUsd = await fetchGasTokenUsd(tokenSymbol, spotBodies);
-  const usdFee = Math.round(transferFeeUsd(gasPriceGwei, tokenUsd) * 1e6) / 1e6;
+  const tokenUsd = testnet ? null : await fetchGasTokenUsd(tokenSymbol, spotBodies);
+  const usdFee = tokenUsd === null ? null : Math.round(transferFeeUsd(gasPriceGwei, tokenUsd) * 1e6) / 1e6;
   // G4b: a computed fee outside [0, 10000] USD for a plain transfer is
   // implausible on every supported chain — refuse, never serve it.
-  if (!(usdFee >= 0 && usdFee <= 10000)) {
+  if (usdFee !== null && !(usdFee >= 0 && usdFee <= 10000)) {
     throw upstreamUnavailable(
       "IMPLAUSIBLE_VALUE",
       `computed transfer_fee_usd ${usdFee} USD is outside the plausible 0..10000 range; refusing to serve it`,
     );
   }
-  const formula = `${gasPriceGwei} gwei x 21000 gas x ${tokenSymbol} $${Math.round(tokenUsd * 100) / 100} (Coinbase spot) / 1e9`;
+  const formula = `${gasPriceGwei} gwei x 21000 gas x ${tokenSymbol} $${Math.round((tokenUsd ?? 0) * 100) / 100} (Coinbase spot) / 1e9`;
 
   const context = await feeContext(rpcs);
   const fields: Record<string, unknown> = {
@@ -298,6 +293,7 @@ export async function handleGasPrice(
     ...(context?.fields ?? {fee_context_scope:"fee context unavailable; no agreeing tuple of block, base fee and priority suggestion"}),
     chain,
     gas_price_gwei: gasPriceGwei,
+    ...(testnet ? {gas_price_wei:winner.wei.toString(),transfer_fee_usd_reason:"Testnet gas token has no mainnet USD valuation; no USD fee computed"}:{}),
     transfer_fee_usd: usdFee,
     as_of: asOf,
   };
@@ -305,7 +301,7 @@ export async function handleGasPrice(
   const defaultDisclosure = unsupported ? "Requested chain was not served; defaulted to ethereum; Ethereum quorum only" : !chainRaw ? "No chain given; defaulted to ethereum" : "";
   const evidence = context ? JSON.stringify({gas_price_raw:winner.rawText,fee_context:context.evidence}) : winner.rawText;
   const receiptDoc: Receipt = makeReceipt(INTENT, winner.rpcUrl, evidence, votes + (defaultDisclosure ? `; ${defaultDisclosure}` : ""));
-  receiptDoc.gas_token_spot = {
+  if (!testnet) receiptDoc.gas_token_spot = {
     source: `Coinbase ${tokenSymbol}-USD spot`,
     token_usd: tokenUsd,
     formula: `transfer_fee_usd = ${formula}`,
@@ -321,7 +317,7 @@ export async function handleGasPrice(
   }
 
   return envelope(INTENT, fields, receiptDoc, {
-    answer: (context ? `Fee context: block ${fields.block_number}, base fee ${fields.base_fee_gwei} gwei, suggested priority ${fields.priority_fee_gwei} gwei (${fields.fee_context_quorum}). Priority is a contemporaneous node suggestion, not a block-bound or future quote. ` : "Base fee, priority fee and block context unavailable; not estimated. ") + (defaulted
+    answer: testnet ? `${chain==='sepolia'?'Sepolia':'Base Sepolia'} testnet gas price is ${winner.wei} wei (${gasPriceGwei.toFixed(9).replace(/\.?0+$/,'')} gwei), ${votes}. Testnet gas is near zero; this is the real quorum value. USD transfer fee unavailable: testnet gas token has no mainnet USD valuation.` : (context ? `Fee context: block ${fields.block_number}, base fee ${fields.base_fee_gwei} gwei, suggested priority ${fields.priority_fee_gwei} gwei (${fields.fee_context_quorum}). Priority is a contemporaneous node suggestion, not a block-bound or future quote. ` : "Base fee, priority fee and block context unavailable; not estimated. ") + (defaulted
       ? `Current gas price on ethereum: ${gasPriceGwei} gwei (${unsupported ? "Requested chain was not served; defaulted to ethereum, not a quote for the requested chain" : "no chain given; defaulted to ethereum"}. ${votes}). 21,000-gas transfer ≈ $${usdFee} = ${formula}. Not a quote for a future transaction; the price moves block to block.`
       : `Current gas price on ${chain}: ${gasPriceGwei} gwei (${votes}). 21,000-gas transfer ≈ $${usdFee} = ${formula}. Not a quote for a future transaction; the price moves block to block.`),
     verdict: "verified",

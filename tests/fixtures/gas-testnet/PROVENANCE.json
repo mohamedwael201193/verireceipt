@@ -1,0 +1,53 @@
+[
+  {
+    "chain": "sepolia",
+    "url": "https://ethereum-sepolia-rpc.publicnode.com",
+    "captured_at": "2026-11-25T15:01:40.405499+00:00",
+    "status": 200,
+    "file": "sepolia-0.json",
+    "sha256": "4ba370492d496bc112acb8ca145c38889ac0a682ea9d870715c438222f5eb9e8",
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x13"
+    }
+  },
+  {
+    "chain": "sepolia",
+    "url": "https://sepolia.gateway.tenderly.co",
+    "captured_at": "2026-11-25T15:01:40.594244+00:00",
+    "status": 200,
+    "file": "sepolia-1.json",
+    "sha256": "b88580af68ad721c1714fd8b271eb5ea53c3a5f7ef56852923026a9a7b71e483",
+    "response": {
+      "id": 1,
+      "jsonrpc": "2.0",
+      "result": "0x13"
+    }
+  },
+  {
+    "chain": "sepolia",
+    "url": "https://ethereum-sepolia.publicnode.com",
+    "captured_at": "2026-11-25T15:01:40.756476+00:00",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "chain": "base-sepolia",
+    "url": "https://base-sepolia-rpc.publicnode.com",
+    "captured_at": "2026-11-25T15:01:40.810068+00:00",
+    "status": 200,
+    "file": "base-sepolia-0.json",
+    "sha256": "cac42bafa4a2a157b7b407f9b9dad9e47c63c00af88aa92046e3dc100efdb3cf",
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": "0x5b8d80"
+    }
+  },
+  {
+    "chain": "base-sepolia",
+    "url": "https://sepolia.base.org",
+    "captured_at": "2026-11-25T15:01:40.971629+00:00",
+    "error": "HTTP Error 403: Forbidden"
+  }
+]

@@ -297,11 +297,11 @@ describe("G3: implausible zero fails closed on every chain (stubbed fetch)", () 
     await expectApiError(handleGasPrice({ chain: "sepolia" }), 502, "IMPLAUSIBLE_ZERO");
   });
 
-  it("a dust agreement that rounds to 0 gwei fails closed too (live sepolia shape: 19 wei)", async () => {
-    stubGasFetch("sepolia", Object.fromEntries(
-      CHAIN_RPCS["sepolia"].map((url: string) => [url, { kind: "ok", value: "0x13" } as StubOutcome]),
+  it("mainnet dust agreement that rounds to 0 gwei still fails closed", async () => {
+    stubGasFetch("ethereum", Object.fromEntries(
+      CHAIN_RPCS["ethereum"].map((url: string) => [url, { kind: "ok", value: "0x13" } as StubOutcome]),
     ));
-    await expectApiError(handleGasPrice({ chain: "sepolia" }), 502, "IMPLAUSIBLE_ZERO");
+    await expectApiError(handleGasPrice({ chain: "ethereum" }), 502, "IMPLAUSIBLE_ZERO");
   });
 
   it("a non-zero agreement still serves", async () => {
