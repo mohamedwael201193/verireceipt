@@ -133,3 +133,9 @@ it('RPC calls receive the source cancellation signal',async()=>{
  await aaveYieldSource([binding],legs,approval).read({project:'aave-v3',symbol:'USDC',chain:'ethereum'},signal);
  expect(vi.mocked(rpcCall).mock.calls.every(c=>c[3]===signal)).toBe(true);
 });
+
+it('default remains finalized; safe mode must be explicitly selected',async()=>{
+ scriptLeg(legs.map(l=>l.rpcUrl),{});
+ await aaveYieldSource([binding],legs,approval).read({project:'aave-v3',symbol:'USDC',chain:'ethereum'},new AbortController().signal);
+ expect(vi.mocked(rpcCall).mock.calls.filter(c=>c[1]==='eth_getBlockByNumber'&&c[2][0]==='finalized')).toHaveLength(2);
+});

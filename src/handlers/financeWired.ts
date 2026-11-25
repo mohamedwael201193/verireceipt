@@ -114,7 +114,7 @@ export interface WiredFinanceHandlers {
  * ONLY when their API keys are present in the environment (blank or
  * whitespace-only keys are ignored, matching 22e2a402). No key means the
  * leg is silently absent; the answer shape is unchanged.
- * Yield: on-chain Aave v3 reserve liquidity rate over the same pinned
+ * Yield: explicitly safe-head (not finalized) on-chain Aave v3 reserve liquidity rate over the same pinned
  * legs; incentives and rewards excluded, disclosed in the answer. */
 export function createWiredFinanceHandlers(env: NodeJS.ProcessEnv = process.env): WiredFinanceHandlers {
     const price: ObservationSource<PriceQuery, PriceValue>[] = [
@@ -132,7 +132,7 @@ export function createWiredFinanceHandlers(env: NodeJS.ProcessEnv = process.env)
         geckoPoolLiquiditySource(DEXSCREENER_POOLS,GECKOTERMINAL_APPROVAL),
     ];
     const yieldSources: ObservationSource<YieldQuery, YieldValue>[] = [
-        aaveYieldSource(AAVE_V3_RESERVES, ethereumPinnedLegs(), AAVE_V3_APPROVAL),
+        aaveYieldSource(AAVE_V3_RESERVES, ethereumPinnedLegs(), AAVE_V3_APPROVAL, { blockTag: 'safe' }),
     ];
     const lists: FinanceSourceLists = { price, liquidity, yield: yieldSources };
     const handlers = createFinanceObservationHandlers(lists);

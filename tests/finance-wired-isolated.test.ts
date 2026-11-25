@@ -77,7 +77,7 @@ it('yield is wired to the Aave on-chain rate; unbound queries fail closed withou
     vi.stubGlobal('fetch', fetchSpy);
     try {
         const h = createWiredFinanceHandlers({} as NodeJS.ProcessEnv);
-        expect(h.yieldSourceNames).toEqual(['Aave v3 on-chain reserve liquidity rate']);
+        expect(h.yieldSourceNames).toEqual(['Aave v3 on-chain reserve liquidity rate (safe-head, not finalized)']);
         await expect(h.yield({ project: 'compound', symbol: 'USDC', chain: 'ethereum' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });
         await expect(h.yield({ project: 'aave-v3', symbol: 'WBTC', chain: 'ethereum' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });
         expect(fetchSpy).not.toHaveBeenCalled();

@@ -1,7 +1,7 @@
 // On-chain Aave v3 supply-rate source (expansion slice, 2026-11-23).
 //
 // Reads AaveProtocolDataProvider.getReserveData(underlying) at one pinned
-// finalized Ethereum block through two agreeing RPC legs - the same pin
+// Ethereum block (finalized by default) through two agreeing RPC legs - the same pin
 // pattern as pinnedFeedReader.ts, copied (not refactored) per repo
 // doctrine because the call set and decoding differ. No third-party
 // aggregator, no key, no terms risk: the observation is public chain
@@ -50,6 +50,7 @@ export interface AaveRpcLeg {
     /** Credential-free public endpoint recorded in receipts. */
     evidenceUrl: string;
 }
+export interface AaveYieldOptions { blockTag?: 'finalized' | 'safe' }
 interface PinnedReserveRead {
     blockNumber: string;
     blockHash: string;
@@ -67,10 +68,10 @@ function parseBlock(result: unknown): { number: bigint; hash: string; timestamp:
         throw new Error('malformed pinned block hash');
     return { number: BigInt(result.number), hash: result.hash, timestamp: BigInt(result.timestamp) };
 }
-/** One leg: verify chain identity, pin the finalized block, read
+/** One leg: verify chain identity, pin the explicitly selected block, read
  * getReserveData at that exact block, then re-read the block and require
- * the identical hash. Any deviation throws; the leg is simply lost. */
-async function readLeg(binding: AaveReserveBinding, leg: AaveRpcLeg, signal: AbortSignal): Promise<PinnedReserveRead> {
+ * the identical number, hash and timestamp. Any deviation throws; the leg is simply lost. */
+async function readLeg(binding: AaveReserveBinding, leg: AaveRpcLeg, signal: AbortSignal, blockTag: 'finalized' | 'safe'): Promise<PinnedReserveRead> {
     const raw: { method: string; params: unknown[]; rawText: string }[] = [];
     const live = () => { if (signal.aborted)
         throw new Error('source deadline'); };
@@ -83,14 +84,14 @@ async function readLeg(binding: AaveReserveBinding, leg: AaveRpcLeg, signal: Abo
     const chainHex = await call('eth_chainId', []);
     if (typeof chainHex !== 'string' || !HEX_RE.test(chainHex) || BigInt(chainHex).toString() !== binding.chainId)
         throw new Error('leg chain identity mismatch');
-    const pinned = parseBlock(await call('eth_getBlockByNumber', ['finalized', false]));
+    const pinned = parseBlock(await call('eth_getBlockByNumber', [blockTag, false]));
     const tag = '0x' + pinned.number.toString(16);
     const data = GET_RESERVE_DATA_SELECTOR + binding.underlying.toLowerCase().replace(/^0x/, '').padStart(64, '0');
     const rawReturn = await call('eth_call', [{ to: binding.dataProvider, data }, tag]);
     if (typeof rawReturn !== 'string' || !HEX_RE.test(rawReturn) || rawReturn.length !== 2 + WORDS * 64)
         throw new Error('malformed reserve data');
     const after = parseBlock(await call('eth_getBlockByNumber', [tag, false]));
-    if (after.number !== pinned.number || after.hash !== pinned.hash)
+    if (after.number !== pinned.number || after.hash !== pinned.hash || after.timestamp !== pinned.timestamp)
         throw new Error('pinned block changed during read');
     return { blockNumber: pinned.number.toString(), blockHash: pinned.hash, blockTimestamp: new Date(Number(pinned.timestamp) * 1000).toISOString(), rawReturn, rawEvidence: JSON.stringify(raw), evidenceUrl: leg.evidenceUrl };
 }
@@ -106,7 +107,9 @@ export function liquidityRateRayToApyBps(rateRay: bigint): number {
     return Math.round(apy * 10000);
 }
 /** Unconfigured provider factory: no reserve binding is enabled here. */
-export function aaveYieldSource(bindings: readonly AaveReserveBinding[], legs: readonly AaveRpcLeg[], approval: SourceApproval): ObservationSource<YieldQuery, YieldValue> {
+export function aaveYieldSource(bindings: readonly AaveReserveBinding[], legs: readonly AaveRpcLeg[], approval: SourceApproval, options: AaveYieldOptions = {}): ObservationSource<YieldQuery, YieldValue> {
+    const blockTag = options.blockTag ?? 'finalized';
+    if (blockTag !== 'finalized' && blockTag !== 'safe') throw new Error('unsupported yield block tag');
     if (legs.length < 2)
         throw new Error('aave yield source needs at least two legs');
     for (const l of legs) {
@@ -114,7 +117,7 @@ export function aaveYieldSource(bindings: readonly AaveReserveBinding[], legs: r
             throw new Error('RPC leg must be https');
     }
     return {
-        name: 'Aave v3 on-chain reserve liquidity rate', approval,
+        name: 'Aave v3 on-chain reserve liquidity rate' + (blockTag === 'safe' ? ' (safe-head, not finalized)' : ''), approval,
         read: async (q, signal) => {
             const matches = bindings.filter(b => b.project.toLowerCase() === q.project.toLowerCase() && b.symbol.toUpperCase() === q.symbol.toUpperCase() && b.chain.toLowerCase() === q.chain.toLowerCase());
             if (matches.length !== 1)
@@ -127,8 +130,8 @@ export function aaveYieldSource(bindings: readonly AaveReserveBinding[], legs: r
                 if (signal.aborted)
                     throw new Error('source deadline');
                 try {
-                    const r = await readLeg(b, leg, signal);
-                    if (reads.length && (reads[0].blockNumber !== r.blockNumber || reads[0].blockHash !== r.blockHash || reads[0].rawReturn !== r.rawReturn))
+                    const r = await readLeg(b, leg, signal, blockTag);
+                    if (reads.length && (reads[0].blockNumber !== r.blockNumber || reads[0].blockHash !== r.blockHash || reads[0].blockTimestamp !== r.blockTimestamp || reads[0].rawReturn !== r.rawReturn))
                         continue;
                     reads.push(r);
                     if (reads.length === 2)
@@ -154,10 +157,10 @@ export function aaveYieldSource(bindings: readonly AaveReserveBinding[], legs: r
             return {
                 identity: JSON.stringify([b.project.toLowerCase(), b.symbol.toLowerCase(), b.chain.toLowerCase()]),
                 sourceUrl: r.evidenceUrl,
-                rawBody: JSON.stringify({ binding: b, block_number: r.blockNumber, block_hash: r.blockHash, block_timestamp: r.blockTimestamp, rpc_quorum: 2, raw_reserve_data: r.rawReturn, liquidity_rate_ray: rateRay.toString(), last_update_timestamp: lastUpdate, rate_semantics: 'liquidityRate is a per-second APR in RAY (1e27); APY = (1 + rate/1e27/31536000)^31536000 - 1', raw_rpc_evidence: reads.map(read => ({source_url:read.evidenceUrl,raw_body:read.rawEvidence})) }),
+                rawBody: JSON.stringify({ binding: b, block_number: r.blockNumber, block_hash: r.blockHash, block_timestamp: r.blockTimestamp, block_tag: blockTag, finality: blockTag === 'safe' ? 'safe-head, not finalized; reorganization remains possible' : 'finalized', rpc_quorum: 2, raw_reserve_data: r.rawReturn, liquidity_rate_ray: rateRay.toString(), last_update_timestamp: lastUpdate, rate_semantics: 'liquidityRate is a per-second APR in RAY (1e27); APY = (1 + rate/1e27/31536000)^31536000 - 1', raw_rpc_evidence: reads.map(read => ({source_url:read.evidenceUrl,raw_body:read.rawEvidence})) }),
                 observedAt,
                 fetchedAt,
-                value: { project: b.project, symbol: b.symbol, chain: b.chain, supplyApyBps: apyBps, components: 'on-chain liquidity (supply) rate only; incentives and rewards excluded' },
+                value: { project: b.project, symbol: b.symbol, chain: b.chain, supplyApyBps: apyBps, components: 'on-chain liquidity (supply) rate only; incentives and rewards excluded' + (blockTag === 'safe' ? '; safe-head observation, not finalized; reorganization remains possible' : '') },
             };
         },
     };
