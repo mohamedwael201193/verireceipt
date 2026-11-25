@@ -150,7 +150,7 @@ export async function handleReserveAttestation(query: Record<string, string | un
     return withAnswerClass({ answer: `No probed-live Chainlink PoR feed is enabled for "${assetRaw.slice(0, 80)}". Covered assets: ${Object.values(POR_FEEDS).map(f => f.asset).join(", ")}. No reserve is asserted; this coverage-only response is outside the scored numeric attestation contract.`,
       asset: assetRaw.slice(0, 80), attested_reserve: null, ethereum_total_supply: null,
       reserve_vs_ethereum_supply_pct: null, collateral_ratio_pct: null,
-      verdict: "unavailable", confidence: 0, receipt: null }, INTENT, {asset_known:false,source_kind:"coverage_only",numeric_vs_null:"null"});
+      verdict: "unavailable", confidence: 0, receipt: null }, INTENT, {asset_known:false,source_kind:"coverage_only",numeric_vs_null:"null",reserve_asset_bucket:"other"});
   }
   const feedDeadline = Date.now() + RESERVE_DEADLINE_MS;
   const fetchedAt = new Date().toISOString();
@@ -234,5 +234,5 @@ export async function handleReserveAttestation(query: Record<string, string | un
     // the evidence.
     source_feed: `Chainlink ${feed.feedName} feed ${feed.proxy} via ethereum RPC quorum; fetched ${fetchedAt}`,
   }, receipt, { answer, verdict: "verified", confidence: 0.9,
-    source: `Chainlink ${feed.feedName} ${feed.proxy} via ethereum RPC quorum (${rpcs.join(", ")}); fetched ${fetchedAt}` }), INTENT, {asset_known:true,source_kind:"por_feed",numeric_vs_null:"numeric"});
+    source: `Chainlink ${feed.feedName} ${feed.proxy} via ethereum RPC quorum (${rpcs.join(", ")}); fetched ${fetchedAt}` }), INTENT, {asset_known:true,source_kind:"por_feed",numeric_vs_null:"numeric",reserve_asset_bucket:feed.asset});
 }
