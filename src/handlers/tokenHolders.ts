@@ -215,7 +215,7 @@ export async function handleTokenHolders(
       // Same token, second holder index. No estimated count or combined aggregate.
       const fallbackUrl=`https://api.geckoterminal.com/api/v2/networks/eth/tokens/${contract}/info`;
       try{
-        const observation=await cachedHolderBody(fallbackUrl,remaining=>fetchText(fallbackUrl,remaining),raw=>parseGecko(raw,'eth',contract),deadlineAt);
+        const observation=await cachedHolderBody(fallbackUrl,remaining=>fetchText(fallbackUrl,remaining),raw=>{try{parseGecko(raw,'eth',contract);}catch(error){markFailure(error,'bad_payload');throw error;}},deadlineAt);
         info=parseGecko(observation.body,'eth',contract);bodyFetchedAt=observation.fetchedAt;staleReason=observation.staleReason;
         url=fallbackUrl;sourceName='GeckoTerminal (Ethereum fallback after Blockscout unavailable)';
       }catch(fallbackError){

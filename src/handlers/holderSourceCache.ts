@@ -59,7 +59,12 @@ export async function cachedHolderBody(url: string, load: (remainingMs: number) 
       let body: string;
       try { body = await load(Math.max(1, Math.min(4_000, deadlineAt - Date.now() - 100))); }
       catch (e) {
-        const error = e as { status?: number; retryAfterMs?: number };
+        let status:unknown,retryAfterMs:unknown;
+        // A provider error may have throwing getters or proxy traps. Never
+        // replace it while reading optional retry metadata.
+        try{status=(e as any)?.status;}catch{}
+        try{retryAfterMs=(e as any)?.retryAfterMs;}catch{}
+        const error={status:typeof status==='number'?status:undefined,retryAfterMs:typeof retryAfterMs==='number'?retryAfterMs:undefined};
         if (error.status === 429) {
           const wait = Math.max(SPACING_MS, error.retryAfterMs ?? 5_000);
           rateLimitedUntil = Math.max(rateLimitedUntil, Date.now() + Math.max(wait, 60_000));
