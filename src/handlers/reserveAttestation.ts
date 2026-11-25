@@ -1,4 +1,4 @@
-// ASSET_RESERVE_ATTESTATION_GENERAL — GET /v1/reserve-attestation?asset=<WBTC|cbBTC|TUSD>
+// ASSET_RESERVE_ATTESTATION_GENERAL: exact symbols in POR_FEEDS, plus verified issuance aliases.
 //
 // Zero-LLM. The latest Chainlink Proof-of-Reserve attestation for a
 // supported asset, read on ethereum mainnet through the 2-of-N RPC
@@ -25,7 +25,7 @@
 // on every ethereum RPC leg; the legs must agree EXACTLY on decimals,
 // roundId, answer and updatedAt, else 502. The attestation's own
 // updatedAt is always named with its age; the feed's heartbeat is
-// 86400s, and a stale attestation is served with the staleness stated,
+// feed-specific (86400s default), and stale data is served with staleness stated,
 // never silently refreshed.
 import {withAnswerClass} from "../core/answerClass";
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
@@ -35,14 +35,23 @@ import { CHAIN_RPCS } from "../config/chains";
 
 const RESERVE_DEADLINE_MS = 9000;
 const UA = "VeriReceipt/2.0 reserve-attestation observer (+https://verireceipt.vercel.app)";
-const HEARTBEAT_S = 86400;
+const DEFAULT_HEARTBEAT_S = 86400;
 
 export const INTENT = "ASSET_RESERVE_ATTESTATION_GENERAL";
 
-export interface PorFeed { asset: string; proxy: string; feedName: string; issuer?: string }
+export interface PorFeed { asset: string; proxy: string; feedName: string; issuer?: string; heartbeat?: number; reserveUnit?: string }
 /** Feeds probed live 2026-11-23 from the official Chainlink reference data directory.
  *  issuer is named only where the feed's own documentation supports it. */
 export const POR_FEEDS: Record<string, PorFeed> = {
+  // Additional feeds: directory and 3-of-3 RPC reads verified 2026-11-25.
+  FBTC: {"asset": "FBTC", "proxy": "0x75A0d3264a949C2C920d7F25Df174af1FaF73399", "feedName": "FBTC Proof of Reserves", "issuer": "Ignition", "heartbeat": 86400, "reserveUnit": "BTC"},
+  LBTC: {"asset": "LBTC", "proxy": "0x70c158c7731Da2C14BC84aEBa39A4FF703DDc7d2", "feedName": "Lombard Proof of Reserves", "issuer": "Lombard", "heartbeat": 86400, "reserveUnit": "BTC"},
+  USDW: {"asset": "USDW", "proxy": "0xe2c4E28D938aA42A5c5EDD5193f7BD2a972Bf7Bf", "feedName": "USDW Reserves", "issuer": "Wenia", "heartbeat": 43200, "reserveUnit": "USD"},
+  UNIBTC: {"asset": "uniBTC", "proxy": "0xc590D9fb8eE78a0909dFF341ccf717000b7b7fF2", "feedName": "uniBTC Proof of Reserves", "issuer": "Bedrock", "heartbeat": 86400, "reserveUnit": "BTC"},
+  SOLVBTC: {"asset": "SolvBTC", "proxy": "0xda9258AFc797Cd64d1b6FC651051224cdAB1B25E", "feedName": "SolvBTC Proof of Reserves", "issuer": "Solv Protocol", "heartbeat": 86400, "reserveUnit": "BTC"},
+  XSOLVBTC: {"asset": "xSolvBTC", "proxy": "0x461790bDAF5aeD3df6a88cB97Dec42DD0EFA73c0", "feedName": "xSolvBTC Proof of Reserves", "issuer": "Solv Protocol", "heartbeat": 86400, "reserveUnit": "BTC"},
+  KAU: {"asset": "KAU", "proxy": "0xaB5Dd7DD7669072a1Ef27c0ba241120A27A1aeC3", "feedName": "KAU Reserves", "issuer": "Kinesis Money", "heartbeat": 86400, "reserveUnit": "g"},
+  KAG: {"asset": "KAG", "proxy": "0x3F0543aA057BcAeA152Fe9462Cb3ffaB305a6F8D", "feedName": "KAG Reserves", "issuer": "Kinesis Money", "heartbeat": 86400, "reserveUnit": "ozt"},
   WBTC: { asset: "WBTC", proxy: "0xa81FE04086865e63E12dD3776978E49DEEa2ea4e", feedName: "WBTC Proof of Reserves", issuer: "BitGo" },
   CBBTC: { asset: "cbBTC", proxy: "0xcBe87Dc0Cf9d807848a3E703B01A90B28eCFb2a7", feedName: "cbBTC Reserves", issuer: "Coinbase" },
   // The TUSD feed docs name TrueUSD/TrueUSDB tokens and attestor Moore Hong Kong,
@@ -64,7 +73,7 @@ const LATEST_ROUND_SEL = "0xfeaf968c";
 // Required feed reads and optional enrichment use separate budgets and ownership pools.
 const activeSupplyReads = new Set<string>();
 // One required operation per URL/feed, held until underlying I/O really settles.
-// The three enabled feeds and three configured URLs give at most nine keys.
+// The closed feed set and configured RPC URLs bound required in-flight keys.
 const activeFeedReads = new Set<string>();
 export function resetReserveFeedReadsForTests() { activeFeedReads.clear(); }
 export function resetReserveSupplyReadsForTests() { activeSupplyReads.clear(); }
@@ -152,6 +161,8 @@ export async function handleReserveAttestation(query: Record<string, string | un
       reserve_vs_ethereum_supply_pct: null, collateral_ratio_pct: null,
       verdict: "unavailable", confidence: 0, receipt: null }, INTENT, {asset_known:false,source_kind:"coverage_only",numeric_vs_null:"null",reserve_asset_bucket:"other"});
   }
+  const heartbeat = feed.heartbeat ?? DEFAULT_HEARTBEAT_S;
+  const reserveUnit = feed.reserveUnit ?? feed.asset;
   const feedDeadline = Date.now() + RESERVE_DEADLINE_MS;
   const fetchedAt = new Date().toISOString();
   const rpcs = CHAIN_RPCS.ethereum;
@@ -178,13 +189,14 @@ export async function handleReserveAttestation(query: Record<string, string | un
   }
   const updatedIso = new Date(data.updatedAt * 1000).toISOString();
   const ageS = Math.max(0, Math.floor(Date.now() / 1000) - data.updatedAt);
-  const stale = ageS > HEARTBEAT_S;
+  const stale = ageS > heartbeat;
   const asOf = new Date().toISOString();
   const human = Number(data.answer) / 10 ** decimals;
   let ethereumSupply: number | null = null;
   let supplyEvidence: unknown = null;
   const token = ETHEREUM_TOKENS[key];
   try {
+    if (!token) throw new Error("no verified Ethereum issuance binding");
     const supplyDeadline = Date.now() + 900;
     const [supply, tokenDec] = await Promise.all([
       quorumCall(rpcs, "0x18160ddd", token.address, "token totalSupply()", supplyDeadline),
@@ -196,7 +208,7 @@ export async function handleReserveAttestation(query: Record<string, string | un
     supplyEvidence = { address: token.address, decimals: token.decimals, raw_supply: BigInt(supply.result).toString(), raw_bodies: { supply: supply.bodies, decimals: tokenDec.bodies }, scope: "Ethereum native ERC20 issuance only; excludes other chains" };
   } catch {
     ethereumSupply = null;
-    supplyEvidence = { status: "unavailable", reason: "token_supply_quorum_unavailable" };
+    supplyEvidence = { status: "unavailable", reason: token ? "token_supply_quorum_unavailable" : "no_verified_ethereum_issuance_binding" };
   }
   const computedRatio = ethereumSupply === null ? null : human / ethereumSupply * 100;
   const ethereumRatio = computedRatio !== null && Number.isFinite(computedRatio) ? computedRatio : null;
@@ -204,9 +216,10 @@ export async function handleReserveAttestation(query: Record<string, string | un
     // The contract's off-chain field "source" is served as source_feed because
     // the response envelope reserves "source"; this key records that mapping.
     field_mapping: { source: "source_feed" },
-    feed_registry: "Chainlink reference data directory feeds-mainnet.json (retrieved 2026-11-23)",
+    feed_registry: "https://reference-data-directory.vercel.app/feeds-mainnet.json (expanded 2026-11-25)",
+    reserve_unit: reserveUnit,
     as_of: asOf, round_id: data.roundId.toString(), answer_raw: data.answer.toString(), feed_decimals: decimals,
-    updated_at: updatedIso, age_seconds: ageS, heartbeat_seconds: HEARTBEAT_S, stale,
+    updated_at: updatedIso, age_seconds: ageS, heartbeat_seconds: heartbeat, stale,
     micro_units: micro.toString(), micro_remainder: remainder.toString(),
     derivation: "attested_reserve = answer x 10^(6 - feed_decimals), floored with the remainder disclosed",
     ethereum_supply: supplyEvidence, reserve_vs_ethereum_supply_pct: ethereumRatio, collateral_ratio_pct: null,
@@ -218,21 +231,21 @@ export async function handleReserveAttestation(query: Record<string, string | un
   } catch {
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
-  const answer = `${feed.asset} attested reserve: ${human.toLocaleString("en-US", { maximumFractionDigits: decimals })} ${feed.asset} (${micro.toString()} micro-units) per the Chainlink ${feed.feedName} feed${feed.issuer ? ` (issuer ${feed.issuer})` : ""}, round ${data.roundId}, attested ${updatedIso} (${Math.floor(ageS / 3600)}h ago${stale ? `, OLDER than the ${HEARTBEAT_S / 3600}h heartbeat` : ""}). ` +
-    `${ethereumSupply === null ? "Ethereum total supply unavailable; no ratio asserted. " : `Ethereum total supply ${ethereumSupply} ${feed.asset}; reserve versus Ethereum-only supply ${ethereumRatio}%. `}This is not a global collateral ratio: the reserve feed covers wider issuance and other native chains are excluded from the supply denominator; collateral_ratio_pct is null. Supply is read at latest while the reserve is the timestamped feed attestation, not a time-matched solvency audit. ` +
+  const answer = `${feed.asset} attested reserve: ${human.toLocaleString("en-US", { maximumFractionDigits: decimals })} ${reserveUnit} (${micro.toString()} micro-units) per the Chainlink ${feed.feedName} feed${feed.issuer ? ` (issuer ${feed.issuer})` : ""}, round ${data.roundId}, attested ${updatedIso} (${Math.floor(ageS / 3600)}h ago${stale ? `, OLDER than the ${heartbeat / 3600}h heartbeat` : ""}). ` +
+    `${ethereumSupply === null ? "Ethereum total supply unavailable; no ratio asserted. " : `Ethereum total supply ${ethereumSupply} ${feed.asset}; reserve versus Ethereum-only supply ${ethereumRatio}%. `}This is not a global collateral ratio; collateral_ratio_pct is null. ${token ? "The reserve feed covers wider issuance and other native chains are excluded from the supply denominator. " : "No verified Ethereum issuance token binding is configured for this asset. "} Supply is read at latest while the reserve is the timestamped feed attestation, not a time-matched solvency audit. ` +
     `Read on ethereum mainnet through the RPC quorum; this is the feed's own attestation, not an independent audit.${remainder ? ` Micro-unit remainder floored: ${remainder}.` : ""}`;
   return withAnswerClass(envelope(INTENT, {
     attested_reserve: Number(micro),
     asset: feed.asset,
-    reserve_units: human, ethereum_total_supply: ethereumSupply,
+    reserve_units: human, reserve_unit: reserveUnit, ethereum_total_supply: ethereumSupply,
     reserve_vs_ethereum_supply_pct: ethereumRatio, collateral_ratio_pct: null,
     supply_scope: "Ethereum native ERC20 issuance only, excludes other chains",
-    round_id: data.roundId.toString(), updated_at: updatedIso, feed_age_seconds: ageS, heartbeat_seconds: HEARTBEAT_S,
+    round_id: data.roundId.toString(), updated_at: updatedIso, feed_age_seconds: ageS, heartbeat_seconds: heartbeat,
     block: `round ${data.roundId}, attested ${updatedIso}`,
     // The contract's off-chain field is named "source"; the envelope
     // reserves that key, so it is served as source_feed and mapped in
     // the evidence.
     source_feed: `Chainlink ${feed.feedName} feed ${feed.proxy} via ethereum RPC quorum; fetched ${fetchedAt}`,
   }, receipt, { answer, verdict: "verified", confidence: 0.9,
-    source: `Chainlink ${feed.feedName} ${feed.proxy} via ethereum RPC quorum (${rpcs.join(", ")}); fetched ${fetchedAt}` }), INTENT, {asset_known:true,source_kind:"por_feed",numeric_vs_null:"numeric",reserve_asset_bucket:feed.asset});
+    source: `Chainlink ${feed.feedName} ${feed.proxy} via ethereum RPC quorum (${rpcs.join(", ")}); fetched ${fetchedAt}` }), INTENT, {asset_known:true,source_kind:"por_feed",numeric_vs_null:"numeric",reserve_asset_bucket:["WBTC","cbBTC","TUSD"].includes(feed.asset)?feed.asset:"other"});
 }

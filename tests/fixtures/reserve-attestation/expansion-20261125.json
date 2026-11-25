@@ -1,0 +1,485 @@
+{
+  "directory_url": "https://reference-data-directory.vercel.app/feeds-mainnet.json",
+  "checked_at": "2026-11-25T05:29:17.686Z",
+  "feeds": [
+    {
+      "asset": "FBTC",
+      "proxy": "0x75A0d3264a949C2C920d7F25Df174af1FaF73399",
+      "feed_name": "FBTC Proof of Reserves",
+      "docs": {
+        "assetClass": "Crypto",
+        "assetSubClass": "Pegged Asset",
+        "attributeType": "smartdata_por",
+        "baseAsset": "FBTC",
+        "baseAssetEntityId": "crypto-FBTC",
+        "blockchainName": "Ethereum",
+        "deliveryChannelCode": "DF",
+        "issuer": "Ignition",
+        "marketHours": "Crypto",
+        "porAuditor": "BlockSec",
+        "porSource": "Third-party",
+        "porType": "Cross-chain",
+        "productSubType": "Cross-chain / Bitcoin Network",
+        "productType": "Proof of Reserve",
+        "productTypeCode": "PoR",
+        "reserveAsset": "BTC",
+        "reserveAssetClic": "BTC_CR",
+        "underlyingAsset": "BTC",
+        "underlyingAssetClic": "BTC_CR"
+      },
+      "heartbeat": 86400,
+      "legs": [
+        {
+          "url": "https://eth-mainnet.public.blastapi.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000008\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000010000000000000327000000000000000000000000000000000000000000000000000000c286794d00000000000000000000000000000000000000000000000000000000006b052294000000000000000000000000000000000000000000000000000000006b05229f0000000000000000000000000000000000000000000000010000000000000327\"}"
+          }
+        },
+        {
+          "url": "https://eth.drpc.org",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000008\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000010000000000000327000000000000000000000000000000000000000000000000000000c286794d00000000000000000000000000000000000000000000000000000000006b052294000000000000000000000000000000000000000000000000000000006b05229f0000000000000000000000000000000000000000000000010000000000000327\"}"
+          }
+        },
+        {
+          "url": "https://rpc.mevblocker.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000008\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000010000000000000327000000000000000000000000000000000000000000000000000000c286794d00000000000000000000000000000000000000000000000000000000006b052294000000000000000000000000000000000000000000000000000000006b05229f0000000000000000000000000000000000000000000000010000000000000327\"}"
+          }
+        }
+      ],
+      "reserve_unit": "BTC"
+    },
+    {
+      "asset": "LBTC",
+      "proxy": "0x70c158c7731Da2C14BC84aEBa39A4FF703DDc7d2",
+      "feed_name": "Lombard Proof of Reserves",
+      "docs": {
+        "assetClass": "Crypto",
+        "attributeType": "smartdata_por",
+        "baseAsset": "LBTC",
+        "baseAssetEntityId": "crypto-LBTC",
+        "blockchainName": "Ethereum",
+        "deliveryChannelCode": "DF",
+        "issuer": "Lombard",
+        "porAuditor": "Cross-chain / Bitcoin Network",
+        "porSource": "Lombard Ledger",
+        "productType": "Proof of Reserve",
+        "productTypeCode": "PoR"
+      },
+      "heartbeat": 86400,
+      "legs": [
+        {
+          "url": "https://eth-mainnet.public.blastapi.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000008\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x00000000000000000000000000000000000000000000000100000000000003be000000000000000000000000000000000000000000000000000000c18de68713000000000000000000000000000000000000000000000000000000006b066217000000000000000000000000000000000000000000000000000000006b06623700000000000000000000000000000000000000000000000100000000000003be\"}"
+          }
+        },
+        {
+          "url": "https://eth.drpc.org",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000008\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x00000000000000000000000000000000000000000000000100000000000003be000000000000000000000000000000000000000000000000000000c18de68713000000000000000000000000000000000000000000000000000000006b066217000000000000000000000000000000000000000000000000000000006b06623700000000000000000000000000000000000000000000000100000000000003be\"}"
+          }
+        },
+        {
+          "url": "https://rpc.mevblocker.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000008\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x00000000000000000000000000000000000000000000000100000000000003be000000000000000000000000000000000000000000000000000000c18de68713000000000000000000000000000000000000000000000000000000006b066217000000000000000000000000000000000000000000000000000000006b06623700000000000000000000000000000000000000000000000100000000000003be\"}"
+          }
+        }
+      ],
+      "reserve_unit": "BTC"
+    },
+    {
+      "asset": "USDW",
+      "proxy": "0xe2c4E28D938aA42A5c5EDD5193f7BD2a972Bf7Bf",
+      "feed_name": "USDW Reserves",
+      "docs": {
+        "assetClass": "Fiat",
+        "attributeType": "smartdata_por",
+        "baseAsset": "USDW",
+        "baseAssetEntityId": "crypto-USDW",
+        "blockchainName": "Ethereum",
+        "deliveryChannelCode": "DF",
+        "issuer": "Wenia",
+        "porAuditor": "Banco Agr\u00edcola El Salvador",
+        "porSource": "Third-party",
+        "porType": "Off-chain",
+        "productType": "Proof of Reserve",
+        "productTypeCode": "PoR",
+        "reserveAsset": "USD",
+        "reserveAssetClic": "USD_FX"
+      },
+      "heartbeat": 43200,
+      "legs": [
+        {
+          "url": "https://eth-mainnet.public.blastapi.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000006\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x00000000000000000000000000000000000000000000000100000000000001cb00000000000000000000000000000000000000000000000000002d634966dc10000000000000000000000000000000000000000000000000000000006b0605a1000000000000000000000000000000000000000000000000000000006b0605af00000000000000000000000000000000000000000000000100000000000001cb\"}"
+          }
+        },
+        {
+          "url": "https://eth.drpc.org",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000006\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x00000000000000000000000000000000000000000000000100000000000001cb00000000000000000000000000000000000000000000000000002d634966dc10000000000000000000000000000000000000000000000000000000006b0605a1000000000000000000000000000000000000000000000000000000006b0605af00000000000000000000000000000000000000000000000100000000000001cb\"}"
+          }
+        },
+        {
+          "url": "https://rpc.mevblocker.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000006\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x00000000000000000000000000000000000000000000000100000000000001cb00000000000000000000000000000000000000000000000000002d634966dc10000000000000000000000000000000000000000000000000000000006b0605a1000000000000000000000000000000000000000000000000000000006b0605af00000000000000000000000000000000000000000000000100000000000001cb\"}"
+          }
+        }
+      ],
+      "reserve_unit": "USD"
+    },
+    {
+      "asset": "uniBTC",
+      "proxy": "0xc590D9fb8eE78a0909dFF341ccf717000b7b7fF2",
+      "feed_name": "uniBTC Proof of Reserves",
+      "docs": {
+        "assetClass": "Crypto",
+        "assetSubClass": "Pegged Asset",
+        "attributeType": "smartdata_por",
+        "baseAsset": "uniBTC",
+        "baseAssetEntityId": "crypto-uniBTC",
+        "blockchainName": "Ethereum",
+        "deliveryChannelCode": "DF",
+        "issuer": "Bedrock",
+        "marketHours": "Crypto",
+        "porAuditor": "Bitcoin Network / Cross-chain",
+        "porSource": "Wallet Address Manager",
+        "porType": "Cross-chain",
+        "productSubType": "Cross-chain",
+        "productType": "Proof of Reserve",
+        "productTypeCode": "PoR",
+        "reserveAsset": "BTC",
+        "reserveAssetClic": "BTC_CR",
+        "underlyingAsset": "BTC",
+        "underlyingAssetClic": "BTC_CR"
+      },
+      "heartbeat": 86400,
+      "legs": [
+        {
+          "url": "https://eth-mainnet.public.blastapi.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x00000000000000000000000000000000000000000000000100000000000002f70000000000000000000000000000000000000000000000cd8a33af46d0fb822c000000000000000000000000000000000000000000000000000000006b059ffc000000000000000000000000000000000000000000000000000000006b05a00f00000000000000000000000000000000000000000000000100000000000002f7\"}"
+          }
+        },
+        {
+          "url": "https://eth.drpc.org",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x00000000000000000000000000000000000000000000000100000000000002f70000000000000000000000000000000000000000000000cd8a33af46d0fb822c000000000000000000000000000000000000000000000000000000006b059ffc000000000000000000000000000000000000000000000000000000006b05a00f00000000000000000000000000000000000000000000000100000000000002f7\"}"
+          }
+        },
+        {
+          "url": "https://rpc.mevblocker.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x00000000000000000000000000000000000000000000000100000000000002f70000000000000000000000000000000000000000000000cd8a33af46d0fb822c000000000000000000000000000000000000000000000000000000006b059ffc000000000000000000000000000000000000000000000000000000006b05a00f00000000000000000000000000000000000000000000000100000000000002f7\"}"
+          }
+        }
+      ],
+      "reserve_unit": "BTC"
+    },
+    {
+      "asset": "SolvBTC",
+      "proxy": "0xda9258AFc797Cd64d1b6FC651051224cdAB1B25E",
+      "feed_name": "SolvBTC Proof of Reserves",
+      "docs": {
+        "assetClass": "Crypto",
+        "assetSubClass": "Pegged Asset",
+        "attributeType": "smartdata_por",
+        "baseAsset": "SolvBTC",
+        "baseAssetEntityId": "crypto-SolvBTC",
+        "blockchainName": "Ethereum",
+        "deliveryChannelCode": "DF",
+        "issuer": "Solv Protocol",
+        "marketHours": "Crypto",
+        "porAuditor": "Bitcoin Network / Cross-chain",
+        "porSource": "Wallet Address Manager",
+        "porType": "Cross-chain",
+        "productSubType": "Cross-chain",
+        "productType": "Proof of Reserve",
+        "productTypeCode": "PoR",
+        "reserveAsset": "BTC",
+        "reserveAssetClic": "BTC_CR",
+        "underlyingAsset": "BTC",
+        "underlyingAssetClic": "BTC_CR"
+      },
+      "heartbeat": 86400,
+      "legs": [
+        {
+          "url": "https://eth-mainnet.public.blastapi.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x000000000000000000000000000000000000000000000001000000000000030e00000000000000000000000000000000000000000000013ad4a0c0fdaee58db5000000000000000000000000000000000000000000000000000000006b053d3d000000000000000000000000000000000000000000000000000000006b053d4b000000000000000000000000000000000000000000000001000000000000030e\"}"
+          }
+        },
+        {
+          "url": "https://eth.drpc.org",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x000000000000000000000000000000000000000000000001000000000000030e00000000000000000000000000000000000000000000013ad4a0c0fdaee58db5000000000000000000000000000000000000000000000000000000006b053d3d000000000000000000000000000000000000000000000000000000006b053d4b000000000000000000000000000000000000000000000001000000000000030e\"}"
+          }
+        },
+        {
+          "url": "https://rpc.mevblocker.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x000000000000000000000000000000000000000000000001000000000000030e00000000000000000000000000000000000000000000013ad4a0c0fdaee58db5000000000000000000000000000000000000000000000000000000006b053d3d000000000000000000000000000000000000000000000000000000006b053d4b000000000000000000000000000000000000000000000001000000000000030e\"}"
+          }
+        }
+      ],
+      "reserve_unit": "BTC"
+    },
+    {
+      "asset": "xSolvBTC",
+      "proxy": "0x461790bDAF5aeD3df6a88cB97Dec42DD0EFA73c0",
+      "feed_name": "xSolvBTC Proof of Reserves",
+      "docs": {
+        "assetClass": "Crypto",
+        "assetSubClass": "Pegged Asset",
+        "attributeType": "smartdata_por",
+        "baseAsset": "xSolvBTC",
+        "baseAssetEntityId": "crypto-xSolvBTC",
+        "blockchainName": "Ethereum",
+        "deliveryChannelCode": "DF",
+        "issuer": "Solv Protocol",
+        "marketHours": "Crypto",
+        "porAuditor": "Bitcoin Network / Cross-chain",
+        "porSource": "Wallet Address Manager",
+        "porType": "Cross-chain",
+        "productSubType": "Cross-chain",
+        "productType": "Proof of Reserve",
+        "productTypeCode": "PoR",
+        "reserveAsset": "BTC",
+        "reserveAssetClic": "BTC_CR",
+        "underlyingAsset": "BTC",
+        "underlyingAssetClic": "BTC_CR"
+      },
+      "heartbeat": 86400,
+      "legs": [
+        {
+          "url": "https://eth-mainnet.public.blastapi.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000010000000000000272000000000000000000000000000000000000000000000034030bccdba237910f000000000000000000000000000000000000000000000000000000006b058cce000000000000000000000000000000000000000000000000000000006b058ce30000000000000000000000000000000000000000000000010000000000000272\"}"
+          }
+        },
+        {
+          "url": "https://eth.drpc.org",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000010000000000000272000000000000000000000000000000000000000000000034030bccdba237910f000000000000000000000000000000000000000000000000000000006b058cce000000000000000000000000000000000000000000000000000000006b058ce30000000000000000000000000000000000000000000000010000000000000272\"}"
+          }
+        },
+        {
+          "url": "https://rpc.mevblocker.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000010000000000000272000000000000000000000000000000000000000000000034030bccdba237910f000000000000000000000000000000000000000000000000000000006b058cce000000000000000000000000000000000000000000000000000000006b058ce30000000000000000000000000000000000000000000000010000000000000272\"}"
+          }
+        }
+      ],
+      "reserve_unit": "BTC"
+    },
+    {
+      "asset": "KAU",
+      "proxy": "0xaB5Dd7DD7669072a1Ef27c0ba241120A27A1aeC3",
+      "feed_name": "KAU Reserves",
+      "docs": {
+        "assetClass": "Commodity",
+        "attributeType": "smartdata_-_por",
+        "baseAsset": "KAU",
+        "baseAssetEntityId": "crypto-KAU",
+        "blockchainName": "Ethereum",
+        "deliveryChannelCode": "DF",
+        "issuer": "Kinesis Money",
+        "porAuditor": "Bureau Veritas",
+        "porSource": "Third-party",
+        "porType": "Off-chain",
+        "productType": "Proof of Reserve",
+        "productTypeCode": "PoR",
+        "reserveAsset": "XAU"
+      },
+      "heartbeat": 86400,
+      "legs": [
+        {
+          "url": "https://eth-mainnet.public.blastapi.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000010000000000000113000000000000000000000000000000000000000000021f9c9583f6f93ea90000000000000000000000000000000000000000000000000000000000006b05ad7e000000000000000000000000000000000000000000000000000000006b05ad8f0000000000000000000000000000000000000000000000010000000000000113\"}"
+          }
+        },
+        {
+          "url": "https://eth.drpc.org",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000010000000000000113000000000000000000000000000000000000000000021f9c9583f6f93ea90000000000000000000000000000000000000000000000000000000000006b05ad7e000000000000000000000000000000000000000000000000000000006b05ad8f0000000000000000000000000000000000000000000000010000000000000113\"}"
+          }
+        },
+        {
+          "url": "https://rpc.mevblocker.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000010000000000000113000000000000000000000000000000000000000000021f9c9583f6f93ea90000000000000000000000000000000000000000000000000000000000006b05ad7e000000000000000000000000000000000000000000000000000000006b05ad8f0000000000000000000000000000000000000000000000010000000000000113\"}"
+          }
+        }
+      ],
+      "reserve_unit": "g"
+    },
+    {
+      "asset": "KAG",
+      "proxy": "0x3F0543aA057BcAeA152Fe9462Cb3ffaB305a6F8D",
+      "feed_name": "KAG Reserves",
+      "docs": {
+        "assetClass": "Commodity",
+        "attributeType": "smartdata_-_por",
+        "baseAsset": "KAG",
+        "baseAssetEntityId": "crypto-KAG",
+        "blockchainName": "Ethereum",
+        "deliveryChannelCode": "DF",
+        "issuer": "Kinesis Money",
+        "porAuditor": "Bureau Veritas",
+        "porSource": "Third-party",
+        "porType": "Off-chain",
+        "productType": "Proof of Reserve",
+        "productTypeCode": "PoR",
+        "reserveAsset": "XAG"
+      },
+      "heartbeat": 86400,
+      "legs": [
+        {
+          "url": "https://eth-mainnet.public.blastapi.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000010000000000000115000000000000000000000000000000000000000000030d23c4090d34f0ce8000000000000000000000000000000000000000000000000000000000006b05c486000000000000000000000000000000000000000000000000000000006b05c4930000000000000000000000000000000000000000000000010000000000000115\"}"
+          }
+        },
+        {
+          "url": "https://eth.drpc.org",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000010000000000000115000000000000000000000000000000000000000000030d23c4090d34f0ce8000000000000000000000000000000000000000000000000000000000006b05c486000000000000000000000000000000000000000000000000000000006b05c4930000000000000000000000000000000000000000000000010000000000000115\"}"
+          }
+        },
+        {
+          "url": "https://rpc.mevblocker.io",
+          "decimals": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+          },
+          "round": {
+            "status": 200,
+            "raw": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000000000000000000000000000010000000000000115000000000000000000000000000000000000000000030d23c4090d34f0ce8000000000000000000000000000000000000000000000000000000000006b05c486000000000000000000000000000000000000000000000000000000006b05c4930000000000000000000000000000000000000000000000010000000000000115\"}"
+          }
+        }
+      ],
+      "reserve_unit": "ozt"
+    }
+  ]
+}
