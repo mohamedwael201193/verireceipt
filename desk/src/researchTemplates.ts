@@ -1,7 +1,7 @@
 // Templates contain selectors and declared analyst thresholds, never numeric
 // observations. Freeze the resolved timestamp before the first purchase.
 import type {ThesisSpec,Claim} from './researchDesk.js';
-export function researchTemplate(id:'A'|'B'|'C'|'D'|'E',frozen_at:string):{spec:ThesisSpec;claims:Claim[]}{
+export function researchTemplate(id:'A'|'B'|'C'|'D'|'E'|'F',frozen_at:string):{spec:ThesisSpec;claims:Claim[]}{
  const base={version:'research-desk-v1' as const,network:'eip155:11155111' as const,frozen_at,budget_uusdc:'60000',max_call_uusdc:'10000' as const,max_escalations:1 as const};
  if(id==='A')return {
   spec:{...base,template:'onchain-valuation',question:'Is UNI Ethereum-contract implied valuation below the declared analyst ceiling, with protocol TVL context?',facts:[
@@ -39,6 +39,18 @@ export function researchTemplate(id:'A'|'B'|'C'|'D'|'E',frozen_at:string):{spec:
    {id:'supply',intent:'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL',params:{token:'UNI on ethereum'},field:'total_supply',unit:'token',max_age_seconds:86400},
   ],assumptions:[{id:'holders_floor',value:'100000',unit:'addresses',rationale:'Declared analyst listing-risk floor for holder-distribution breadth; a screen threshold, not a market forecast or investment recommendation.'},{id:'liquidity_floor',value:'5000000',unit:'USD',rationale:'Declared analyst minimum DEX pool reserve depth for the listing-liquidity screen; a screen threshold, not a market forecast or investment recommendation.'}],calculations:[]},
   claims:[{id:'holders_above_floor',fact_refs:['holders'],assumption_refs:['holders_floor'],predicate:{left:'holders',op:'>=',right:'holders_floor'}},{id:'liquidity_above_floor',fact_refs:['liquidity'],assumption_refs:['liquidity_floor'],predicate:{left:'liquidity',op:'>=',right:'liquidity_floor'}},{id:'supply_context',fact_refs:['supply'],assumption_refs:[]}],
+ };
+ if(id==='F')return {
+  spec:{...base,template:'settlement-screen',question:'Does the declared payee pass the declared pre-settlement compliance screen for a simulated testnet treasury transfer: sanctions best-score below the declared screening threshold and TUSD attested reserves at or above the declared floor?',facts:[
+   {id:'sanctions',intent:'SANCTIONS_SCREENING_MATCH_GENERAL',params:{name:'Ares Capital Corporation'},field:'match_score',unit:'score',max_age_seconds:86400},
+   // TUSD Chainlink Proof-of-Reserve feed on ethereum, pinned by proxy
+   // address in the miner's probed-live registry. The independent primary
+   // re-read recomputes micro-units from the same feed at a pinned
+   // finalized block over two chain-bound RPCs; a new attestation round
+   // between the paid and independent reads fails closed.
+   {id:'reserve',intent:'ASSET_RESERVE_ATTESTATION_GENERAL',params:{asset:'TUSD'},field:'attested_reserve',unit:'micro-units of the underlying asset',max_age_seconds:86400},
+  ],assumptions:[{id:'sanctions_threshold',value:'0.85',unit:'score',rationale:'Declared screening threshold equal to the miner\'s own published match threshold; a fuzzy name match is not identity confirmation and a non-match is not legal clearance.'},{id:'reserve_floor',value:'100000000000000',unit:'micro-units of the underlying asset',rationale:'Declared treasury minimum attested reserve (100,000,000 whole units) for authorizing a simulated settlement; a screen threshold, not a solvency opinion or investment recommendation.'}],calculations:[]},
+  claims:[{id:'sanctions_below_threshold',fact_refs:['sanctions'],assumption_refs:['sanctions_threshold'],predicate:{left:'sanctions',op:'<',right:'sanctions_threshold'}},{id:'reserve_above_floor',fact_refs:['reserve'],assumption_refs:['reserve_floor'],predicate:{left:'reserve',op:'>=',right:'reserve_floor'}}],
  };
  return {
   spec:{...base,template:'issuer-macro',question:'Did Tesla file at least the declared number of Form 10-Qs in calendar 2024, with share-price and US unemployment context?',facts:[

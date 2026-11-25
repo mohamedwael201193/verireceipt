@@ -74,6 +74,24 @@ export interface SanctionsScreenResponse extends ReceiptedResponse {
   checked_at?: string;
 }
 
+export interface ReserveAttestationResponse extends ReceiptedResponse {
+  attested_reserve?: number | null;
+  asset?: string;
+  reserve_units?: number | null;
+  ethereum_total_supply?: number | null;
+  reserve_vs_ethereum_supply_pct?: number | null;
+  collateral_ratio_pct?: number | null;
+  supply_scope?: string;
+  round_id?: string;
+  updated_at?: string;
+  feed_age_seconds?: number;
+  heartbeat_seconds?: number;
+  block?: string;
+  source_feed?: string;
+  verdict?: string;
+  confidence?: number;
+}
+
 export interface CorporateRegistryResponse extends ReceiptedResponse {
   legal_name?: string;
   registration_id?: string;

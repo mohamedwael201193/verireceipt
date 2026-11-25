@@ -7,6 +7,7 @@ import {verifyFilingSource} from './filingSource.js';
 import {CHAIN_RPCS} from '../../src/config/chains.js';
 import {TOKEN_CONTRACTS} from '../../src/handlers/tokenContracts.js';
 import {matchScore,normalizeName,parseAlt,parseSdn,parseUn} from '../../src/handlers/sanctionsMatch.js';
+import {POR_FEEDS} from '../../src/handlers/reserveAttestation.js';
 export interface PrimaryResult { ok:boolean; source:SourceEvidence|null; as_of:string|null; reasons:string[] }
 interface Read {url:string;raw_text:string;observed_at:string;json:any;method?:string;body?:string}
 const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
@@ -165,6 +166,40 @@ export async function verifyResearchPrimary(fact:FactSpec,value:string,options:{
     if(answers[0].raw!==answers[1].raw||answers[0].decimals!==answers[1].decimals)fail('RPC supply/decimals disagreement');
     const paid=decimal(value),s=answers[0];if(paid.n*(10n**s.decimals)!==s.raw*paid.d)fail('whole-token supply mismatch');
     const blockSeconds=hex(first?.timestamp);if(blockSeconds>BigInt(Math.floor(now().getTime()/1000)))fail('future finalized block timestamp');as_of=new Date(Number(blockSeconds)*1000).toISOString();parser='evm-two-rpc-chain-finalized-block-supply-v1';break;
+   }
+   case 'ASSET_RESERVE_ATTESTATION_GENERAL':{
+    const asset=fact.params.asset?.trim();if(!asset||asset.length>60)fail('reserve primary requires an explicit asset symbol');
+    // The miner's own pinned probed-live feed registry (shared module):
+    // exact symbol only, no address aliases or cross-chain guesses.
+    const feed=POR_FEEDS[asset.toUpperCase()];if(!feed)fail('reserve asset not in the pinned probed-live feed registry');
+    const urls=CHAIN_RPCS.ethereum.slice(0,2);
+    const rpc=async(url:string,method:string,params:unknown[])=>{const r=await read(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});if(r.json.error||r.json.id!==1)fail('RPC error');return r.json.result;};
+    const hex=(x:unknown)=>{if(typeof x!=='string'||!/^0x[0-9a-fA-F]+$/.test(x))fail('invalid RPC quantity');return BigInt(x as string);};
+    // Two independent chain-bound RPCs. Pin both legs to the same finalized
+    // block number and compare the block hash, feed decimals and the full
+    // latestRoundData round; any disagreement or round change fails closed.
+    const first=await rpc(urls[0],'eth_getBlockByNumber',['finalized',false]);
+    const block=first?.number,blockHash=first?.hash;if(!/^0x[0-9a-fA-F]+$/.test(block)||!/^0x[0-9a-fA-F]{64}$/.test(blockHash))fail('finalized block unavailable');
+    const legs=[];
+    for(const url of urls){
+     if(hex(await rpc(url,'eth_chainId',[]))!==1n)fail('RPC chain mismatch');
+     const b=await rpc(url,'eth_getBlockByNumber',[block,false]);if(b?.hash!==blockHash)fail('RPC finalized block hash mismatch');
+     const decimals=hex(await rpc(url,'eth_call',[{to:feed.proxy,data:'0x313ce567'},block]));
+     const round=await rpc(url,'eth_call',[{to:feed.proxy,data:'0xfeaf968c'},block]);
+     if(typeof round!=='string'||!/^0x[0-9a-fA-F]+$/.test(round)||round.length<2+64*5)fail('reserve round body short');
+     const h=round.slice(2);
+     legs.push({decimals,roundId:hex('0x'+h.slice(0,64)),answer:hex('0x'+h.slice(64,128)),updatedAt:hex('0x'+h.slice(192,256))});
+    }
+    const a=legs[0],b=legs[1];
+    if(a.decimals!==b.decimals||a.roundId!==b.roundId||a.answer!==b.answer||a.updatedAt!==b.updatedAt)fail('RPC reserve round disagreement');
+    if(a.decimals>36n)fail('unsupported feed decimals');
+    if(a.answer<=0n)fail('non-positive reserve attestation');
+    // The handler's exact conversion: micro = answer x 10^(6 - decimals),
+    // floored when the feed carries more than 6 decimals. Compared exactly;
+    // a republication between the paid and independent reads fails closed.
+    const micro=a.decimals<=6n?a.answer*10n**(6n-a.decimals):a.answer/(10n**(a.decimals-6n));
+    const paid=decimal(value);if(paid.n!==micro*paid.d)fail('reserve micro-unit value mismatch');
+    const blockSeconds=hex(first?.timestamp);if(blockSeconds>BigInt(Math.floor(now().getTime()/1000)))fail('future finalized block timestamp');as_of=new Date(Number(blockSeconds)*1000).toISOString();parser='evm-two-rpc-finalized-chainlink-por-micro-v1';break;
    }
    default: fail('no independent primary parser for intent');
   }

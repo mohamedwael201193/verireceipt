@@ -91,6 +91,31 @@ describe('chain-bound token supply primary, unit RPC transport only',()=>{
  it('source replay preserves method/body selectors for RPC calls',async()=>{const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(supply,'100',{f:rpc().f,now});expect(await replayPrimaryBytes(supply,{source:r.source,value:'100',as_of:r.as_of} as any,now().toISOString())).toBe(true);});
 });
 
+describe('reserve attestation primary, unit transport only',()=>{
+ const reserve:FactSpec={id:'reserve',intent:'ASSET_RESERVE_ATTESTATION_GENERAL',params:{asset:'TUSD'},field:'attested_reserve',unit:'micro-units of the underlying asset',max_age_seconds:86400};
+ const ANSWER=123456789012345678n; // feed units at 8 decimals
+ const MICRO=ANSWER/100n;          // handler conversion: floor(answer x 10^(6-8))
+ const w=(x:bigint)=>x.toString(16).padStart(64,'0');
+ const blockSecs=BigInt(Math.floor(now().getTime()/1000)-60);
+ function rpcReserve(mutant?:'chain'|'block'|'decimals'|'round'|'zero'){
+  let calls=0;const f:typeof fetch=async(url,init)=>{calls++;const req=JSON.parse(String(init?.body));const second=String(url).includes('drpc');let result:unknown;
+   if(req.method==='eth_chainId')result=mutant==='chain'&&second?'0x89':'0x1';
+   else if(req.method==='eth_getBlockByNumber')result={number:'0x123',hash:'0x'+(mutant==='block'&&second?'b':'a').repeat(64),timestamp:'0x'+blockSecs.toString(16)};
+   else if(req.method==='eth_call'&&req.params[0].data==='0x313ce567')result=mutant==='decimals'&&second?'0x7':'0x8';
+   else if(req.method==='eth_call'&&req.params[0].data==='0xfeaf968c'){const answer=mutant==='zero'?0n:mutant==='round'&&second?ANSWER+1n:ANSWER;result='0x'+w(9n)+w(answer)+w(blockSecs)+w(blockSecs)+w(9n);}
+   else throw new Error('unexpected RPC method '+req.method);
+   return Response.json({jsonrpc:'2.0',id:1,result});
+  };return {f,get calls(){return calls;}};
+ }
+ it('recomputes micro-units from the pinned feed round at a finalized block',async()=>{const t=rpcReserve();const r=await verifyResearchPrimary(reserve,MICRO.toString(),{f:t.f,now});expect(r.ok).toBe(true);expect(r.source!.parser).toBe('evm-two-rpc-finalized-chainlink-por-micro-v1');expect(r.source!.raw_text).toContain('0xfeaf968c');});
+ it.each(['chain','block','decimals','round'] as const)('rejects RPC %s mismatch',async mutant=>expect((await verifyResearchPrimary(reserve,MICRO.toString(),{f:rpcReserve(mutant).f,now})).ok).toBe(false));
+ it('rejects a paid value that differs by one micro-unit',async()=>expect((await verifyResearchPrimary(reserve,(MICRO+1n).toString(),{f:rpcReserve().f,now})).ok).toBe(false));
+ it('refuses a non-positive attestation',async()=>expect((await verifyResearchPrimary(reserve,'0',{f:rpcReserve('zero').f,now})).ok).toBe(false));
+ it('refuses an unlisted asset without fetching',async()=>{let calls=0;const f=async()=>{calls++;return Response.json({});};const r=await verifyResearchPrimary({...reserve,params:{asset:'USDC'}},'1',{f,now});expect(r.ok).toBe(false);expect(calls).toBe(0);});
+ it('floors the sub-micro remainder exactly as the handler does',async()=>{const odd=ANSWER+99n;const t=rpcReserve();t.f=async(url,init)=>{const req=JSON.parse(String(init?.body));if(req.method==='eth_call'&&req.params[0].data==='0xfeaf968c')return Response.json({jsonrpc:'2.0',id:1,result:'0x'+w(9n)+w(odd)+w(blockSecs)+w(blockSecs)+w(9n)});return rpcReserve().f(url,init);};const r=await verifyResearchPrimary(reserve,(odd/100n).toString(),{f:t.f,now});expect(r.ok).toBe(true);});
+ it('source replay re-runs the same RPC sequence from stored bytes',async()=>{const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(reserve,MICRO.toString(),{f:rpcReserve().f,now});expect(await replayPrimaryBytes(reserve,{source:r.source,value:MICRO.toString(),as_of:r.as_of} as any,now().toISOString())).toBe(true);});
+});
+
 it('replay binds derived timestamp, source URL, parser, scope and observation metadata',async()=>{
  const {replayPrimaryBytes}=await import('../src/researchPublicReplay.js');const r=await verifyResearchPrimary(macro,'4.123457',{f:transport([{},[macroRow]]),now});
  for(const change of ['as_of','url','parser','scope_hash','observed_at'] as const){const o={source:structuredClone(r.source),value:'4.123457',as_of:r.as_of} as any;if(change==='as_of')o.as_of='2026-11-23T00:00:00Z';else o.source[change]=change==='observed_at'?'2020-01-01T00:00:00Z':'changed';expect(await replayPrimaryBytes(macro,o,now().toISOString())).toBe(false);}

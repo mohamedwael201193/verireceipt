@@ -10,7 +10,7 @@ import {liveResearchAdapter,localResearchStore} from '../src/researchLiveAdapter
 import {runResearchDesk} from '../src/researchDeskRunner.js';
 import {researchTemplate} from '../src/researchTemplates.js';
 const [id,out,...extra]=process.argv.slice(2);
-if(!['A','B','C','D'].includes(id)||!out||extra.length)throw new Error('Usage: run-research-desk.ts A|B|C|D NEW_PRIVATE_OUTPUT_DIRECTORY');
+if(!['A','B','C','D','F'].includes(id)||!out||extra.length)throw new Error('Usage: run-research-desk.ts A|B|C|D|F NEW_PRIVATE_OUTPUT_DIRECTORY');
 const secrets=process.env.DESK_SECRETS_FILE;if(!secrets)throw new Error('DESK_SECRETS_FILE is required');
 const expected=process.env.DESK_PAYER_ADDRESS?.toLowerCase();if(!expected||!/^0x[0-9a-f]{40}$/.test(expected))throw new Error('explicit DESK_PAYER_ADDRESS required');
 const ledgerDir=resolve(process.env.DESK_LEDGER_DIR??join(dirname(fileURLToPath(import.meta.url)),'../ledger'));
@@ -21,7 +21,7 @@ const spend=spendLedgerFromFiles({reservationsFile:join(ledgerDir,'reservations.
 try{lstatSync(join(ledgerDir,'spend.lock'));throw new Error('existing spend lock requires operator inspection');}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
 const account=privateKeyToAccount(normalizePrivateKey(readSecret(secrets,'private_key')));if(account.address.toLowerCase()!==expected)throw new Error('payer binding mismatch');
 const payer={address:account.address,signMessage:(message:string)=>account.signMessage({message})};
-const {spec,claims}=researchTemplate(id as 'A'|'B'|'C'|'D',new Date().toISOString());
+const {spec,claims}=researchTemplate(id as 'A'|'B'|'C'|'D'|'F',new Date().toISOString());
 const result=await runResearchDesk(spec,claims,liveResearchAdapter({payer,spend,evidence_dir:dir,run_ledger,secUserAgent:process.env.SEC_USER_AGENT}),localResearchStore(dir));
 console.log(JSON.stringify({outcome:result.outcome,spec_hash:result.spec_hash,packet_hash:result.packet_hash,reasons:result.reasons,accounting:result.accounting,metrics:result.metrics,receipts:result.observations.map(o=>({fact_id:o.fact_id,receipt_hash:o.receipt_hash,signal_hash:o.signal_hash,supply:o.supply,integrity:o.integrity_level})),onchain_transactions:[]},null,2));
 process.exitCode=result.outcome==='READY'?0:1;
