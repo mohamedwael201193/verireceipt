@@ -9,3 +9,9 @@ Ownership spans root resolution, root binding, and the underlying fetch/body wor
 When fewer than two sources are otherwise eligible, an inactive slow source can be retried to preserve a possible quorum. This never bypasses an active call or a 429 cooldown. Rate-limit and slow cooldowns cannot shorten each other. The optional performance sample budget remains 900 milliseconds.
 
 This is process-local pacing, not a guarantee of a response under a particular latency. A request can still fail closed when current finalized-root or validator quorum is unavailable.
+
+## Retryable error latency and optional enrichment
+
+A root-bound leg ending with a retryable HTTP error after1500ms opens the same60second slow-host cooldown. Successful records retain the3000ms threshold. This affects later request eligibility only. A retryable HTTP attempt that has already consumed1000ms is not retried, including root-bind attempts. Existing quorum, root binding, dissent, absence and wait-for-all rules are unchanged.
+
+Optional epoch balance-delta reads share400ms, skip active or slow-marked required-source hosts, and can be omitted without changing the verified balance verdict, primary receipt evidence or balance answer. The900/400/timeout comparison is test-only; no HTTP query can override the production400ms enrichment budget.

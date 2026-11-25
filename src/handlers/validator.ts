@@ -313,6 +313,8 @@ export const VALIDATOR_STATUSES: ReadonlySet<string> = new Set([
 /** Optional transport override — used only by tests to inject fixtures. */
 export interface ValidatorDeps {
   fetchImpl?: typeof fetch;
+  /** Optional enrichment budget override for decision-neutrality tests only. */
+  performanceBudgetMs?:number;
   /**
    * Request budget override in ms (test only, default 4500): bounds each
    * fetch attempt AND the whole request, retries included. Tests may
@@ -417,6 +419,7 @@ function refillChainSafeBucket(now: number): void {
 }
 
 export const VALIDATOR_SLOW_HOST_MS=3000;
+export const VALIDATOR_SLOW_ERROR_MS=1500;
 export const VALIDATOR_SLOW_HOST_COOLDOWN_MS=60000;
 const activeValidatorHosts=new Set<string>();
 const slowCooldownUntil=new Map<string,number>();
@@ -435,7 +438,7 @@ export async function ownValidatorHost<T>(base:string,work:()=>Promise<T>):Promi
  if(!slowHostEligible(base))throw Error('validator host cooling down or active');
  activeValidatorHosts.add(base);const start=Date.now();
  const timer=setTimeout(()=>noteSourceSlow(base),VALIDATOR_SLOW_HOST_MS);
- try{return await work();}catch(error){if(error instanceof Error&&error.name==='AbortError')noteSourceSlow(base);throw error;}finally{clearTimeout(timer);activeValidatorHosts.delete(base);if(Date.now()-start>=VALIDATOR_SLOW_HOST_MS)noteSourceSlow(base);}
+ try{return await work();}catch(error){if((error instanceof Error&&error.name==='AbortError')||(Date.now()-start>=VALIDATOR_SLOW_ERROR_MS&&RETRYABLE_STATUSES.has(httpStatusOf(error)??0)))noteSourceSlow(base);throw error;}finally{clearTimeout(timer);activeValidatorHosts.delete(base);if(Date.now()-start>=VALIDATOR_SLOW_HOST_MS)noteSourceSlow(base);}
 }
 
 /** Test-only: empty caches, refill the ChainSafe bucket, clear cooldowns. */
@@ -934,6 +937,7 @@ async function fetchValidatorFromSource(
   const stateId = useRootPin ? (expectedRoot as string) : "finalized";
   const sourceUrl = `${base}/eth/v1/beacon/states/${stateId}/validators/${index}`;
   for (let attempt = 1; ; attempt++) {
+    const attemptStartedAt=Date.now();
     // Bind first when required: root-pin+optimistic-allow (Stakely), or
     // finalized-label sources (blockreq) whose vote is only valid for
     // the agreed root.
@@ -965,7 +969,7 @@ async function fetchValidatorFromSource(
           } catch (fallbackErr) {
             throw fallbackErr;
           }
-        } else if (status !== undefined && RETRYABLE_STATUSES.has(status) && attempt < VALIDATOR_MAX_ATTEMPTS) {
+        } else if (status !== undefined && RETRYABLE_STATUSES.has(status) && Date.now()-attemptStartedAt<1000 && attempt < VALIDATOR_MAX_ATTEMPTS) {
           const rawWaitMs =
             status === 429 ? RETRY_429_DEFAULT_DELAY_MS : RETRY_BASE_DELAY_MS;
           const waitMs = Math.min(rawWaitMs, RETRY_AFTER_CAP_MS);
@@ -1040,7 +1044,7 @@ async function fetchValidatorFromSource(
     if (res.status === 429) {
       noteSource429(base, parseRetryAfterMs(retryAfterHeader(res)));
     }
-    if (attempt >= VALIDATOR_MAX_ATTEMPTS || !RETRYABLE_STATUSES.has(res.status)) throw err;
+    if (attempt >= VALIDATOR_MAX_ATTEMPTS || !RETRYABLE_STATUSES.has(res.status) || Date.now()-attemptStartedAt>=1000) throw err;
     const rawWaitMs =
       parseRetryAfterMs(retryAfterHeader(res)) ??
       (res.status === 429 ? RETRY_429_DEFAULT_DELAY_MS : RETRY_BASE_DELAY_MS);
@@ -1089,7 +1093,7 @@ interface EpochBalanceDelta {
  */
 const activePerformanceSources = new Set<string>();
 export function resetValidatorPerformanceReadsForTests() { activePerformanceSources.clear(); }
-/** Optional reads share one 900ms budget. Ownership outlives a caller timeout. */
+/** Optional reads share one400ms budget. Ownership outlives a caller timeout. */
 async function readPerformanceBody(url: string, fetchImpl: typeof fetch, deadline: number, nowMs: () => number): Promise<string | undefined> {
   const host = new URL(url).origin;
   if (Date.now() >= deadline || activePerformanceSources.has(host)) return undefined;
@@ -1135,16 +1139,17 @@ async function fetchEpochBalanceDelta(
   bases: string[],
   fetchImpl: typeof fetch,
   nowMs: () => number = Date.now,
+  budgetMs=400,
 ): Promise<EpochBalanceDelta | undefined> {
   const eligible = bases.filter((base) => {
     const cap = BEACON_SOURCE_CAPS.find((c) => c.base === base);
-    if (cap === undefined || !canStartSource(cap, nowMs())) return false;
+    if (cap === undefined || activeValidatorHosts.has(base) || nowMs()<(slowCooldownUntil.get(base)??0) || !canStartSource(cap, nowMs())) return false;
     if (cap.paced && !chainsafeTakeToken(nowMs())) return false;
     return true;
   });
   if (eligible.length < 2) return undefined;
   const probeBases = eligible.slice(0, 2);
-  const deadline = Date.now() + 900;
+  const deadline = Date.now() + budgetMs;
   const getJson = async (url: string): Promise<Record<string, unknown> | undefined> => {
     try {
       const raw = await readPerformanceBody(url, fetchImpl, deadline, nowMs);
@@ -1503,6 +1508,7 @@ async function handleValidatorObserved(
         stateSources,
         fetchImpl,
         nowFn,
+        deps.performanceBudgetMs??400,
       );
       if (perf !== undefined) {
         const perfReceipt = makeReceipt(
