@@ -35,6 +35,12 @@ const supplyEvidence = JSON.parse(fixture.scenarios.supply.expected_raw_text);
 supplyEvidence.total_supply_scope = supplyScope;
 fixture.scenarios.supply.expected_raw_text = JSON.stringify(supplyEvidence, Object.keys(supplyEvidence).sort());
 fixture.scenarios.supply.expected_raw_sha256 = sha256Hex(fixture.scenarios.supply.expected_raw_text);
+for (const name of ['macro_latest','macro_year']) {
+  const item=fixture.scenarios[name];
+  const rows=JSON.parse(item.expected_raw_text)[1];
+  item.expected_fields.value=rows.find((row: {date:string})=>Number(row.date)===item.expected_fields.year).value;
+  item.expected_fields.unit='% of total labour force';
+}
 const responses = fixture.responses as RecordedResponse[];
 const key = (url: string, method: string, body: unknown) => JSON.stringify([url, method, body]);
 const responseMap = new Map<string, RecordedResponse[]>();

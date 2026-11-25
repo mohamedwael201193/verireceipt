@@ -7,16 +7,15 @@ import {buildServer} from '../src/server';
 const catalog=readFileSync('tests/fixtures/macro-fuzzy/countries.json','utf8');
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();resetMacroCachesForTests();});
 it.each([
- ['latest annual inflation rate','inflation'],['current cpi','inflation'],['please show me unemployment rate','unemployment rate'],['growth gdp','gdp growth'],['latest population data','population'],['exports','trade'],
+ ['latest annual inflation rate','inflation'],['current cpi','inflation'],['please show me unemployment rate','unemployment rate'],['growth gdp','gdp growth'],['latest population data','population'],['exports','exports'],
 ])('bounded word matching %s selects %s', (input,expected)=>expect(normalizeIndicator(input)).toBe(expected));
-it.each(['national unemployment rate','female unemployment','youth unemployment rate','policy interest rate','inflation expectations','GDP per hour','unemployment inflation','not unemployment','exports volume'])('substantive qualifier %s refuses without fetch',async indicator=>{
- const f=vi.fn();vi.stubGlobal('fetch',f);await expect(handleMacro({indicator,country:'US'})).rejects.toMatchObject({code:'UNSUPPORTED_INDICATOR'});expect(f).not.toHaveBeenCalled();
+it.each(['policy interest rate','inflation expectations','GDP per hour','unemployment inflation','not unemployment','exports volume'])('qualified %s uses exact catalog discovery without measure substitution',async indicator=>{
+ const f=vi.fn(async(u:unknown)=>new Response(String(u).includes('source=2')?readFileSync('tests/fixtures/macro-coverage/catalog.json','utf8'):catalog));vi.stubGlobal('fetch',f);
+ const out=await handleMacro({indicator,country:'US'});expect(out.verdict).toBe('no_data');expect(out.rate_pct).toBeNull();expect(out).not.toHaveProperty('indicator_id');
 });
-it('closest exports uses actual trade series with scope disclosure, raw receipt and closed telemetry',async()=>{
- const raw=readFileSync('tests/fixtures/macro-series/NE.TRD.GNFS.ZS-observation.json','utf8');
- vi.stubGlobal('fetch',async(u:unknown)=>new Response(String(u).includes('/indicator/')?raw:catalog));
- const out=await handleMacro({indicator:'exports',country:'US',year:'2022'});expect(out.indicator_id).toBe('NE.TRD.GNFS.ZS');expect(out.answer).toContain('Closest series used');expect(out.answer).toContain('not exports alone');
- expect(answerDiagnostics('MACRO_ECONOMIC_INDICATOR_GENERAL',out).answerClass).toEqual({alias_known:true,matched_series:'NE.TRD.GNFS.ZS',indicator_selection:'closest'});expect(out).not.toHaveProperty('matched_series');
+it('exports now uses actual exports rather than total trade',async()=>{
+ const raw=readFileSync('tests/fixtures/macro-coverage/NE.EXP.GNFS.ZS-observation.json','utf8');vi.stubGlobal('fetch',async(u:unknown)=>new Response(String(u).includes('/indicator/')?raw:catalog));
+ const out=await handleMacro({indicator:'exports',country:'US',year:'2022'});expect(out.indicator_id).toBe('NE.EXP.GNFS.ZS');expect(out.answer).toContain('exports of goods and services');expect(out.answer).not.toContain('Closest series');
 });
 it('unsupported HTTP diagnostics retain closed rejection only, no raw indicator or unknown keys',async()=>{
  const log=vi.spyOn(console,'info').mockImplementation(()=>{});const f=vi.fn();vi.stubGlobal('fetch',f);const app=buildServer();

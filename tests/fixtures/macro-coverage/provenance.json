@@ -1,0 +1,170 @@
+{
+  "retrieved_at": "2026-11-25T22:40:00Z",
+  "sources": [
+    {
+      "file": "BX.KLT.DINV.WD.GD.ZS-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/BX.KLT.DINV.WD.GD.ZS?format=json",
+      "sha256": "fd15df0dd9de59dd6537c0c76dbcf5656ff19af8445370700ad6b7931f192819"
+    },
+    {
+      "file": "BX.KLT.DINV.WD.GD.ZS-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/BX.KLT.DINV.WD.GD.ZS?date=2022&format=json&per_page=100",
+      "sha256": "be3117e5e9dd309e759ce0506c654a8f26151adb6102242b42aa633a6e08ea0b"
+    },
+    {
+      "file": "FM.LBL.BMNY.GD.ZS-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/FM.LBL.BMNY.GD.ZS?format=json",
+      "sha256": "d0961fb1e28061edf424c4755da8e0b92ddc1a46737bc3f38d37be0589e49d9f"
+    },
+    {
+      "file": "FM.LBL.BMNY.GD.ZS-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/FM.LBL.BMNY.GD.ZS?date=2022&format=json&per_page=100",
+      "sha256": "7bf14414615e3b689c63990f75c60f291318298c68a5a4f83eace7634a4a7a42"
+    },
+    {
+      "file": "FR.INR.DPST-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/FR.INR.DPST?format=json",
+      "sha256": "6975dc3f7043684e9beed19f21209e98ee5bdc104275a0eca8cf82f176d0e2d2"
+    },
+    {
+      "file": "FR.INR.DPST-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/FR.INR.DPST?date=2022&format=json&per_page=100",
+      "sha256": "c6a1fe54a621fa21454b4c0495563dd784c53f3940aa16c1d1ca48ff403776b4"
+    },
+    {
+      "file": "FR.INR.LEND-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/FR.INR.LEND?format=json",
+      "sha256": "5ba11a439eaa6c91ab9fa1ac555c5da4a5a697c1cb0aac1c99342af54dbdb80c"
+    },
+    {
+      "file": "FR.INR.LEND-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/FR.INR.LEND?date=2022&format=json&per_page=100",
+      "sha256": "ef0dc29d6f3018ffe8d37d1b0767b30800465bd05af5469c86f4e00793d954ce"
+    },
+    {
+      "file": "GC.DOD.TOTL.GD.ZS-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/GC.DOD.TOTL.GD.ZS?format=json",
+      "sha256": "840db52efe87e4415fecd7d9ac7ca68f875cd8388755126e05609d2e688b5da0"
+    },
+    {
+      "file": "GC.DOD.TOTL.GD.ZS-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/GC.DOD.TOTL.GD.ZS?date=2022&format=json&per_page=100",
+      "sha256": "454d3099265f263d297cf6565df5498ff8b4a4e5d98c33d3c69c594e779ea0d8"
+    },
+    {
+      "file": "NE.EXP.GNFS.ZS-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/NE.EXP.GNFS.ZS?format=json",
+      "sha256": "2324e64be12297b7dd655312acf3581dff838c732d6c989cdfc75653956bd542"
+    },
+    {
+      "file": "NE.EXP.GNFS.ZS-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/NE.EXP.GNFS.ZS?date=2022&format=json&per_page=100",
+      "sha256": "cfcf2c66393a1139ab1f2894856cec9b3a51a534e85e904ae41e37656547bea2"
+    },
+    {
+      "file": "NE.IMP.GNFS.ZS-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/NE.IMP.GNFS.ZS?format=json",
+      "sha256": "7b4d9cbb46f5e6baca7dd719e96f2dc355bd8cd6959dccd11fa48e64ea1f15f3"
+    },
+    {
+      "file": "NE.IMP.GNFS.ZS-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/NE.IMP.GNFS.ZS?date=2022&format=json&per_page=100",
+      "sha256": "fbdcce6c7cc1f67d704e303496caa9531c18dd80ffc1e4e1c0c2313c0e23eb76"
+    },
+    {
+      "file": "NY.GDP.DEFL.KD.ZG-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/NY.GDP.DEFL.KD.ZG?format=json",
+      "sha256": "2498a3b5be51eb1bb22e2e4d058d6c9fec726e3fc09b6b34035b6e8cb0edf1b7"
+    },
+    {
+      "file": "NY.GDP.DEFL.KD.ZG-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/NY.GDP.DEFL.KD.ZG?date=2022&format=json&per_page=100",
+      "sha256": "25f265d42415530c53b29f78c3f93f9b6516d0c1e42e1d75e5934b0917af9f29"
+    },
+    {
+      "file": "NY.GDP.PCAP.KD.ZG-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/NY.GDP.PCAP.KD.ZG?format=json",
+      "sha256": "f37a5b98c6b85047ac7c52538269b816a57cad8e79d19a6a2cbd91fff89e7f7f"
+    },
+    {
+      "file": "NY.GDP.PCAP.KD.ZG-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/NY.GDP.PCAP.KD.ZG?date=2022&format=json&per_page=100",
+      "sha256": "1033d11d3ad10d7171fe0c7b66fa1c0e4ac70ecd99699f7106f29e062038f922"
+    },
+    {
+      "file": "PA.NUS.FCRF-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/PA.NUS.FCRF?format=json",
+      "sha256": "879ac40c1e115d0575c0ac1d26a45b68432303927ea163be9c80e7f47c739b12"
+    },
+    {
+      "file": "PA.NUS.FCRF-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/PA.NUS.FCRF?date=2022&format=json&per_page=100",
+      "sha256": "4dd520a01f9848ddcdc2629f1bc3e62e6be2f7ea18101d4162a16ffb09c47eb3"
+    },
+    {
+      "file": "SL.TLF.CACT.ZS-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/SL.TLF.CACT.ZS?format=json",
+      "sha256": "10154473c4d75dd636f728baf231162ddd5a12c910084f832a3b93fe55038fe7"
+    },
+    {
+      "file": "SL.TLF.CACT.ZS-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/SL.TLF.CACT.ZS?date=2022&format=json&per_page=100",
+      "sha256": "27ba9894b3dde3072cb83d807b027326843ea8fa878451fba96fdd6a8a89cc54"
+    },
+    {
+      "file": "SL.UEM.1524.ZS-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/SL.UEM.1524.ZS?format=json",
+      "sha256": "591afae475788a26e1c53db79754212fcdea0489065f49cb963ad23478ac5804"
+    },
+    {
+      "file": "SL.UEM.1524.ZS-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/SL.UEM.1524.ZS?date=2022&format=json&per_page=100",
+      "sha256": "8cb1b8875febf2bdb807498f740b0b1e1cb46d0e6167f4cd1ee18c4d60618b50"
+    },
+    {
+      "file": "SL.UEM.TOTL.FE.ZS-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/SL.UEM.TOTL.FE.ZS?format=json",
+      "sha256": "d77f4707ce08963d6a18c14c81f83833aa9a2cd9d3ca21aff60e96edbf06e762"
+    },
+    {
+      "file": "SL.UEM.TOTL.FE.ZS-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/SL.UEM.TOTL.FE.ZS?date=2022&format=json&per_page=100",
+      "sha256": "cfa7ed06d1178a70a5f75d48c38ff65996a748841edb0098cce529dce1af9f3f"
+    },
+    {
+      "file": "SL.UEM.TOTL.MA.ZS-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/SL.UEM.TOTL.MA.ZS?format=json",
+      "sha256": "273a6babeffb9b7a86b2e76c0327834958616367629aa834184ee35ff2b05261"
+    },
+    {
+      "file": "SL.UEM.TOTL.MA.ZS-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/SL.UEM.TOTL.MA.ZS?date=2022&format=json&per_page=100",
+      "sha256": "21b5160e0e373b1b2ffc35134c123c0d73eb74c425e230863e4e03d9a21ce178"
+    },
+    {
+      "file": "SL.UEM.TOTL.NE.ZS-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/SL.UEM.TOTL.NE.ZS?format=json",
+      "sha256": "5ab7c7bcda09099ea269d2fc24bd1db4dfe22bfabe05684758c54a99ca3005dd"
+    },
+    {
+      "file": "SL.UEM.TOTL.NE.ZS-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/SL.UEM.TOTL.NE.ZS?date=2022&format=json&per_page=100",
+      "sha256": "66766ad57c1744848bd6380b77f9e09c9f2b20ff198858bc7a0559a292c88669"
+    },
+    {
+      "file": "SP.POP.GROW-metadata.json",
+      "url": "https://api.worldbank.org/v2/indicator/SP.POP.GROW?format=json",
+      "sha256": "410c9806e450f67653b837ced0851741d45763284d7621f94f29e930ee817c65"
+    },
+    {
+      "file": "SP.POP.GROW-observation.json",
+      "url": "https://api.worldbank.org/v2/country/US/indicator/SP.POP.GROW?date=2022&format=json&per_page=100",
+      "sha256": "8052c0c1a151c9643c3aa51d4e476b66ac766ac21c46a102f3e1eac4637f629e"
+    },
+    {
+      "file": "catalog.json",
+      "url": "https://api.worldbank.org/v2/indicator?source=2&format=json&per_page=20000",
+      "sha256": "7dd8d2d0b52fca5db60556b65e9e8fda8d0c9721e25ac4555ad29231f812b659"
+    }
+  ]
+}

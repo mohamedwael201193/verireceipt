@@ -4,7 +4,7 @@
 // Endpoint aliases name their series in the answer. The registered YAML remains
 // unemployment-only. Missing observations and values outside the scored 0..100
 // percent range are disclosed with rate_pct null, never clamped or invented.
-// Unknown indicators refuse rather than silently changing the question.
+// Unknown macro indicators use exact WDI catalog discovery, never a default series.
 //
 // COUNTRY RESOLUTION: the input is matched against the World Bank's own
 // country catalog (GET /v2/country?format=json&per_page=400 — the same
@@ -17,6 +17,7 @@
 // asks for a country or region's published statistic and the scored
 // reference is a country series; an aggregate input is 422. No fuzzy
 // substring matching: an unmatched country is 422 COUNTRY_NOT_FOUND.
+import {discoverMacroSeries,macroInputDiagnostic,isMacroRequest,resetMacroDiscoveryForTests} from './macroSeriesDiscovery';
 import {macroObservation,resetMacroSourceCacheForTests,readMacroText} from './macroSourceCache';
 import {withAnswerClass} from "../core/answerClass";
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
@@ -39,6 +40,69 @@ const SERIES: Record<string, { id: string; unit: string }> = {
   "real interest rate": { id: "FR.INR.RINR", unit: "% real interest rate" },
   "trade": { id: "NE.TRD.GNFS.ZS", unit: "% of GDP (exports plus imports of goods and services)" },
 };
+const EXTRA_SERIES: Record<string, { id: string; unit: string }> = {
+  "youth unemployment": {
+    "id": "SL.UEM.1524.ZS",
+    "unit": "% of total labour force ages 15-24 (modeled ILO estimate)"
+  },
+  "female unemployment": {
+    "id": "SL.UEM.TOTL.FE.ZS",
+    "unit": "% of female labour force (modeled ILO estimate)"
+  },
+  "male unemployment": {
+    "id": "SL.UEM.TOTL.MA.ZS",
+    "unit": "% of male labour force (modeled ILO estimate)"
+  },
+  "national unemployment rate": {
+    "id": "SL.UEM.TOTL.NE.ZS",
+    "unit": "% of total labour force (national estimate)"
+  },
+  "labor force participation rate": {
+    "id": "SL.TLF.CACT.ZS",
+    "unit": "% of total population ages 15+ (modeled ILO estimate)"
+  },
+  "gdp per capita growth": {
+    "id": "NY.GDP.PCAP.KD.ZG",
+    "unit": "% annual GDP per capita growth"
+  },
+  "exports": {
+    "id": "NE.EXP.GNFS.ZS",
+    "unit": "% of GDP (exports of goods and services)"
+  },
+  "imports": {
+    "id": "NE.IMP.GNFS.ZS",
+    "unit": "% of GDP (imports of goods and services)"
+  },
+  "lending interest rate": {
+    "id": "FR.INR.LEND",
+    "unit": "% lending interest rate"
+  },
+  "deposit interest rate": {
+    "id": "FR.INR.DPST",
+    "unit": "% deposit interest rate"
+  },
+  "central government debt": {
+    "id": "GC.DOD.TOTL.GD.ZS",
+    "unit": "% of GDP (central government debt, not general government)"
+  },
+  "official exchange rate": {
+    "id": "PA.NUS.FCRF",
+    "unit": "local currency units per US dollar (period average)"
+  },
+  "population growth": {
+    "id": "SP.POP.GROW",
+    "unit": "% annual population growth"
+  },
+  "foreign direct investment": {
+    "id": "BX.KLT.DINV.WD.GD.ZS",
+    "unit": "% of GDP (net FDI inflows)"
+  },
+  "gdp deflator inflation": {
+    "id": "NY.GDP.DEFL.KD.ZG",
+    "unit": "% annual GDP-deflator inflation"
+  }
+};
+Object.assign(SERIES, EXTRA_SERIES);
 const CATALOG_TTL_MS = 60 * 60 * 1000;
 
 const SUPPORTED_INDICATOR = "unemployment rate";
@@ -73,6 +137,7 @@ export function normalizeIndicator(input: string, exactOnly=false): string | nul
   const totalSeriesWords=new Set(["unemployment","rate","total","of","the","labor","labour","force","percent","percentage","modeled","modelled","ilo","estimate"]);
   if(words.includes("unemployment")&&words.every(w=>totalSeriesWords.has(w)))return SUPPORTED_INDICATOR;
   const aliases: Record<string, string> = {
+    ...Object.fromEntries(Object.keys(SERIES).map(name => [name, name])),
     "gdp":"gdp", "gdp current us":"gdp", "nominal gdp":"gdp", "ny.gdp.mktp.cd":"gdp",
     "real gdp":"real gdp", "gdp constant":"real gdp", "ny.gdp.mktp.kd":"real gdp",
     "gdp growth rate":"gdp growth", "gdp growth annual":"gdp growth", "economic growth":"gdp growth",
@@ -85,6 +150,14 @@ export function normalizeIndicator(input: string, exactOnly=false): string | nul
     "bn.cab.xoka.gd.zs": "current account", "gdp per capita": "gdp per capita",
     "ny.gdp.pcap.cd": "gdp per capita", population: "population", "sp.pop.totl": "population",
   };
+  for (const [name, series] of Object.entries(EXTRA_SERIES)) {
+    for (const alias of [name, series.id, ...(name.includes('unemployment') ? [name+' rate', name+' rate modeled ilo estimate'] : [])]) {
+      aliases[alias] = name;
+    }
+  }
+  aliases['youth unemployment rate'] = 'youth unemployment';
+  aliases['labour force participation rate'] = 'labor force participation rate';
+  aliases['fdi net inflows'] = 'foreign direct investment';
   const match=Object.entries(aliases).find(([key])=>key.replace(/[_\-.]+/g," ")===stripped);
   if(match)return match[1];
   if(exactOnly)return null;
@@ -94,7 +167,7 @@ export function normalizeIndicator(input: string, exactOnly=false): string | nul
   const tokens=(s:string)=>s.toLowerCase().replace(/[_\-.(),%?]+/g,' ').split(/\s+/).filter(w=>w&&!noise.has(w));
   const wanted=tokens(stripped);if(!wanted.length)return null;
   const candidates=new Map<string,number>();
-  for(const [name,canonical] of [...Object.keys(SERIES).map(k=>[k,k]),...Object.entries(aliases),...Array.from(INDICATOR_ALIASES,k=>[k,SUPPORTED_INDICATOR]),['exports','trade']]){
+  for(const [name,canonical] of [...Object.keys(SERIES).map(k=>[k,k]),...Object.entries(aliases),...Array.from(INDICATOR_ALIASES,k=>[k,SUPPORTED_INDICATOR])]){
     const words=new Set(tokens(name));
     if(wanted.every(w=>words.has(w))&&[...words].every(w=>wanted.includes(w)))candidates.set(canonical,wanted.length);
   }
@@ -159,6 +232,7 @@ let catalogCache: { at: number; countries: WbCountry[] } | null = null;
 /** Test seam: drop the cached catalog between cases. */
 export function resetMacroCachesForTests(): void {
   catalogCache = null;
+  resetMacroDiscoveryForTests();
   resetMacroSourceCacheForTests();
 }
 
@@ -277,15 +351,14 @@ export async function handleMacro(
   if (!indicatorRaw || !countryRaw) {
     throw badRequest("MISSING_PARAM", "indicator and country are required query parameters");
   }
-  const indicator = indicatorRaw === SUPPORTED_INDICATOR ? SUPPORTED_INDICATOR : normalizeIndicator(indicatorRaw);
-  if (indicator === null) {
-    throw withAnswerClass(unprocessable(
-      "UNSUPPORTED_INDICATOR",
-      `unsupported indicator: ${query.indicator}; no default is substituted. Supported endpoint indicators: ${Object.keys(SERIES).join(", ")}`,
-    ), INTENT, {alias_known:false,indicator_selection:'rejected',indicator_rejection:'unsupported_or_qualified'});
+  let indicator = indicatorRaw === SUPPORTED_INDICATOR ? SUPPORTED_INDICATOR : normalizeIndicator(indicatorRaw);
+  // Unknown input diagnostics never write free-form request text to logs.
+  if (indicator === null) console.info(JSON.stringify({event:'macro_indicator_unmapped',...macroInputDiagnostic(indicatorInput!)}));
+  if (indicator === null && !isMacroRequest(indicatorInput!)) {
+    throw withAnswerClass(unprocessable('UNSUPPORTED_INDICATOR','No supported macro indicator mapping; no default is substituted.'),INTENT,{alias_known:false,indicator_selection:'rejected',indicator_rejection:'unsupported_or_qualified'});
   }
-  const closest=normalizeIndicator(indicatorRaw,true)===null;
-  const series = SERIES[indicator];
+  let closest=normalizeIndicator(indicatorRaw,true)===null;
+  let series = indicator === null ? undefined : SERIES[indicator];
   const indicatorNormalized = indicatorInput !== undefined && indicatorInput !== SUPPORTED_INDICATOR;
   if (yearRaw !== undefined && !/^\d{4}$/.test(yearRaw)) {
     throw badRequest("INVALID_YEAR", "year must be a 4-digit calendar year (1960-2100)");
@@ -311,6 +384,29 @@ export async function handleMacro(
       "COUNTRY_NOT_FOUND",
       `country not found in the World Bank catalog: ${countryRaw} (aggregate regions are not served)`,
     );
+  }
+
+  if (!series) {
+    if (!isMacroRequest(indicatorInput!)) {
+      throw withAnswerClass(unprocessable('UNSUPPORTED_INDICATOR', 'No supported macro indicator mapping; no default is substituted.'), INTENT,
+        {alias_known:false,indicator_selection:'rejected',indicator_rejection:'unsupported_or_qualified'});
+    }
+    const discovery = await discoverMacroSeries(indicatorInput!, deadline);
+    if (!discovery.series) {
+      const receiptDoc = makeReceipt(INTENT, discovery.url, discovery.raw, 'World Bank WDI indicator catalog: no unique exact series mapping; not an observation');
+      receiptDoc.fetched_at=discovery.fetchedAt;
+      try { await saveReceipt(receiptDoc, discovery.raw); }
+      catch { throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','Catalog evidence could not be stored'); }
+      return withAnswerClass(envelope(INTENT, {
+        rate_pct:null,indicator:indicatorInput,indicator_input:indicatorInput,country:country.name,country_iso3:country.iso3,
+        year:requestedYear,as_of:discovery.fetchedAt,data_status:'no_data',
+        resolution_scope:'No unique exact name or code in World Bank World Development Indicators catalog; other publishers and differently named measures were not searched',
+      }, receiptDoc, {
+        answer:'No unique exact World Bank WDI series mapping was found for the requested indicator. No observation or rate is asserted. This is a coverage limitation, not evidence that the statistic does not exist elsewhere.',
+        verdict:'no_data',confidence:0,source:'World Bank WDI indicator catalog (api.worldbank.org)',
+      }), INTENT,{alias_known:false,indicator_selection:'rejected',indicator_rejection:'unsupported_or_qualified'});
+    }
+    series=discovery.series;indicator=discovery.series.name;closest=false;
   }
 
   const iso = country.iso2Code || country.id;
@@ -341,17 +437,24 @@ export async function handleMacro(
         Number(r.date) <= 2100 && r.value !== null && r.value !== undefined)
         .sort((a, b) => Number(b.date) - Number(a.date))[0]
     : rows.find((r) => String(r?.date) === String(requestedYear));
+  if (row && (!Object.values(SERIES).slice(0,10).some(item=>item.id===series.id))) {
+    if ((row.indicator as {id?:unknown})?.id !== series.id || String(row.countryiso3code)!==country.iso3) {
+      throw upstreamUnavailable('WORLD_BANK_UNAVAILABLE','Observation does not bind the requested series and country');
+    }
+  }
   const year = requestedYear ?? (row ? Number(row.date) : undefined);
   const value = row?.value;
   if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value))) {
     throw upstreamUnavailable("WORLD_BANK_UNAVAILABLE", "World Bank returned a nonnumeric observation");
   }
   const hasValue = typeof value === "number" && Number.isFinite(value);
-  const percentSeries = !["gdp per capita", "population", "gdp", "real gdp"].includes(indicator);
+  const percentSeries = series.unit.includes('%');
   const ratePct = hasValue && percentSeries && value >= 0 && value <= 100 ? Math.round(value * 1e6) / 1e6 : null;
   const asOf = observation.fetchedAt;
   const fields: Record<string, unknown> = {
     rate_pct: ratePct,
+    value: hasValue ? value : null,
+    unit: series.unit,
     indicator,
     indicator_id: series.id,
     indicator_input: indicatorInput,

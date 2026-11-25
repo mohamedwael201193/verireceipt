@@ -196,15 +196,15 @@ describe("M1 indicator normalization (stubbed World Bank)", () => {
     expect(String(out.answer)).not.toContain("read as");
   });
 
-  it("unknown indicators still refuse without a default", async () => {
-    await expectApiError(handleMacro({ indicator: "GDP per hour", country: "Egypt" }), 422, "UNSUPPORTED_INDICATOR");
-    await expectApiError(handleMacro({ indicator: "unknown statistic", country: "Egypt" }), 422, "UNSUPPORTED_INDICATOR");
+  it.each(['GDP per hour','unemployment (youth, ages 15-24)','the unemployment (youth, ages 15-24)'])('unmapped qualified wording %s never becomes total unemployment', async indicator=>{
+    vi.stubGlobal('fetch', async (url:unknown)=>new Response(String(url).includes('source=2')?readFileSync('tests/fixtures/macro-coverage/catalog.json','utf8'):catalogJson()));
+    const out=await handleMacro({indicator,country:'Egypt'});
+    expect(out.verdict).toBe('no_data');expect(out.rate_pct).toBeNull();expect(out).not.toHaveProperty('indicator_id');
+  });
+  it('non-macro input still refuses without default',async()=>{
+    await expectApiError(handleMacro({indicator:'unknown statistic',country:'Egypt'}),422,'UNSUPPORTED_INDICATOR');
   });
 
-  it("a non-unit parenthetical is NOT stripped (no smuggling a different statistic past the alias check)", async () => {
-    await expectApiError(handleMacro({ indicator: "unemployment (youth, ages 15-24)", country: "Egypt" }), 422, "UNSUPPORTED_INDICATOR");
-    await expectApiError(handleMacro({ indicator: "the unemployment (youth, ages 15-24)", country: "Egypt" }), 422, "UNSUPPORTED_INDICATOR");
-  });
 });
 
 describe("handleMacro answers (stubbed World Bank)", () => {
@@ -392,5 +392,8 @@ describe('punctuation and descriptive total-unemployment aliases',()=>{
   vi.stubGlobal('fetch',async(url:unknown)=>{if(String(url).includes('/indicator/')){expect(String(url)).toContain('/SL.UEM.TOTL.ZS?date=2022');return new Response(unemployment);}return new Response(JSON.stringify([{},[{id:'DEU',iso2Code:'DE',name:'Germany',region:{value:'Europe'}}]]));});
   const out=await handleMacro({indicator:input,country:'DEU',year:'2022'});expect(out.indicator).toBe('unemployment rate');expect(out.indicator_id).toBe('SL.UEM.TOTL.ZS');expect(out.answer).toContain('read as "unemployment rate"');expect((out.receipt as any).raw_response_sha256).toBe(sha256Hex(unemployment));expect(out.rate_pct).toBe(Math.round(JSON.parse(unemployment)[1][0].value*1e6)/1e6);
  });
- it.each(['national unemployment rate','youth unemployment rate','female unemployment','long-term unemployment rate','unemployment benefit spending','employment rate','not unemployment','underemployment rate','GDP per hour','unemployment inflation'])('refuses unrelated or qualified series %s before fetching',async(input)=>{const f=vi.fn();vi.stubGlobal('fetch',f);await expectApiError(handleMacro({indicator:input,country:'DEU'}),422,'UNSUPPORTED_INDICATOR');expect(f).not.toHaveBeenCalled();});
+ it.each(['long-term unemployment rate','unemployment benefit spending','employment rate','not unemployment','underemployment rate','GDP per hour','unemployment inflation'])('qualified series %s uses catalog absence, never total unemployment',async(indicator)=>{
+   const f=vi.fn(async(url:unknown)=>new Response(String(url).includes('source=2')?readFileSync('tests/fixtures/macro-coverage/catalog.json','utf8'):catalogJson()));vi.stubGlobal('fetch',f);
+   const out=await handleMacro({indicator,country:'EG'});expect(out.verdict).toBe('no_data');expect(out.rate_pct).toBeNull();expect(out).not.toHaveProperty('indicator_id');
+ });
 });
