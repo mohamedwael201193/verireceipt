@@ -1,0 +1,31 @@
+{
+  "captured_at": "2026-11-25T17:31:40.465301+00:00",
+  "scope": "Self-recorded public DNS responses and headers, not independently authenticated",
+  "urls": [
+    "https://dns.google/resolve?name=missing.verireceipt.invalid&type=A",
+    "https://cloudflare-dns.com/dns-query?name=missing.verireceipt.invalid&type=A"
+  ],
+  "files": [
+    {
+      "file": "google.json",
+      "sha256": "f9a5da147e8009bacf42e4ad1430c6ffe610b47bfb55de3f5dbca9e0c33ec347",
+      "bytes": 260
+    },
+    {
+      "file": "google.headers",
+      "sha256": "70975bc90e9bb87f37e2e7b665f6c897005f0c883e16b7469b127d10bb63e478",
+      "bytes": 483
+    },
+    {
+      "file": "cloudflare.json",
+      "sha256": "666cc91bab02c9472d7031ccc07b5ba68ace1849228d8af0ae63b2f994b8f7a5",
+      "bytes": 258
+    },
+    {
+      "file": "cloudflare.headers",
+      "sha256": "993da44f232c245d610135d83779d0ed92a5b420f93a07fddf2b2a6d381865ca",
+      "bytes": 244
+    }
+  ],
+  "header_note": "HTTP header captures use LF newlines; reporting/NEL headers omitted. DNS bodies are exact bytes."
+}

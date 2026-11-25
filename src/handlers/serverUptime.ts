@@ -8,8 +8,9 @@
 import { ApiError, upstreamUnavailable, unprocessable } from "../core/errors";
 import { envelope, makeReceipt, sha256Hex } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
-import { guardPublicHttpUrl, measureGet } from "./ssrfGuard";
+import { guardPublicHttpUrl, measureGet, dnsProbeFailure } from "./ssrfGuard";
 
+import {confirmNxDomain} from './uptimeDns';
 const TIMEOUT_MS = 5000;
 const UA = "VeriReceipt/2.0 server-uptime observer (+https://verireceipt.vercel.app)";
 
@@ -24,7 +25,7 @@ function reserveRefusal(hash:string):void {
 
 export async function handleServerUptime(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   let target;
-  try { target = await guardPublicHttpUrl(query.host, "host"); }
+  try { target = await guardPublicHttpUrl(query.host, "host",true); }
   catch(error) {
     const allowed = ['PRIVATE_HOST','PORT_NOT_CHECKED','DNS_UNRESOLVABLE'] as const;
     if (!(error instanceof ApiError) || !(allowed as readonly string[]).includes(error.code)) throw error;
@@ -32,6 +33,15 @@ export async function handleServerUptime(query: Record<string, string | undefine
     const targetHash=sha256Hex(query.host??'');reserveRefusal(targetHash);
     console.info(JSON.stringify({event:'server_uptime_not_probed',guard_code:code}));
     const checkedAt=new Date().toISOString();
+    const dnsFailure=dnsProbeFailure(error);
+    const negative=code==='DNS_UNRESOLVABLE'&&dnsFailure&&dnsFailure.kind!=='resolution_timeout'&&!dnsFailure.temporary_failure?await confirmNxDomain(dnsFailure.hostname):null;
+    if(negative){
+     const answer='The host does not resolve (NXDOMAIN), so it is not reachable. No HTTP measurement was possible or attempted. This is a point-in-time DNS observation, not uptime history.';
+     const evidence=JSON.stringify({requested_target_sha256:targetHash,checked_at:checkedAt,reachable_now:false,status:'unreachable',dns_result:'NXDOMAIN',http_attempted:false,resolvers:negative});
+     const receipt=makeReceipt(INTENT,negative[0].source,evidence,'two independent DNS resolvers agree NXDOMAIN; no HTTP measurement');
+     try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','DNS evidence could not be stored');}
+     return envelope(INTENT,{host:dnsFailure!.hostname,reachable_now:false,status:'unreachable',dns_result:'NXDOMAIN',http_status:null,latency_ms:null,http_attempted:false},receipt,{answer,verdict:'verified',confidence:0.9,source:'Two public DNS resolver responses; no target HTTP connection'});
+    }
     const reasons:Record<string,string>={PRIVATE_HOST:'The host is local, private, reserved or resolves to a blocked address.',PORT_NOT_CHECKED:'Only HTTP ports 80 and 443 are checked.',DNS_UNRESOLVABLE:'The host did not resolve to usable addresses.'};
     const evidence=JSON.stringify({requested_target_sha256:targetHash,checked_at:checkedAt,http_attempted:false,guard_code:code,reachable_now:null,http_status:null,latency_ms:null,scope:'guard decision only; no uptime or reachability measurement'});
     const receipt=makeReceipt(INTENT,'https://verireceipt.onrender.com/v1/server-uptime',evidence,'local safety guard decision; target not probed');

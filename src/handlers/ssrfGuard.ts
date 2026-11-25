@@ -28,7 +28,7 @@ export function __setLookupForTests(fn: typeof lookup | null): void {
 export function __clearRateLimitsForTests(): void { lastCheck.clear(); }
 
 export interface GuardedTarget { url: string; hostname: string; port: number; addresses: string[] }
-export interface DnsProbeFailure {url:string;hostname:string;port:number;latency_ms:number;kind:'resolution_failed'|'resolution_timeout'|'no_addresses'}
+export interface DnsProbeFailure {url:string;hostname:string;port:number;latency_ms:number;kind:'resolution_failed'|'resolution_timeout'|'no_addresses';temporary_failure?:boolean}
 // Only locally created DNS refusal errors carry this metadata. Never inspect
 // arbitrary resolver errors or turn private/mixed address refusals into results.
 const dnsProbeFailures=new WeakMap<object,DnsProbeFailure>();
@@ -77,11 +77,12 @@ export async function guardPublicHttpUrl(raw: string | undefined, param: string,
     addresses = [hostname];
   } else {
     let records: { address: string }[] = [];
+    let temporaryFailure=false;
     const dnsStarted=Date.now();let dnsTimedOut=false;
     const refuseDns=(kind:DnsProbeFailure['kind'],message:string):never=>{
       if(recordDnsObservation)reserveProbeSlot(hostname,port);
       const error=unprocessable('DNS_UNRESOLVABLE',message);
-      if(recordDnsObservation)dnsProbeFailures.set(error,{url:u.toString(),hostname,port,latency_ms:Date.now()-dnsStarted,kind});
+      if(recordDnsObservation)dnsProbeFailures.set(error,{url:u.toString(),hostname,port,latency_ms:Date.now()-dnsStarted,kind,...(temporaryFailure?{temporary_failure:true}:{})});
       throw error;
     };
     try {
@@ -92,7 +93,8 @@ export async function guardPublicHttpUrl(raw: string | undefined, param: string,
           new Promise<never>((_, reject) => { timer = setTimeout(() => {dnsTimedOut=true;reject(new Error("DNS deadline"));}, 2000); }),
         ]);
       } finally { if (timer) clearTimeout(timer); }
-    } catch {
+    } catch(error) {
+      temporaryFailure=!!error&&typeof error==='object'&&'code' in error&&['EAI_AGAIN','ESERVFAIL','ETIMEOUT'].includes(String(error.code));
       refuseDns(dnsTimedOut?'resolution_timeout':'resolution_failed', `${hostname} does not resolve; nothing is guessed`);
     }
     addresses = records.map((r) => r.address);
