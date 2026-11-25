@@ -53,7 +53,7 @@ describe("PAYMENT_METHOD_VERIFY_GENERAL", () => {
   });
   it("an unknown BIN answers valid=false, named as 'no record', not proof of non-allocation", async () => {
     stub();
-    const result = await handlePaymentMethod({ bin: "000000" });
+    const result = await handlePaymentMethod({ bin: "100000" });
     expect(result.valid).toBe(false);
     expect(String(result.answer)).toContain("No record");
     expect(String(result.answer)).toContain("not proof the prefix is unallocated");
@@ -218,4 +218,28 @@ it.each(['411112','41111','41111100'])('rejects unrelated or wrongly-sized sourc
  const body=JSON.parse(readFileSync(join(FX,'open-bin-411111.json'),'utf8'));body.data.bin=identity;
  vi.stubGlobal('fetch',async(u:unknown)=>{if(String(u).includes('api.dharun.dev'))return new Response(JSON.stringify(body));throw Error('primary down');});
  await expect(handlePaymentMethod({bin:'4111110'})).rejects.toMatchObject({code:'BIN_SOURCES_UNAVAILABLE'});
+});
+
+describe('BIN prefix structure is independent of lookup coverage',()=>{
+ it.each(['411111','400000','515462','601100','222100','272099','340000','370000'])('%s has published network range even when both references have no record',async bin=>{vi.stubGlobal('fetch',async()=>new Response('{}',{status:404}));const out=await handlePaymentMethod({bin});expect(out).toMatchObject({valid:true,allocation_known:false,checksum_assessed:false,issuing_bank:null,issuing_country:null});expect(out.answer).toContain('allocation unknown');expect(out.answer).toContain('no checksum');const rc=out.receipt as any;const st=await getReceiptEvidence(rc.receipt_id);expect(sha256Hex(st.evidence!)).toBe(rc.raw_response_sha256);expect(JSON.parse(Buffer.from(st.evidence!).toString())).toMatchObject({valid:true,allocation_known:false,checksum_assessed:false,network_range_source:'https://design.visa.com/patterns/card-input/'});});
+ it.each(['100000','99999999','222099','272100'])('%s unknown outside covered ranges never claims allocation or checksum',async bin=>{vi.stubGlobal('fetch',async()=>new Response('{}',{status:404}));const out=await handlePaymentMethod({bin});expect(out).toMatchObject({valid:false,allocation_known:false,checksum_assessed:false,network_range_candidates:[]});expect(out.answer).toContain('not proof');});
+ it.each(['000000','099999','01234567'])('%s rejected at request bound before source call',async bin=>{const f=vi.fn();vi.stubGlobal('fetch',f);await expect(handlePaymentMethod({bin})).rejects.toMatchObject({status:400,code:'INVALID_BIN'});expect(f).not.toHaveBeenCalled();});
+});
+
+describe('published network candidate ranges and intentional overlaps',()=>{
+ it.each([
+  ['399999',[]],['400000',['visa']],['499999',['visa']],['500000',['maestro']],
+  ['509999',['maestro']],['510000',['mastercard']],['559999',['mastercard']],['560000',['maestro']],
+  ['589999',['maestro']],['590000',[]],['599999',[]],['600000',['maestro']],['699999',['maestro']],['700000',[]],
+  ['222099',[]],['222100',['mastercard']],['272099',['mastercard']],['272100',[]],
+  ['339999',[]],['340000',['american express']],['349999',['american express']],['350000',[]],
+  ['369999',[]],['370000',['american express']],['379999',['american express']],['380000',[]],
+  ['601099',['maestro']],['601100',['discover','maestro']],['601199',['discover','maestro']],['601200',['maestro']],
+  ['622125',['maestro']],['622126',['discover','maestro']],['622925',['discover','maestro']],['622926',['maestro']],
+  ['643999',['maestro']],['644000',['discover','maestro']],['649999',['discover','maestro']],
+  ['650000',['discover','maestro']],['659999',['discover','maestro']],['660000',['maestro']],
+ ])('%s exact candidates are %j',async(bin,expected)=>{
+  const {binNetworkCandidates}=await import('../src/handlers/paymentMethod');expect(binNetworkCandidates(bin as string)).toEqual(expected);
+ });
+ it.each(['500000','509999','560000','589999','600000','699999'])('Maestro-only %s is valid with no issuer allocation',async bin=>{vi.stubGlobal('fetch',async()=>new Response('{}',{status:404}));expect(await handlePaymentMethod({bin})).toMatchObject({valid:true,allocation_known:false,network_range_candidates:['maestro'],checksum_assessed:false});});
 });
