@@ -7,7 +7,7 @@ import {sha256Hex} from '../src/core/receipt';
 const apple=readFileSync('tests/fixtures/return-policy/apple.html','utf8'),walmart=readFileSync('tests/fixtures/return-policy/walmart.html','utf8');
 beforeEach(()=>{resetReturnPolicyBudgetForTests();vi.useFakeTimers();vi.setSystemTime(new Date('2026-11-24T17:00:00Z'));});
 afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();vi.clearAllMocks();});
-it.each([['Apple US',apple,14],['Walmart US',walmart,90]])('real official %s page supplies a standard window and retained exact bytes',async(retailer,raw,days)=>{
+it.each([['Apple US',apple,14],['Walmart US',walmart,90]])('reviewed official %s section supplies a standard window and retained fixture bytes',async(retailer,raw,days)=>{
  vi.stubGlobal('fetch',async()=>new Response(raw));const out=await handleReturnPolicy({retailer});expect(out.return_window_days).toBe(days);expect(out.verified).toBe(true);expect(out.answer).toContain('standard return window');expect(out.scope).toContain('not a decision about a particular item');
  const [receipt,evidence]=vi.mocked(saveReceipt).mock.calls[0];expect(evidence).toBe(raw);expect(receipt.raw_response_sha256).toBe(sha256Hex(raw));
  expect(JSON.stringify(out.conditions)).toContain('Holiday exception');expect(out.sources).toHaveLength(1);

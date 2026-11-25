@@ -1,0 +1,37 @@
+[
+  {
+    "retailer": "apple",
+    "original_raw_sha256": "fc7351fc341a4209eedac6096ed80e7a79cd3af45b848298dd5757b43651fb32",
+    "reviewed_section_sha256": "6c87193be8f19a133e54356d3f1b6252ffc029f73a636a9f34ad9413c98272ee",
+    "fixture_kind": "Reviewed policy text plus end marker extracted with the production parser. Full HTML omitted to exclude unrelated scripts and embedded site keys. Not a full raw HTTP response.",
+    "extracted_date": "2026-11-26"
+  },
+  {
+    "retailer": "walmart",
+    "original_raw_sha256": "3481d4bbeabfceb75abc87b2d4085d2218c238b9736ebfc6ce81e05a95528e2a",
+    "reviewed_section_sha256": "9e50b7d3bf70222cb6289a81f4b9fadeadd42107c7c01173f06ea47c9e4654bd",
+    "fixture_kind": "Reviewed policy text plus end marker extracted with the production parser. Full HTML omitted to exclude unrelated scripts and embedded site keys. Not a full raw HTTP response.",
+    "extracted_date": "2026-11-26"
+  },
+  {
+    "retailer": "costco",
+    "original_raw_sha256": "3ad693b5821d92b4da92c6b143c0b9ad2f83cceecb18b19b6a5fdc991cb82f19",
+    "reviewed_section_sha256": "3b56f54ae65c32e00b1bac63697f06bfd2e9348d3e1e63037041a2990d867e9b",
+    "fixture_kind": "Reviewed policy text plus end marker extracted with the production parser. Full HTML omitted to exclude unrelated scripts and embedded site keys. Not a full raw HTTP response.",
+    "extracted_date": "2026-11-26"
+  },
+  {
+    "retailer": "target",
+    "original_raw_sha256": "459b00671c1d7f29fbbe50c4fceae67be1a3009418b9a28ad908775d0c7398c4",
+    "reviewed_section_sha256": "2d2b0f7ae4838ba10d1f07a707b133b6267e170024deffded2023b4e1fb90b3c",
+    "fixture_kind": "Reviewed policy text plus end marker extracted with the production parser. Full HTML omitted to exclude unrelated scripts and embedded site keys. Not a full raw HTTP response.",
+    "extracted_date": "2026-11-26"
+  },
+  {
+    "retailer": "ikea",
+    "original_raw_sha256": "e407b2aee825a7ea6a0b7844e4a3141c621b710e8b84137d7d1c20c6635c97c8",
+    "reviewed_section_sha256": "2e4523dd7937ca773a2fe63031c9e99f8b1535e8d3e89bb15df9d159fe9180e3",
+    "fixture_kind": "Reviewed policy text plus end marker extracted with the production parser. Full HTML omitted to exclude unrelated scripts and embedded site keys. Not a full raw HTTP response.",
+    "extracted_date": "2026-11-26"
+  }
+]

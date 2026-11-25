@@ -6,7 +6,7 @@ import {handleReturnPolicy,resetReturnPolicyBudgetForTests} from '../src/handler
 import {sha256Hex} from '../src/core/receipt';
 beforeEach(()=>{resetReturnPolicyBudgetForTests();vi.useFakeTimers();vi.setSystemTime(new Date('2026-11-26T00:00:00Z'));});
 afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();vi.clearAllMocks();});
-it.each([['costco',null],['target',90],['ikea',365]])('live reviewed%s uses its actual full raw body and conditional window',async(retailer,days)=>{
+it.each([['costco',null],['target',90],['ikea',365]])('reviewed%s section fixture verifies conditional window and exact receipt bytes',async(retailer,days)=>{
  const raw=readFileSync('tests/fixtures/return-policy/'+retailer+'.html','utf8');vi.stubGlobal('fetch',async()=>new Response(raw));const out=await handleReturnPolicy({retailer:retailer as string,product:'electronics'});expect(out.return_window_days).toBe(days);expect(out.verified).toBe(true);expect(out.scope).toContain('not a decision about a particular item');expect(vi.mocked(saveReceipt).mock.calls[0][1]).toBe(raw);expect((out.receipt as any).raw_response_sha256).toBe(sha256Hex(raw));
  if(retailer==='costco')expect(out.conditions).toContainEqual(expect.stringContaining('electronics exception'));
  if(retailer==='ikea')expect(out.conditions).toContainEqual(expect.stringContaining('180-day'));
