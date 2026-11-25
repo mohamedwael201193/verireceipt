@@ -20,3 +20,13 @@ it('source attempt timeout is bounded even if fetch ignores abort, no late recei
 it('bad input and unapproved source never fetch',async()=>{const f=vi.fn();vi.stubGlobal('fetch',f);await expect(createBuoyObservationHandler(approval)({...q,sensor:'other'})).rejects.toMatchObject({status:400});await expect(createBuoyObservationHandler({...approval,ownerRiskAcceptance:undefined})(q)).rejects.toMatchObject({status:502});expect(f).not.toHaveBeenCalled();});
 it('storage failure propagates with no second receipt and no source refresh',async()=>{const f=fetcher();vi.stubGlobal('fetch',f);vi.mocked(saveReceipt).mockRejectedValueOnce(Error('storage failed'));await expect(createBuoyObservationHandler(approval)(q)).rejects.toThrow('storage failed');expect(saveReceipt).toHaveBeenCalledTimes(1);expect(f).toHaveBeenCalledTimes(2);});
 it('pre-aborted source read never starts network',async()=>{const f=vi.fn();vi.stubGlobal('fetch',f);const c=new AbortController();c.abort();await expect(bostonBuoySource(approval).read(q,c.signal)).rejects.toThrow();expect(f).not.toHaveBeenCalled();});
+it('later cache hit preserves table fetch, metadata fetch and observed times',async()=>{
+ const f=fetcher();vi.stubGlobal('fetch',f);const h=createBuoyObservationHandler(approval);await h(q);vi.setSystemTime(new Date('2026-11-25T02:10:00Z'));await h(q);
+ const first=JSON.parse(vi.mocked(saveReceipt).mock.calls[0][1]),second=JSON.parse(vi.mocked(saveReceipt).mock.calls[1][1]);
+ expect(second.fetched_at).toBe('2026-11-25T01:55:00.000Z');expect(second.fetched_at).toBe(first.fetched_at);expect(second.observed_at).toBe('2026-11-25T01:00:00.000Z');
+ expect(JSON.parse(second.raw_body).metadata_fetched_at).toBe('2026-11-25T01:55:00.000Z');expect(f).toHaveBeenCalledTimes(2);
+});
+it('abort during deferred capture refuses direct source read after resolution',async()=>{
+ const resolvers:((r:Response)=>void)[]=[];vi.stubGlobal('fetch',vi.fn(()=>new Promise<Response>(r=>resolvers.push(r))));const c=new AbortController();const pending=bostonBuoySource(approval).read(q,c.signal).catch(e=>e);
+ await vi.advanceTimersByTimeAsync(1);expect(resolvers).toHaveLength(2);c.abort();resolvers[0](new Response(raw));resolvers[1](new Response(metadata));expect(await pending).toBeInstanceOf(Error);expect(saveReceipt).not.toHaveBeenCalled();
+});
