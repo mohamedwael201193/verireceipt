@@ -56,3 +56,15 @@ export function matchSecCompany(companies:SecSearchCompany[],query:string):SecSe
  if(unique.size>1)throw unprocessable('AMBIGUOUS_ENTITY','multiple SEC legal names match; use the exact CIK');
  return [...unique.values()][0]??null;
 }
+/** Atom relation is a whitespace-separated token set; XML attribute spacing is insignificant. */
+export function hasNextSecCompanyPage(body:string):boolean{
+ for(const link of body.matchAll(/<(?:[A-Za-z_][\w.-]*:)?link\b([^<>]*)\/?>/g)){
+  const attrs=new Map<string,string>();
+  for(const attr of link[1].matchAll(/([A-Za-z_][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)){
+   if(attrs.has(attr[1]))throw upstreamUnavailable('SEC_UNAVAILABLE','duplicate Atom link attribute');
+   attrs.set(attr[1],text(attr[2]??attr[3]));
+  }
+  if((attrs.get('rel')??'').split(/\s+/).includes('next'))return true;
+ }
+ return false;
+}

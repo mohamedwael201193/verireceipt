@@ -19,7 +19,7 @@
 import { ApiError, badRequest, unprocessable, upstreamUnavailable } from '../core/errors';
 import { envelope, makeReceipt, sha256Hex } from '../core/receipt';
 import { saveReceipt } from '../core/storage';
-import {parseSecCompanyAtom,matchSecCompany} from './filingsSearch';
+import {parseSecCompanyAtom,matchSecCompany,hasNextSecCompanyPage} from './filingsSearch';
 import { resolveEntitySpans } from './filingsEntity';
 import {
   assertNoUnconsumedFormTokens,
@@ -2360,7 +2360,7 @@ export async function handleFilings(
         const companies=parseSecCompanyAtom(body);
         searchEvidence={url,body:JSON.stringify({evidence_kind:'filtered SEC company-search identity excerpt',omitted_fields:'addresses, phones, contacts, filing entries and other non-identity metadata',companies})};
         const match=matchSecCompany(companies,entity);
-        if(/<link\b[^>]*rel=["']next["']/i.test(body))throw unprocessable('AMBIGUOUS_ENTITY','SEC company search is truncated; supply the exact legal name or CIK');
+        if(hasNextSecCompanyPage(body))throw unprocessable('AMBIGUOUS_ENTITY','SEC company search is truncated; supply the exact legal name or CIK');
         console.log(JSON.stringify({event:'filings_entity_resolution',entity_sha256:sha256Hex(entityNfc),entity_length:entityNfc.length,source:'sec_company_search',outcome:match?'matched':'no_data'}));
         if(match){cikMatch={cik:match.cik,cik10:padCik(match.cik),matchKind:'name'};matchedLegalName=match.name;cikNameMustMatch=match.name;}
       } else if (!hasClaim || !spans.name) throw spans.error;
