@@ -33,6 +33,10 @@ const SERIES: Record<string, { id: string; unit: string }> = {
   "current account": { id: "BN.CAB.XOKA.GD.ZS", unit: "% of GDP" },
   "gdp per capita": { id: "NY.GDP.PCAP.CD", unit: "current US dollars per person" },
   "population": { id: "SP.POP.TOTL", unit: "people" },
+  "gdp": { id: "NY.GDP.MKTP.CD", unit: "current US dollars" },
+  "real gdp": { id: "NY.GDP.MKTP.KD", unit: "constant 2015 US dollars" },
+  "real interest rate": { id: "FR.INR.RINR", unit: "% real interest rate" },
+  "trade": { id: "NE.TRD.GNFS.ZS", unit: "% of GDP (exports plus imports of goods and services)" },
 };
 const HTTP_TIMEOUT_MS = 12000;
 const CATALOG_TTL_MS = 60 * 60 * 1000;
@@ -69,6 +73,12 @@ export function normalizeIndicator(input: string): string | null {
   const totalSeriesWords=new Set(["unemployment","rate","total","of","the","labor","labour","force","percent","percentage","modeled","modelled","ilo","estimate"]);
   if(words.includes("unemployment")&&words.every(w=>totalSeriesWords.has(w)))return SUPPORTED_INDICATOR;
   const aliases: Record<string, string> = {
+    "gdp":"gdp", "gdp current us":"gdp", "nominal gdp":"gdp", "ny.gdp.mktp.cd":"gdp",
+    "real gdp":"real gdp", "gdp constant":"real gdp", "ny.gdp.mktp.kd":"real gdp",
+    "gdp growth rate":"gdp growth", "gdp growth annual":"gdp growth", "economic growth":"gdp growth",
+    "interest rate":"real interest rate", "real interest rate":"real interest rate", "fr.inr.rinr":"real interest rate",
+    "trade % of gdp":"trade", "ne.trd.gnfs.zs":"trade",
+    "inflation rate":"inflation", "consumer price inflation":"inflation", "cpi inflation":"inflation",
     inflation: "inflation", cpi: "inflation", "consumer prices": "inflation",
     "fp.cpi.totl.zg": "inflation", "gdp growth": "gdp growth",
     "ny.gdp.mktp.kd.zg": "gdp growth", "current account": "current account",
@@ -284,7 +294,7 @@ export async function handleMacro(
     throw upstreamUnavailable("WORLD_BANK_UNAVAILABLE", "World Bank returned a nonnumeric observation");
   }
   const hasValue = typeof value === "number" && Number.isFinite(value);
-  const percentSeries = !["gdp per capita", "population"].includes(indicator);
+  const percentSeries = !["gdp per capita", "population", "gdp", "real gdp"].includes(indicator);
   const ratePct = hasValue && percentSeries && value >= 0 && value <= 100 ? Math.round(value * 1e6) / 1e6 : null;
   const asOf = new Date().toISOString();
   const fields: Record<string, unknown> = {
@@ -310,7 +320,7 @@ export async function handleMacro(
   }
 
   return withAnswerClass(envelope(INTENT, fields, receiptDoc, {
-    answer: `${indicatorNormalized ? `"${indicatorInput}" read as "${indicator}". ` : ""}Mapping: ${indicator} -> World Bank ${series.id}. ${country.name}${requestedYear === undefined ? " latest published observation" : ""}${year === undefined ? "" : ` in ${year}`}: ${hasValue ? `${value} ${series.unit}.${ratePct === null ? " rate_pct is null: this observation is outside the scored 0..100 percent field or is not a percentage." : ""}` : "no data published for the requested observation; rate_pct is null, not zero."}`,
+    answer: `${indicator==='real interest rate'?'World Bank real interest rate: lending interest rate adjusted for inflation using the GDP deflator, not a policy rate. ':''}${indicatorNormalized ? `"${indicatorInput}" read as "${indicator}". ` : ""}Mapping: ${indicator} -> World Bank ${series.id}. ${country.name}${requestedYear === undefined ? " latest published observation" : ""}${year === undefined ? "" : ` in ${year}`}: ${hasValue ? `${value} ${series.unit}.${ratePct === null ? " rate_pct is null: this observation is outside the scored 0..100 percent field or is not a percentage." : ""}` : "no data published for the requested observation; rate_pct is null, not zero."}`,
     verdict: hasValue ? "verified" : "no_data",
     confidence: hasValue ? 1.0 : 0,
     source: "World Bank API (api.worldbank.org, authoritative publisher)",
