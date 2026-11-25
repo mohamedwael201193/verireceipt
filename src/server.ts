@@ -66,7 +66,7 @@ import { handleEmailSecurity } from "./handlers/emailSecurity";
 import { exactQuery } from "./core/exactQuery";
 import { intentFor, diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
 import { handleMacro } from "./handlers/macroEconomic";
-import { handleTokenHolders, holderUpstreamForQuery } from "./handlers/tokenHolders";
+import { handleTokenHolders, holderUpstreamForQuery, startHolderBootWarm, stopHolderBootWarm } from "./handlers/tokenHolders";
 import {handleBuoySensor} from "./handlers/buoyWired";
 import {handleVesselPosition} from "./handlers/vesselWired";
 import { createWiredFinanceHandlers, isBoundYieldQuery } from "./handlers/financeWired";
@@ -577,9 +577,10 @@ export async function main(): Promise<FastifyInstance> {
   const rawPort = Number(process.env.PORT ?? "10000");
   const port = Number.isFinite(rawPort) && rawPort > 0 ? Math.floor(rawPort) : 10000;
   let stopGridDemoWarm = () => {};
-  app.addHook("onClose", async () => { stopGridDemoRefreshes(); stopGridDemoWarm(); stopMacroBootWarm(); });
+  app.addHook("onClose", async () => { stopGridDemoRefreshes(); stopGridDemoWarm(); stopMacroBootWarm(); stopHolderBootWarm(); });
   await app.listen({ host: "0.0.0.0", port });
   startMacroBootWarm();
+  startHolderBootWarm();
   console.log(`verireceipt listening on 0.0.0.0:${port}`);
   // Grid ingester starts AFTER listen (A5-fix2, 2026-11-20, J2-R2 F1d):
   // startIngester() fires its first multi-source pull immediately, and
@@ -600,7 +601,7 @@ export async function main(): Promise<FastifyInstance> {
       if (ingesterTimer) clearInterval(ingesterTimer);
       stopGridDemoRefreshes();
       stopGridDemoWarm();
-      stopMacroBootWarm();
+      stopMacroBootWarm(); stopHolderBootWarm();
       stopTvlListsRefreshTimer();
       stopStoragePinger();
     },

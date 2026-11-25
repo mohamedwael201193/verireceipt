@@ -20,7 +20,7 @@ import {withAnswerClass} from '../core/answerClass';
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
-import { cachedHolderBody, resetHolderCacheForTests } from "./holderSourceCache";
+import { cachedHolderBody, resetHolderCacheForTests, holderRetrySlot } from "./holderSourceCache";
 import { recordUpstreamError } from "../core/upstreams";
 import { normalizeChain } from "./txLookup";
 import { ADDRESS_RE, TOKEN_CONTRACTS, isNativeSymbol, labeledTokenContract, tokenContractFor } from "./tokenContracts";
@@ -51,12 +51,13 @@ let fetchImpl: FetchText | null = null;
 export function setTokenHoldersFetchForTests(impl: FetchText | null): void {
   fetchImpl = impl;
   resetHolderCacheForTests();
+  holderResults.clear();
 }
 
 // Caller deadlines do not release ownership of an abort-ignoring fetch/body.
 // Bound the retained flights, including timed-out I/O, to avoid a leak.
 const activeHolderIO = new Map<string, Promise<string>>();
-async function fetchText(url: string, timeoutMs = HTTP_TIMEOUT_MS): Promise<string> {
+async function fetchTextOnce(url: string, timeoutMs = HTTP_TIMEOUT_MS): Promise<string> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let io = activeHolderIO.get(url);
@@ -93,12 +94,28 @@ async function fetchText(url: string, timeoutMs = HTTP_TIMEOUT_MS): Promise<stri
     return await Promise.race([io, new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
         controller.abort();
-        const error = new Error("holder HTTP budget exceeded");
+        const error = Object.assign(new Error("holder HTTP budget exceeded"),{timeout:true});
         markFailure(error, "unreachable");
         reject(error);
       }, Math.max(1, timeoutMs));
     })]);
   } finally { clearTimeout(timer); }
+}
+
+async function fetchText(url: string, timeoutMs = HTTP_TIMEOUT_MS, canStart: () => boolean = () => true): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  for (let attempt=0;attempt<2;attempt++) {
+    if (!canStart() || Date.now()>=deadline) throw Error('holder start budget ended');
+    try { return await fetchTextOnce(url, Math.max(1,Math.min(attempt===0?2500:4000,deadline-Date.now()))); }
+    catch (error) {
+      let status:unknown,timeout:unknown;try{status=(error as any)?.status;timeout=(error as any)?.timeout;}catch{}
+      const e={status:typeof status==='number'?status:undefined,timeout:timeout===true};
+      if(attempt || !(e.status!==undefined && e.status>=500 || e.timeout) || activeHolderIO.has(url) || deadline-Date.now()<=250) throw error;
+      if(url.includes('api.geckoterminal.com')){if(!await holderRetrySlot(deadline,canStart))throw error;}
+      else await new Promise(r=>setTimeout(r,200));
+    }
+  }
+  throw Error('holder retry exhausted');
 }
 
 function holderFailureClass(error:unknown,token:string):Record<string,unknown>{
@@ -112,6 +129,10 @@ interface IndexerTokenInfo {
   rawBody: string;
   sourceUpdated?: string;
 }
+
+interface HolderResult { info: IndexerTokenInfo; url: string; sourceName: string; fetchedAt: string }
+const holderResults = new Map<string,HolderResult>();
+const RESULT_TTL_MS=15*60_000, RESULT_MAX_STALE_MS=24*60*60_000;
 
 function parseIndexerResponse(rawBody: string, url: string, contract: string): IndexerTokenInfo {
   let parsed: unknown;
@@ -159,12 +180,17 @@ function parseGecko(rawBody: string, network: string, contract: string): Indexer
   return { holdersCount: count, symbol: a.symbol, rawBody, sourceUpdated: updated };
 }
 
-export async function handleTokenHolders(
+export async function handleTokenHolders(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+  return holderLookup(query);
+}
+async function holderLookup(
   query: Record<string, string | undefined>,
+  boot?: {deadline:number;canStart:()=>boolean},
 ): Promise<Record<string, unknown>> {
   query=queryFallback(query,"token",text=>text);
   const startedAt = Date.now();
-  const deadlineAt = startedAt + 7_500;
+  const deadlineAt = Math.min(startedAt + 7_500,boot?.deadline??Infinity);
+  const canStart=boot?.canStart??(()=>true);
   let tokenRaw = query.token?.trim();
   let chainRaw = query.chain?.trim();
   // Tolerate the builder packing the chain into the token ("USDC on
@@ -222,6 +248,10 @@ export async function handleTokenHolders(
     requestedSymbol = tokenRaw.trim().toUpperCase();
   }
 
+  const resultKey=`${chain}:${contract.toLowerCase()}`;
+  const prior=holderResults.get(resultKey);
+  const age=prior?Date.now()-Date.parse(prior.fetchedAt):Infinity;
+  const fresh=prior && age>=0 && age<RESULT_TTL_MS;
   let url = network
     ? `https://api.geckoterminal.com/api/v2/networks/${network}/tokens/${contract}/info`
     : `${indexer}/api/v2/tokens/${contract}`;
@@ -230,19 +260,22 @@ export async function handleTokenHolders(
   let bodyFetchedAt: string;
   let staleReason: string | undefined;
   try {
+  if (fresh) { info=prior.info;url=prior.url;sourceName=prior.sourceName;bodyFetchedAt=prior.fetchedAt; } else {
+  try {
     const observation = network
-      ? await cachedHolderBody(url, (remaining) => fetchText(url, remaining), (raw) => { try{parseGecko(raw, network, contract);}catch(error){markFailure(error,'bad_payload');throw error;} }, deadlineAt)
-      : { body: await fetchText(url, Math.min(4_000, deadlineAt - Date.now())), fetchedAt: new Date().toISOString() };
+      ? await cachedHolderBody(url, (remaining) => fetchText(url, remaining,canStart), (raw) => { try{parseGecko(raw, network, contract);}catch(error){markFailure(error,'bad_payload');throw error;} }, deadlineAt)
+      : { body: await fetchText(url, Math.min(4_000, deadlineAt - Date.now()),canStart), fetchedAt: new Date().toISOString() };
     bodyFetchedAt = observation.fetchedAt;
     staleReason = "staleReason" in observation ? observation.staleReason : undefined;
     if (staleReason) recordUpstreamError("geckoterminal", staleReason.includes("429") ? "UPSTREAM_RATE_LIMITED" : "INDEXER_UNREACHABLE");
     try{info = network ? parseGecko(observation.body, network, contract) : parseIndexerResponse(observation.body, url, contract);}catch(error){markFailure(error,'bad_payload');throw error;}
   } catch (err) {
+    if(network)recordUpstreamError('geckoterminal',holderFailureClass(err,tokenRaw).upstream_http_status===429?'UPSTREAM_RATE_LIMITED':'INDEXER_UNREACHABLE');
     if(chain==='ethereum'){
       // Same token, second holder index. No estimated count or combined aggregate.
       const fallbackUrl=`https://api.geckoterminal.com/api/v2/networks/eth/tokens/${contract}/info`;
       try{
-        const observation=await cachedHolderBody(fallbackUrl,remaining=>fetchText(fallbackUrl,remaining),raw=>{try{parseGecko(raw,'eth',contract);}catch(error){markFailure(error,'bad_payload');throw error;}},deadlineAt);
+        const observation=await cachedHolderBody(fallbackUrl,remaining=>fetchText(fallbackUrl,remaining,canStart),raw=>{try{parseGecko(raw,'eth',contract);}catch(error){markFailure(error,'bad_payload');throw error;}},deadlineAt);
         info=parseGecko(observation.body,'eth',contract);bodyFetchedAt=observation.fetchedAt;staleReason=observation.staleReason;
         url=fallbackUrl;sourceName='GeckoTerminal (Ethereum fallback after Blockscout unavailable)';
       }catch(fallbackError){
@@ -256,6 +289,14 @@ export async function handleTokenHolders(
     }
   }
 
+  }
+  } catch(error) {
+    if(!prior || age<0 || Date.now()-Date.parse(prior.fetchedAt)>=RESULT_MAX_STALE_MS) throw error;
+    info=prior.info;url=prior.url;sourceName=prior.sourceName;bodyFetchedAt=prior.fetchedAt;
+    staleReason='upstream request failed; last validated holder observation, not a current count';
+
+  }
+
   // A symbol request must match the indexer's own symbol for the
   // contract — a mismatch means the verified map drifted, and answering
   // would attribute another token's count to the asked symbol.
@@ -265,6 +306,11 @@ export async function handleTokenHolders(
       `indexer reports symbol ${info.symbol} for ${contract} on ${chain}, not ${requestedSymbol}; refusing to attribute the count`,
     );
   }
+  if (!fresh && !staleReason) {
+    if(holderResults.size>=128)holderResults.delete(holderResults.keys().next().value!);
+    holderResults.set(resultKey,{info,url,sourceName,fetchedAt:bodyFetchedAt});
+  }
+  if(boot) return {warmed:true};
   const symbol = requestedSymbol ?? info.symbol ?? "unknown";
   const asOf = info.sourceUpdated ?? bodyFetchedAt;
 
@@ -273,7 +319,7 @@ export async function handleTokenHolders(
     chain,
     holders_count: info.holdersCount,
     token_symbol: symbol,
-    as_of: asOf,
+    as_of: asOf, fetched_at:bodyFetchedAt,
     stale: Boolean(staleReason),
     ...(staleReason ? { stale_reason: staleReason } : {}),
   };
@@ -295,14 +341,29 @@ export async function handleTokenHolders(
 
   if (Date.now() >= startedAt + 8_000) throw upstreamUnavailable("HOLDER_DEADLINE", "holder lookup exceeded its 8s total budget; no answer served");
   return envelope(INTENT, fields, receiptDoc, {
-    answer: `${staleReason ? "STALE CACHED OBSERVATION, not a current count. " : ""}${symbol} (${contract}) on ${chain} has ${info.holdersCount} distinct holder addresses (${sourceName} indexer, as of ${asOf}).${staleReason ? " Upstream lookup failed (" + staleReason + "). This is the last real cached value observed at " + asOf + "; no count has been estimated or updated." : ""}`,
+    answer: `${staleReason ? `STALE cached holder count acquired ${bodyFetchedAt}, cache age ${Math.floor((Date.now()-Date.parse(bodyFetchedAt))/1000)} seconds, upstream unavailable; not a fresh query. Not a current count. ` : ""}${symbol} (${contract}) on ${chain} has ${info.holdersCount} distinct holder addresses (${sourceName} indexer, as of ${asOf}).${staleReason ? " Upstream lookup failed (" + staleReason + "). This is the last real cached value observed at " + asOf + "; no count has been estimated or updated." : ""}`,
     verdict: staleReason ? "stale" : "verified",
     confidence: staleReason ? 0.5 : 0.9,
-    source: `${sourceName} indexer (${url}, keyless, receipted); holder aggregate, not RPC state${(network||sourceName.startsWith("GeckoTerminal")) ? "; original body may be reused for up to 5 minutes (5 additional minutes disclosed stale on failure, maximum 10-minute acquisition age and 24h source-age bound); as_of is provider holders.last_updated" : ""}`,
+    source: `${sourceName} indexer (${url}, keyless, receipted); holder aggregate, not RPC state${(network||sourceName.startsWith("GeckoTerminal")) ? "; validated holder result may be reused for15minutes, or disclosed stale on error below24hours acquisition age; as_of is provider holders.last_updated" : ""}`,
   });
 }
 
 export function holderUpstreamForQuery(query: Record<string, string | undefined>): string {
   const chain = normalizeChain(query.chain ?? query.token?.match(/\s+on\s+(.+)$/i)?.[1]);
   return GECKO_NETWORKS[chain ?? ""] ? "geckoterminal" : "blockscout";
+}
+
+let holderBootStarted=false,holderBootStopped=false;
+export function stopHolderBootWarm():void {holderBootStopped=true;}
+export function resetHolderBootWarmForTests():void {holderBootStarted=false;holderBootStopped=true;}
+export function startHolderBootWarm():void {
+  if(holderBootStarted)return;holderBootStarted=true;holderBootStopped=false;
+  void (async()=>{
+    const deadline=Date.now()+120000;
+    for(const chain of ['bsc','ethereum']) for(const token of ['USDT','USDC']) {
+      await new Promise<void>(r=>{const t=setTimeout(r,1000);t.unref?.();});
+      if(holderBootStopped||Date.now()>=deadline)return;
+      try{await holderLookup({chain,token},{deadline,canStart:()=>!holderBootStopped&&Date.now()<deadline});}catch{return;}
+    }
+  })().catch(()=>{});
 }

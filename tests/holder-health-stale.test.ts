@@ -15,7 +15,7 @@ it("health names GeckoTerminal on 429 and never credits stale fallback as a fres
  const app=buildServer();
  await app.inject({method:"GET",url:"/v1/token-holders?token=USDC&chain=base"});
  const initial=getUpstreamsSnapshot().geckoterminal.last_ok;
- await vi.advanceTimersByTimeAsync(300001);limited=true;
+ await vi.advanceTimersByTimeAsync(900001);limited=true;
  const r=await app.inject({method:"GET",url:"/v1/token-holders?token=USDC&chain=base"});expect(r.statusCode).toBe(200);
  const h=(await app.inject({method:"GET",url:"/health"})).json();
  expect(h.upstreams.geckoterminal.last_error).toBe("UPSTREAM_RATE_LIMITED");

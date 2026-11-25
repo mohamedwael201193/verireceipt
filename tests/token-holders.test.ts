@@ -261,9 +261,9 @@ it("stale 429 answer quotes source time and marks the receipt without changing r
  vi.useFakeTimers();vi.setSystemTime(new Date(Date.parse(updated)+1000));
  let limited=false;setTokenHoldersFetchForTests(async()=>{if(limited)throw Object.assign(new Error("429"),{status:429});return raw;});
  const first=await handleTokenHolders({chain:"base",token:"USDC"});
- await vi.advanceTimersByTimeAsync(300001);limited=true;
+ await vi.advanceTimersByTimeAsync(900001);limited=true;
  const r=await handleTokenHolders({chain:"base",token:"USDC"});
- expect(r.verdict).toBe("stale");expect(r.stale).toBe(true);expect(String(r.answer)).toContain(updated);expect(String(r.answer)).toContain("HTTP 429");
+ expect(r.verdict).toBe("stale");expect(r.stale).toBe(true);expect(String(r.answer)).toContain(updated);expect(String(r.answer)).toContain("upstream unavailable");
  const receipt=r.receipt as {receipt_id:string;fetched_at:string;quorum_votes:string};
  expect(receipt.fetched_at).toBe((first.receipt as {fetched_at:string}).fetched_at);
  expect(receipt.quorum_votes).toContain("STALE DISCLOSED");

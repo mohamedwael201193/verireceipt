@@ -1,0 +1,19 @@
+# Validated holder result cache and boot warm
+
+The new process-local cache uses chain plus lowercase contract address, finite integer counts validated by the existing parsers, original raw body and acquisition time. The symbol is checked before cache admission. Fresh TTL15minutes, absolute stale acquisition limit24hours, maximum128results. This result cache sits above the existing paced source cache; that cache retains its original5minute/10minute rules and source-age validation. No stale result refreshes its acquisition time.
+
+Upstream failure after expiry can serve only a prior validated exact-key result below24hours age. Answer starts with STALE cached holder count acquired, acquisition timestamp, cache age in seconds, upstream unavailable and not a fresh query. Verdict stale/confidence0.5, original raw hash and receipt fetched_at retained. No prior observation remains502INDEXER_UNREACHABLE; invalid/null or symbol-mismatched data never enters result cache. Every user answer still requires evidence persistence. Fresh cache reuse is not a new upstream observation.
+
+The existing source transport retains fetch/body ownership until actual settlement, including canceled error bodies, and8underlying-read cap. One retry on explicit5xx or timeout is allowed only inside the existing source/request deadline and while the boot canStart predicate permits it. First attempt is capped at2500ms to leave retry room; no overlapping retry while the old I/O is owned. No retry on429/other4xx or invalid data. Gecko retries respect and advance the existing2100ms start-spacing gate. Request observation7.5second/total8second ceilings remain unchanged. Ethereum's existing primary/fallback routing remains unchanged, no source added.
+
+Boot starts after listen without awaiting it, once per process, four fixed bsc/ethereum USDT/USDC targets, one second between logical targets plus source pacing.120second shared run bound clipped into each request budget. No periodic timer, no boot receipts, no invented counts. Failure ends the run; shutdown blocks subsequent starts/retries. Already active reads stay under their own bounded deadlines. A request before successful warm can still fail.
+
+## Address and count provenance,25November2026
+
+Ethereum USDT: https://tether.to/supported-protocols/ confirms0xdac17f958d2ee523a2206206994597c13d831ec7. Ethereum USDC: https://developers.circle.com/stablecoins/usdc-contract-addresses confirms0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48. BSC target addresses match the BNB Chain organization integration table https://github.com/bnb-chain/stockanalyst-agent-demo . BSC USDT also matches https://explorer.bnbchain.org/asset/USDT-6D8 . BSC representations are not claimed issuer-native USDC.
+
+Raw existing-source captures and hashes are in tests/fixtures/holder-resilience/PROVENANCE.json. Blockscout returned403 for both Ethereum reads; the existing GeckoTerminal Ethereum fallback returned USDT15586761 and USDC9243659. BSC returned USDT84258286 and USDC5310056. These are captured aggregates with the provider's own update times, not fixed production data or current balances. Fixtures are tests only.
+
+Old handler tests move their expiry checks from5minutes to15minutes and their result-stale expiry checks to24hours. Source-cache tests keep their original5/10minute contract. Tests include eviction/refetch, address case, cross-token/chain isolation, stale metadata/hash/time, absence/invalid response, exact24hour boundary, paced retries, boot no-receipts and shutdown. No score gain or production latency claim.
+
+V2 explicitly tests a500, successful retry, then a different token. Every consecutive Gecko start is at least2100ms apart; deleting retry-slot nextAllowed advancement is RED. The120second boot ceiling remains a defensive guard: four sequential7.5second lookups cannot consume it under the current target set, so its loop guard is redundant rather than claimed independently mutation-protected.

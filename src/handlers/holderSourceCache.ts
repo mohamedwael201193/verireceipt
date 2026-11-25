@@ -97,3 +97,13 @@ export async function cachedHolderBody(url: string, load: (remainingMs: number) 
   try { return await work; }
   finally { if (queueTimer) clearTimeout(queueTimer); pending--; inFlight.delete(url); }
 }
+
+// A retry is still a source start and must respect/advance the same pacing gate.
+export async function holderRetrySlot(deadlineAt:number,canStart:()=>boolean):Promise<boolean>{
+ const wait=Math.max(200,nextAllowed-Date.now());
+ if(!canStart()||Date.now()+wait+100>=deadlineAt||Date.now()<rateLimitedUntil)return false;
+ await sleep(wait);
+ if(!canStart()||Date.now()+100>=deadlineAt||Date.now()<rateLimitedUntil)return false;
+ nextAllowed=Date.now()+SPACING_MS;
+ return true;
+}

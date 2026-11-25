@@ -1,0 +1,102 @@
+[
+  {
+    "chain": "ethereum",
+    "symbol": "USDT",
+    "address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+    "url": "https://eth.blockscout.com/api/v2/tokens/0xdac17f958d2ee523a2206206994597c13d831ec7",
+    "fetched_at": "2026-11-25T14:42:13.322200+00:00",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "chain": "ethereum",
+    "symbol": "USDC",
+    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "url": "https://eth.blockscout.com/api/v2/tokens/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "fetched_at": "2026-11-25T14:42:15.477247+00:00",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "chain": "bsc",
+    "symbol": "USDT",
+    "address": "0x55d398326f99059ff775485246999027b3197955",
+    "url": "https://api.geckoterminal.com/api/v2/networks/bsc/tokens/0x55d398326f99059ff775485246999027b3197955/info",
+    "fetched_at": "2026-11-25T14:42:17.631504+00:00",
+    "status": 200,
+    "sha256": "d740f450a36f176ca018336f7cd4f05d934a081f516d88f78c4ddc5d06e25ff6",
+    "count": {
+      "count": 84258286,
+      "distribution_percentage": {
+        "top_10": "25.9752",
+        "11_30": "7.9741",
+        "31_50": "4.291",
+        "rest": "61.7597"
+      },
+      "last_updated": "2026-11-25T14:36:24Z"
+    },
+    "observed_symbol": "USDT",
+    "observed_address": "0x55d398326f99059ff775485246999027b3197955"
+  },
+  {
+    "chain": "bsc",
+    "symbol": "USDC",
+    "address": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+    "url": "https://api.geckoterminal.com/api/v2/networks/bsc/tokens/0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d/info",
+    "fetched_at": "2026-11-25T14:42:19.943673+00:00",
+    "status": 200,
+    "sha256": "3e2236d88661a96679d7092bf4f5f6d5f6b4a623013edfc54aec8d8090820521",
+    "count": {
+      "count": 5310056,
+      "distribution_percentage": {
+        "top_10": "55.1673",
+        "11_30": "9.4559",
+        "31_50": "2.9303",
+        "rest": "32.4465"
+      },
+      "last_updated": "2026-11-25T14:19:11Z"
+    },
+    "observed_symbol": "USDC",
+    "observed_address": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d"
+  },
+  {
+    "chain": "ethereum",
+    "symbol": "USDT",
+    "address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+    "url": "https://api.geckoterminal.com/api/v2/networks/eth/tokens/0xdac17f958d2ee523a2206206994597c13d831ec7/info",
+    "fetched_at": "2026-11-25T14:42:39.443038+00:00",
+    "status": 200,
+    "sha256": "6443bb1f776fc14d7c54cc1ebf2ac644b36b6c6141feebdda800a8f9f6019f35",
+    "count": {
+      "count": 15586761,
+      "distribution_percentage": {
+        "top_10": "44.6582",
+        "11_30": "9.0973",
+        "31_50": "4.956",
+        "rest": "41.2885"
+      },
+      "last_updated": "2026-11-25T14:39:57Z"
+    },
+    "observed_symbol": "USDT",
+    "observed_address": "0xdac17f958d2ee523a2206206994597c13d831ec7"
+  },
+  {
+    "chain": "ethereum",
+    "symbol": "USDC",
+    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "url": "https://api.geckoterminal.com/api/v2/networks/eth/tokens/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48/info",
+    "fetched_at": "2026-11-25T14:42:41.731887+00:00",
+    "status": 200,
+    "sha256": "9e9dc0dc90420d9b7a28fbbe51f4034d954b153e9bd92aee70e5dd3522a81130",
+    "count": {
+      "count": 9243659,
+      "distribution_percentage": {
+        "top_10": "22.636",
+        "11_30": "13.8712",
+        "31_50": "5.0864",
+        "rest": "58.4064"
+      },
+      "last_updated": "2026-11-25T14:16:59Z"
+    },
+    "observed_symbol": "USDC",
+    "observed_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+  }
+]

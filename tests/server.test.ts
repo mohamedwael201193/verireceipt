@@ -1,3 +1,4 @@
+import * as holderBoot from '../src/handlers/tokenHolders';
 import * as macroBoot from '../src/handlers/macroEconomic';
 import { __getGridDemoWarmTimerForTests } from '../src/jobs/gridDemoWarm';
 // Server tests — routing + error mapping via Fastify inject (no network).
@@ -360,10 +361,13 @@ describe("main() wiring — TVL hourly timer (round-3 R3, J2 FAIL F1)", () => {
     try {
       expect(__getTvlListsRefreshTimerForTests()).toBeNull();
     expect(__getGridDemoWarmTimerForTests()).toBeNull();
+      const holderWarm=vi.spyOn(holderBoot,"startHolderBootWarm").mockImplementation((()=>new Promise(()=>{})) as any);
       const bootWarm=vi.spyOn(macroBoot,"startMacroBootWarm").mockImplementation((()=>new Promise(()=>{})) as any);
       booted = await main();
       expect(bootWarm).toHaveBeenCalledTimes(1);
       bootWarm.mockRestore();
+      expect(holderWarm).toHaveBeenCalledTimes(1);
+      holderWarm.mockRestore();
       expect(booted.server.listening).toBe(true);
       const addr = booted.server.address();
       expect(addr).not.toBeNull();
