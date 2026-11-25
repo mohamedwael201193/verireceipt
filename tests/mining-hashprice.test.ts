@@ -117,3 +117,20 @@ it("historical cache reuses at59s and expires at60s",async()=>{
  spy.mockReturnValue(now+60000);await handleMiningHashprice({block_height:"840000"});expect(f).toHaveBeenCalledTimes(9);
  }finally{spy.mockRestore()}
 });
+describe('historical daily-price age scope',()=>{
+ function setup(age:number){
+  const block=JSON.parse(fx('block-840000.json'));const price=JSON.parse(fx('block-840000-price.json'));price.prices[0].time=block.timestamp-age;
+  vi.stubGlobal('fetch',async(u:unknown)=>new Response(String(u).includes('tip/height')?tip:String(u).includes('block-height')?fx('block-840000-hash.txt'):String(u).includes('historical-price')?JSON.stringify(price):JSON.stringify(block)));
+ }
+ it.each([86401,215863,259200])('serves a disclosed prior daily price age %ss within three days',async age=>{
+  setup(age);const out=await handleMiningHashprice({block_height:'840000'});expect(String(out.answer)).toContain(age+' seconds before');expect(String(out.answer)).toContain('daily historical observation');
+  const r=out.receipt as any;const stored=await getReceiptEvidence(r.receipt_id);expect(JSON.parse(stored.evidence!.toString()).price_age_seconds).toBe(age);
+ });
+ it.each([259201,-1])('refuses stale or future price age %ss',async age=>{setup(age);await expect(handleMiningHashprice({block_height:'840000'})).rejects.toMatchObject({code:'BAD_PRICE'});});
+ it('real block100000 passes price age but preserves the numeric contract refusal and logs requested height',async()=>{
+  const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+  vi.stubGlobal('fetch',async(u:unknown)=>new Response(String(u).includes('tip/height')?tip:String(u).includes('block-height')?fx('block-100000-hash.txt'):String(u).includes('historical-price')?fx('block-100000-price.json'):fx('block-100000.json')));
+  await expect(handleMiningHashprice({block_height:'100000'})).rejects.toMatchObject({code:'OUT_OF_CONTRACT_RANGE'});
+  expect(warn).toHaveBeenCalledWith(JSON.stringify({event:'hashprice_historical_refusal',requested_height:100000,code:'OUT_OF_CONTRACT_RANGE'}));warn.mockRestore();
+ });
+});

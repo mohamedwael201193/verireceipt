@@ -29,6 +29,7 @@ const FEES_URL = "https://mempool.space/api/v1/mining/blocks/fees/1w";
 const TIP_URL = "https://mempool.space/api/blocks/tip/height";
 const SPOT_URL = "https://api.coinbase.com/v2/prices/BTC-USD/spot";
 const BLOCKS_PER_DAY = 144;
+export const HISTORICAL_PRICE_MAX_AGE_SECONDS = 3 * 86400;
 
 export interface HashpriceInputs {
   tip: number; meanHashrateHs: number; meanFeesSats: number; subsidySats: number; spotUsd: number;
@@ -99,15 +100,15 @@ async function historicalHashprice(height: number, fetchedAt: string): Promise<R
   const priceUrl = `https://mempool.space/api/v1/historical-price?timestamp=${timestamp}&currency=USD`;
   const priceRaw = await fetchText(priceUrl);
   const price = JSON.parse(priceRaw)?.prices?.[0];
-  if (!Number.isFinite(price?.USD) || price.USD <= 0 || !Number.isSafeInteger(price.time) || price.time > timestamp || timestamp - price.time > 86400) throw upstreamUnavailable("BAD_PRICE", "no usable historical USD price near the block timestamp");
+  if (!Number.isFinite(price?.USD) || price.USD <= 0 || !Number.isSafeInteger(price.time) || price.time > timestamp || timestamp - price.time > HISTORICAL_PRICE_MAX_AGE_SECONDS) throw upstreamUnavailable("BAD_PRICE", "no usable historical USD price near the block timestamp");
   const hashrate = difficulty * 2 ** 32 / 600;
   const sats = reward * 144 * 1e15 / hashrate;
   if (!Number.isFinite(sats) || sats < 1 || sats > 1e9) throw unprocessable("OUT_OF_CONTRACT_RANGE", "single-block hashprice is outside1..1e9 sats/PH/day; not served");
-  const evidence = JSON.stringify({ height, hash, reward_sats: reward, difficulty, timestamp, price_timestamp: price.time, historical_usd: price.USD, formula: "hashrate_Hs=difficulty*2^32/600; sats_per_PH_day=reward_sats*144*1e15/hashrate_Hs", basis: "single-block reward over difficulty-implied hashrate, not a weekly average", raw_bodies: { hash: hashRaw, block: blockRaw, price: priceRaw }, fetched_at: fetchedAt });
+  const evidence = JSON.stringify({ height, hash, reward_sats: reward, difficulty, timestamp, price_timestamp: price.time, price_age_seconds: timestamp-price.time, price_granularity: "daily historical observation; up to three days prior", historical_usd: price.USD, formula: "hashrate_Hs=difficulty*2^32/600; sats_per_PH_day=reward_sats*144*1e15/hashrate_Hs", basis: "single-block reward over difficulty-implied hashrate, not a weekly average", raw_bodies: { hash: hashRaw, block: blockRaw, price: priceRaw }, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, blockUrl, evidence, "mempool.space historical block and historical USD price; disclosed computation"); receipt.fetched_at = fetchedAt;
   try { await saveReceipt(receipt, evidence); } catch { throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable"); }
   const value = envelope(INTENT, { hashprice_sats_per_ph_day: Math.round(sats * 100) / 100, block_height: height, hashrate_eh_s: hashrate / 1e18, hashprice_usd_per_ph_day: Math.round(sats / 1e8 * price.USD * 100) / 100 }, receipt,
-    { answer: `Bitcoin block ${height}: ${Math.round(sats * 100) / 100} sats/PH/day. Basis: single-block reward ${reward} sats over difficulty-implied hashrate (${difficulty} *2^32/600), not a weekly average. USD uses the historical price $${price.USD} at ${new Date(price.time * 1000).toISOString()}, near the block timestamp ${new Date(timestamp * 1000).toISOString()}.`, verdict: "verified", confidence: 0.85, source: `${hashUrl} + ${blockUrl} + ${priceUrl}; measured historical inputs, not a forecast` });
+    { answer: `Bitcoin block ${height}: ${Math.round(sats * 100) / 100} sats/PH/day. Basis: single-block reward ${reward} sats over difficulty-implied hashrate (${difficulty} *2^32/600), not a weekly average. USD uses the historical price $${price.USD} at ${new Date(price.time * 1000).toISOString()}, ${timestamp-price.time} seconds before the block timestamp ${new Date(timestamp * 1000).toISOString()}. Price granularity: daily historical observation, up to three days prior; not an exact block-time trade price.`, verdict: "verified", confidence: 0.85, source: `${hashUrl} + ${blockUrl} + ${priceUrl}; measured historical inputs, not a forecast` });
   if (historicalCache.size >= 64) historicalCache.delete(historicalCache.keys().next().value!);
   historicalCache.set(height, { at: Date.now(), value }); return value;
 }
@@ -124,7 +125,15 @@ export async function handleMiningHashprice(query: Record<string, string | undef
     const tip = Number((await fetchText(TIP_URL)).trim());
     if (!Number.isSafeInteger(tip) || tip < 1) throw upstreamUnavailable("NO_USABLE_TIP", "tip height is unavailable");
     if (requestedHeight > tip) throw unprocessable("ABOVE_TIP", `height ${requestedHeight} is above observed tip ${tip}; no future block hashprice is asserted`);
-    if (requestedHeight < tip) return historicalHashprice(requestedHeight, fetchedAt);
+    if (requestedHeight < tip) {
+      try { return await historicalHashprice(requestedHeight, fetchedAt); }
+      catch (e) {
+        const code=e instanceof ApiError?e.code:'UPSTREAM_UNAVAILABLE';
+        const closed=['BAD_PRICE','BAD_BLOCK','OUT_OF_CONTRACT_RANGE','UPSTREAM_UNREACHABLE','RECEIPT_PERSIST_FAILED'].includes(code)?code:'UPSTREAM_UNAVAILABLE';
+        console.warn(JSON.stringify({event:'hashprice_historical_refusal',requested_height:requestedHeight,code:closed}));
+        throw e;
+      }
+    }
   }
   const urls = [HASHRATE_URL, FEES_URL, TIP_URL, SPOT_URL];
   const settled = await Promise.allSettled(urls.map(fetchText));
