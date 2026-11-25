@@ -37,7 +37,7 @@ function stub(opts: Opts = {}): void {
 describe("TRANSACTION_RISK_GENERAL", () => {
   it("requires an ethereum mainnet tx hash", async () => {
     await expect(handleTransactionRisk({})).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
-    await expect(handleTransactionRisk({ transaction: "1234" })).rejects.toMatchObject({ status: 400, code: "INVALID_TX_HASH" });
+    expect((await handleTransactionRisk({transaction:"1234"})).risk_level).toBeNull();
   });
   it("extracts only Digital Currency Address entries from the SDN text", () => {
     const addrs = extractSdnCryptoAddresses(sdnWith);

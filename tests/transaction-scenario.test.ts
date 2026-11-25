@@ -35,8 +35,8 @@ it.each([tx.hash.toUpperCase(),tx.hash.slice(2).toUpperCase()])('normalizes vali
  });
  const out=await handleTransactionRisk({transaction});expect(out.assessment_mode).toBeUndefined();expect(out.confidence).toBe(.9);expect(hashes.length).toBeGreaterThanOrEqual(4);expect(new Set(hashes)).toEqual(new Set([tx.hash.toLowerCase()]));
 });
-it.each(['0x1234','1234','0x'+'z'.repeat(64),'a'.repeat(63)])('malformed hash stays a strict refusal: %s',async(transaction)=>{
- const f=vi.fn();vi.stubGlobal('fetch',f);await expect(handleTransactionRisk({transaction})).rejects.toMatchObject({code:'INVALID_TX_HASH'});expect(f).not.toHaveBeenCalled();expect(saveReceipt).not.toHaveBeenCalled();
+it.each(['0x1234','1234','0x'+'z'.repeat(64),'a'.repeat(63)])('malformed hash returns disclosed unassessed result: %s',async(transaction)=>{
+ const f=vi.fn();vi.stubGlobal('fetch',f);const out=await handleTransactionRisk({transaction});expect(out.risk_level).toBeNull();expect(out.risk_score).toBeNull();expect(out.verdict).toBe('unverified');expect(out.confidence).toBe(0);expect(out.answer).toContain('not a full 64-hex');expect(f).not.toHaveBeenCalled();expect(saveReceipt).toHaveBeenCalledOnce();
 });
 it('bounds descriptions and fails closed on receipt storage failure',async()=>{
  await expect(handleTransactionRisk({transaction:'x'.repeat(2001)})).rejects.toMatchObject({code:'INVALID_TRANSACTION'});

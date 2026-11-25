@@ -126,15 +126,36 @@ export async function scenarioRisk(description: string): Promise<Record<string, 
     {answer:summary,verdict:'unverified',confidence:0,source:'Supplied description + disclosed local rubric; no external evidence'});
 }
 
+/** Incomplete hash/address screening never pretends to assess a transaction. */
+async function incompleteTransaction(input:string):Promise<Record<string,unknown>>{
+ const normalized=input.toLowerCase().replace(/^0x/,'');
+ const address=/^[a-f0-9]{40}$/.test(normalized)?'0x'+normalized:null;
+ let sdn:{addresses:string[];body:string}|null=null;
+ if(address){
+  try{sdn=await fetchSdnAddresses();if(!sdn.addresses.length)throw Error('empty address corpus');}
+  catch{throw upstreamUnavailable('SANCTIONS_UNAVAILABLE','the OFAC SDN address list could not be validated; no screening result is guessed');}
+ }
+ const matched=address&&sdn?sdn.addresses.includes(address):null;
+ const notice='Hash lookup cannot run because the value is not a full 64-hex transaction hash. No transaction lookup or transaction risk level was inferred.';
+ const summary=address?`Address-shaped input ${address}: ${matched?'exact match found':'no exact match found'} in ${sdn!.addresses.length} OFAC SDN Digital Currency Address entries. Address screening only, not a transaction assessment or a claim of safety. ${notice}`:notice;
+ const now=new Date().toISOString();
+ const evidence=JSON.stringify({mode:address?'address_screening':'incomplete_hash',input,address,sanctions_screened:!!sdn,sanctions_match:matched,sdn_address_count:sdn?.addresses.length??null,raw_bodies:{sdn:sdn?.body??null},notice,assessed_at:now});
+ const receipt=makeReceipt(INTENT,address?SDN_URL:'local:transaction-risk-incomplete-hash',evidence,address?'Exact SDN address screening only; transaction risk unassessed':'No external lookup; incomplete transaction hash');receipt.fetched_at=now;
+ try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
+ return envelope(INTENT,{risk_level:null,risk_score:null,signals:matched?['SDN_ADDRESS_MATCH']:[],summary,assessment_mode:address?'address_screening':'incomplete_hash',sanctions_screened:!!sdn,sanctions_match:matched},receipt,{answer:summary,verdict:'unverified',confidence:0,source:address?SDN_URL:'Input shape only; no external evidence'});
+}
+
 export async function handleTransactionRisk(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
-  const input = query.transaction?.trim();
+  const rawInput=query.transaction;
+  if(rawInput!==undefined&&(rawInput.length>2000||/[\x00-\x1f\x7f]/.test(rawInput)))throw badRequest("INVALID_TRANSACTION", "transaction must be at most 2000 printable characters");
+  const input = rawInput?.trim();
   if (!input) throw badRequest("MISSING_PARAM", "transaction is required as a hash or description");
   if (input.length > 2000 || /[\x00-\x1f]/.test(input)) throw badRequest("INVALID_TRANSACTION", "transaction must be at most 2000 printable characters");
   const normalized = input.toLowerCase();
   const txHash = /^(?:0x)?[0-9a-f]{64}$/.test(normalized) ? '0x' + normalized.replace(/^0x/, '') : null;
   if (!txHash) {
-    // Never reinterpret malformed hash-shaped input as a narrative assessment.
-    if (/^(?:0x)?[a-f0-9]+$/i.test(input) || /^0x\S+$/i.test(input)) throw badRequest("INVALID_TX_HASH", "hash lookup requires exactly 64 hex characters, with an optional 0x prefix");
+    // Hash-shaped input is disclosed as unassessed, never a narrative rubric.
+    if (/^(?:0x)?[a-f0-9]+$/i.test(input) || /^0x\S*$/i.test(input)) return incompleteTransaction(input);
     return scenarioRisk(input);
   }
   const fetchedAt = new Date().toISOString();
