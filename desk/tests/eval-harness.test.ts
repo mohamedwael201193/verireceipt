@@ -258,6 +258,19 @@ describe("runEvalHarness", () => {
   });
 });
 
+describe("eval daily cap valve", () => {
+  it("honours dailyCapUusdc mid-run: two calls under cap 20,000, the third skipped-budget", async () => {
+    const w = workspace();
+    const payer = makePayer();
+    const n = node(correctPlan);
+    const report = await runEvalHarness(payer, SET, ["111"], { spend: w.spend, outDir: w.outDir, dailyCapUusdc: 20000n, f: n.f, verify: verifyStub(correctPlan, n.sent), now: () => NOW });
+    expect(report.providers[0]).toMatchObject({ cases_run: 2, correct: 2, skipped_budget: 1, spend_uusdc: "20000", reserved_uusdc: "20000" });
+    expect(payer.signMessage).toHaveBeenCalledTimes(2);
+    expect(report.verdicts[2].status).toBe("skipped-budget");
+    expect(report.verdicts[2].reason).toMatch(/not run: remaining shared daily cap 0/);
+  });
+});
+
 describe("paramsEqual request binding", () => {
   it("compares key-order independently and rejects extra, missing, or different keys", () => {
     expect(paramsEqual({ task: "t", output: "o" }, { output: "o", task: "t" })).toBe(true);
@@ -265,6 +278,8 @@ describe("paramsEqual request binding", () => {
     expect(paramsEqual({ task: "t", output: "o", extra: "x" }, { task: "t", output: "o" })).toBe(false);
     expect(paramsEqual({ task: "t", output: "o" }, { task: "t", output: "p" })).toBe(false);
     expect(paramsEqual({ task: "t", output: "o" }, null)).toBe(false);
+    // Non-string values compare by strict identity, never deep-equal.
+    expect(paramsEqual({ a: { x: 1 } } as unknown as Record<string, string>, { a: { x: 1 } } as unknown as Record<string, string>)).toBe(false);
   });
 });
 
@@ -311,6 +326,41 @@ describe("run-eval-harness CLI", () => {
     const r = runCli([shippedCases, join(d, "new-out"), "111"], { DESK_LEDGER_DIR: ledger, DESK_SECRETS_FILE: "/intentionally-not-present", DESK_PAYER_ADDRESS: "0x0000000000000000000000000000000000000000" });
     expect(r.status).not.toBe(0);
     expect(out(r)).toMatch(/needs 60000 μUSDC \(1 providers x 6 cases x 10000 μUSDC per call\) but the remaining shared daily cap is 0 μUSDC/);
+    expect(existsSync(join(d, "new-out"))).toBe(false);
+  });
+  it.each(["abc", "", "-1", "1.5"])("rejects an invalid DESK_EVAL_CAP_UUSDC value %p before any spend", (v) => {
+    const d = mkdtempSync(join(tmpdir(), "evalcli-"));
+    dirs.push(d);
+    const r = runCli([shippedCases, join(d, "new-out"), "111"], { DESK_LEDGER_DIR: join(d, "ledger"), DESK_EVAL_CAP_UUSDC: v });
+    expect(r.status).not.toBe(0);
+    expect(out(r)).toMatch(/DESK_EVAL_CAP_UUSDC must be digits/);
+    expect(existsSync(join(d, "new-out"))).toBe(false);
+  });
+  it("clamps a huge DESK_EVAL_CAP_UUSDC to the desk-wide 2,000,000 cap", () => {
+    const d = mkdtempSync(join(tmpdir(), "evalcli-"));
+    dirs.push(d);
+    const ledger = join(d, "ledger");
+    mkdirSync(ledger, { mode: 0o700 });
+    writeFileSync(join(ledger, "reservations.jsonl"), JSON.stringify({ kind: "gate", nonce: "g", amount_uusdc: "1980000", reserved_at: new Date().toISOString() }) + "\n", { mode: 0o600 });
+    const r = runCli([shippedCases, join(d, "new-out"), "111"], { DESK_LEDGER_DIR: ledger, DESK_EVAL_CAP_UUSDC: "9999999999" });
+    expect(r.status).not.toBe(0);
+    // Unclamped, remaining would be billions; clamped to 2,000,000 it is 20,000.
+    expect(out(r)).toMatch(/remaining shared daily cap is 20000 μUSDC/);
+  });
+  it("a raised cap lets 2 providers x 6 cases pass pre-flight and stops at the missing-secrets error", () => {
+    const d = mkdtempSync(join(tmpdir(), "evalcli-"));
+    dirs.push(d);
+    const r = runCli([shippedCases, join(d, "new-out"), "111", "222"], { DESK_LEDGER_DIR: join(d, "ledger"), DESK_EVAL_CAP_UUSDC: "1000000", DESK_SECRETS_FILE: "" });
+    expect(r.status).not.toBe(0);
+    expect(out(r)).toMatch(/DESK_SECRETS_FILE is required/);
+    expect(out(r)).not.toMatch(/refusing before any spend/);
+  });
+  it("a zero cap refuses every call", () => {
+    const d = mkdtempSync(join(tmpdir(), "evalcli-"));
+    dirs.push(d);
+    const r = runCli([shippedCases, join(d, "new-out"), "111"], { DESK_LEDGER_DIR: join(d, "ledger"), DESK_EVAL_CAP_UUSDC: "0" });
+    expect(r.status).not.toBe(0);
+    expect(out(r)).toMatch(/remaining shared daily cap is 0 μUSDC/);
     expect(existsSync(join(d, "new-out"))).toBe(false);
   });
 });
