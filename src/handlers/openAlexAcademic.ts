@@ -2,7 +2,7 @@ import {normalizeAcademicQuery} from './academicSourceCache';
 import {envelope,makeReceipt} from '../core/receipt';
 import {saveReceipt} from '../core/storage';
 import {upstreamUnavailable} from '../core/errors';
-interface Paper{title:string;doi:string;authors:string[];publication_year:number|null;venue:string|null;work_type:string|null;venue_type:string|null;openalex_citation_count:number|null}
+interface Paper{publication_date?:string;title:string;doi:string;authors:string[];publication_year:number|null;venue:string|null;work_type:string|null;venue_type:string|null;openalex_citation_count:number|null}
 const text=(v:unknown)=>typeof v==='string'&&v.trim()?v.trim():null;
 export function parseOpenAlex(raw:string,year?:number,recent?:{minYear:number;maxYear:number}):{total:number;papers:Paper[]}{
  const j=JSON.parse(raw);if(!Array.isArray(j?.results)||typeof j.meta?.count!=='number'||!Number.isSafeInteger(j.meta.count)||j.meta.count<0)throw Error('invalid works');
@@ -12,9 +12,10 @@ export function parseOpenAlex(raw:string,year?:number,recent?:{minYear:number;ma
   const y=Number.isInteger(r?.publication_year)&&r.publication_year>0&&r.publication_year<=9999?r.publication_year:null;
   const venue=text(r?.primary_location?.source?.display_name);
   if(!title||!doi||(!y&&!venue)||(year!==undefined&&y!==year)||(recent&&(!y||y<recent.minYear||y>recent.maxYear||!Number.isSafeInteger(r.cited_by_count)||r.cited_by_count<1)))continue;
-  papers.push({title,doi,publication_year:y,venue,work_type:text(r.type),venue_type:text(r.primary_location?.source?.type),authors:Array.isArray(r.authorships)?r.authorships.flatMap((a:any)=>text(a?.author?.display_name)?[text(a.author.display_name)!]:[]):[],openalex_citation_count:Number.isSafeInteger(r.cited_by_count)&&r.cited_by_count>=0?r.cited_by_count:null});
+  const date=typeof r.publication_date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(r.publication_date)&&Number.isFinite(Date.parse(r.publication_date))&&new Date(r.publication_date).toISOString().slice(0,10)===r.publication_date&&Number(r.publication_date.slice(0,4))===y?r.publication_date:String(y).padStart(4,'0')+'-01-01';
+  papers.push({...(recent?{publication_date:date}:{}),title,doi,publication_year:y,venue,work_type:text(r.type),venue_type:text(r.primary_location?.source?.type),authors:Array.isArray(r.authorships)?r.authorships.flatMap((a:any)=>text(a?.author?.display_name)?[text(a.author.display_name)!]:[]):[],openalex_citation_count:Number.isSafeInteger(r.cited_by_count)&&r.cited_by_count>=0?r.cited_by_count:null});
  }
- if(recent){const date=(p:Paper)=>{const source=j.results.find((r:any)=>text(r?.doi)?.replace(/^https:\/\/doi.org\//i,'')===p.doi);return typeof source?.publication_date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(source.publication_date)?source.publication_date:String(p.publication_year)+'-01-01';};papers.sort((a,b)=>date(b).localeCompare(date(a))||(b.openalex_citation_count??0)-(a.openalex_citation_count??0));}else papers.sort((a,b)=>Number(!!b.publication_year&&!!b.venue&&(['journal','conference'].includes(b.venue_type??'')||b.work_type==='proceedings-article'))-Number(!!a.publication_year&&!!a.venue&&(['journal','conference'].includes(a.venue_type??'')||a.work_type==='proceedings-article')));
+ if(recent){papers.sort((a,b)=>(b.publication_date??'').localeCompare(a.publication_date??'')||(b.openalex_citation_count??0)-(a.openalex_citation_count??0));}else papers.sort((a,b)=>Number(!!b.publication_year&&!!b.venue&&(['journal','conference'].includes(b.venue_type??'')||b.work_type==='proceedings-article'))-Number(!!a.publication_year&&!!a.venue&&(['journal','conference'].includes(a.venue_type??'')||a.work_type==='proceedings-article')));
  return{total:Math.min(j.meta.count,1e8),papers:papers.slice(0,5)};
 }
 const cache=new Map<string,{raw:string;at:string}>(),active=new Map<string,Promise<{raw:string;at:string}>>();

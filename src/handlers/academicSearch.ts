@@ -19,6 +19,7 @@ const MAX_QUERY_BYTES = 256;
 const UA = "VeriReceipt/2.0 academic-search observer (+https://verireceipt.vercel.app)";
 
 export interface AcademicPaper {
+  publication_date?: string;
   title: string;
   doi: string;
   authors: string[];
@@ -50,7 +51,7 @@ function paperMetadata(item: Record<string, unknown>): Omit<AcademicPaper, "titl
     crossref_citation_count: typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? count : null,
   };
 }
-export function parseCrossrefWorks(raw: string, limit: number = ROWS): { total: number; papers: AcademicPaper[]; skipped: number } {
+export function parseCrossrefWorks(raw: string, limit: number = ROWS,includeDates=false): { total: number; papers: AcademicPaper[]; skipped: number } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -76,7 +77,11 @@ export function parseCrossrefWorks(raw: string, limit: number = ROWS): { total: 
       const doi = (item as { DOI?: unknown }).DOI;
       const title = Array.isArray(titles) && typeof titles[0] === "string" ? titles[0].trim() : "";
       if (!title || typeof doi !== "string" || !doi.trim()) { skipped++; continue; }
-      papers.push({ title, doi: doi.trim(), ...paperMetadata(item as Record<string, unknown>) });
+      const metadata=paperMetadata(item as Record<string, unknown>);
+      const parts=(item as any).published?.['date-parts']?.[0];
+      const date=Array.isArray(parts)&&metadata.publication_year!==null?[String(metadata.publication_year).padStart(4,'0'),String(parts[1]??1).padStart(2,'0'),String(parts[2]??1).padStart(2,'0')].join('-'):null;
+      const validDate=date&&/^\d{4}-\d{2}-\d{2}$/.test(date)&&Number.isFinite(Date.parse(date))&&new Date(date).toISOString().slice(0,10)===date?date:metadata.publication_year===null?null:String(metadata.publication_year).padStart(4,'0')+'-01-01';
+      papers.push({ title, doi: doi.trim(), ...metadata,...(includeDates?{publication_date:validDate??undefined}:{}) });
     }
   }
   return { total: Math.floor(totalRaw), papers, skipped };
@@ -100,9 +105,9 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
   });
   const {body:raw,fetchedAt,staleReason}=observation;
   const ageSeconds=Math.floor((Date.now()-Date.parse(fetchedAt))/1000),stale=Boolean(staleReason);
-  const parsedWorks=parseCrossrefWorks(raw,recent?20:ROWS);
+  const parsedWorks=parseCrossrefWorks(raw,recent?20:ROWS,Boolean(recent));
   const total=parsedWorks.total,eligible=parsedWorks.papers.filter(p=>(p.publication_year!==null||p.venue!==null)&&(year===undefined||p.publication_year===year)&&(!recent||(p.publication_year!==null&&p.publication_year>=recent.minYear&&p.publication_year<=recent.maxYear&&p.crossref_citation_count!==null&&p.crossref_citation_count>=1)));
-  if(recent){const items=JSON.parse(raw).message.items;const date=(p:AcademicPaper)=>{const parts=items.find((r:any)=>r?.DOI===p.doi)?.published?.['date-parts']?.[0];return Array.isArray(parts)?[parts[0],String(parts[1]??1).padStart(2,'0'),String(parts[2]??1).padStart(2,'0')].join('-'):String(p.publication_year);};eligible.sort((a,b)=>date(b).localeCompare(date(a))||(b.crossref_citation_count??0)-(a.crossref_citation_count??0));}
+  if(recent)eligible.sort((a,b)=>(b.publication_date??'').localeCompare(a.publication_date??'')||(b.crossref_citation_count??0)-(a.crossref_citation_count??0));
   const papers=eligible.slice(0,ROWS),skipped=parsedWorks.skipped+parsedWorks.papers.length-eligible.length;
   const asOf = fetchedAt;
   const titles = papers.map((p) => p.title);
