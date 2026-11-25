@@ -50,7 +50,7 @@ function paperMetadata(item: Record<string, unknown>): Omit<AcademicPaper, "titl
     crossref_citation_count: typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? count : null,
   };
 }
-export function parseCrossrefWorks(raw: string): { total: number; papers: AcademicPaper[]; skipped: number } {
+export function parseCrossrefWorks(raw: string, limit: number = ROWS): { total: number; papers: AcademicPaper[]; skipped: number } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -70,7 +70,7 @@ export function parseCrossrefWorks(raw: string): { total: number; papers: Academ
   const papers: AcademicPaper[] = [];
   let skipped = 0;
   if (Array.isArray(items)) {
-    for (const item of items.slice(0, ROWS)) {
+    for (const item of items.slice(0, limit)) {
       if(!item || typeof item!=="object"){skipped++;continue;}
       const titles = (item as { title?: unknown }).title;
       const doi = (item as { DOI?: unknown }).DOI;
@@ -90,16 +90,20 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
   }
   let year:number|undefined;
   if(query.year!==undefined){year=Number(query.year);if(!/^\d{4}$/.test(query.year)||!Number.isInteger(year)||year<1000||year>new Date().getUTCFullYear())throw badRequest('INVALID_YEAR','year must be a four-digit publication year, not in the future');}
-  try{return await openAlexAnswer(q,year);}catch(error){if((error as any)?.code==='RECEIPT_PERSIST_FAILED')throw error;}
-  const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(normalizeAcademicQuery(q))}&rows=${ROWS}${year?`&filter=from-pub-date:${year}-01-01,until-pub-date:${year}-12-31`:""}`;
-  const observation = await cachedAcademicBody(year?`${q} year:${year}`:q,url,UA,body=>{parseCrossrefWorks(body);}).catch((err:unknown)=>{
+  const currentYear=new Date().getUTCFullYear();
+  const recent=/\b(?:recent|latest|new|current|this\s+year)\b/i.test(q)?{minYear:year??currentYear-3,maxYear:year??currentYear}:undefined;
+  try{return await openAlexAnswer(q,year,recent);}catch(error){if((error as any)?.code==='RECEIPT_PERSIST_FAILED')throw error;}
+  const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(normalizeAcademicQuery(q))}&rows=${recent?20:ROWS}${recent?`&filter=from-pub-date:${recent.minYear}-01-01,until-pub-date:${recent.maxYear}-12-31&sort=published&order=desc`:year?`&filter=from-pub-date:${year}-01-01,until-pub-date:${year}-12-31`:""}`;
+  const observation = await cachedAcademicBody(recent?`${q} recent:${recent.minYear}-${recent.maxYear} citations:1`:year?`${q} year:${year}`:q,url,UA,body=>{parseCrossrefWorks(body);}).catch((err:unknown)=>{
     if(err&&typeof err==='object'&&'code' in err)throw err;
     throw upstreamUnavailable('CROSSREF_UNREACHABLE','Both scholarly sources unavailable');
   });
   const {body:raw,fetchedAt,staleReason}=observation;
   const ageSeconds=Math.floor((Date.now()-Date.parse(fetchedAt))/1000),stale=Boolean(staleReason);
-  const parsedWorks=parseCrossrefWorks(raw);
-  const total=parsedWorks.total,papers=parsedWorks.papers.filter(p=>(p.publication_year!==null||p.venue!==null)&&(year===undefined||p.publication_year===year)),skipped=parsedWorks.skipped+parsedWorks.papers.length-papers.length;
+  const parsedWorks=parseCrossrefWorks(raw,recent?20:ROWS);
+  const total=parsedWorks.total,eligible=parsedWorks.papers.filter(p=>(p.publication_year!==null||p.venue!==null)&&(year===undefined||p.publication_year===year)&&(!recent||(p.publication_year!==null&&p.publication_year>=recent.minYear&&p.publication_year<=recent.maxYear&&p.crossref_citation_count!==null&&p.crossref_citation_count>=1)));
+  if(recent){const items=JSON.parse(raw).message.items;const date=(p:AcademicPaper)=>{const parts=items.find((r:any)=>r.DOI===p.doi)?.published?.['date-parts']?.[0];return Array.isArray(parts)?[parts[0],String(parts[1]??1).padStart(2,'0'),String(parts[2]??1).padStart(2,'0')].join('-'):String(p.publication_year);};eligible.sort((a,b)=>date(b).localeCompare(date(a))||(b.crossref_citation_count??0)-(a.crossref_citation_count??0));}
+  const papers=eligible.slice(0,ROWS),skipped=parsedWorks.skipped+parsedWorks.papers.length-eligible.length;
   const asOf = fetchedAt;
   const titles = papers.map((p) => p.title);
   const dois = papers.map((p) => p.doi);
@@ -117,11 +121,11 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
     ? `${papers.length} of ${total} Crossref matches; top: ${papers[0].title}`
     : `No Crossref matches for this query`;
   const brief = Array.from((stale ? "STALE cached search; " : "")+briefRaw).slice(0, 80).join("");
-  const evidence = JSON.stringify({ query: q, as_of: asOf, total_matches: total,
+  const evidence = JSON.stringify({ query: q, as_of: asOf, total_matches: total,...(recent?{recent_window:recent,citation_floor:1,sort:'publication date descending'}:{}),
     papers, skipped_items: skipped, stale, stale_reason:staleReason, age_seconds:ageSeconds,
-    source_policy: "Crossref REST API, keyless public pool (no mailto: maintainer decision 2026-11-23; project User-Agent instead); single source, Crossref relevance order",
+    source_policy: "Crossref REST API, keyless public pool (no mailto: maintainer decision 2026-11-23; project User-Agent instead); single source; sorting mode disclosed",
     raw_body: raw, fetched_at: fetchedAt });
-  const receipt = makeReceipt(INTENT, url, evidence, "Crossref bibliographic search; relevance order and match count are Crossref's own");
+  const receipt = makeReceipt(INTENT, url, evidence, recent?'Crossref recent bibliographic search; publication date order with citation floor':"Crossref bibliographic search; relevance order and match count are Crossref's own");
   receipt.fetched_at = fetchedAt;
   try {
     await saveReceipt(receipt, evidence);
@@ -132,20 +136,20 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
   // The contract's "answer" response field is the envelope's own
   // answer (meta below); the fields object carries the off-chain lists.
   return envelope(INTENT, {
-    papers,
+    papers,...(recent?{recent_window:recent,citation_floor:1,sort:'publication date descending'}:{}),
     metadata_scope: "Crossref deposited metadata; work type is not proof of peer review; citation counts are Crossref-only",
     paper_titles: titles,
     dois,
     total_matches: total,
     brief, as_of:asOf, fetched_at:fetchedAt, age_seconds:ageSeconds, stale, ...(stale?{stale_reason:staleReason}:{}),
   }, receipt, {
-    answer: (stale ? `STALE CACHED SEARCH, not a current index query. ${staleReason}; exact result acquired ${fetchedAt}, age ${ageSeconds}s, no titles or counts updated. ` : `Crossref observation acquired ${fetchedAt}, age ${ageSeconds}s; may be cached up to15minutes. `) + (papers.length
-      ? `Crossref index: ${total} works match "${q}". Top ${papers.length} by Crossref relevance: ${listing}. ` +
-        (skipped ? `${skipped} returned item(s) lacked title/DOI or both publication year and venue, or did not meet the year filter, and were skipped. ` : "") +
-        "The ranking is Crossref's own relevance order, not a quality judgment; the count is Crossref's index match count, not all scholarly papers on the topic. Metadata is as deposited; work type is not proof of peer review, and citation counts are Crossref-only."
+    answer: (recent?`Recent publication window ${recent.minYear}-${recent.maxYear}; at least 1 Crossref citation; newest publication first. `:'') + (stale ? `STALE CACHED SEARCH, not a current index query. ${staleReason}; exact result acquired ${fetchedAt}, age ${ageSeconds}s, no titles or counts updated. ` : `Crossref observation acquired ${fetchedAt}, age ${ageSeconds}s; may be cached up to15minutes. `) + (papers.length
+      ? `Crossref index: ${total} works match "${q}". Top ${papers.length} by ${recent?'publication date':'Crossref relevance'}: ${listing}. ` +
+        (skipped ? `${skipped} returned item(s) lacked title/DOI or both publication year and venue, or did not meet the year/citation filter, and were skipped. ` : "") +
+        (recent?"The ranking uses publication date after the citation floor, not a quality judgment;":"The ranking is Crossref's own relevance order, not a quality judgment;")+ " the count is Crossref's index match count, not all scholarly papers on the topic. Metadata is as deposited; work type is not proof of peer review, and citation counts are Crossref-only."
       : `Crossref index: ${total} query matches, but no eligible DOI-bearing records in the returned sample${year?` for ${year}`:""}. Records missing both publication year and venue are omitted. Absence in this sample is not proof no paper exists.`),
     verdict: stale ? "stale" : "verified",
     confidence: stale ? 0.5 : 0.9,
-    source: `${url}; Crossref REST API single source, Crossref relevance order; fetched ${fetchedAt}; acquired ${asOf}`,
+    source: `${url}; Crossref REST API single source, ${recent?'publication date order with citation floor':'Crossref relevance order'}; fetched ${fetchedAt}; acquired ${asOf}`,
   });
 }

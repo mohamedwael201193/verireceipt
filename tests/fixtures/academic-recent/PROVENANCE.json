@@ -1,0 +1,19 @@
+{
+  "scope": "Actual source responses captured for publication-date filtered academic search. Citation counts remain index-specific.",
+  "captures": [
+    {
+      "url": "https://api.openalex.org/works?search=graph%20neural%20networks&per-page=10&select=id,display_name,doi,publication_year,publication_date,primary_location,type,authorships,cited_by_count&filter=publication_year:2023-2026,cited_by_count:>0&sort=publication_date:desc,cited_by_count:desc",
+      "status": 200,
+      "captured_at": "2026-11-25T19:36:16.888694+00:00",
+      "file": "openalex.json",
+      "sha256": "1d477af2d57030abf927b6f83a4add35139ed62651d8daa6ffe6dc2ce1d7cde6"
+    },
+    {
+      "url": "https://api.crossref.org/works?query.bibliographic=graph%20neural%20networks&rows=20&filter=from-pub-date:2023-01-01,until-pub-date:2026-12-31&sort=published&order=desc",
+      "status": 200,
+      "captured_at": "2026-11-25T19:36:17.258729+00:00",
+      "file": "crossref.json",
+      "sha256": "573ce23a7e919fd27b583ea804ad87de21068d365aa13ef696a38e0d35e3696d"
+    }
+  ]
+}
