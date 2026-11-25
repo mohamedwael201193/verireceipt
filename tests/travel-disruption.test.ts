@@ -23,7 +23,7 @@ function stub(body: string | "ERR" = nas): void {
 describe("TRAVEL_DISRUPTION_GENERAL", () => {
   it("requires input and refuses flight numbers without dated origin evidence", async () => {
     await expect(handleTravelDisruption({})).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
-    await expect(handleTravelDisruption({ route_or_flight: "UA123" })).rejects.toMatchObject({ status: 400, code: "AIRPORT_CODE_REQUIRED" });
+    expect(await handleTravelDisruption({route_or_flight:"UA123"})).toMatchObject({disrupted:null,verdict:"unverified"});
 
   });
   it("parses the real snapshot: ground delay program, arr/dep delay, closure", () => {
@@ -101,21 +101,9 @@ describe("A1 airport names via the bundled list", () => {
     expect(String(result.status)).toContain("ground delay program");
   });
 
-  it("a multi-airport city refuses ambiguous, naming the candidates", async () => {
-    for (const [city, codes] of [["Washington", ["IAD", "DCA"]], ["New York", ["JFK", "LGA"]], ["Dallas", ["DFW", "DAL"]], ["Chicago", ["ORD", "MDW"]], ["Houston", ["IAH", "HOU"]]] as const) {
-      let err: unknown;
-      try {
-        await handleTravelDisruption({ route_or_flight: city });
-      } catch (e) { err = e; }
-      const e = err as { status?: number; code?: string; message?: string };
-      expect(e.status, city).toBe(422);
-      expect(e.code, city).toBe("AMBIGUOUS_AIRPORT");
-      for (const c of codes) expect(String(e.message), `${city} ${c}`).toContain(c);
-    }
-  });
-
-  it("an unlisted name keeps the honest AIRPORT_CODE_REQUIRED refusal", async () => {
-    await expect(handleTravelDisruption({ route_or_flight: "Springfield" })).rejects.toMatchObject({ status: 400, code: "AIRPORT_CODE_REQUIRED" });
+  it('metro city checks all airports and unrecognized name stays unknown',async()=>{
+    stub();const out=await handleTravelDisruption({route_or_flight:'New York'});expect((out.airport_statuses as any[]).map(s=>s.airport)).toEqual(['JFK','LGA','EWR']);expect(out.disrupted).toBe(true);
+    expect(await handleTravelDisruption({route_or_flight:'Springfield'})).toMatchObject({disrupted:null,verdict:'unverified'});
   });
 
   it("a 3-letter code still answers directly with no resolution disclosure", async () => {
@@ -143,16 +131,16 @@ describe('two-airport route status',()=>{
   stub();const out=await handleTravelDisruption({route_or_flight:'PIT-LGA'});expect(out.disrupted).toBe(true);expect((out.airport_statuses as any[])[0].disrupted).toBe(false);expect((out.airport_statuses as any[])[1].disrupted).toBe(true);
   const negative=await handleTravelDisruption({route_or_flight:'PIT-JFK'});expect(negative.disrupted).toBe(false);expect(negative.delay_minutes).toBeNull();expect(String(negative.answer)).toContain('not claimed normal');
  });
- it.each(['New York to LAX','LGA to Washington'])('refuses ambiguous endpoint without network: %s',async(route_or_flight)=>{
-  const f=vi.fn();vi.stubGlobal('fetch',f);await expect(handleTravelDisruption({route_or_flight})).rejects.toMatchObject({code:'AMBIGUOUS_AIRPORT'});expect(f).not.toHaveBeenCalled();
+ it.each(['New York to LAX','LGA to Washington'])('expands metro endpoints and checks one snapshot: %s',async route_or_flight=>{
+  const f=vi.fn(async()=>new Response(nas));vi.stubGlobal('fetch',f);const out=await handleTravelDisruption({route_or_flight});expect(out.disrupted).toBe(true);expect((out.airport_statuses as any[]).length).toBeGreaterThan(2);expect(f).toHaveBeenCalledOnce();
  });
- it.each(['UA123','LGA-JFK-LAX','LGA/JFK/LAX','LGA to Springfield'])('refuses unsupported flight/multi-hop/unknown endpoint without guessing: %s',async(route_or_flight)=>{
-  const f=vi.fn();vi.stubGlobal('fetch',f);await expect(handleTravelDisruption({route_or_flight})).rejects.toMatchObject({code:'AIRPORT_CODE_REQUIRED'});expect(f).not.toHaveBeenCalled();
+ it.each(['UA123','LGA-JFK-LAX','LGA/JFK/LAX','LGA to Springfield'])('unsupported flight/multi-hop/unknown endpoint never guesses clean: %s',async route_or_flight=>{
+  const f=vi.fn();vi.stubGlobal('fetch',f);expect(await handleTravelDisruption({route_or_flight})).toMatchObject({disrupted:null,verdict:'unverified'});expect(f).not.toHaveBeenCalled();
  });
 });
 
 describe('flight number with explicitly supplied airport route',()=>{
  it.each(['UA123 LGA-SFO','ua 123 LGA to SFO','UA123 LGA/SFO'])('%s observes only supplied airports, never claims a flight lookup',async route_or_flight=>{stub();const out=await handleTravelDisruption({route_or_flight});expect(out).toMatchObject({route_or_flight:'LGA-SFO',disrupted:true,disruption_scope:'FAA airport-level only, not the flight',flight_context:{route_binding:'caller-supplied, not independently verified',flight_level_status:null,flight_level_data_available:false}});expect(out.answer).toContain('Flight-level data not available');expect(out.answer).toContain('not a verified route for the flight number');const receipt=out.receipt as any;const stored=await getReceiptEvidence(receipt.receipt_id);expect(sha256Hex(stored.evidence!)).toBe(receipt.raw_response_sha256);expect(JSON.parse(Buffer.from(stored.evidence!).toString()).flight_context).toEqual(out.flight_context);});
- it.each(['UA123','UA123 SFO','UA123 mystery route'])('%s never guesses the dated flight route or a clean flight status',async route_or_flight=>{const f=vi.fn();vi.stubGlobal('fetch',f);await expect(handleTravelDisruption({route_or_flight})).rejects.toMatchObject({status:400});expect(f).not.toHaveBeenCalled();});
+ it.each(['UA123','UA123 SFO','UA123 mystery route'])('%s never guesses the dated flight route or a clean flight status',async route_or_flight=>{const f=vi.fn();vi.stubGlobal('fetch',f);expect(await handleTravelDisruption({route_or_flight})).toMatchObject({disrupted:null,verdict:'unverified'});expect(f).not.toHaveBeenCalled();});
  it('airport-only response remains independent of flight number',async()=>{stub();const out=await handleTravelDisruption({route_or_flight:'SFO-SEA'});expect(out.flight_context).toBeNull();expect(out.answer).not.toContain('caller supplied');});
 });

@@ -1,3 +1,4 @@
+import {travelEndpoint,travelMetro} from '../data/travelMetros';
 // TRAVEL_DISRUPTION_GENERAL — GET /v1/travel-disruption?route_or_flight=<IATA>
 //
 // Zero-LLM. US airport-level disruption status from the FAA's NAS
@@ -94,36 +95,41 @@ export function parseNasStatus(raw: string, airport: string): { updateTime: stri
   return { updateTime, entries, excluded_closures };
 }
 
+async function travelUnknown(input:string,reason:'flight_status_unavailable'|'coverage_unavailable'){
+ const now=new Date().toISOString();const notice=reason==='flight_status_unavailable'?'Flight status is not verifiable from keyless FAA NAS airport data. A flight number alone does not establish its airports or dated itinerary.':'FAA NAS coverage is limited to the bundled US airports in this slice. Non-US or unrecognized endpoints are not verified; no disruption status is inferred.';
+ const evidence=JSON.stringify({route_or_flight:input,reason_code:reason,disrupted:null,notice,external_lookup:false,assessed_at:now});const receipt=makeReceipt(INTENT,'local:travel-coverage',evidence,'input/coverage assessment only; no flight or airport observation');receipt.fetched_at=now;
+ try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
+ return envelope(INTENT,{route_or_flight:input,disrupted:null,status:'unverified',delay_minutes:null,reason_code:reason},receipt,{answer:notice+' Disruption is unknown, not false; no FAA status was fetched for this input.',verdict:'unverified',confidence:0,source:'Input coverage only; no external status evidence'});
+}
+
 async function handleTravelDisruptionInternal(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const rawInput = query.route_or_flight?.trim();
   if (!rawInput) throw badRequest("MISSING_PARAM", "route_or_flight is required as a 3-letter airport code, e.g. LGA, or a US airport name");
   if (rawInput.length > 200 || /[\x00-\x1f]/.test(rawInput)) throw badRequest('INVALID_ROUTE','route_or_flight must be at most 200 printable characters');
+  if(/^[A-Za-z]{2,3}\s*\d{1,4}[A-Za-z]?$/.test(rawInput))return travelUnknown(rawInput,'flight_status_unavailable');
   // A supplied airport route is context, never a dated flight-to-airport lookup.
   const suppliedFlight = /^([A-Za-z]{2,3}\s*\d{1,4}[A-Za-z]?)\s+(.+)$/i.exec(rawInput);
   const routeInput = suppliedFlight ? suppliedFlight[2].trim() : rawInput;
   const route = /^(.+?)\s+to\s+(.+)$/i.exec(routeInput) ?? /^([a-z]{3})\s*[-/]\s*([a-z]{3})$/i.exec(routeInput);
-  if (suppliedFlight && !route) throw badRequest("AIRPORT_ROUTE_REQUIRED", "A flight number requires an explicit airport route, e.g. UA123 LGA-SFO; no route or flight status is inferred");
+  if(suppliedFlight&&!route)return travelUnknown(rawInput,'flight_status_unavailable');
   const names = route ? [route[1].trim(),route[2].trim()] : [routeInput];
-  const resolutions = names.map(name => {
-    if (/^[a-z]{3}$/i.test(name)) return {airport:name.toUpperCase(),resolvedFrom:null};
-    const matches=resolveAirportName(name);
-    if(matches.length>1)throw unprocessable('AMBIGUOUS_AIRPORT',`"${name}" matches ${matches.length} airports: ${matches.map(m=>m.code+' ('+m.label+')').join('; ')}; pass the 3-letter code`);
-    if(matches.length!==1)throw badRequest('AIRPORT_CODE_REQUIRED','Use a 3-letter airport code, exact bundled US airport name or a route X to Y / XXX-YYY / XXX/YYY. Flight-number origin requires a real dated flight source and is not inferred.');
-    return {airport:matches[0].code,resolvedFrom:{name,label:matches[0].label}};
-  });
+  const endpointGroups=names.map(travelEndpoint);
+  if(endpointGroups.some(group=>!group.length))return travelUnknown(rawInput,'coverage_unavailable');
+  const resolutions=[...new Map(endpointGroups.flat().map(r=>[r.airport,r])).values()];
   const airport = resolutions[0].airport;
   const resolvedFrom = resolutions[0].resolvedFrom;
   const fetchedAt = new Date().toISOString();
   let body: string;
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
+    let timer:ReturnType<typeof setTimeout>;
     try {
-      const res = await fetch(`${NAS_URL}?airport=${airport}`, { signal: controller.signal, headers: { "User-Agent": UA } });
+      const io=(async()=>{const res = await fetch(`${NAS_URL}?airport=${airport}`, { signal: controller.signal, headers: { "User-Agent": UA } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      body = await res.text();
+      return await res.text();})();
+      body=await Promise.race([io,new Promise<never>((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error("FAA deadline"));},SOURCE_TIMEOUT_MS);})]);
     } finally {
-      clearTimeout(timer);
+      clearTimeout(timer!);
     }
   } catch {
     throw upstreamUnavailable("FAA_UNREACHABLE", "the FAA NAS status feed could not be reached");
@@ -144,7 +150,7 @@ async function handleTravelDisruptionInternal(query: Record<string, string | und
   const maxDelay=delayMinutes.length?Math.max(...delayMinutes):null;
   const status=disrupted?airportStatuses.filter(s=>s.disrupted).map(s=>s.airport+': '+s.entries.map(e=>e.kind).join('; ')).join('; '):'no active FAA-listed disruption';
   const reason=entries.map(e=>e.reason).filter(Boolean).join('; ');
-  const resolvedRoute=route?resolutions.map(r=>r.airport).join('-'):airport;
+  const resolvedRoute=(route||resolutions.length>1)?resolutions.map(r=>r.airport).join('-'):airport;
   const asOf = new Date().toISOString();
   const flightContext = suppliedFlight ? {flight_number:suppliedFlight[1].replace(/\s/g," ").trim().toUpperCase(),route_binding:"caller-supplied, not independently verified",flight_level_status:null,flight_level_data_available:false} : null;
   const evidence = JSON.stringify({ route_or_flight: resolvedRoute, flight_context:flightContext, airport_statuses:airportStatuses, route_name_resolutions:resolutions, as_of: asOf, feed_update_time: updateTime, entries,
@@ -159,10 +165,10 @@ async function handleTravelDisruptionInternal(query: Record<string, string | und
   } catch {
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
-  const namePrefix = resolvedFrom ? `"${resolvedFrom.name}" resolved to ${airport} (${resolvedFrom.label}) via the bundled airport list. ` : "";
+  const namePrefix = resolutions.length>1 ? `Metro expansion: ${resolutions.map(r=>r.airport).join(", ")} from the bundled static metro list; all checked, no single airport chosen. ` : resolvedFrom ? `"${resolvedFrom.name}" resolved to ${airport} (${resolvedFrom.label}) via the bundled airport list. ` : "";
   const excludedCount=airportStatuses.reduce((n,s)=>n+s.excluded_closures.length,0);
-  const answer = route
-    ? `${resolvedRoute}: ${airportStatuses.map(s=>s.airport+(s.disrupted?' has '+s.entries.map(e=>e.kind+(e.reason?' ('+e.reason+')':'')).join('; '):' has no active FAA-listed disruption')).join('; ')}. FAA NAS status as of ${updateTime}. Both endpoints checked against one snapshot. Airport-level status only, not flight tracking or route delay; an unlisted condition is not claimed normal.`
+  const answer = (route||resolutions.length>1)
+    ? `${namePrefix}${resolvedRoute}: ${airportStatuses.map(s=>s.airport+(s.disrupted?' has '+s.entries.map(e=>e.kind+(e.reason?' ('+e.reason+')':'')).join('; '):' has no active FAA-listed disruption')).join('; ')}. FAA NAS status as of ${updateTime}. All airports in the supplied endpoints or metro groups checked against one snapshot. Airport-level status only, not flight tracking or route delay; an unlisted condition is not claimed normal.`
     : disrupted
     ? `${namePrefix}${airport} is DISRUPTED at the airport level: ${status}${reason ? ` (${reason})` : ""}` +
       `${maxDelay !== null ? `, average delay up to ${maxDelay} minutes` : ""}. FAA NAS status as of ${updateTime}. ` +
@@ -192,6 +198,8 @@ function travelInputClass(q:Record<string,string|undefined>):string {
  const route=/^(.+?)\s+to\s+(.+)$/i.exec(raw)??/^([a-z]{3})\s*[-/]\s*([a-z]{3})$/i.exec(raw);
  const names=route?[route[1].trim(),route[2].trim()]:[raw];
  const kinds=names.map(n=>/^[a-z]{3}$/i.test(n)?'code':resolveAirportName(n).length===1?'name':resolveAirportName(n).length>1?'ambiguous':'unsupported');
+ if(names.some(n=>travelMetro(n)))return 'metro';
+ if(names.some(n=>!travelEndpoint(n).length))return 'coverage_unavailable';
  if(kinds.includes('ambiguous'))return 'ambiguous_airport';
  if(kinds.includes('unsupported'))return 'unsupported';
  return route?'airport_route':kinds[0]==='code'?'airport_code':'airport_name';

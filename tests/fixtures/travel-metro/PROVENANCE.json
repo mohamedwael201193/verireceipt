@@ -1,0 +1,23 @@
+{
+  "url": "https://nasstatus.faa.gov/api/airport-status-information",
+  "status": 200,
+  "captured_at": "2026-11-25T16:45:33.153793+00:00",
+  "byte_count": 2083,
+  "sha256": "d92f260d46dff3e402b59f16752d71e42950ade656fa350d1777de1d29bc7a79",
+  "response_headers": {
+    "Server": "nginx",
+    "Content-Type": "application/xml",
+    "X-Content-Type-Options": "nosniff",
+    "X-XSS-Protection": "0",
+    "Pragma": "no-cache",
+    "X-Frame-Options": "DENY",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
+    "Content-Security-Policy": "default-src 'self'; img-src 'self' data: blob: https://*.arcgis.com; style-src-elem 'self' 'unsafe-inline' https://js.arcgis.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://code.jquery.com ; script-src-elem 'self' 'unsafe-inline' https://js.arcgis.com https://code.jquery.com ; font-src 'self' 'unsafe-inline' https://js.arcgis.com https://code.jquery.com; connect-src 'self' https://*.arcgis.com; worker-src 'self' blob: https://*.arcgis.com https://code.jquery.com; style-src-attr 'self' 'unsafe-inline';style-src 'self' https://*.arcgis.com",
+    "Vary": "Accept-Encoding",
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Expires": "Wed, 25 Nov 2026 16:45:33 GMT",
+    "Date": "Wed, 25 Nov 2026 16:45:33 GMT",
+    "Content-Length": "2083",
+    "Connection": "close"
+  }
+}
