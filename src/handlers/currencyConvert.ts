@@ -1,67 +1,18 @@
 import {withAnswerClass} from "../core/answerClass";
-// CURRENCY_EXCHANGE_CONVERT — GET /v1/fx?from_currency=&to_currency=&amount=
-//
-// Zero-LLM. Converts an amount between two ISO-4217 currencies using
-// real, keyless public rate sources, with a SHA-256 receipt over the
-// exact evidence bytes (every source's raw response body) and the
-// VeriReceipt envelope (answer/verdict/confidence/source). How this
-// fits the VeriReceipt story: same receipt model, same envelope, same
-// honesty language as every other intent — the answer is only ever a
-// number three named public sources carried, and the receipt lets any
-// judge recompute it.
-//
-// Intent contract (https://devnode.telegraphprotocol.com/engine/v1/intents/CURRENCY_EXCHANGE_CONVERT,
-// read 2026-11-22): inputs from_currency (string), to_currency
-// (string), amount (number, optional); scored output converted_amount
-// (number, range [0.01, 1e8]).
-//
-// SOURCES: five keyless, no accounts —
-//   1. Frankfurter (api.frankfurter.dev) — ECB euro reference rates,
-//      ~30 currencies, published daily on ECB business days.
-//   2. open.er-api.com — broad ISO coverage (used in-house by the grid
-//      ingester since 2026-11-20), recomputed daily.
-//   3. fawaz currency-api (cdn.jsdelivr.net/npm/@fawazahmed0/currency-api)
-//      — broadest coverage including crypto codes, recomputed daily.
-//   4. vatcomply (api.vatcomply.com) — ECB-anchored daily fix, ~30 fiat
-//      codes.
-//   5. floatrates (www.floatrates.com) — daily fix snapshots with a
-//      per-currency date label, fiat codes.
-// — plus one KEYED leg, ExchangeRate-API v6 (env EXCHANGE_RATE_API_KEY,
-//   configured through the environment), restricted to the EGP
-//   panel and the NO_DATA coverage fallback. See quoteExchangeRateApi.
-// The three fix-anchored sources and the two recomputed ones snapshot
-// at different times; the served rate is the median of whichever subset
-// covers the pair (see SOURCES below for why the panel is five).
-//
-// FAILOVER DOCTRINE (owner requirement 2026-11-22): all five fire in
-// PARALLEL with a 4 s per-source budget, so a dead source never stalls
-// an answer (wall = winner time, not source count x timeout). A source
-// that errors, times out, or simply does not cover the pair is skipped
-// — coverage differs (Frankfurter has no EGP/AED; the others do).
-// CORRECTNESS OVER AVAILABILITY: when two or more sources cover the
-// pair their implied rates must agree pairwise within
-// AGREEMENT_TOLERANCE (0.5% — the sources snapshot at different times
-// of day, so exact equality is impossible); the served rate is the
-// lower observed MEDIAN. A same-date pool beyond tolerance may serve a
-// selected tight anchor cluster of at least two quotes, whose full span
-// must remain within tolerance, at confidence 0.9 with exclusions disclosed.
-// Without that cluster the handler refuses with FX_SOURCES_DISAGREE.
-// Different-date freshest-source behavior is unchanged. Exactly one covering source answers at confidence 0.9 with
-// the single source named honestly. Zero covering sources is 422
-// NO_DATA for a well-formed but uncovered code (at least one source
-// answered and carried no such pair); malformed codes are 400. ALL
-// sources erroring with none answering at all is 502 FX_SOURCES_DOWN.
-// No rate is ever invented.
-//
-// LIMITATION (named honestly): the straddle rule trusts each source's
-// OWN date label. A source that serves a stale rate under a fresh
-// date label would look "freshest" and win the straddle path alone at
-// 0.9. Same-date cluster selection does not prove that excluded sources
-// are wrong or that a publication event caused their spread; it discloses
-// each exclusion and retains every quote in the receipt.
+// CURRENCY_EXCHANGE_CONVERT and FX_NOW: deterministic reference-rate answers.
+// USD -> EUR/CAD/SEK and FX_NOW share three parallel keyless observations,
+// cached for 55 seconds with original acquisition times and a five-minute
+// observation-age ceiling. Source publication dates are disclosed separately;
+// a recent fetch is never a market-freshness claim. The largest complete-span
+// 0.5% agreeing majority supplies its median (even count: midpoint). No majority
+// refuses. One valid observation answers at reduced confidence.
+// Other currency conversions retain the five-source legacy selection below,
+// including the scoped keyed EGP and uncovered-pair fallback. Every accepted
+// raw response is retained in receipt evidence. No rate is invented.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+import {observeRatePanel,selectObservedRates,FX_MAX_OBSERVATION_AGE_MS} from './fxObservations';
 type FxFailure = { reason: "timeout" | "http_status" | "transport_error"; status?: number };
 const fetchFailures = new WeakMap<object, FxFailure>();
 const FX_LOG_SOURCES = new Set(["frankfurter", "open-er-api", "fawaz", "vatcomply", "floatrates", "exchangerate-api"]);
@@ -399,6 +350,7 @@ export async function handleFx(
     }
   }
 
+  if(from==='USD'&&FX_NOW_CURRENCIES.has(to))return observedFxAnswer(from,to,amount,INTENT);
   // All sources in parallel, each on its own 4 s budget. The wait ends
   // when all have settled, OR when two have answered and the straggler
   // grace expires (a hung source costs ~0.8 s, never its full budget),
@@ -635,22 +587,15 @@ export async function handleFx(
 //
 // Doctrine is identical to handleFx: the same five keyless sources fire
 // in parallel, pairwise agreement within 0.5% with the median served —
-// the median of the tightest agreeing anchor cluster, selected by the
-// SAME shared helper /v1/fx uses (2026-11-23), so the two routes can
-// never diverge — a straddled update serves the freshest dated source
-// alone at 0.9, a same-date disagreement beyond tolerance is refused,
-// never averaged.
-// The keyed ExchangeRate-API leg keeps its EGP-only role and never joins
-// this panel. The served rate is USD -> {currency} (units of {currency}
-// per 1 USD), the contract's own direction.
+// the observed median described at the top of this file. Publication-date
+// differences never let a lone newest quote bypass the majority guard.
+// The keyed adapter is not part of this panel. Direction: USD -> currency.
 const FX_NOW_CURRENCIES = new Set(["EUR", "CAD", "SEK"]);
 const FX_NOW_RATE_MIN = 0.0001;
 const FX_NOW_RATE_MAX = 100000;
 
 
-/** Anchor-cluster selection, shared verbatim by /v1/fx and /v1/fx-now
- * (2026-11-23) so the two routes can never diverge on which quote a
- * within-tolerance pool serves. Input is the pool sorted by rate;
+/** Legacy anchor-cluster selection for conversions outside USD/EUR,CAD,SEK. Input is the pool sorted by rate;
  * returns the serving quote(s) and, when a tight cluster (not the full
  * pool) chose the rate, a disclosure naming the anchor sources and
  * every excluded quote with its distance in bps. */
@@ -824,174 +769,24 @@ export async function handleFxNow(
   }
   const intent = `FX_NOW_${currency}`;
 
-  const legs = [...SOURCES];
-  const settled = await settleWithStragglerGrace(
-    legs.map((s) => observeFxSource(s.name, "USD", currency, () => s.quote("USD", currency))),
-    STRAGGLER_GRACE_MS,
-    SOURCE_TIMEOUT_MS + 500,
-  );
-  const quotes: SourceQuote[] = [];
-  const failedSources: string[] = [];
-  const erroredSources: string[] = [];
-  const uncoveredSources: string[] = [];
-  settled.forEach((outcome, i) => {
-    if (outcome === undefined) warnFxSource(legs[i].name, "USD", currency, "pending_at_selection");
-    if (outcome?.status === "fulfilled" && outcome.value !== null) {
-      quotes.push(outcome.value);
-    } else {
-      failedSources.push(legs[i].name);
-      if (outcome?.status === "fulfilled") {
-        uncoveredSources.push(legs[i].name);
-      } else {
-        erroredSources.push(legs[i].name);
-      }
-    }
-  });
+  return observedFxAnswer('USD',currency,1,intent);
+}
 
-  if (quotes.length === 0) {
-    if (uncoveredSources.length === 0) {
-      throw upstreamUnavailable(
-        "FX_SOURCES_DOWN",
-        `every rate source errored for USD/${currency} (${erroredSources.join(", ")}); refusing to invent a rate`,
-      );
-    }
-    throw unprocessable(
-      "NO_DATA",
-      `no rate source covers USD/${currency} (answered without it: ${uncoveredSources.join(", ")}` +
-        (erroredSources.length ? `; errored: ${erroredSources.join(", ")}` : "") + `)`,
-    );
-  }
-
-  let serving = quotes;
-  let degradedReasons: string[] = [];
-  let straddledUpdate = false;
-  let straddleDetail = "";
-  // Same anchor-cluster selection as /v1/fx (shared helper, 2026-11-23):
-  // the two routes can never diverge on which quote a pool serves.
-  let clusterDetail = "";
-  if (quotes.length >= 2) {
-    const sorted = [...quotes].sort((a, b) => a.rate - b.rate);
-    const lo = sorted[0].rate;
-    const hi = sorted[sorted.length - 1].rate;
-    if ((hi - lo) / lo > AGREEMENT_TOLERANCE) {
-      const byFreshness = [...quotes].sort((a, b) => rateDayKey(b.rateDate) - rateDayKey(a.rateDate));
-      const freshest = byFreshness[0];
-      const stalest = byFreshness[byFreshness.length - 1];
-      if (rateDayKey(freshest.rateDate) > rateDayKey(stalest.rateDate)) {
-        straddledUpdate = true;
-        serving = [freshest];
-        straddleDetail =
-          `sources straddled a rate update: ${freshest.source} read ${freshest.rate} dated ` +
-          `${freshest.rateDate}, ${stalest.source} read ${stalest.rate} dated ${stalest.rateDate}`;
-        degradedReasons = [
-          `sources straddle a rate update for USD/${currency}: serving the freshest ` +
-            `(${freshest.source}=${freshest.rate} dated ${freshest.rateDate}); the stale source read ` +
-            `${stalest.rate} dated ${stalest.rateDate}`,
-        ];
-      } else {
-        const selected = selectForPair(sorted, "USD", currency);
-        const anchor = selected.anchor;
-        // The helper can fall back to the full pool on tied/no clusters.
-        // That fallback must never rescue a genuinely disagreeing pool.
-        if (anchor.length < 2 || anchor.length === sorted.length ||
-            (anchor[anchor.length - 1].rate - anchor[0].rate) / anchor[0].rate > AGREEMENT_TOLERANCE) {
-          const detail = quotes.map((q) => `${q.source}=${q.rate} (${q.rateDate})`).join("; ");
-          throw upstreamUnavailable("FX_SOURCES_DISAGREE",
-            `rate sources disagree on USD/${currency} beyond 0.5% on the SAME date with no selected agreeing pair: ${detail}`);
-        }
-        serving = selected.serving;
-        clusterDetail = selected.clusterDetail;
-        degradedReasons = [
-          `same-date pool exceeds 0.5%; ${clusterDetail}; different intraday snapshots may straddle the ECB publication; publication timing is not independently verified`,
-          ...(failedSources.length ? [`sources unavailable or not covering: ${failedSources.join(", ")}`] : []),
-        ];
-      }
-    } else {
-      const selected = selectForPair(sorted, "USD", currency);
-      serving = selected.serving;
-      clusterDetail = selected.clusterDetail;
-      if (failedSources.length > 0) {
-        degradedReasons = [`sources unavailable or not covering: ${failedSources.join(", ")}`];
-      }
-    }
-  } else {
-    degradedReasons = [
-      `only ${quotes[0].source} covers USD/${currency} (${failedSources.join(", ")} did not answer)`,
-    ];
-  }
-  const winner = serving[0];
-  const rate = clusterDetail.startsWith("largest complete-span") ? serving.reduce((sum, q) => sum + q.rate, 0) / serving.length : winner.rate;
-  if (!Number.isFinite(rate) || rate < FX_NOW_RATE_MIN || rate > FX_NOW_RATE_MAX) {
-    throw upstreamUnavailable(
-      "FX_RATE_OUT_OF_RANGE",
-      `served rate ${rate} is outside the contract range [${FX_NOW_RATE_MIN}, ${FX_NOW_RATE_MAX}]; refusing to serve it`,
-    );
-  }
-  const confidence = quotes.length >= 2 && degradedReasons.length === 0 && !straddledUpdate ? 1.0 : 0.9;
-
-  const receiptEvidence = JSON.stringify({
-    from_currency: "USD",
-    to_currency: currency,
-    rate_served: rate,
-    rate_direction: `units of ${currency} per 1 USD, the contract's own direction`,
-    agreement_tolerance: AGREEMENT_TOLERANCE,
-    sources: quotes.map((q) => ({
-      source: q.source,
-      url: q.url,
-      rate: q.rate,
-      rate_date: q.rateDate,
-      raw_body: q.rawBody,
-    })),
-    failed_sources: failedSources,
-    ...(clusterDetail.startsWith("largest complete-span") ? { independent_window_selection: clusterDetail, median_inputs: serving.map(q => ({source:q.source, rate:q.rate})) } : {}),
-    ...(degradedReasons.some(reason => reason.startsWith("same-date pool")) ? {
-      selection_policy: clusterDetail.startsWith("largest complete-span") ? (serving.length === 2 ? "same-date independent-origin complete-span window median, even midpoint" : "same-date independent-origin complete-span window median, odd observed middle") : "same-date wide pool: selected agreeing anchor cluster, lower observed median",
-      cluster_detail: clusterDetail,
-      degraded_reasons: degradedReasons,
-    } : {}),
-  });
-  const receiptDoc: Receipt = makeReceipt(
-    intent,
-    clusterDetail.startsWith("largest complete-span") ? serving.map(q=>q.url).join(" + ") : winner.url,
-    receiptEvidence,
-    `${quotes.length}/${legs.length} rate sources${degradedReasons.some(reason => reason.startsWith("same-date pool")) ? "; full pool disagreed; selected anchor cluster; exclusions disclosed" : ""}`,
-  );
-  try {
-    await saveReceipt(receiptDoc, receiptEvidence);
-  } catch {
-    throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
-  }
-
-  const fields: Record<string, unknown> = {
-    rate,
-    currency,
-    rate_date: winner.rateDate,
-    sources_used: quotes.map((q) => q.source),
-  };
-
-  return withAnswerClass(envelope(intent, fields, receiptDoc, {
-    answer:
-      `1 USD buys ${rate} ${currency}` +
-      ` (${clusterDetail.startsWith("largest complete-span") ? serving.map(q => q.source).join(" + ") : winner.source}${clusterDetail.startsWith("largest complete-span") && serving.length > 1 && serving[0].rate !== serving[1].rate ? "; median midpoint, not a single-source quote" : ""}, rates dated ${winner.rateDate}` +
-      (straddledUpdate
-        ? `; ${straddleDetail} — the freshest is served; they did NOT agree within 0.5%)`
-        : quotes.length > 1
-          ? (degradedReasons.some(reason => reason.startsWith("same-date pool"))
-              ? `; full source pool did NOT agree within 0.5%; serving the selected agreeing cluster`
-              : clusterDetail.startsWith("largest complete-span") ? `; selected independent-origin window agrees within 0.5%` : `; cross-checked against ${quotes.length} sources agreeing within 0.5%`) +
-            (clusterDetail ? `; ${clusterDetail}` : "") +
-            ")"
-          : "; single covering source)") +
-      ".",
-    verdict: "verified",
-    confidence,
-    source:
-      `Keyless public rate APIs (${quotes.map((q) => q.source).join(" + ")}); ` +
-      `sources snapshot at different times of day, so a 0.5% pairwise agreement tolerance is applied ` +
-      `and a wider same-date split requires a selected agreeing cluster of at least two quotes; otherwise refused, never averaged across clusters` +
-      (clusterDetail
-        ? clusterDetail.startsWith("largest complete-span") ? `; ${clusterDetail}` : `; the served rate is the median of the tightest single-linkage agreeing cluster (5bps), not the full pool`
-        : "") +
-      (degradedReasons.length ? `; degraded: ${degradedReasons.join("; ")}` : ""),
-  }),intent,{currency:currency,source_set:quotes.map(q=>q.source),serving_rule:straddledUpdate||quotes.length===1?"freshest_alone":degradedReasons.some(reason=>reason.startsWith("same-date pool"))?"anchor_cluster":"full_median"});
+async function observedFxAnswer(from:string,to:string,amount:number,intent:string):Promise<Record<string,unknown>>{
+ const sources=SOURCES.slice(0,3).map(s=>({...s,quote:(f:string,t:string)=>observeFxSource(s.name,f,t,()=>s.quote(f,t))}));
+ const panel=await observeRatePanel(from,to,sources);
+ if(!panel.quotes.length){if(panel.uncovered.length)throw unprocessable('NO_DATA','keyless sources answered without this currency pair');throw upstreamUnavailable('FX_SOURCES_DOWN','no usable keyless rate observation; no rate guessed');}
+ if(panel.quotes.some(q=>{const age=Date.now()-Date.parse(q.observedAt);return !Number.isFinite(age)||age<0||age>FX_MAX_OBSERVATION_AGE_MS;}))throw upstreamUnavailable('FX_OBSERVATION_STALE','rate observation exceeds 5 minutes; no stale value served');
+ let selected;try{selected=selectObservedRates(panel.quotes);}catch{throw upstreamUnavailable('FX_SOURCES_DISAGREE','keyless rate panel lacks an agreeing majority within 0.5%; no blended rate served');}
+ const {rate,serving,excluded}=selected;
+ if(!Number.isFinite(rate)||rate<=0||(intent!==INTENT&&(rate<FX_NOW_RATE_MIN||rate>FX_NOW_RATE_MAX)))throw upstreamUnavailable('FX_RATE_OUT_OF_RANGE','observed median outside contract bounds');
+ const dates=serving.map(q=>({source:q.source,rate_date:q.rateDate})),converted=Math.round(amount*rate*1e6)/1e6;
+ const observedAt=serving.map(q=>q.observedAt).sort()[0];
+ const evidence=JSON.stringify({from_currency:from,to_currency:to,amount,rate_served:rate,selection_policy:'median of up to 3 keyless observations; drop outliers only with agreeing majority within 0.5 percent; no majority refuses',observation_cache_ms:55000,max_observation_age_ms:300000,observed_at:observedAt,sources:panel.quotes.map(q=>({source:q.source,url:q.url,raw_body:q.rawBody,rate:q.rate,rate_date:q.rateDate,observed_at:q.observedAt})),serving_sources:serving.map(q=>q.source),excluded_sources:excluded.map(q=>q.source),failed_sources:panel.failed,publication_dates:dates,market_freshness:'source publication dates retained; recently fetched does not imply current market pricing'});
+ const receipt=makeReceipt(intent,serving.map(q=>q.url).join(' + '),evidence,'keyless reference-rate median with publication dates');receipt.fetched_at=observedAt;
+ try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
+ const degraded=serving.length<3||excluded.length>0||panel.failed.length>0;
+ const fields:Record<string,unknown>={rate,rate_date:dates.map(d=>d.rate_date).join('; '),rate_dates:dates,observed_at:observedAt,sources_used:serving.map(q=>q.source)};
+ if(intent===INTENT)Object.assign(fields,{converted_amount:converted,from_currency:from,to_currency:to,amount});else fields.currency=to;
+ return withAnswerClass(envelope(intent,fields,receipt,{answer:`${amount} ${from} = ${converted} ${to}; mid-market reference-rate median ${rate}, from ${serving.length} of 3 keyless observations. Observed ${observedAt}. Upstream rate dates: ${dates.map(d=>d.rate_date).join('; ')}. Sources publish reference snapshots; this is not a five-minute market-freshness claim.`+(excluded.length?` Dropped ${excluded.length} outlier outside the agreeing 0.5 percent majority.`:'')+(panel.failed.length?` ${panel.failed.length} source unavailable or without coverage.`:''),verdict:'verified',confidence:degraded?0.9:1,source:serving.map(q=>q.source+' '+q.url).join(' + ')+(degraded?' (degraded reference panel)':'')}),intent,{currency:to,from_currency:from,source_set:serving.map(q=>q.source),serving_rule:serving.length===1?'freshest_alone':'full_median'});
 }

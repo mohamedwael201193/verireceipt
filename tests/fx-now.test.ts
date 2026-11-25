@@ -1,3 +1,4 @@
+import {resetFxObservationsForTests} from '../src/handlers/fxObservations';
 // Tests for handleFxNow (FX_NOW_EUR / FX_NOW_CAD / FX_NOW_SEK) in
 // src/handlers/currencyConvert.ts. All sources stubbed via global fetch;
 // hermetic DB via a unique scratch SQLITE_PATH per run.
@@ -49,7 +50,7 @@ function stubFxSources(opts: Record<string, StubOpt>): void {
   });
 }
 
-afterEach(() => {
+afterEach(() => { resetFxObservationsForTests();
   vi.unstubAllGlobals();
 });
 
@@ -81,16 +82,17 @@ describe("handleFxNow validation", () => {
 });
 
 describe("handleFxNow answers (stubbed sources)", () => {
-  it("EUR: all five agree -> median served at confidence 1.0, contract direction", async () => {
+  it("EUR: all three agree -> median served at confidence 1.0, contract direction", async () => {
     stubFxSources(bodies("EUR", 0.85));
     const r = await handleFxNow({ currency: "EUR" });
     expect(r.rate).toBe(0.85);
     expect(r.currency).toBe("EUR");
     expect(r.confidence).toBe(1.0);
-    expect(r.rate_date).toBe("2026-11-21");
-    expect((r.sources_used as string[]).length).toBe(5);
+    expect(r.rate_dates).toHaveLength(3);
+    expect(String(r.rate_date)).toContain("2026-11-21");
+    expect((r.sources_used as string[]).length).toBe(3);
     expect((r.receipt as { intent: string }).intent).toBe("FX_NOW_EUR");
-    expect(String(r.answer)).toContain("1 USD buys 0.85 EUR");
+    expect(String(r.answer)).toContain("1 USD = 0.85 EUR");
   });
   it("CAD and SEK stamp their own intents", async () => {
     stubFxSources(bodies("CAD", 1.41));
@@ -113,14 +115,14 @@ describe("handleFxNow answers (stubbed sources)", () => {
     stubFxSources(b);
     await expectApiError(handleFxNow({ currency: "EUR" }), 502, "FX_SOURCES_DISAGREE");
   });
-  it("straddled update serves the freshest dated source alone at 0.9", async () => {
+  it("newer outlier cannot override the agreeing majority", async () => {
     const b = bodies("EUR", 0.85, "2026-11-21");
     b.frankfurter = JSON.stringify({ amount: 1.0, base: "USD", date: "2026-11-22", rates: { EUR: 0.86 } });
     stubFxSources(b);
     const r = await handleFxNow({ currency: "EUR" });
-    expect(r.rate).toBe(0.86);
+    expect(r.rate).toBe(0.85);
     expect(r.confidence).toBe(0.9);
-    expect(String(r.answer)).toContain("straddled");
+    expect(String(r.answer)).toContain("Dropped 1");
   });
   it("a single covering source answers at 0.9 with the source named", async () => {
     const b = bodies("EUR", 0.85);
@@ -138,11 +140,7 @@ describe("handleFxNow answers (stubbed sources)", () => {
     stubFxSources(bodies("EUR", 0.00001));
     await expectApiError(handleFxNow({ currency: "EUR" }), 502, "FX_RATE_OUT_OF_RANGE");
   });
-  it("adopts the same anchor-cluster rule as /v1/fx: the tight fix cluster anchors over drifted recomputed quotes", async () => {
-    // The weekend shape from the fx anchor-cluster review (measured
-    // 2026-11-23): a fix pair and a late-GMT Friday quote vs two drifted
-    // recomputed quotes. /v1/fx serves 0.909918 here; /v1/fx-now must
-    // serve the SAME value so the routes never diverge.
+  it("shares the same three-source median as /v1/fx even across publication dates", async () => {
     const b = bodies("EUR", 0.91);
     b.frankfurter = JSON.stringify({ amount: 1.0, base: "USD", date: "2026-11-20", rates: { EUR: 0.90992 } });
     b.vatcomply = JSON.stringify({ date: "2026-11-20", base: "USD", rates: { EUR: 0.909918 } });
@@ -151,12 +149,11 @@ describe("handleFxNow answers (stubbed sources)", () => {
     b.fawaz = JSON.stringify({ date: "2026-11-22", usd: { eur: 0.91158 } });
     stubFxSources(b);
     const result = await handleFxNow({ currency: "EUR" });
-    expect(result.rate).toBe(0.909918);
+    expect(result.rate).toBe(0.911256);
     expect(result.confidence).toBe(1.0);
-    const ans = String(result.answer);
-    expect(ans).toContain("anchored on the tightest agreeing cluster");
-    expect(ans).toContain("excluded");
-    expect(String(result.source)).toContain("single-linkage");
+    expect(result.sources_used).toHaveLength(3);
+    expect(String(result.answer)).toContain('not a five-minute market-freshness claim');
+
   });
 });
 

@@ -1,0 +1,26 @@
+{
+  "scope": "Self-recorded public source responses",
+  "captures": [
+    {
+      "name": "fix",
+      "url": "https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR,CAD,SEK",
+      "at": "2026-11-25T19:09:01.164Z",
+      "status": 200,
+      "sha256": "0df5caea46caf052c314dcb4fb291b22a4c6d74a7de251b8c647fad1280dd8e0"
+    },
+    {
+      "name": "broad",
+      "url": "https://open.er-api.com/v6/latest/USD",
+      "at": "2026-11-25T19:09:01.636Z",
+      "status": 200,
+      "sha256": "70f9c51845fcee99f92f2b180319c4e73b696f4455ffd782968fbd00826932b2"
+    },
+    {
+      "name": "aggregate",
+      "url": "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json",
+      "at": "2026-11-25T19:09:01.700Z",
+      "status": 200,
+      "sha256": "b7b0524b985eff46919c9a797a39ac85b63cd485c4282e5b034dab6c639842e0"
+    }
+  ]
+}

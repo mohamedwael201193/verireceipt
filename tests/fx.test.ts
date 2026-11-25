@@ -1,3 +1,4 @@
+import {resetFxObservationsForTests} from '../src/handlers/fxObservations';
 // Tests for src/handlers/currencyConvert.ts (CURRENCY_EXCHANGE_CONVERT).
 // Handler paths are driven by a stubbed global fetch (all five rate
 // sources); the LIVE tests at the bottom hit the real keyless APIs.
@@ -95,6 +96,7 @@ interface StubOpts {
  * shortened in tests — the failover assertions prove a hung source
  * never delays the answer). */
 function stubFxSources(opts: StubOpts, counts?: { exchangeRateApi?: number }): void {
+  resetFxObservationsForTests();
   const fetchStub = (url: unknown) => {
     const u = String(url);
     const pick = (body: string | "ERR" | "HANG" | undefined, label: string): Promise<Response> => {
@@ -117,7 +119,7 @@ function stubFxSources(opts: StubOpts, counts?: { exchangeRateApi?: number }): v
   vi.stubGlobal("fetch", fetchStub);
 }
 
-afterEach(() => {
+afterEach(() => { resetFxObservationsForTests();
   vi.unstubAllGlobals();
 });
 
@@ -213,7 +215,7 @@ describe("handleFx validation (stubbed, no network use)", () => {
 });
 
 describe("handleFx answers (stubbed sources)", () => {
-  it("all five sources agree -> median served at confidence 1.0 with a recomputable receipt", async () => {
+  it("all three sources agree -> median served at confidence 1.0 with a recomputable receipt", async () => {
     stubFxSources({
       frankfurter: frankfurterBody(0.91),
       openEr: openErBody(0.9102),
@@ -222,29 +224,22 @@ describe("handleFx answers (stubbed sources)", () => {
       floatrates: floatratesBody(0.91),
     });
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "10" });
-    // Median of [0.91, 0.9102, 0.9099, 0.9101, 0.91] is 0.91.
     expect(result.converted_amount).toBeCloseTo(9.1, 6);
     expect(result.rate).toBeCloseTo(0.91, 6);
     expect(result.verdict).toBe("verified");
     expect(result.confidence).toBe(1.0);
-    expect(result.sources_used).toHaveLength(5);
+    expect(result.sources_used).toHaveLength(3);
     const receipt = result.receipt as { receipt_id: string; raw_response_sha256: string; intent: string };
     expect(receipt.intent).toBe(INTENT);
     expect(receipt.raw_response_sha256).toMatch(SHA256_RE);
-    // Receipt evidence is stored and the hash recomputes over the exact bytes.
     const ev = await getReceiptEvidence(receipt.receipt_id);
     expect(ev.found).toBe(true);
     expect(sha256Hex(ev.evidence!)).toBe(receipt.raw_response_sha256);
     const parsed = JSON.parse(ev.evidence!.toString("utf8")) as { sources: Array<{ raw_body: string }> };
-    expect(parsed.sources).toHaveLength(5);
+    expect(parsed.sources).toHaveLength(3);
   });
 
-  it("weekend split: three fix-dated sources outvote two recomputed ones -> the fix value serves", async () => {
-    // Reproduces the epoch-40 scoring leak: on weekends the public
-    // keyless population is fix-heavy (Friday ECB-style snapshots), so
-    // the network's reference median lands on the fix value. Serving
-    // the five-source median keeps us on that value; the old
-    // three-source panel could land 15-25bps away on EUR/GBP.
+  it("weekend snapshots use the median of the three declared observations", async () => {
     stubFxSources({
       frankfurter: frankfurterBody(0.90992, "2026-11-20"),
       vatcomply: vatcomplyBody(0.909918, "2026-11-20"),
@@ -253,21 +248,14 @@ describe("handleFx answers (stubbed sources)", () => {
       fawaz: fawazBody(0.91158, "2026-11-22"),
     });
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
-    // The tight fix cluster {0.909918, 0.90992, 0.90995} anchors (the two
-    // recomputed sources drift 15-25bps on the weekend); its median 0.90992
-    // serves - closer to the fix than the old full-pool median 0.90995.
-    expect(result.rate).toBeCloseTo(0.90992, 6);
-    expect(result.converted_amount).toBeCloseTo(90.992, 6);
+    expect(result.rate).toBeCloseTo(0.911256, 6);
+    expect(result.converted_amount).toBeCloseTo(91.1256, 6);
     expect(result.verdict).toBe("verified");
     expect(result.confidence).toBe(1.0);
-    expect(result.sources_used).toHaveLength(5);
+    expect(result.sources_used).toHaveLength(3);
   });
 
-  it("weekend live shape (measured 2026-11-23): the ECB fix pair anchors over a recomputed pair", async () => {
-    // Measured live: every top-ranked miner serves the ECB fix (0.909918,
-    // dated Friday). The recomputed sources drift 15-25bps on Sunday and a
-    // late-GMT Friday quote sits between them, so the full-pool median
-    // lands ~9bps off the fix. The tight fix pair must anchor instead.
+  it("weekend-shaped quotes retain all three publication labels", async () => {
     stubFxSources({
       frankfurter: frankfurterBody(0.90992, "2026-11-20"),
       openEr: openErBody(0.911256, "Sun, 22 Nov 2026 00:02:32 +0000"),
@@ -277,30 +265,16 @@ describe("handleFx answers (stubbed sources)", () => {
     });
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
     expect(result.verdict).toBe("verified");
-    expect(result.rate).toBe(0.909918);
-    expect(result.converted_amount).toBeCloseTo(90.9918, 4);
-    // The answer must disclose the anchor cluster and the excluded quotes
-    // with their distances - never silently pool (review, 2026-11-23).
-    const ans = String(result.answer);
-    expect(ans).toContain("anchored on the tightest agreeing cluster");
-    expect(ans).toContain("vatcomply=0.909918");
-    expect(ans).toContain("Frankfurter (ECB reference rates)=0.90992");
-    expect(ans).toContain("excluded floatrates=0.910744 (+9bps)");
-    expect(ans).toContain("open.er-api.com=0.911256 (+15bps)");
-    expect(ans).toContain("fawaz currency-api=0.91158 (+18bps)");
-    expect(String(result.source)).toContain("single-linkage");
-    vi.unstubAllGlobals();
+    expect(result.rate).toBe(0.911256);
+    expect(result.converted_amount).toBeCloseTo(91.1256, 4);
+    expect(result.sources_used).toHaveLength(3);
+    expect(result.confidence).toBe(1);
+    expect(String(result.answer)).toContain('Upstream rate dates:');
+    expect(String(result.answer)).toContain('not a five-minute market-freshness claim');
+
   });
 
-  it("epoch-41 live shape (measured 2026-11-23 00:41Z): a larger recomputed cluster no longer outvotes the fix pair", async () => {
-    // Measured live in epoch 41: the Monday-recomputed sources formed a
-    // THREE-member tight cluster (er-api 0.911134 fresh Monday 00:02:32Z,
-    // fawaz 0.91158016, floatrates 0.91074399) against the Friday ECB fix
-    // pair (frankfurter 0.90992, vatcomply 0.909918). Raw size anchored on
-    // the recomputed side; the reference is fix-heavy (the truth sources
-    // are frankfurter + er-api and every top-ranked miner serves the fix),
-    // so the fix republication pair must anchor. Both sides sit inside the
-    // scorer's 50bps tolerance, so this is alignment, not a score trick.
+  it("mixed-date quotes serve their three-source median", async () => {
     stubFxSources({
       frankfurter: frankfurterBody(0.90992, "2026-11-20"),
       openEr: openErBody(0.911134, "Mon, 23 Nov 2026 00:02:32 +0000"),
@@ -310,22 +284,16 @@ describe("handleFx answers (stubbed sources)", () => {
     });
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
     expect(result.verdict).toBe("verified");
-    expect(result.rate).toBe(0.909918);
-    expect(result.converted_amount).toBeCloseTo(90.9918, 4);
-    const ans = String(result.answer);
-    expect(ans).toContain("anchored on the tightest agreeing cluster");
-    expect(ans).toContain("vatcomply=0.909918");
-    expect(ans).toContain("Frankfurter (ECB reference rates)=0.90992");
-    expect(ans).toContain("excluded floatrates=0.91074399");
-    expect(ans).toContain("open.er-api.com=0.911134");
-    expect(ans).toContain("fawaz currency-api=0.91158016");
-    vi.unstubAllGlobals();
+    expect(result.rate).toBe(0.911134);
+    expect(result.converted_amount).toBeCloseTo(91.1134, 4);
+    expect(result.sources_used).toHaveLength(3);
+    expect(result.confidence).toBe(1);
+    expect(String(result.answer)).toContain('Upstream rate dates:');
+    expect(String(result.answer)).toContain('not a five-minute market-freshness claim');
+
   });
 
   it("all-singleton pool (incl. a fix republication) -> no cluster anchors, pool median serves", async () => {
-    // Reviewer pin (727496d follow-up): the >=2-member gate must hold -
-    // a lone fix republication among mutually distant quotes is not a
-    // cluster, so the full-pool median serves, never the fix value.
     stubFxSources({
       frankfurter: frankfurterBody(0.90992, "2026-11-20"),
       openEr: openErBody(0.911134, "Mon, 23 Nov 2026 00:02:32 +0000"),
@@ -335,15 +303,12 @@ describe("handleFx answers (stubbed sources)", () => {
     });
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
     expect(result.verdict).toBe("verified");
-    // Median of {0.90992, 0.911134, 0.9124}, all >5bps apart.
     expect(result.rate).toBe(0.911134);
     expect(String(result.answer)).not.toContain("anchored on the tightest agreeing cluster");
     vi.unstubAllGlobals();
   });
 
-  it("no fix republication in the pool -> the largest tight cluster anchors, as before", async () => {
-    // frankfurter + vatcomply down: the rule must reduce to the previous
-    // largest-cluster behaviour, never refuse and never invent a fix.
+  it("two remaining agreeing quotes serve their midpoint", async () => {
     stubFxSources({
       frankfurter: "ERR",
       openEr: openErBody(0.911134, "Mon, 23 Nov 2026 00:02:32 +0000"),
@@ -353,14 +318,12 @@ describe("handleFx answers (stubbed sources)", () => {
     });
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
     expect(result.verdict).toBe("verified");
-    // The recomputed trio anchors; its median (lower-middle of
-    // {0.91074399, 0.911134, 0.91158016}) is 0.911134.
-    expect(result.rate).toBe(0.911134);
+    expect(result.rate).toBe((0.911134+0.91158016)/2);
     vi.unstubAllGlobals();
   });
 
-  it("kill-each-source failover: any one source down -> the remaining four answer", async () => {
-    for (const killed of ["frankfurter", "openEr", "fawaz", "vatcomply", "floatrates"] as const) {
+  it("kill-each-source failover: any declared source down -> the remaining two answer", async () => {
+    for (const killed of ["frankfurter", "openEr", "fawaz"] as const) {
       const opts: StubOpts = {
         frankfurter: frankfurterBody(0.91),
         openEr: openErBody(0.9101),
@@ -374,15 +337,15 @@ describe("handleFx answers (stubbed sources)", () => {
       const result = await handleFx({ from_currency: "USD", to_currency: "EUR" });
       const wall = Date.now() - start;
       expect(result.verdict).toBe("verified");
-      expect(result.converted_amount).toBeCloseTo(0.91, 6);
+      expect(result.converted_amount).toBeCloseTo(killed==='openEr'?0.91:0.91005, 6);
       expect(result.confidence).toBe(0.9); // degraded: one source lost
-      expect(result.sources_used).toHaveLength(4);
+      expect(result.sources_used).toHaveLength(2);
       expect(wall).toBeLessThan(1000); // sub-second failover (owner requirement)
       vi.unstubAllGlobals();
     }
   });
 
-  it("a HUNG source never delays the answer (wall < 1 s with one source hanging)", async () => {
+  it("a HUNG source is bounded by the four-second source budget", async () => {
     stubFxSources({
       frankfurter: "HANG",
       openEr: openErBody(0.9101),
@@ -393,12 +356,12 @@ describe("handleFx answers (stubbed sources)", () => {
     const start = Date.now();
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR" });
     const wall = Date.now() - start;
-    expect(result.converted_amount).toBeCloseTo(0.91, 6);
+    expect(result.converted_amount).toBeCloseTo(0.91005, 6);
     expect(result.confidence).toBe(0.9);
     expect(String(result.source)).toContain("degraded");
-    expect(String(result.source)).toContain("frankfurter");
-    expect(result.sources_used).toHaveLength(4);
-    expect(wall).toBeLessThan(1000);
+    expect(String(result.answer)).toContain("1 source unavailable");
+    expect(result.sources_used).toHaveLength(2);
+    expect(wall).toBeLessThan(4500);
   });
 
   it("two sources down -> single covering source answers at confidence 0.9, honestly labeled", async () => {
@@ -443,47 +406,16 @@ describe("handleFx answers (stubbed sources)", () => {
     await expectApiError(handleFx({ from_currency: "USD", to_currency: "EUR" }), 502, "FX_SOURCES_DISAGREE");
   });
 
-  it("sources straddling a rate update -> freshest serves at 0.9 with the split disclosed", async () => {
-    stubFxSources({
-      frankfurter: "ERR",
-      openEr: openErBody(0.95, "Sun, 22 Nov 2026 00:02:32 +0000"), // fresh
-      fawaz: fawazBody(0.90, "2026-11-21"), // stale by one day, 5.3% split
-      vatcomply: "ERR",
-      floatrates: "ERR",
-    });
-    const result = await handleFx({ from_currency: "USD", to_currency: "EUR" });
-    expect(result.rate).toBeCloseTo(0.95, 6);
-    expect(result.confidence).toBe(0.9);
-    expect(String(result.source)).toContain("straddle a rate update");
-    expect(String(result.source)).toContain("0.9");
+  it("publication-date straddle cannot bypass the disagreement guard", async () => {
+    stubFxSources({frankfurter:"ERR",openEr:openErBody(0.95,"Sun, 22 Nov 2026 00:02:32 +0000"),fawaz:fawazBody(0.90,"2026-11-21")});
+    await expectApiError(handleFx({from_currency:"USD",to_currency:"EUR"}),502,"FX_SOURCES_DISAGREE");
   });
-
-  it("straddle answer text makes NO false agreement claim; agreeing run claims agreement (negative control, review 35)", async () => {
-    stubFxSources({
-      frankfurter: "ERR",
-      openEr: openErBody(0.95, "Sun, 22 Nov 2026 00:02:32 +0000"),
-      fawaz: fawazBody(0.90, "2026-11-21"), // 5.3% split, straddled
-      vatcomply: "ERR",
-      floatrates: "ERR",
-    });
-    const straddled = await handleFx({ from_currency: "USD", to_currency: "EUR" });
-    const straddledAnswer = String(straddled.answer);
-    expect(straddledAnswer).not.toContain("agreeing within 0.5%");
-    expect(straddledAnswer).toContain("straddled a rate update");
-    expect(straddledAnswer).toContain("0.95");
-    expect(straddledAnswer).toContain("2026-11-21"); // the stale date is named too
-    expect(straddledAnswer).toContain("did NOT agree within 0.5%");
-    expect(String(straddled.source)).toContain("otherwise refused, never averaged across clusters");
-
-    vi.unstubAllGlobals();
-    stubFxSources({
-      frankfurter: "ERR",
-      openEr: openErBody(0.951, "Sun, 22 Nov 2026 00:02:32 +0000"),
-      fawaz: fawazBody(0.95, "2026-11-21"), // 0.1% split, agreeing
-    });
-    const agreed = await handleFx({ from_currency: "USD", to_currency: "EUR" });
-    expect(String(agreed.answer)).toContain("agreeing within 0.5%");
-    expect(String(agreed.answer)).not.toContain("straddled a rate update");
+  it("an agreeing pair can span publication dates, which remain disclosed", async () => {
+    stubFxSources({frankfurter:"ERR",openEr:openErBody(0.951,"Sun, 22 Nov 2026 00:02:32 +0000"),fawaz:fawazBody(0.95,"2026-11-21")});
+    const out=await handleFx({from_currency:"USD",to_currency:"EUR"});
+    expect(out.rate).toBe((.951+.95)/2);expect(out.confidence).toBe(.9);
+    expect(String(out.answer)).toContain("2026-11-21");expect(String(out.answer)).toContain("Sun, 22 Nov");
+    expect(out.sources_used).toHaveLength(2);
   });
 
   it("agreement boundary: exactly 0.5% apart serves; just over refuses", async () => {
@@ -547,11 +479,11 @@ describe.skipIf(!FX_LIVE)("handleFx live (real keyless rate APIs, no mocks)", ()
 
 describe("keyed ExchangeRate-API sixth leg (EGP panel + NO_DATA fallback only)", () => {
   const KEY = "synthetic-fx-key";
-  afterEach(() => {
+  afterEach(() => { resetFxObservationsForTests();
     delete process.env.EXCHANGE_RATE_API_KEY;
   });
 
-  it("weekend split unchanged with the key set: the leg is never consulted for USD/EUR (fix-dated outvote holds)", async () => {
+  it("keyed leg is never consulted for the major USD/EUR panel", async () => {
     process.env.EXCHANGE_RATE_API_KEY = KEY;
     const counts: { exchangeRateApi?: number } = {};
     stubFxSources(
@@ -566,12 +498,9 @@ describe("keyed ExchangeRate-API sixth leg (EGP panel + NO_DATA fallback only)",
       counts,
     );
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
-    // Anchor-cluster rule (merged 2026-11-23): the tight fix cluster
-    // {0.909918, 0.90992, 0.90995} anchors, median 0.90992 — the keyed
-    // leg staying out of USD/EUR must not change that outcome.
-    expect(result.rate).toBeCloseTo(0.90992, 6);
+    expect(result.rate).toBeCloseTo(0.911256, 6);
     expect(result.confidence).toBe(1.0);
-    expect(result.sources_used).toHaveLength(5);
+    expect(result.sources_used).toHaveLength(3);
     expect(counts.exchangeRateApi ?? 0).toBe(0);
   });
 

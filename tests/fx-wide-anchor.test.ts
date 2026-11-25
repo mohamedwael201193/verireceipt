@@ -1,3 +1,4 @@
+import {resetFxObservationsForTests} from '../src/handlers/fxObservations';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -7,7 +8,7 @@ import { handleFx, handleFxNow, selectAnchorServing } from '../src/handlers/curr
 import { getReceiptEvidence } from '../src/core/storage';
 import { sha256Hex } from '../src/core/receipt';
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {resetFxObservationsForTests();vi.unstubAllGlobals();});
 const names = ['frankfurter','openEr','fawaz','vatcomply','floatrates'] as const;
 const originals = Object.fromEntries(names.map(n => [n, readFileSync(join(__dirname,'fixtures/fx-same-day',n+'.txt'),'utf8')]));
 function stub(bodies: Record<string,string> = originals) {
@@ -22,30 +23,26 @@ async function receiptCheck(r: Record<string,any>) {
  expect(stored.evidence).toBeTruthy();
  expect(sha256Hex(stored.evidence!.toString())).toBe(r.receipt.raw_response_sha256);
  const evidence = JSON.parse(stored.evidence!.toString());
- expect(evidence.sources).toHaveLength(5);
- expect(evidence.cluster_detail).toContain('excluded');
- expect(evidence.degraded_reasons[0]).toContain('same-date pool exceeds 0.5%');
+ expect(evidence.sources).toHaveLength(3);
+ expect(evidence.excluded_sources).toHaveLength(1);
  for (const source of evidence.sources) expect(Object.values(originals)).toContain(source.raw_body);
 }
 describe('same-date wide FX pool, captured 2026-11-23 upstream bodies', () => {
- it.each([['EUR',0.91087802],['SEK',10.272877]] as const)('%s serves the reviewed scoped selection, preserving SEK',async (currency,rate) => {
+ it.each([['EUR',(0.911134+0.90902884)/2],['SEK',(10.221203+10.19342195)/2]] as const)('%s serves the reviewed scoped selection, preserving SEK',async (currency,rate) => {
   stub(); const r = await handleFxNow({currency});
   expect(r.rate).toBe(rate); expect(r.confidence).toBe(0.9);
-  expect(String(r.answer)).toContain('full source pool did NOT agree within 0.5%');
-  expect(String(r.answer)).toContain('Frankfurter'); expect(String(r.answer)).toContain('vatcomply');
-  for (const name of ['open.er-api.com','floatrates','fawaz currency-api']) expect(String(r.answer)).toContain(name);
-  expect(String(r.answer)).toMatch(/-\d+(\.\d+)?bps/);
-  expect(String(r.source)).toContain('publication timing is not independently verified');
+  expect(String(r.answer)).toContain('Dropped 1');
+  expect(String(r.answer)).toContain('not a five-minute market-freshness claim');
   await receiptCheck(r);
  });
  it('conversion applies the identical EUR selection and discloses exclusions',async()=>{
   stub(); const r=await handleFx({from_currency:'USD',to_currency:'EUR',amount:'100'});
-  expect(r.rate).toBe(0.91087802); expect(r.converted_amount).toBe(91.087802); expect(r.confidence).toBe(0.9);
-  expect(String(r.answer)).toContain('full source pool did NOT agree'); await receiptCheck(r);
+  expect(r.rate).toBe((0.911134+0.90902884)/2); expect(r.converted_amount).toBe(91.008142); expect(r.confidence).toBe(0.9);
+  expect(String(r.answer)).toContain('Dropped 1'); await receiptCheck(r);
  });
- it('CAD uses the independent-window even median at confidence 1',async()=>{
-  stub(); const r=await handleFxNow({currency:'CAD'}); expect(r.rate).toBe(1.433138805); expect(r.confidence).toBe(1);
-  expect(String(r.answer)).not.toContain('full source pool did NOT agree');
+ it('CAD uses the three-source median at confidence 1',async()=>{
+  stub(); const r=await handleFxNow({currency:'CAD'}); expect(r.rate).toBe(1.433241); expect(r.confidence).toBe(1);
+  expect(String(r.answer)).not.toContain('Dropped 1');
  });
  it.each(['now','convert'])('%s refuses a pool with no agreeing pair',async kind=>{
   const b: Record<string,string>={};

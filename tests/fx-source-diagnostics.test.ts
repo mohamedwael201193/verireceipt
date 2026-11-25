@@ -1,11 +1,12 @@
+import {resetFxObservationsForTests} from '../src/handlers/fxObservations';
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 const dir = mkdtempSync("/tmp/fx-source-logs-"); process.env.SQLITE_PATH = join(dir, "receipts.sqlite");
 import { handleFx, handleFxNow } from "../src/handlers/currencyConvert";
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); delete process.env.EXCHANGE_RATE_API_KEY; });
+afterEach(() => { resetFxObservationsForTests(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); delete process.env.EXCHANGE_RATE_API_KEY; });
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
-function failureLogs(spy: ReturnType<typeof vi.spyOn>): any[] { return spy.mock.calls.map(row => JSON.parse(String(row[0]))); }
+function failureLogs(spy: ReturnType<typeof vi.spyOn>): any[] { return spy.mock.calls.map((row: unknown[]) => JSON.parse(String(row[0]))); }
 describe("FX source diagnostic logging", () => {
   it("warns structured status/parse/transport reasons without response or error text", async () => {
     const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -16,7 +17,7 @@ describe("FX source diagnostic logging", () => {
       if (u.includes("floatrates")) throw new Error("private transport details");
       return new Response("{}");
     });
-    await expect(handleFx({ from_currency: "USD", to_currency: "EUR" })).rejects.toMatchObject({ status: 422 });
+    await expect(handleFx({ from_currency: "USD", to_currency: "GBP" })).rejects.toMatchObject({ status: 422 });
     const logs = failureLogs(spy);
     expect(logs).toContainEqual(expect.objectContaining({ source: "frankfurter", reason: "http_status", status: 403 }));
     expect(logs).toContainEqual(expect.objectContaining({ source: "vatcomply", reason: "parse_error" }));
@@ -38,6 +39,6 @@ describe("FX source diagnostic logging", () => {
     }));
     const request = handleFxNow({ currency: "EUR" }); const check = expect(request).rejects.toMatchObject({ code: "FX_SOURCES_DOWN", status: 502 });
     await vi.advanceTimersByTimeAsync(4000); await check;
-    expect(failureLogs(spy).filter(row => row.reason === "timeout")).toHaveLength(5);
+    expect(failureLogs(spy).filter(row => row.reason === "timeout")).toHaveLength(3);
   });
 });
