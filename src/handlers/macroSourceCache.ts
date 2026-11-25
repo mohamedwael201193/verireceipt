@@ -46,13 +46,14 @@ export async function readMacroText(url: string, deadline: number): Promise<stri
 
 export async function macroObservation(
   url: string, deadline: number, validate: (body: string) => boolean,
+  canStart: () => boolean = () => true,
 ): Promise<Observation> {
   const prior = cache.get(url);
   const age = prior ? Date.now() - Date.parse(prior.fetchedAt) : Infinity;
   if (prior && age >= 0 && age < FRESH_TTL_MS) return { ...prior };
   let failure: unknown;
   for (let n = 0; n < 2; n++) {
-    if (Date.now() >= deadline) break;
+    if (Date.now() >= deadline || !canStart()) break;
     let body: string;
     try {
       body = await readMacroText(url, deadline);

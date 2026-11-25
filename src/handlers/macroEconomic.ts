@@ -205,6 +205,55 @@ export function resolveCountry(
   return null;
 }
 
+function observeMacro(url: string, deadline: number, requestedYear?: number, canStart?: () => boolean) {
+  return macroObservation(url, deadline, body => {
+      const data=JSON.parse(body);if(!Array.isArray(data)||(data[1]!==null&&!Array.isArray(data[1])))throw Error('invalid macro source payload');
+      const rows=(data[1]??[]) as Array<Record<string,unknown>>;
+      const selected=requestedYear===undefined?rows.filter(r=>/^\d{4}$/.test(String(r?.date))&&Number(r.date)>=1960&&Number(r.date)<=2100&&r.value!==null&&r.value!==undefined).sort((a,b)=>Number(b.date)-Number(a.date))[0]:rows.find(r=>String(r?.date)===String(requestedYear));
+      if(selected?.value!==null&&selected?.value!==undefined&&(typeof selected.value!=='number'||!Number.isFinite(selected.value)))throw Error('invalid macro observation');
+      return typeof selected?.value==='number'&&Number.isFinite(selected.value);
+      }, canStart);
+}
+
+// Boot-only fixed latest observations. Uses the exact request-path validators/cache.
+let bootWarmStarted = false;
+let bootWarmStopped = false;
+export function stopMacroBootWarm(): void { bootWarmStopped = true; }
+export function startMacroBootWarm(): void {
+  if (bootWarmStarted) return;
+  bootWarmStarted = true;
+  bootWarmStopped = false;
+  void warmMacroBoot().catch(() => {});
+}
+export function resetMacroBootWarmForTests(): void {
+  bootWarmStarted = false;
+  bootWarmStopped = true;
+}
+async function warmMacroBoot(): Promise<void> {
+  const deadline = Date.now() + 120000;
+  const pause = () => new Promise<void>(r => { const timer=setTimeout(r,1000); timer.unref?.(); });
+  try {
+    let countries: WbCountry[];
+    try { countries = await loadCatalog(Math.min(deadline,Date.now()+20000)); }
+    catch (error) {
+      if ((error as {retryable?:boolean})?.retryable === false || bootWarmStopped) return;
+      await pause();
+      if (bootWarmStopped || Date.now() >= deadline) return;
+      countries = await loadCatalog(Math.min(deadline,Date.now()+20000));
+    }
+    for (const iso of ['US','DE']) {
+      const country=resolveCountry(countries,iso);
+      if (!country) continue;
+      for (const indicator of ['unemployment rate','inflation','gdp growth','trade']) {
+        await pause();
+        if (bootWarmStopped || Date.now() >= deadline) return;
+        const url = `${WB_BASE}/country/${encodeURIComponent(country.iso2Code || country.id)}/indicator/${SERIES[indicator].id}?mrnev=1&format=json&per_page=100`;
+        await observeMacro(url,Math.min(deadline,Date.now()+20000),undefined,()=>!bootWarmStopped);
+      }
+    }
+  } catch { /* A source failure ends this bounded boot run. No invented cache entry. */ }
+}
+
 export async function handleMacro(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
@@ -260,13 +309,7 @@ export async function handleMacro(
   let rawText: string;
   let observation: { fetchedAt: string; stale?: boolean };
   try {
-    const result=await macroObservation(url,deadline,body=>{
-      const data=JSON.parse(body);if(!Array.isArray(data)||(data[1]!==null&&!Array.isArray(data[1])))throw Error('invalid macro source payload');
-      const rows=(data[1]??[]) as Array<Record<string,unknown>>;
-      const selected=requestedYear===undefined?rows.filter(r=>/^\d{4}$/.test(String(r?.date))&&Number(r.date)>=1960&&Number(r.date)<=2100&&r.value!==null&&r.value!==undefined).sort((a,b)=>Number(b.date)-Number(a.date))[0]:rows.find(r=>String(r?.date)===String(requestedYear));
-      if(selected?.value!==null&&selected?.value!==undefined&&(typeof selected.value!=='number'||!Number.isFinite(selected.value)))throw Error('invalid macro observation');
-      return typeof selected?.value==='number'&&Number.isFinite(selected.value);
-    });rawText=result.body;observation=result;
+    const result=await observeMacro(url,deadline,requestedYear);rawText=result.body;observation=result;
   } catch {
     throw upstreamUnavailable("WORLD_BANK_UNAVAILABLE", "World Bank indicator API is unreachable");
   }

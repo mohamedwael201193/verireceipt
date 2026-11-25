@@ -1,3 +1,4 @@
+import * as macroBoot from '../src/handlers/macroEconomic';
 import { __getGridDemoWarmTimerForTests } from '../src/jobs/gridDemoWarm';
 // Server tests — routing + error mapping via Fastify inject (no network).
 //
@@ -8,7 +9,7 @@ import { __getGridDemoWarmTimerForTests } from '../src/jobs/gridDemoWarm';
 // Note: these tests exercise the REAL handlers (no mocks). A 400 here means
 // the handler validated the missing parameter before touching any upstream.
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { mkdirSync } from "fs";
 import { join, resolve } from "path";
 import type { FastifyInstance } from "fastify";
@@ -359,7 +360,10 @@ describe("main() wiring — TVL hourly timer (round-3 R3, J2 FAIL F1)", () => {
     try {
       expect(__getTvlListsRefreshTimerForTests()).toBeNull();
     expect(__getGridDemoWarmTimerForTests()).toBeNull();
+      const bootWarm=vi.spyOn(macroBoot,"startMacroBootWarm").mockImplementation((()=>new Promise(()=>{})) as any);
       booted = await main();
+      expect(bootWarm).toHaveBeenCalledTimes(1);
+      bootWarm.mockRestore();
       expect(booted.server.listening).toBe(true);
       const addr = booted.server.address();
       expect(addr).not.toBeNull();

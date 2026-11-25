@@ -1,0 +1,11 @@
+# Bounded macro boot warm
+
+An unawaited call after listen starts one process-local boot warm. It first loads the real country catalog, with at most one recovery after a one-second pause. It then warms latest unemployment, inflation, GDP growth and trade for US and DE, sequentially, paced at least one second between observations. These fixed countries are operational warm targets, not a claim about user interest. No explicit historical years are guessed.
+
+The run shares a120second start budget. Each observation uses at most20seconds clipped to that remainder, the existing18second per-attempt ceiling and at most one retry. At most two catalog calls and sixteen indicator attempts can start. A catalog429/4xx ends the warm with no retry. A series failure ends the warm. There is no periodic refresh or restart loop. Startup does not wait for source success. Shutdown blocks subsequent starts; already active work remains under existing source deadlines/ownership.
+
+Both boot and request paths use the same source helper, catalog TTL, exact country/series/year-selector URL key, numeric validation,15minute fresh cache,24hour stale limit,128-entry cap and8underlying-read cap. Boot does not save receipts or invent observations. Actual requests still require receipt persistence. Null data never becomes a good entry. Shutdown does not cancel an already in-flight observation; it can fill valid cache bytes within its own deadline before the process ends.
+
+A cold request arriving before warm success can still fail. Prewarm reduces cold exposure but does not promise startup readiness. No production timing or score improvement is claimed. Tests replay existing captured observation bytes with synthetic faults/clocks; the warm-target table test uses those bytes only for transport/cache behavior, not as real measurements for other country/series combinations.
+
+V2 passes a boot-only start predicate through the shared observation workflow. It is rechecked before each attempt, including after retry backoff, so shutdown blocks a pending retry. Normal request callers retain the default always-allowed predicate. Separate boundary coverage proves the last in-flight read aborts at the120second shared deadline rather than overrunning to its own18second cap. Both guards have isolated RED mutants.

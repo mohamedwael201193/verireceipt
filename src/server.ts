@@ -1,3 +1,4 @@
+import {startMacroBootWarm,stopMacroBootWarm} from './handlers/macroEconomic';
 import {handleReturnPolicy} from './handlers/returnPolicy';
 import {answerDiagnostics} from "./core/answerClass";
 import { refreshSourceReachability, sourceReachabilitySnapshot } from "./core/sourceReachability";
@@ -576,8 +577,9 @@ export async function main(): Promise<FastifyInstance> {
   const rawPort = Number(process.env.PORT ?? "10000");
   const port = Number.isFinite(rawPort) && rawPort > 0 ? Math.floor(rawPort) : 10000;
   let stopGridDemoWarm = () => {};
-  app.addHook("onClose", async () => { stopGridDemoRefreshes(); stopGridDemoWarm(); });
+  app.addHook("onClose", async () => { stopGridDemoRefreshes(); stopGridDemoWarm(); stopMacroBootWarm(); });
   await app.listen({ host: "0.0.0.0", port });
+  startMacroBootWarm();
   console.log(`verireceipt listening on 0.0.0.0:${port}`);
   // Grid ingester starts AFTER listen (A5-fix2, 2026-11-20, J2-R2 F1d):
   // startIngester() fires its first multi-source pull immediately, and
@@ -598,6 +600,7 @@ export async function main(): Promise<FastifyInstance> {
       if (ingesterTimer) clearInterval(ingesterTimer);
       stopGridDemoRefreshes();
       stopGridDemoWarm();
+      stopMacroBootWarm();
       stopTvlListsRefreshTimer();
       stopStoragePinger();
     },
