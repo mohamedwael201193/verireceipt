@@ -19,8 +19,8 @@
 //   are the repo's own test fixtures (tests/tx.test.ts).
 // - grid zone TH_NP15_GEN-APND + a 2h-ago interval returns live CAISO LMP.
 
-import { getCorporateRegistry, getFilings, getGridPrice, getOnchainMetric, getPoolLiquidity, getReserveAttestation, getRoute, getSanctionsScreen, getStockPrice, getTokenHolders, getTokenSupply, getTvl, getTx } from "../../lib/api";
-import type { CorporateRegistryResponse, FilingsResponse, GridPriceResponse, LiveReceipt, OnchainMetricResponse, PoolLiquidityResponse, ProbeOutcome, ReserveAttestationResponse, RouteResponse, SanctionsScreenResponse, StockPriceResponse, TokenHoldersResponse, TokenSupplyResponse, TvlResponse, TxResponse } from "./types";
+import { getCorporateRegistry, getCryptoPrice, getFilings, getGridPrice, getMiningHashprice, getOnchainMetric, getPoolLiquidity, getReserveAttestation, getRoute, getSanctionsScreen, getStockPrice, getTokenHolders, getTokenSupply, getTvl, getTx } from "../../lib/api";
+import type { CorporateRegistryResponse, CryptoPriceResponse, FilingsResponse, GridPriceResponse, LiveReceipt, MiningHashpriceResponse, OnchainMetricResponse, PoolLiquidityResponse, ProbeOutcome, ReserveAttestationResponse, RouteResponse, SanctionsScreenResponse, StockPriceResponse, TokenHoldersResponse, TokenSupplyResponse, TvlResponse, TxResponse } from "./types";
 import { formatUsd, formatUsdPrecise, isVerified, probe, recentGridInterval } from "./utils";
 
 export type MissionId = "m13" | "m12" | "m03" | "m04" | "m01" | "m02" | "m14";
@@ -134,6 +134,19 @@ export function parseThreshold(scope: string): number | null {
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
+/**
+ * The user's fleet efficiency in J/TH, typed into the interval field as
+ * "J/TH 25". null when absent or not a positive finite number — then no
+ * margin decision is derived (same QA-03 rule as the m12 curtailment
+ * threshold: no silent default drives a RUN/CURTAIL outcome).
+ */
+export function parseJoulesPerTh(scope: string): number | null {
+  const m = /\bJ\s*\/\s*TH\s*(\d{1,4}(?:\.\d{1,4})?)(?![\d.])/i.exec(scope);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 /** form_type actually sent, parsed from the request URL ("" if none). */
 function filingsFormOf(result: DeskCheckResult | undefined): string {
   const url = result?.receipt?.requestUrl;
@@ -156,7 +169,8 @@ function scoreOf(passes: number, total: number): number {
 }
 
 function direct(path: string, params: Record<string, string>): string {
-  return `https://verireceipt.onrender.com${path}?${new URLSearchParams(params).toString()}`;
+  const q = new URLSearchParams(params).toString();
+  return `https://verireceipt.onrender.com${path}${q ? `?${q}` : ""}`;
 }
 
 export const DESK_PRESETS: DeskPreset[] = [
@@ -891,6 +905,150 @@ export const DESK_PRESETS: DeskPreset[] = [
             verdict: "RUN",
             score: scoreOf(passes, 2),
             headline: `RUN: live LMP ${priceText}${zoneSuffix} is at or below your ${formatUsdPrecise(threshold)} / MWh threshold.`,
+            why,
+          };
+    },
+  },
+  {
+    id: "m12-margin",
+    mission: "m12",
+    tag: "M12 · MINING POWER",
+    title: "Hashprice Margin Allocation",
+    sub: "Live hashprice, BTC spot and grid LMP; set a fleet J/TH for a run/curtail margin outcome",
+    inputs: {
+      entity: "Bitcoin mining fleet",
+      ref: "TH_NP15_GEN-APND",
+      // QA-03 mirror: no fleet efficiency by default — the outcome is
+      // DATA VERIFIED, never an operational approval. Type e.g. "J/TH 25"
+      // into the interval field to evaluate an estimated margin against
+      // live measured inputs.
+      scope: `${recentGridInterval()} · no fleet J/TH`,
+    },
+    buildChecks: (inputs) => {
+      // No silent defaults (see m13-defi): an unparseable/missing
+      // interval runs empty instead of quietly substituting "2h ago".
+      const segs = splitSegments(inputs.scope);
+      const parsed = segs[0] && !Number.isNaN(Date.parse(segs[0])) ? segs[0] : "";
+      return [
+        {
+          label: "BTC hashprice",
+          intent: "MINING_HASHPRICE_VERIFY_GENERAL",
+          query: "current tip · weekly measured basis",
+          requestUrl: direct("/v1/mining-hashprice", {}),
+          run: (signal) => probe((s) => getMiningHashprice(s), signal),
+        },
+        {
+          label: "BTC spot",
+          intent: "CRYPTO_PRICE_USD",
+          query: "symbol=BTC",
+          requestUrl: direct("/v1/crypto-price", { symbol: "BTC" }),
+          run: (signal) => probe((s) => getCryptoPrice({ symbol: "BTC" }, s), signal),
+        },
+        {
+          label: "Grid LMP",
+          intent: "GRID_POWER_PRICE_GENERAL",
+          query: `zone=${inputs.ref} · ${parsed}`,
+          requestUrl: direct("/v1/grid-price", { node_or_zone: inputs.ref, interval_start: parsed }),
+          run: (signal) => probe((s) => getGridPrice({ node_or_zone: inputs.ref, interval_start: parsed }, s), signal),
+        },
+      ];
+    },
+    evaluate: (results, inputs) => {
+      const jPerTh = parseJoulesPerTh(inputs?.scope ?? "");
+      const [hashprice, spot, grid] = results;
+      const hpBody = hashprice ? bodyOf<MiningHashpriceResponse>(hashprice) : null;
+      const hpOk =
+        !!hashprice &&
+        isVerified(hashprice.receipt) &&
+        typeof hpBody?.hashprice_sats_per_ph_day === "number" &&
+        Number.isFinite(hpBody.hashprice_sats_per_ph_day) &&
+        hpBody.hashprice_sats_per_ph_day > 0;
+      const spotBody = spot ? bodyOf<CryptoPriceResponse>(spot) : null;
+      const spotOk =
+        !!spot &&
+        isVerified(spot.receipt) &&
+        typeof spotBody?.price_usd === "number" &&
+        Number.isFinite(spotBody.price_usd) &&
+        spotBody.price_usd > 0;
+      const gridBody = grid ? bodyOf<GridPriceResponse>(grid) : null;
+      // A negative LMP (a negative-price hour) is a genuine verified
+      // price: it widens the estimated margin, it is never a failure.
+      const gridOk = !!grid && isVerified(grid.receipt) && typeof gridBody?.lmp_usd_per_mwh === "number" && Number.isFinite(gridBody.lmp_usd_per_mwh);
+      const why: WhyCard[] = [
+        {
+          k: "Hashprice (live)",
+          v: hpOk
+            ? `${hpBody!.hashprice_sats_per_ph_day.toLocaleString("en-US")} sats/PH/day${typeof hpBody!.block_height === "number" ? ` · tip ${hpBody!.block_height}` : ""}`
+            : "no live hashprice returned",
+          ok: hpOk,
+        },
+        {
+          k: "BTC Spot (live)",
+          v: spotOk ? `${formatUsdPrecise(spotBody!.price_usd)} / BTC` : "no live BTC spot returned",
+          ok: spotOk,
+        },
+        {
+          k: "Grid LMP (live)",
+          v:
+            grid && isVerified(grid.receipt) && typeof gridBody?.lmp_usd_per_mwh === "number" && Number.isFinite(gridBody.lmp_usd_per_mwh)
+              ? `${formatUsdPrecise(gridBody.lmp_usd_per_mwh)} / MWh${typeof gridBody.node_or_zone === "string" && gridBody.node_or_zone ? ` · ${gridBody.node_or_zone}` : ""}`
+              : "no live LMP returned",
+          ok: gridOk,
+        },
+        {
+          k: "Fleet Efficiency",
+          v:
+            jPerTh === null
+              ? "No fleet J/TH set — the inputs are reported live; no margin decision is derived. Add e.g. \"J/TH 25\" to the interval field."
+              : `Your fleet ${jPerTh} J/TH: estimated margin = hashprice × BTC spot − LMP × ${Number((jPerTh * 0.024).toFixed(6))} MWh/PH/day. An allocation screen from live measured inputs, never a dispatch order; no real energy is dispatched.`,
+          ok: "na",
+        },
+        {
+          k: "Power Price Basis",
+          // Two different screens, two different power prices: the desk's
+          // hashrate-margin template prices power at a DECLARED $60/MWh
+          // site contract assumption; this panel prices it at the live
+          // grid LMP. The margins are not the same number.
+          v: "This panel prices power at the live grid LMP. The desk's hashrate-margin template uses a declared $60/MWh site contract assumption — the two margins are different screens and differ by design.",
+          ok: "na",
+        },
+      ];
+      const passes = [hpOk, spotOk, gridOk].filter(Boolean).length;
+      if (!hpOk || !spotOk || !gridOk) {
+        return {
+          verdict: "HOLD",
+          score: scoreOf(passes, 3),
+          headline: "One or more live inputs did not verify — review the rows before acting.",
+          why,
+        };
+      }
+      const hpText = `${hpBody!.hashprice_sats_per_ph_day.toLocaleString("en-US")} sats/PH/day`;
+      const lmpText = `${formatUsdPrecise(gridBody!.lmp_usd_per_mwh)} / MWh`;
+      if (jPerTh === null) {
+        return {
+          verdict: "VERIFIED",
+          score: scoreOf(passes, 3),
+          headline: `Data verified: hashprice ${hpText}, BTC ${formatUsdPrecise(spotBody!.price_usd)}, LMP ${lmpText}. No fleet J/TH set — no margin decision.`,
+          why,
+        };
+      }
+      const revenue = (hpBody!.hashprice_sats_per_ph_day * spotBody!.price_usd) / 1e8;
+      // Round the energy product to 6dp (well below the 2dp USD display)
+      // so float noise never reaches the card text or the margin sign.
+      const powerCost = gridBody!.lmp_usd_per_mwh * Number((jPerTh * 0.024).toFixed(6));
+      const margin = revenue - powerCost;
+      const marginText = `${formatUsdPrecise(margin)} / PH/day (revenue ${formatUsdPrecise(revenue)} − power ${formatUsdPrecise(powerCost)})`;
+      return margin > 0
+        ? {
+            verdict: "RUN",
+            score: scoreOf(3, 3),
+            headline: `RUN: estimated margin ${marginText}. An allocation screen from live measured inputs, never a dispatch order; no real energy is dispatched.`,
+            why,
+          }
+        : {
+            verdict: "CURTAIL",
+            score: scoreOf(3, 3),
+            headline: `CURTAIL: estimated margin ${marginText}. An allocation screen from live measured inputs, never a dispatch order; no real energy is dispatched.`,
             why,
           };
     },

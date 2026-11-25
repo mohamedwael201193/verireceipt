@@ -6,6 +6,8 @@
 // lib's internal type names beyond the mandated imports.
 
 import type {
+  CryptoPriceResponse,
+  MiningHashpriceResponse,
   FilingsResponse,
   CorporateRegistryResponse,
   GridPriceResponse,
@@ -25,6 +27,8 @@ import type {
 
 export type {
   CorporateRegistryResponse,
+  CryptoPriceResponse,
+  MiningHashpriceResponse,
   FilingsResponse,
   GridPriceResponse,
   HealthResponse,

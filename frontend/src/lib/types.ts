@@ -187,6 +187,19 @@ export interface GridPriceResponse extends ReceiptedResponse {
   currency: string;
 }
 
+export interface MiningHashpriceResponse extends ReceiptedResponse {
+  hashprice_sats_per_ph_day: number;
+  block_height?: number;
+  hashrate_eh_s?: number;
+  hashprice_usd_per_ph_day?: number;
+}
+
+export interface CryptoPriceResponse extends ReceiptedResponse {
+  symbol: string;
+  price_usd: number;
+  quote_currency?: string;
+}
+
 export interface ValidatorResponse extends ReceiptedResponse {
   validator_index: string | number;
   effective_balance: number;
