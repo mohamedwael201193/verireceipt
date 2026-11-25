@@ -68,6 +68,40 @@ describe('filing primary-source semantics', () => {
  ])('rejects right count with contradictory returned source assertions: %j',async(result)=>{
   const r=await verifyFilingSource(input({result}),opts(fixture()));expect(r.status).toBe('failed');
  });
+ it('accepts a padded or numeric top-level CIK spelling of the same issuer',async()=>{
+  for(const cikValue of ['0000987654',987654]){
+    expect((await verifyFilingSource(input({result:{filing_count:1,cik:cikValue}}),opts(fixture()))).status).toBe('verified');
+  }
+ });
+ it.each(['0000987655','CIK 987654','987654.0','',-987654,'0',' 987654'])('rejects a top-level CIK that is not the same positive integer: %j',async(cikValue)=>{
+  expect((await verifyFilingSource(input({result:{filing_count:1,cik:cikValue}}),opts(fixture()))).status).toBe('failed');
+ });
+ it('accepts a padded filings_detail CIK of the same issuer, with no top-level cik',async()=>{
+  const result={filing_count:1,filings_detail:[{form:'8-K',filing_date:'2019-02-03',cik:'0000987654',accession_number:accession(1)}]};
+  expect((await verifyFilingSource(input({result}),opts(fixture()))).status).toBe('verified');
+ });
+ it('rejects a padded filings_detail CIK of a different issuer, with no top-level cik',async()=>{
+  const result={filing_count:1,filings_detail:[{form:'8-K',filing_date:'2019-02-03',cik:'0000987655',accession_number:accession(1)}]};
+  expect((await verifyFilingSource(input({result}),opts(fixture()))).status).toBe('failed');
+ });
+ const recentRow=(over:Record<string,unknown>={})=>({agency:'SEC',type:'8-K',date:'2019-02-03',title:'SEC Form 8-K (2019-02-03) - Example Corp',url:'https://www.sec.gov/Archives/edgar/data/987654/000098765419000001/0000987654-19-000001-index.htm',...over});
+ it('accepts recent filing rows that name the filing date as date instead of publication_date',async()=>{
+  expect((await verifyFilingSource(input({result:{filing_count:1,recent:[recentRow()]}}),opts(fixture()))).status).toBe('verified');
+  expect((await verifyFilingSource(input({result:{filing_count:1,recent:[recentRow({publication_date:'2019-02-03'})]}}),opts(fixture()))).status).toBe('verified');
+ });
+ it('accepts a padded recent-row CIK of the same issuer, with no top-level cik',async()=>{
+  expect((await verifyFilingSource(input({result:{filing_count:1,recent:[recentRow({cik:'0000987654'})]}}),opts(fixture()))).status).toBe('verified');
+ });
+ it('rejects a padded recent-row CIK of a different issuer, with no top-level cik',async()=>{
+  expect((await verifyFilingSource(input({result:{filing_count:1,recent:[recentRow({cik:'0000987655'})]}}),opts(fixture()))).status).toBe('failed');
+ });
+ it.each([
+  recentRow({publication_date:'2019-02-04'}),
+  recentRow({date:'2019-02-04'}),
+  recentRow({foo:1}),
+ ])('rejects recent rows with conflicting dates or unknown keys: %j',async(row)=>{
+  expect((await verifyFilingSource(input({result:{filing_count:1,recent:[row]}}),opts(fixture()))).status).toBe('failed');
+ });
  it('rejects issuer mismatch, not just matching count',async()=>{
   const f=fixture({root:{cik:123,name:'Other Corp',filings:{recent:rows(),files:[]}}});
   expect((await verifyFilingSource(input(),opts(f))).status).toBe('failed');

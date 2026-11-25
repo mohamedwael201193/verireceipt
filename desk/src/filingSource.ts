@@ -57,9 +57,16 @@ function returnedAssertions(result:Record<string,unknown>, matching:Filing[], ci
     if(claim)return Number(claim[2])===cik&&nameKey(claim[1])===nameKey(issuer);
     return nameKey(value)===nameKey(issuer)||value===String(cik);
   };
+  // SEC itself zero-pads CIKs to ten digits; a padded or numeric spelling
+  // of the same number is the same identifier, never a mismatch.
+  const cikMatches=(value:unknown):boolean=>{
+    if(typeof value!=='string'&&typeof value!=='number')return false;
+    const s=String(value);
+    return /^\d{1,10}$/.test(s)&&Number(s)===cik;
+  };
   if(result.form_type!==undefined&&result.form_type!==form)return false;
   if(result.entity!==undefined&&result.entity!==queryEntity&&!issuerMatches(result.entity))return false;
-  if(result.cik!==undefined&&String(result.cik)!==String(cik))return false;
+  if(result.cik!==undefined&&!cikMatches(result.cik))return false;
   const linkMatches=(value:unknown,expectedAccession?:string):boolean=>{
     if(typeof value!=='string')return false;
     try{
@@ -93,13 +100,17 @@ function returnedAssertions(result:Record<string,unknown>, matching:Filing[], ci
     if(!Array.isArray(result.recent))return false;
     for(const raw of result.recent){
       let item:Record<string,unknown>;try{item=object(raw);}catch{return false;}
-      if(Object.keys(item).some(k=>!['agency','publication_date','title','type','url','accession','accession_number','cik','entity','report_date'].includes(k)))return false;
+      // Providers variously name the filing date 'publication_date' or
+      // 'date'; both are accepted, and when both are present they must agree.
+      if(Object.keys(item).some(k=>!['agency','publication_date','date','title','type','url','accession','accession_number','cik','entity','report_date'].includes(k)))return false;
       if(item.agency!==undefined&&item.agency!=='SEC')return false;
-      if(item.type!==form||!isoDate(item.publication_date)||!linkMatches(item.url))return false;
-      const candidates=matching.filter(row=>row.date===item.publication_date&&linkMatches(item.url,row.accession));
+      const pubDate=item.publication_date??item.date;
+      if(item.publication_date!==undefined&&item.date!==undefined&&item.publication_date!==item.date)return false;
+      if(item.type!==form||!isoDate(pubDate)||!linkMatches(item.url))return false;
+      const candidates=matching.filter(row=>row.date===pubDate&&linkMatches(item.url,row.accession));
       if(candidates.length!==1||!titleMatches(item.title,candidates[0]))return false;
       const row=candidates[0];
-      if(item.accession!==undefined&&item.accession!==row.accession||item.accession_number!==undefined&&item.accession_number!==row.accession||item.cik!==undefined&&String(item.cik)!==String(cik)||item.entity!==undefined&&!issuerMatches(item.entity)||item.report_date!==undefined&&item.report_date!==row.reportDate)return false;
+      if(item.accession!==undefined&&item.accession!==row.accession||item.accession_number!==undefined&&item.accession_number!==row.accession||item.cik!==undefined&&!cikMatches(item.cik)||item.entity!==undefined&&!issuerMatches(item.entity)||item.report_date!==undefined&&item.report_date!==row.reportDate)return false;
     }
   }
   if(Array.isArray(result.filings_detail))for(const raw of result.filings_detail){
@@ -111,7 +122,7 @@ function returnedAssertions(result:Record<string,unknown>, matching:Filing[], ci
     if((detail.accession!==undefined&&detail.accession!==accession)||(detail.accession_number!==undefined&&detail.accession_number!==accession)||detail.form!==row.form||detail.filing_date!==row.date)return false;
     if(detail.report_date!==undefined&&detail.report_date!==row.reportDate)return false;
     if(detail.title!==undefined&&!titleMatches(detail.title,row))return false;
-    if(detail.cik!==undefined&&String(detail.cik)!==String(cik))return false;
+    if(detail.cik!==undefined&&!cikMatches(detail.cik))return false;
     if(detail.entity!==undefined&&!issuerMatches(detail.entity))return false;
     if(detail.url!==undefined&&!linkMatches(detail.url,accession))return false;
   }
