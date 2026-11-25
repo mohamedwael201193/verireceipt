@@ -1,3 +1,6 @@
+import {financialCoin} from './financialCoins';
+import {internationalEquity} from './financialInternational';
+import {withAnswerClass} from '../core/answerClass';
 import {fetchYahooBody} from './yahooTransport';
 import {cachedSecFinancial,type SecObservation} from './secFinancialCache';
 // FINANCIAL_DATA_GENERAL — GET /v1/financial-data?asset=<company|ticker|BTC|ETH|SOL>
@@ -12,8 +15,9 @@ import {cachedSecFinancial,type SecObservation} from './secFinancialCache';
 //
 // US equities use SEC-reported shares x Yahoo chart price. Company names
 // resolve through SEC titles, with Yahoo search as a discovery fallback;
-// all resolved tickers must still exist in the SEC index. Ambiguity refuses.
-// BTC retains its emission-schedule methodology. ETH and SOL use CoinPaprika
+// non-SEC exact equity matches use reported ordinary shares, chart price and FX.
+// Ambiguous matches are never selected.
+// BTC retains its emission-schedule methodology. Other supported crypto use CoinPaprika
 // aggregated market cap and rolling 24h volume, disclosed as a different
 // methodology. Equity session volume is NOT rolling 24h volume.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
@@ -33,24 +37,19 @@ async function fetchText(url: string, ua: string = UA): Promise<string> {
   const yahoo = new URL(url).hostname === "query1.finance.yahoo.com";
   if(yahoo)return fetchYahooBody(url,assertYahooAllowed,noteYahooRateLimit);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
+  let timer:ReturnType<typeof setTimeout>;
   try {
-    const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": ua, Accept: "application/json" } });
+    const io=(async()=>{const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": ua, Accept: "application/json" } });
     if (yahoo && res.status === 429) noteYahooRateLimit(res.headers.get("retry-after"));
     if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), {status:res.status});
-    return await res.text();
+    return await res.text();})();
+    return await Promise.race([io,new Promise<never>((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error("financial source deadline"));},SOURCE_TIMEOUT_MS);})]);
   } finally {
-    clearTimeout(timer);
+    clearTimeout(timer!);
   }
 }
 
 interface SecEntry { cik_str?: number; ticker?: string; title?: string }
-const CRYPTO: Record<string, { id: string; symbol: string; name: string }> = {
-  ETH: { id: "eth-ethereum", symbol: "ETH", name: "Ethereum" },
-  ETHEREUM: { id: "eth-ethereum", symbol: "ETH", name: "Ethereum" },
-  SOL: { id: "sol-solana", symbol: "SOL", name: "Solana" },
-  SOLANA: { id: "sol-solana", symbol: "SOL", name: "Solana" },
-};
 const companyName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
   .replace(/(?:\s+(?:inc|incorporated|corp|corporation|co|company|ltd|limited))+$/, "").trim();
 
@@ -128,14 +127,14 @@ export function latestShares(raw: string): { val: number; end: string; filed: st
   return { val: best.val as number, end: String(best.end), filed: String(best.filed ?? "unknown"), accn: String(best.accn ?? "unknown") };
 }
 
-export async function handleFinancialData(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+async function financialData(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const asset = query.asset?.trim();
   if (!asset) throw badRequest("MISSING_PARAM", "asset is required: a US-listed company/ticker, BTC, ETH or SOL");
   if (new TextEncoder().encode(asset).length > 256) throw badRequest("BAD_ASSET", "asset must be at most 256 UTF-8 bytes");
   const fetchedAt = new Date().toISOString();
   const upper = asset.toUpperCase();
 
-  if (CRYPTO[upper]) return aggregatedCrypto(asset, CRYPTO[upper]);
+  const crypto=financialCoin(asset);if(crypto)return aggregatedCrypto(asset,crypto);
 
   if (upper === "BTC" || upper === "BITCOIN") {
     let spotBody: string, tipBody: string;
@@ -199,20 +198,19 @@ export async function handleFinancialData(query: Record<string, string | undefin
   const searchUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(asset.trim().toLowerCase().replace(/\s+/g," "))}&quotesCount=10&newsCount=0`;
   let searchObservation: EquityObservation | undefined;
   if (!row) {
-    const resolveSearch = (body: string): SecEntry => {
+    const resolveSearch = (body: string): SecEntry | undefined => {
       let quotes: { symbol?: string; quoteType?: string; shortname?: string; longname?: string }[];
       try {
         const parsed = JSON.parse(body);
         if (!Array.isArray(parsed.quotes)) throw new Error("invalid quotes");
         quotes = parsed.quotes;
       } catch { throw upstreamUnavailable("ASSET_SEARCH_UNAVAILABLE", "Yahoo search returned an invalid quote list"); }
-      const symbols = new Set(quotes.filter((q) => q && q.quoteType === "EQUITY" &&
-        [q.symbol, q.shortname, q.longname].some((n) => typeof n === "string" && companyName(n) === companyName(asset)))
-        .map((q) => q.symbol?.toUpperCase()));
-      const candidates = entries.filter((e) => symbols.has(e.ticker?.toUpperCase()));
-      if (candidates.length > 1) throw unprocessable("AMBIGUOUS_ASSET", "Yahoo search resolved multiple SEC-listed equities; supply an exact ticker");
-      if (!candidates[0] || typeof candidates[0].cik_str !== "number") throw unprocessable("UNSUPPORTED_ASSET", "Yahoo search had no unambiguous SEC-listed equity");
-      return candidates[0];
+      const candidates=quotes.filter(q=>q&&q.quoteType==='EQUITY'&&typeof q.symbol==='string'&&/^[A-Za-z0-9^][A-Za-z0-9.^=-]{0,29}$/.test(q.symbol)&&[q.symbol,q.shortname,q.longname].some(n=>typeof n==='string'&&companyName(n)===companyName(asset)));
+      const unique=[...new Map(candidates.map(q=>[q.symbol!.toUpperCase(),q])).values()];
+      if(unique.length>1)throw unprocessable('AMBIGUOUS_ASSET','multiple exact equity search matches; supply an exact ticker');
+      if(!unique[0])return undefined;
+      const quote=unique[0],sec=entries.find(e=>e.ticker?.toUpperCase()===quote.symbol!.toUpperCase());
+      return sec??{ticker:quote.symbol!.toUpperCase(),title:quote.longname??quote.shortname??quote.symbol};
     };
     try {
       searchObservation = await cachedYahooSearch(asset, () => fetchText(searchUrl), body => { resolveSearch(body); });
@@ -223,9 +221,13 @@ export async function handleFinancialData(query: Record<string, string | undefin
       throw upstreamUnavailable("ASSET_SEARCH_UNAVAILABLE", "SEC title/ticker had no match and Yahoo search is unavailable");
     }
   }
-  if (!row || typeof row.cik_str !== "number") {
-    throw unprocessable("UNSUPPORTED_ASSET", `No unambiguous SEC-listed equity for "${asset}" after SEC title/ticker and Yahoo search; crypto coverage is BTC, ETH and SOL only`);
+  if(!row){
+    const evidence=JSON.stringify({requested_asset:asset,reason_code:'unsupported_asset',search_acquired_at:searchObservation?.fetchedAt,search_stale:Boolean(searchObservation?.staleReason),raw_bodies:{company_tickers:tickersBody,search:searchBody},source_url:searchUrl,fetched_at:fetchedAt});
+    const receipt=makeReceipt(INTENT,searchUrl,evidence,'no exact supported asset match; no market data invented');
+    try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
+    return envelope(INTENT,{asset,market_cap_usd:null,volume_24h_usd:null,reason_code:'unsupported_asset',as_of:fetchedAt},receipt,{answer:`${searchObservation?.staleReason?'STALE cached search evidence, not a fresh asset search. ':''}No exact supported asset match in company index or equity search. Market cap and rolling 24h USD volume are unavailable, not zero. No asset was guessed. Search acquired ${searchObservation?.fetchedAt}.`,verdict:'no_data',confidence:0,source:searchUrl});
   }
+  if(typeof row.cik_str!=='number')return internationalEquity(asset,String(row.ticker),String(row.title),searchObservation!,tickersBody,fetchText);
   const ticker = String(row.ticker).toUpperCase();
   const cik10 = String(row.cik_str).padStart(10, "0");
   let quote: EquityObservation;
@@ -298,4 +300,9 @@ export async function handleFinancialData(query: Record<string, string | undefin
     as_of: quote.fetchedAt, stale: anyStale, quote_stale: quoteStale, resolution_observation: resolutionEvidence, quote_fetched_at: quote.fetchedAt, quote_age_seconds: quoteAgeSeconds, ...(anyStale ? {stale_reason:staleReason}:{}),
   }, receipt, { answer: (searchStale ? `STALE CACHED NAME-TO-TICKER RESOLUTION. Original search acquired ${searchObservation!.fetchedAt}, age ${resolutionEvidence!.age_seconds}s; ${searchObservation!.staleReason}; revalidated against the bounded-cache SEC index, not a fresh search. ` : "") + answer + ` SEC company index acquired ${indexObservation.fetchedAt} (cached up to1hour); shares acquired ${sharesObservation.fetchedAt} (cached up to15minutes). Mixed-age derivation, no source timestamp advanced by cache reuse. Quote acquired ${quote.fetchedAt}, age ${quoteAgeSeconds}s; exchange time ${marketTime}. ${quoteStale ? quote.staleReason + "; original exact quote retained; SEC shares acquired independently at their disclosed timestamp, mixed-age derivation, no price estimated or updated." : "Quote may be cached up to5minutes."}`, verdict: anyStale ? "stale" : "verified", confidence: anyStale ? 0.5 : 0.85,
     source: `SEC EDGAR (${TICKERS_URL} + companyconcept) + Yahoo chart; fetched ${fetchedAt}` });
+}
+
+export async function handleFinancialData(query:Record<string,string|undefined>):Promise<Record<string,unknown>>{
+ try{const out=await financialData(query);return withAnswerClass(out,INTENT,{asset_resolution:out.reason_code==='unsupported_asset'?'unsupported_asset':'resolved'});}
+ catch(err){if(err&&typeof err==='object'&&(err as any).code==='AMBIGUOUS_ASSET')throw withAnswerClass(err,INTENT,{asset_resolution:'ambiguous_asset'});throw err;}
 }

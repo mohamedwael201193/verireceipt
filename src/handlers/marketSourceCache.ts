@@ -1,3 +1,4 @@
+import {FINANCIAL_COIN_IDS} from './financialCoins';
 // Process-local CoinPaprika observation cache. Raw bytes and acquisition time stay atomic.
 const FRESH_MS = 30_000;
 const STALE_MS = 5 * 60_000;
@@ -8,7 +9,7 @@ const cache = new Map<string, MarketObservation>();
 const inFlight = new Map<string, Promise<MarketObservation>>();
 export function resetMarketCacheForTests(): void { cache.clear(); inFlight.clear(); }
 export async function cachedMarketBody(id: string, validate: (body: string) => number): Promise<MarketObservation> {
-  if (id !== "eth-ethereum" && id !== "sol-solana") throw new Error("unsupported market identity");
+  if (!FINANCIAL_COIN_IDS.has(id)) throw new Error("unsupported market identity");
   const prior = cache.get(id);
   const age = prior ? Date.now() - Date.parse(prior.fetchedAt) : Infinity;
   if (prior && age >= 0 && age < FRESH_MS) { validate(prior.body); return prior; }

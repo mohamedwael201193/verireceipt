@@ -11,7 +11,7 @@ async function acquire(deadline:number){
 }
 function release(){const next=waiters.shift();if(next)next();else busy=false;}
 export async function fetchYahooBody(url:string,allowed:()=>void,rateLimited:(retry:string|null)=>void):Promise<string>{
- const u=new URL(url);if(u.origin!=='https://query1.finance.yahoo.com'||!['/v8/finance/chart/','/v1/finance/search'].some(p=>u.pathname.startsWith(p)))throw Error('unsupported Yahoo acquisition URL');
+ const u=new URL(url);if(u.origin!=='https://query1.finance.yahoo.com'||!['/v8/finance/chart/','/v1/finance/search','/ws/fundamentals-timeseries/v1/finance/timeseries/'].some(p=>u.pathname.startsWith(p)))throw Error('unsupported Yahoo acquisition URL');
  allowed();const deadline=Date.now()+12000;await acquire(deadline);let releaseHere=true;
  try{
   allowed();const wait=Math.min(Math.max(0,nextStart-Date.now()),Math.max(0,deadline-Date.now()));if(wait)await new Promise(r=>setTimeout(r,wait));

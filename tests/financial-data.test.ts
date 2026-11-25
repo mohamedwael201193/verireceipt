@@ -45,7 +45,7 @@ describe("FINANCIAL_DATA_GENERAL", () => {
   it("requires an asset and refuses unsupported ones honestly", async () => {
     await expect(handleFinancialData({})).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
     stub();
-    await expect(handleFinancialData({ asset: "ZZZZ9!" })).rejects.toMatchObject({ status: 422, code: "UNSUPPORTED_ASSET" });
+    expect(await handleFinancialData({asset:"ZZZZ9!"})).toMatchObject({verdict:"no_data",market_cap_usd:null,reason_code:"unsupported_asset"});
 
   });
   it("BTC cap is the Coinbase spot x the emission-schedule supply at the tip", async () => {
@@ -170,9 +170,9 @@ describe("Yahoo equity discovery remains SEC-bound", () => {
     discovery([{ symbol: "AAPL", quoteType: "EQUITY", shortname: "Ambiguous" }, { symbol: "MSFT", quoteType: "EQUITY", shortname: "Ambiguous" }]);
     await expect(handleFinancialData({ asset: "Ambiguous" })).rejects.toMatchObject({ code: "AMBIGUOUS_ASSET" });
   });
-  it("refuses a search result absent from the SEC index", async () => {
+  it("non-SEC search match without valid identity-bound records refuses", async () => {
     discovery([{ symbol: "ZZZ", quoteType: "EQUITY", shortname: "Unknown" }]);
-    await expect(handleFinancialData({ asset: "Unknown" })).rejects.toMatchObject({ code: "UNSUPPORTED_ASSET" });
+    await expect(handleFinancialData({ asset: "Unknown" })).rejects.toMatchObject({ code: "SOURCE_UNREACHABLE" });
   });
 });
 
