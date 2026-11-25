@@ -49,3 +49,15 @@ it('all resolver responses with unrelated matching answers refuse instead of sco
  const b=JSON.parse(raw);b.Answer[0].name='unrelated.example.net.';vi.stubGlobal('fetch',async()=>new Response(JSON.stringify(b)));
  await expect(handleDns({name:'example.com',record_type:'A'})).rejects.toMatchObject({code:'DNS_RESOLVERS_DOWN'});
 });
+it.each(['fork','cycle','invalid-target','self-cycle'])('CNAME query refuses %s instead of bypassing alias validation',kind=>{
+ const b=JSON.parse(raw);b.Answer=[{name:'example.com.',type:5,TTL:5,data:'alias.example.com.'}];
+ if(kind==='fork')b.Answer.push({name:'EXAMPLE.COM.',type:5,TTL:5,data:'other.example.com.'});
+ if(kind==='cycle')b.Answer.push({name:'alias.example.com.',type:5,TTL:5,data:'example.com.'});
+ if(kind==='invalid-target')b.Answer[0].data='not a name';
+ if(kind==='self-cycle')b.Answer[0].data='example.com.';
+ expect(()=>parse(JSON.stringify(b),5)).toThrow();
+});
+it('CNAME duplicate same-target records are not a fork; chain validates without returning downstream aliases',()=>{
+ const b=JSON.parse(raw);b.Answer=[{name:'example.com.',type:5,TTL:3,data:'alias.example.com.'},{name:'EXAMPLE.COM.',type:5,TTL:2,data:'ALIAS.example.com.'},{name:'alias.example.com.',type:5,TTL:1,data:'final.example.com.'}];
+ const r=parse(JSON.stringify(b),5);expect(r.records).toEqual(['alias.example.com.','ALIAS.example.com.']);expect(r.cnameChain).toEqual(['alias.example.com','final.example.com']);expect(r.ttl).toBe(2);
+});

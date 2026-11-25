@@ -247,12 +247,13 @@ describe("handleDns stubbed resolvers", () => {
   it("all ten contract record types reach their numeric DoH query and return real evidence", async () => {
     for (const [type, code] of Object.entries({ A: 1, NS: 2, CNAME: 5, SOA: 6, PTR: 12, MX: 15, TXT: 16, AAAA: 28, SRV: 33, CAA: 257 })) {
       vi.unstubAllGlobals();
-      const body = dohBody(code, ["record-data"]);
+      const data = code === 5 ? "alias.example.com." : "record-data";
+      const body = dohBody(code, [data]);
       stubResolvers({ google: body, cloudflare: body, adguard: body });
       const result = await handleDns({ name: "example.com", record_type: type.toLowerCase() });
       expect(result.has_record).toBe(true);
       expect(result.record_type).toBe(type);
-      expect(result.records).toEqual(["record-data"]);
+      expect(result.records).toEqual([data]);
     }
   });
 

@@ -145,15 +145,16 @@ export function parseDohVerdict(
       if (seen.has(owner)) throw new Error("cyclic DNS alias chain");
       seen.add(owner);
       const aliases = answers.filter(a => a.type === 5 && typeof a.name === "string" && normalize(a.name) === owner);
-      if (!aliases.length || typeCode === 5) break;
+      if (!aliases.length) break;
       const targets = [...new Set(aliases.map(a => normalize(String(a.data))))];
       if (targets.length !== 1 || !isValidDnsName(targets[0])) throw new Error("invalid DNS alias chain");
       owner = targets[0];
       cnameChain.push(owner);
     }
   }
-  const matching = answers.filter((a) => a.type === typeCode && (!owner ||
-    (typeof a.name === "string" && normalize(a.name) === owner)));
+  const matchingOwner = typeCode === 5 && requestedName ? normalize(requestedName) : owner;
+  const matching = answers.filter((a) => a.type === typeCode && (!matchingOwner ||
+    (typeof a.name === "string" && normalize(a.name) === matchingOwner)));
   if (owner && typeCode !== 5 && answers.some(a => a.type === typeCode && !matching.includes(a))) {
     throw new Error("DNS answer owner is outside requested alias chain");
   }
