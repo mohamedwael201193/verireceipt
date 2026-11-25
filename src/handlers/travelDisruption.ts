@@ -165,7 +165,7 @@ async function handleTravelDisruptionInternal(query: Record<string, string | und
   } catch {
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
-  const namePrefix = resolutions.length>1 ? `Metro expansion: ${resolutions.map(r=>r.airport).join(", ")} from the bundled static metro list; all checked, no single airport chosen. ` : resolvedFrom ? `"${resolvedFrom.name}" resolved to ${airport} (${resolvedFrom.label}) via the bundled airport list. ` : "";
+  const namePrefix = names.some(name=>travelMetro(name)) ? `Metro expansion: ${resolutions.map(r=>r.airport).join(", ")} from the bundled static metro list; all checked, no single airport chosen. ` : resolvedFrom ? `"${resolvedFrom.name}" resolved to ${airport} (${resolvedFrom.label}) via the bundled airport list. ` : "";
   const excludedCount=airportStatuses.reduce((n,s)=>n+s.excluded_closures.length,0);
   const answer = (route||resolutions.length>1)
     ? `${namePrefix}${resolvedRoute}: ${airportStatuses.map(s=>s.airport+(s.disrupted?' has '+s.entries.map(e=>e.kind+(e.reason?' ('+e.reason+')':'')).join('; '):' has no active FAA-listed disruption')).join('; ')}. FAA NAS status as of ${updateTime}. All airports in the supplied endpoints or metro groups checked against one snapshot. Airport-level status only, not flight tracking or route delay; an unlisted condition is not claimed normal.`
