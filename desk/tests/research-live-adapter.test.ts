@@ -33,8 +33,9 @@ describe('live adapter through existing paid gate, injected unit transport only'
  it('fails closed before signing an unsupported second-provider retry',async()=>{const {adapter,payer}=setup();await expect(adapter.buy(fact,{spec_hash:'a'.repeat(64),remaining_uusdc:'20000',escalation:true})).rejects.toThrow('escalation');expect(payer.signMessage).not.toHaveBeenCalled();});
 });
 
-it('all committed templates validate before any live purchase',async()=>{const {researchTemplate}=await import('../src/researchTemplates.js');const {validateSpec,buildPacket}=await import('../src/researchDesk.js');for(const id of ['A','B','C','D','E','F','G'] as const){const {spec,claims}=researchTemplate(id,new Date().toISOString(),id==='G'?'26489252':undefined);expect(()=>validateSpec(spec)).not.toThrow();expect(buildPacket(spec,[],[],claims,spec.frozen_at).outcome).toBe('HOLD');}});
+it('all committed templates validate before any live purchase',async()=>{const {researchTemplate}=await import('../src/researchTemplates.js');const {validateSpec,buildPacket}=await import('../src/researchDesk.js');for(const id of ['A','B','C','D','E','F','G','H'] as const){const {spec,claims}=researchTemplate(id,new Date().toISOString(),id==='G'?'26489252':id==='H'?'977460':undefined);expect(()=>validateSpec(spec)).not.toThrow();expect(buildPacket(spec,[],[],claims,spec.frozen_at).outcome).toBe('HOLD');}});
 it('template G refuses to build without an explicit pinned block',async()=>{const {researchTemplate}=await import('../src/researchTemplates.js');expect(()=>researchTemplate('G',new Date().toISOString())).toThrow('pinned finalized block');expect(()=>researchTemplate('G',new Date().toISOString(),'0')).toThrow('pinned finalized block');});
+it('template H refuses to build without an explicit pinned Bitcoin tip',async()=>{const {researchTemplate}=await import('../src/researchTemplates.js');expect(()=>researchTemplate('H',new Date().toISOString())).toThrow('pinned Bitcoin tip height');expect(()=>researchTemplate('H',new Date().toISOString(),'100000001')).toThrow('pinned Bitcoin tip height');});
 
 
 describe('crash-durable spend ordering',()=>{

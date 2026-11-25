@@ -22,7 +22,11 @@ export async function verifyResearchPrimary(fact:FactSpec,value:string,options:{
  const read=async(url:string,init?:RequestInit)=>{
    const response=await f(url,{...init,redirect:'error',signal:AbortSignal.timeout(20000)});if(!response.ok)throw new Error(`primary HTTP ${response.status}`);
    const raw_text=await response.text();if(Buffer.byteLength(raw_text)>8000000||reads.reduce((n,r)=>n+Buffer.byteLength(r.raw_text),0)+Buffer.byteLength(raw_text)>16000000)throw new Error('primary byte limit');
-   const result={url,raw_text,observed_at:now().toISOString(),json:JSON.parse(raw_text),method:init?.method??'GET',body:typeof init?.body==='string'?init.body:undefined};reads.push(result);return result;
+   // Bare scalars (tip height, block hash) are not JSON objects; a body
+   // that does not parse leaves json undefined and each case fails closed
+   // on its own checks.
+   let json:any;try{json=JSON.parse(raw_text);}catch{json=undefined;}
+   const result={url,raw_text,observed_at:now().toISOString(),json,method:init?.method??'GET',body:typeof init?.body==='string'?init.body:undefined};reads.push(result);return result;
  };
  let as_of:string|null=null;
  try{
@@ -230,6 +234,56 @@ export async function verifyResearchPrimary(fact:FactSpec,value:string,options:{
     // pinned block, so any mismatch is a discrepancy, not drift.
     const paid=decimal(value);if(paid.n*(10n**9n)!==a.wei*paid.d)fail('balance gwei mismatch at pinned block');
     const blockSeconds=hex(a.block.timestamp);if(blockSeconds>BigInt(Math.floor(now().getTime()/1000)))fail('future pinned block timestamp');as_of=new Date(Number(blockSeconds)*1000).toISOString();parser='evm-two-rpc-pinned-block-balance-gwei-v1';break;
+   }
+   case 'MINING_HASHPRICE_VERIFY_GENERAL':{
+    const heightDec=fact.params.block_height;
+    if(!/^(0|[1-9]\d*)$/.test(heightDec)||BigInt(heightDec)<=0n||BigInt(heightDec)>100000000n)fail('hashprice primary requires an explicit pinned Bitcoin block height within the live schema range');
+    // Recompute from the same published mempool.space series the handler
+    // discloses in its receipt, in a deterministic read order so stored
+    // bytes replay exactly. This is a recomputation of the handler's
+    // disclosed inputs, never a second-source or independent data
+    // verification. Weekly basis when the pinned height is the current tip:
+    // revenue per block is the pinned-era subsidy plus the mean measured
+    // 1-week block fees, scaled by 144 blocks/day over the mean 1-week
+    // hashrate; a fixed declared 500 bps tolerance accommodates
+    // 1-week-mean drift between the paid and independent reads. Below the
+    // tip the pinned block's reward and difficulty are immutable, so the
+    // recompute must match the handler's disclosed 2dp rounding exactly.
+    // Neither tolerance is the network scoring tolerance.
+    // Race note: if the tip advances between the paid call and this read,
+    // the paid weekly-basis value no longer matches the single-block
+    // recompute at the pinned height and the fact HOLDs. That is
+    // fail-closed by design: a new run pins the new tip.
+    const tipR=await read('https://mempool.space/api/blocks/tip/height');
+    const tip=Number(tipR.json);if(!Number.isSafeInteger(tip)||tip<1)fail('tip height unavailable');
+    const pinned=Number(heightDec);
+    if(pinned===tip){
+     const SUBSIDY_SATS:Record<number,string>={0:'5000000000',1:'2500000000',2:'1250000000',3:'625000000',4:'312500000',5:'156250000'};
+     const subsidy=SUBSIDY_SATS[Math.floor(tip/210000)];if(!subsidy)fail('subsidy era outside the pinned era table');
+     const hr=await read('https://mempool.space/api/v1/mining/hashrate/1w');
+     const fees=await read('https://mempool.space/api/v1/mining/blocks/fees/1w');
+     const hrows=Array.isArray(hr.json?.hashrates)?hr.json.hashrates:[];const hvals=hrows.map((r:any)=>Number(r?.avgHashrate)).filter((v:number)=>Number.isFinite(v)&&v>0);
+     if(!hvals.length)fail('hashrate series carried no usable entries');
+     const frows=Array.isArray(fees.json)?fees.json:[];const fvals=frows.map((r:any)=>Number(r?.avgFees)).filter((v:number)=>Number.isFinite(v)&&v>=0);
+     if(!fvals.length)fail('block-fee series carried no usable entries');
+     const mean=(xs:number[])=>xs.reduce((a:number,c:number)=>a+c,0)/xs.length;
+     const sats=(Number(subsidy)+mean(fvals))*144*1e15/mean(hvals);
+     if(!Number.isFinite(sats)||sats<1||sats>1e9)fail('recomputed hashprice outside the live contract range');
+     if(!within(value,sats.toFixed(6),500n))fail('hashprice differs by more than declared 500 bps independent-read tolerance');
+     as_of=reads.at(-1)!.observed_at;parser='mempool-1w-series-hashprice-recompute-v1-500bps';
+    } else if(pinned<tip){
+     const hashR=await read(`https://mempool.space/api/block-height/${pinned}`);
+     const blockHash=hashR.raw_text.trim();if(!/^[0-9a-f]{64}$/.test(blockHash))fail('block-height source returned no usable hash');
+     const blk=await read(`https://mempool.space/api/v1/block/${blockHash}`);
+     const reward=blk.json?.extras?.reward,difficulty=blk.json?.difficulty;
+     if(blk.json?.id!==blockHash||blk.json?.height!==pinned||!Number.isSafeInteger(reward)||reward<=0||!Number.isFinite(difficulty)||difficulty<=0)fail('pinned block identity or measured inputs invalid');
+     // sats/PH/day = reward*144*1e15/(difficulty*2^32/600), exact rational;
+     // the paid value carries the handler's disclosed 2dp rounding (0.005).
+     const x=decimal(value);const num=BigInt(reward)*144n*(10n**15n)*600n,den=BigInt(Math.round(difficulty))*(2n**32n);
+     const diff=x.n*den-num*x.d;if((diff<0n?-diff:diff)*200n>x.d*den)fail('hashprice mismatch beyond the disclosed 2dp rounding at the pinned block');
+     as_of=reads.at(-1)!.observed_at;parser='mempool-single-block-hashprice-recompute-v1';
+    } else fail('pinned height above observed tip; no future block hashprice is asserted');
+    break;
    }
    default: fail('no independent primary parser for intent');
   }

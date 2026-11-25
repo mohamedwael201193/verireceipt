@@ -1,7 +1,7 @@
 // Templates contain selectors and declared analyst thresholds, never numeric
 // observations. Freeze the resolved timestamp before the first purchase.
 import type {ThesisSpec,Claim} from './researchDesk.js';
-export function researchTemplate(id:'A'|'B'|'C'|'D'|'E'|'F'|'G',frozen_at:string,pinned_block?:string):{spec:ThesisSpec;claims:Claim[]}{
+export function researchTemplate(id:'A'|'B'|'C'|'D'|'E'|'F'|'G'|'H',frozen_at:string,pinned_block?:string):{spec:ThesisSpec;claims:Claim[]}{
  const base={version:'research-desk-v1' as const,network:'eip155:11155111' as const,frozen_at,budget_uusdc:'60000',max_call_uusdc:'10000' as const,max_escalations:1 as const};
  if(id==='G'){
   // The block is a selector resolved by the operator CLI from the current
@@ -22,6 +22,33 @@ export function researchTemplate(id:'A'|'B'|'C'|'D'|'E'|'F'|'G',frozen_at:string
    {id:'contract_balance',intent:'ONCHAIN_METRIC_VERIFY_GENERAL',params:{address:'0x1d42064Fc4Beb5F8aAF85F4617AE8b3b5B8Bd801',block:pinned_block,chain:'ethereum',metric:'balance'},field:'balance_gwei',unit:'gwei',max_age_seconds:1800},
   ],assumptions:[{id:'holders_floor',value:'100000',unit:'addresses',rationale:'Declared analyst pre-purchase floor for holder-distribution breadth; a screen threshold, not a market forecast or investment recommendation.'},{id:'liquidity_floor',value:'5000000',unit:'USD',rationale:'Declared analyst minimum DEX pool reserve depth for the pre-purchase liquidity screen; a screen threshold, not a market forecast or investment recommendation.'},{id:'expected_balance_gwei',value:'0',unit:'gwei',rationale:'Declared expectation that the WETH-pool contract holds no native coin at the pinned block; a nonzero balance is a review trigger, not proof of malice.'}],calculations:[]},
   claims:[{id:'holders_above_floor',fact_refs:['holders'],assumption_refs:['holders_floor'],predicate:{left:'holders',op:'>=',right:'holders_floor'}},{id:'liquidity_above_floor',fact_refs:['liquidity'],assumption_refs:['liquidity_floor'],predicate:{left:'liquidity',op:'>=',right:'liquidity_floor'}},{id:'balance_matches_declared',fact_refs:['contract_balance'],assumption_refs:['expected_balance_gwei'],predicate:{left:'contract_balance',op:'==',right:'expected_balance_gwei'}},{id:'supply_context',fact_refs:['supply'],assumption_refs:[]}],
+  };
+ }
+ if(id==='H'){
+  // The Bitcoin tip is a selector resolved by the operator CLI from the
+  // keyless mempool.space tip endpoint immediately before the first
+  // purchase, never a numeric observation: the paid response and the
+  // independent primary both read the hashprice basis at exactly this
+  // pinned height (weekly series at the tip, single block below it).
+  if(!pinned_block||!/^(0|[1-9]\d*)$/.test(pinned_block)||BigInt(pinned_block)<=0n||BigInt(pinned_block)>100000000n)throw new Error('hashrate-margin requires an explicit pinned Bitcoin tip height');
+  return {
+  spec:{...base,template:'hashrate-margin',question:'Does the live measured Bitcoin hashprice cover the declared site power cost for the declared fleet efficiency, with the estimated margin at or above the declared floor? An allocation screen, never a dispatch order; no real energy is dispatched.',facts:[
+   {id:'hashprice',intent:'MINING_HASHPRICE_VERIFY_GENERAL',params:{block_height:pinned_block},field:'hashprice_sats_per_ph_day',unit:'sats/PH/day',max_age_seconds:3600},
+   {id:'btc',intent:'CRYPTO_PRICE_USD',params:{symbol:'BTC'},field:'price_usd',unit:'USD/token',max_age_seconds:900},
+  ],assumptions:[
+   {id:'power_price_usd_per_mwh',value:'60',unit:'USD/MWh',rationale:'Declared site power contract price for the allocation screen; a planning assumption, not the live grid LMP and not a market forecast.'},
+   {id:'fleet_j_per_th',value:'25',unit:'J/TH',rationale:'Declared fleet efficiency for the allocation screen; a planning assumption, not a measurement of any real machine.'},
+   {id:'margin_floor',value:'0',unit:'USD/PH/day',rationale:'Declared minimum estimated margin for the allocation signal; a screen threshold, never a dispatch order.'},
+   {id:'sats_per_btc',value:'100000000',unit:'sats/BTC',rationale:'Fixed unit conversion between sats and BTC.'},
+   {id:'mwh_per_ph_day_per_j_th',value:'0.024',unit:'MWh/PH/day per J/TH',rationale:'Exact unit conversion: one PH/s at one J/TH draws 0.024 MWh/day (86400 s x 1000 W = 8.64e7 J per day, over 3.6e9 J per MWh).'},
+  ],calculations:[
+   {id:'gross_revenue_sats_usd',op:'multiply',left:'hashprice',right:'btc',unit:'sats USD/PH/day/token'},
+   {id:'gross_revenue',op:'divide',left:'gross_revenue_sats_usd',right:'sats_per_btc',unit:'USD/PH/day'},
+   {id:'energy_mwh',op:'multiply',left:'fleet_j_per_th',right:'mwh_per_ph_day_per_j_th',unit:'MWh/PH/day'},
+   {id:'power_cost',op:'multiply',left:'energy_mwh',right:'power_price_usd_per_mwh',unit:'USD/PH/day'},
+   {id:'margin',op:'subtract',left:'gross_revenue',right:'power_cost',unit:'USD/PH/day'},
+  ]},
+  claims:[{id:'margin_above_floor',fact_refs:['hashprice','btc'],assumption_refs:['sats_per_btc','fleet_j_per_th','mwh_per_ph_day_per_j_th','power_price_usd_per_mwh','margin_floor'],calculation_ref:'margin',predicate:{left:'margin',op:'>=',right:'margin_floor'}},{id:'revenue_context',fact_refs:['hashprice','btc'],assumption_refs:['sats_per_btc'],calculation_ref:'gross_revenue'}],
   };
  }
  if(id==='A')return {

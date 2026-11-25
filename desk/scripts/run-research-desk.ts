@@ -10,7 +10,7 @@ import {liveResearchAdapter,localResearchStore} from '../src/researchLiveAdapter
 import {runResearchDesk} from '../src/researchDeskRunner.js';
 import {researchTemplate} from '../src/researchTemplates.js';
 const [id,out,...extra]=process.argv.slice(2);
-if(!['A','B','C','D','E','F','G'].includes(id)||!out||extra.length)throw new Error('Usage: run-research-desk.ts A|B|C|D|E|F|G NEW_PRIVATE_OUTPUT_DIRECTORY');
+if(!['A','B','C','D','E','F','G','H'].includes(id)||!out||extra.length)throw new Error('Usage: run-research-desk.ts A|B|C|D|E|F|G|H NEW_PRIVATE_OUTPUT_DIRECTORY');
 const secrets=process.env.DESK_SECRETS_FILE;if(!secrets)throw new Error('DESK_SECRETS_FILE is required');
 const expected=process.env.DESK_PAYER_ADDRESS?.toLowerCase();if(!expected||!/^0x[0-9a-f]{40}$/.test(expected))throw new Error('explicit DESK_PAYER_ADDRESS required');
 const ledgerDir=resolve(process.env.DESK_LEDGER_DIR??join(dirname(fileURLToPath(import.meta.url)),'../ledger'));
@@ -31,7 +31,18 @@ if(id==='G'){
  if(typeof n!=='string'||!/^0x[0-9a-fA-F]+$/.test(n))throw new Error('finalized block unavailable for template G');
  pinned_block=BigInt(n).toString(10);
 }
-const {spec,claims}=researchTemplate(id as 'A'|'B'|'C'|'D'|'E'|'F'|'G',new Date().toISOString(),pinned_block);
+// Template H pins the current Bitcoin tip as a selector: resolve it from
+// the keyless mempool.space tip endpoint immediately before the first
+// purchase, the same freeze pattern as template G's finalized block. The
+// handler serves the weekly-series basis at the tip and the disclosed
+// single-block basis below it; the independent primary mirrors both.
+if(id==='H'){
+ const r=await fetch('https://mempool.space/api/blocks/tip/height',{signal:AbortSignal.timeout(15000)});
+ const tipText=(await r.text()).trim();
+ if(!/^\d+$/.test(tipText)||BigInt(tipText)<=0n||BigInt(tipText)>100000000n)throw new Error('Bitcoin tip unavailable for template H');
+ pinned_block=BigInt(tipText).toString(10);
+}
+const {spec,claims}=researchTemplate(id as 'A'|'B'|'C'|'D'|'E'|'F'|'G'|'H',new Date().toISOString(),pinned_block);
 const result=await runResearchDesk(spec,claims,liveResearchAdapter({payer,spend,evidence_dir:dir,run_ledger,secUserAgent:process.env.SEC_USER_AGENT}),localResearchStore(dir));
 console.log(JSON.stringify({outcome:result.outcome,spec_hash:result.spec_hash,packet_hash:result.packet_hash,reasons:result.reasons,accounting:result.accounting,metrics:result.metrics,receipts:result.observations.map(o=>({fact_id:o.fact_id,receipt_hash:o.receipt_hash,signal_hash:o.signal_hash,supply:o.supply,integrity:o.integrity_level})),onchain_transactions:[]},null,2));
 process.exitCode=result.outcome==='READY'?0:1;
