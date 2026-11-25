@@ -1,3 +1,4 @@
+import {proofReceiptIds,evidenceBudgetBytes,logEvidencePrune} from './evidencePins';
 import {
   accessSync,
   closeSync,
@@ -1054,7 +1055,7 @@ export function isValidFetchedAt(value: string): boolean {
  * G10 r2: a single receipt whose own evidence (main + pages, gzipped)
  * exceeds the whole budget is stored without blobs and prunes nothing.
  */
-export const MAX_EVIDENCE_TOTAL_BYTES = 50 * 1024 * 1024;
+export const MAX_EVIDENCE_TOTAL_BYTES = evidenceBudgetBytes();
 
 /**
  * R6: the prune victim query, exported (not inlined) so the test can
@@ -1071,6 +1072,7 @@ export const MAX_EVIDENCE_TOTAL_BYTES = 50 * 1024 * 1024;
 export const PRUNE_OLDEST_EVIDENCE_SQL =
   `SELECT receipt_id FROM miner_receipts AS r
    WHERE r.receipt_id != ?
+     AND r.receipt_id NOT IN (SELECT value FROM json_each(?))
      AND (r.evidence_gzip IS NOT NULL
           OR EXISTS (SELECT 1 FROM miner_receipt_pages AS p
                      WHERE p.receipt_id = r.receipt_id AND p.evidence_gzip IS NOT NULL))
@@ -1084,11 +1086,11 @@ function pruneEvidence(database: Database.Database, exceptReceiptId: string): vo
   for (;;) {
     const totalRow = database
       .prepare(
-        `SELECT (SELECT COALESCE(SUM(LENGTH(evidence_gzip)), 0) FROM miner_receipts)
-              + (SELECT COALESCE(SUM(LENGTH(evidence_gzip)), 0) FROM miner_receipt_pages) AS total`,
+        `SELECT (SELECT COALESCE(SUM(LENGTH(evidence_gzip)), 0) FROM miner_receipts WHERE receipt_id NOT IN (SELECT value FROM json_each(?)))
+              + (SELECT COALESCE(SUM(LENGTH(evidence_gzip)), 0) FROM miner_receipt_pages WHERE receipt_id NOT IN (SELECT value FROM json_each(?))) AS total`,
       )
-      .get() as { total: number };
-    if (totalRow.total <= MAX_EVIDENCE_TOTAL_BYTES) return;
+      .get(JSON.stringify(proofReceiptIds()), JSON.stringify(proofReceiptIds())) as { total: number };
+    if (totalRow.total <= MAX_EVIDENCE_TOTAL_BYTES) { logEvidencePrune("sqlite",totalRow.total,MAX_EVIDENCE_TOTAL_BYTES); return; }
     // R2 (F3): the final tie-break is rowid (insertion order), not
     // receipt_id. receipt_id is random, so under a fetched_at tie
     // (ms-precision timestamps, certain in bursts) the old
@@ -1101,7 +1103,7 @@ function pruneEvidence(database: Database.Database, exceptReceiptId: string): vo
     // EVIDENCE_NOT_FOUND (unchanged).
     const oldest = database
       .prepare(PRUNE_OLDEST_EVIDENCE_SQL)
-      .get(exceptReceiptId) as { receipt_id: string } | undefined;
+      .get(exceptReceiptId, JSON.stringify(proofReceiptIds())) as { receipt_id: string } | undefined;
     if (!oldest) return;
     database
       .prepare(

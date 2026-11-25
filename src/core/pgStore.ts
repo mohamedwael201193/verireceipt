@@ -1,3 +1,4 @@
+import {proofReceiptIds,logEvidencePrune} from './evidencePins';
 // PG-MIGRATE (2026-11-21): Postgres storage backend.
 //
 // WHY THIS EXISTS: the SQLite file lived on a Render persistent disk, and
@@ -100,6 +101,7 @@ const SCHEMA_LOCK_KEY = 774921;
 
 export const PRUNE_OLDEST_EVIDENCE_SQL_PG = `SELECT receipt_id FROM miner_receipts AS r
    WHERE r.receipt_id <> $1
+     AND r.receipt_id <> ALL($2::text[])
      AND (r.evidence_gzip IS NOT NULL
           OR EXISTS (SELECT 1 FROM miner_receipt_pages AS p
                      WHERE p.receipt_id = r.receipt_id AND p.evidence_gzip IS NOT NULL))
@@ -315,12 +317,12 @@ async function pruneEvidencePg(exceptReceiptId: string, wait: boolean): Promise<
     let pruned = 0;
     for (;;) {
       const { rows: [t] } = await c.query<{ total: string }>(
-        `SELECT (SELECT COALESCE(SUM(octet_length(evidence_gzip)), 0) FROM miner_receipts)
-              + (SELECT COALESCE(SUM(octet_length(evidence_gzip)), 0) FROM miner_receipt_pages) AS total`,
+        `SELECT (SELECT COALESCE(SUM(octet_length(evidence_gzip)), 0) FROM miner_receipts WHERE receipt_id <> ALL($1::text[]))
+              + (SELECT COALESCE(SUM(octet_length(evidence_gzip)), 0) FROM miner_receipt_pages WHERE receipt_id <> ALL($1::text[])) AS total`, [proofReceiptIds()],
       );
       const total = Number(t.total);
-      if (total <= MAX_EVIDENCE_TOTAL_BYTES) return { ran: true, totalAfter: total, pruned } as const;
-      const { rows: [oldest] } = await c.query<{ receipt_id: string }>(PRUNE_OLDEST_EVIDENCE_SQL_PG, [exceptReceiptId]);
+      if (total <= MAX_EVIDENCE_TOTAL_BYTES) { logEvidencePrune("postgres",total,MAX_EVIDENCE_TOTAL_BYTES,pruned); return { ran: true, totalAfter: total, pruned } as const; }
+      const { rows: [oldest] } = await c.query<{ receipt_id: string }>(PRUNE_OLDEST_EVIDENCE_SQL_PG, [exceptReceiptId, proofReceiptIds()]);
       if (!oldest) return { ran: true, totalAfter: total, pruned } as const;
       await c.query(
         `UPDATE miner_receipts SET evidence_gzip = NULL, evidence_bytes = 0 WHERE receipt_id = $1`,
