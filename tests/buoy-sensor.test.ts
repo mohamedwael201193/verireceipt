@@ -22,3 +22,9 @@ it('malformed and oversized otherwise-valid payloads refuse',()=>{expect(()=>par
 it('scope constants require hourly future source caching and90minute observation age',()=>{expect(NDBC_STATION_CACHE_MS).toBe(3600000);expect(NDBC_MAX_OBSERVATION_AGE_MS).toBe(5400000);});
 
 it('row width guard refuses extra irrelevant cell with every binding still valid',()=>{const lines=raw.trim().split('\n');lines[2]+=' extra';expect(()=>parse({...base,raw:lines.join('\n')})).toThrow();});
+
+it('NaN and infinite clocks refuse independently of observation freshness',()=>{for(const nowMs of [NaN,Infinity,-Infinity])expect(()=>parse({...base,nowMs})).toThrow();});
+it('otherwise-valid strictly descending rows above count limit refuse',()=>{
+ const h=raw.trim().split('\n').slice(0,2),template=raw.trim().split('\n')[2].trim().split(/\s+/);const rows=Array.from({length:12001},(_,i)=>{const d=new Date(Date.parse('2026-11-25T01:00:00Z')-i*60000);return [...d.toISOString().slice(0,16).replace(/[-T:]/g,' ').split(' '),...Array.from({length:14},()=> '0')].join(' ');});
+ const oversized=[...h,...rows].join('\n');expect(Buffer.byteLength(oversized)).toBeLessThan(1000000);expect(()=>parse({...base,raw:oversized})).toThrow();
+});
