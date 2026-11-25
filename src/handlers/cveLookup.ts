@@ -1,3 +1,4 @@
+import{TenMinuteObservation}from'./tenMinuteObservation';
 import {queryFallback} from '../core/queryFallback';
 // CVE_LOOKUP_CVSS: real CVSS v3 assessments from the published CVE record.
 // NVD is disabled by default. Literal CVE_NVD_ENABLED=true opts in only
@@ -77,7 +78,9 @@ let nvdBudget = new StartBudget(5, 30_001);
 let nextNvdStart = 0;
 let nvdStoppedUntil = 0;
 /** Tests reset only. Production state lives for the process lifetime. */
+const triageCache=new TenMinuteObservation();
 export function resetCveTransportForTests(): void {
+  triageCache.clear();
   sourceCache = new PublicBodyCache(128, 60_000); nvdBudget = new StartBudget(5, 30_001);
   nextNvdStart = 0; nvdStoppedUntil = 0;
 }
@@ -197,7 +200,7 @@ export async function handleCve(query: Record<string, string | undefined>): Prom
 // disagreement-refused doctrine. The answer says what the number is: a
 // published base severity score, not a prediction of exploitation.
 export const TRIAGE_INTENT = "VULNERABILITY_TRIAGE_GENERAL";
-export async function handleVulnTriage(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+async function loadVulnTriage(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   query=queryFallback(query,"cve_id",text=>text.match(/CVE-\d{4}-\d{4,}/i)?.[0].toUpperCase());
   const id = query.cve_id?.trim().toUpperCase();
   if (!id) throw badRequest("MISSING_PARAM", "cve_id is required");
@@ -253,4 +256,11 @@ export async function handleVulnTriage(query: Record<string, string | undefined>
     verdict: "verified", confidence: candidates.length === 2 && scores[0] === scores[1] ? 1 : 0.9,
     source: `${candidates.map((r) => r.url).join(" + ")}; ${nvdEnabled ? "NVD primary when available, published CVE record fallback" : "NVD disabled; published CVE record only, degraded single-source coverage"}; selected assessment is not an average; source fetched ${winner.fetchedAt ?? asOf}; checked ${asOf}`,
   });
+}
+
+export async function handleVulnTriage(query:Record<string,string|undefined>):Promise<Record<string,unknown>>{
+ const filled=queryFallback(query,'cve_id',text=>text.match(/CVE-\d{4}-\d{4,}/i)?.[0].toUpperCase());
+ const id=filled.cve_id?.trim().toUpperCase();
+ if(!id||!/^CVE-\d{4}-\d{4,19}$/.test(id))return loadVulnTriage(filled);
+ return triageCache.get(id+':nvd:'+(process.env.CVE_NVD_ENABLED==='true'),()=>loadVulnTriage(filled));
 }
