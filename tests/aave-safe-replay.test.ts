@@ -6,13 +6,14 @@ import {saveReceipt} from '../src/core/storage';
 import {createWiredFinanceHandlers} from '../src/handlers/financeWired';
 const capture=JSON.parse(readFileSync(join(__dirname,'fixtures/aave-yield/usdc-safe-20261125.json'),'utf8'));
 afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();vi.clearAllMocks();});
-function replay(tamper?:'hash'|'timestamp'|'return'){
+function replay(tamper?:'hash'|'timestamp'|'return'|'reread-timestamp'){
  vi.stubGlobal('fetch',async(url:unknown,init?:RequestInit)=>{
   const request=JSON.parse(String(init?.body));const leg=capture.results.find((l:any)=>l.endpoint===String(url));if(!leg)throw Error('captured leg unavailable');
   const row=leg.raw.find((r:any)=>r.method===request.method&&JSON.stringify(r.params)===JSON.stringify(request.params));if(!row)throw Error('uncaptured request');
   const parsed=JSON.parse(row.body);
   if(leg===capture.results[1]&&request.method==='eth_getBlockByNumber'&&tamper==='hash')parsed.result.hash='0x'+'00'.repeat(32);
   if(leg===capture.results[1]&&request.method==='eth_getBlockByNumber'&&tamper==='timestamp')parsed.result.timestamp='0x'+(parseInt(parsed.result.timestamp,16)+1).toString(16);
+  if(leg===capture.results[1]&&tamper==='reread-timestamp'&&request.method==='eth_getBlockByNumber'&&request.params[0]!=='safe')parsed.result.timestamp='0x'+(parseInt(parsed.result.timestamp,16)+1).toString(16);
   if(leg===capture.results[1]&&request.method==='eth_call'&&tamper==='return')parsed.result=parsed.result.slice(0,-1)+(parsed.result.endsWith('0')?'1':'0');
   return new Response(tamper?JSON.stringify(parsed):row.body,{status:row.status});
  });
@@ -31,5 +32,10 @@ it.each(['hash','timestamp','return'] as const)('safe-head %s disagreement refus
 });
 it('safe-head does not widen the15minute freshness limit',async()=>{
  vi.useFakeTimers();const blockTime=parseInt(capture.results[0].block_timestamp,16)*1000;vi.setSystemTime(blockTime+900001);replay();
+ await expect(createWiredFinanceHandlers({}).yield({project:'aave-v3',symbol:'USDC',chain:'ethereum'})).rejects.toMatchObject({code:'APPROVED_SOURCES_UNAVAILABLE'});expect(saveReceipt).not.toHaveBeenCalled();
+});
+
+it('a numbered reread timestamp change alone refuses without a receipt',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(new Date(capture.fetched_at));replay('reread-timestamp');
  await expect(createWiredFinanceHandlers({}).yield({project:'aave-v3',symbol:'USDC',chain:'ethereum'})).rejects.toMatchObject({code:'APPROVED_SOURCES_UNAVAILABLE'});expect(saveReceipt).not.toHaveBeenCalled();
 });
