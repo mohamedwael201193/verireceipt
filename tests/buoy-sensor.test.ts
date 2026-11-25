@@ -20,3 +20,5 @@ it('invalid calendar time is refused independently of freshness',()=>{let r=row(
 it('future or stale observation refuses, exact90min bound passes',()=>{const t=Date.parse('2026-11-25T01:00:00Z');expect(()=>parse({...base,nowMs:t-1})).toThrow();expect(()=>parse({...base,nowMs:t+5400000})).not.toThrow();expect(()=>parse({...base,nowMs:t+5400001})).toThrow();});
 it('malformed and oversized otherwise-valid payloads refuse',()=>{expect(()=>parse({...base,raw:raw+' '.repeat(1000001)})).toThrow();expect(()=>parse({...base,metadataHtml:metadataHtml+' '.repeat(250001)})).toThrow();expect(()=>parse({...base,raw:raw.replace('2026 11 25 01 00','2026 11 25 01')})).toThrow();});
 it('scope constants require hourly future source caching and90minute observation age',()=>{expect(NDBC_STATION_CACHE_MS).toBe(3600000);expect(NDBC_MAX_OBSERVATION_AGE_MS).toBe(5400000);});
+
+it('row width guard refuses extra irrelevant cell with every binding still valid',()=>{const lines=raw.trim().split('\n');lines[2]+=' extra';expect(()=>parse({...base,raw:lines.join('\n')})).toThrow();});
