@@ -114,6 +114,19 @@ describe("runGate", () => {
     expect(rec.outcome).toBe("HOLD");
     expect(rec.reasons.join(" ")).toMatch(/serving miner identity present/);
   });
+  it("keeps provider names out of serving-identity check details (registration only)", async () => {
+    // Check details are published in replay packets; provider names must never
+    // ship there. Exact detail text pinned per site: mutating either emitter
+    // back to a slug-carrying string turns this test RED.
+    const w = workspace();
+    const rec = await runGate(task.id, makePayer(), { ...baseOpts(w), f: node({ miner: "424242", minerSlug: "other-miner" }).f });
+    expect(rec.outcome).toBe("PASS");
+    const present = rec.node_checks.find((c) => c.name === "serving miner identity present");
+    const consistent = rec.node_checks.find((c) => c.name === "serving identity consistent with the receipt registration");
+    expect(present?.detail).toBe("registration=424242");
+    expect(consistent?.detail).toBe("registration 424242 is not a known VeriReceipt id");
+    expect(rec.node_checks.every((c) => !c.detail.includes("slug") && !c.detail.includes("other-miner"))).toBe(true);
+  });
   it("HOLDs when the signal payload names different params than asked", async () => {
     const w = workspace();
     const rec = await runGate(task.id, makePayer(), { ...baseOpts(w), f: node({ requestParams: { protocol: "uniswap-v3" } }).f });
