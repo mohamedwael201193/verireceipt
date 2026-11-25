@@ -15,5 +15,5 @@ it('native real-page response serves all mapped fields but does not backfill sco
  }finally{await app.close();}
 });
 it('unsupported retailer remains refusal and never uses another retailer policy',async()=>{
- const f=vi.fn();vi.stubGlobal('fetch',f);const app=await buildServer();try{const r=await app.inject({method:'GET',url:'/v1/return-policy?retailer=Apple%20UK'});expect(r.statusCode).toBe(422);expect(f).not.toHaveBeenCalled();}finally{await app.close();}
+ const f=vi.fn();vi.stubGlobal('fetch',f);const app=await buildServer();try{const r=await app.inject({method:'GET',url:'/v1/return-policy?retailer=Apple%20UK'});expect(r.statusCode).toBe(200);expect(r.json().verified).toBe(false);expect(r.json().sources).toEqual([]);expect(f).not.toHaveBeenCalled();}finally{await app.close();}
 });

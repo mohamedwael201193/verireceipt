@@ -1,0 +1,18 @@
+import {it,expect,vi,afterEach,beforeEach} from 'vitest';
+import {readFileSync} from 'node:fs';
+vi.mock('../src/core/storage',()=>({saveReceipt:vi.fn(async()=>{})}));
+import {saveReceipt} from '../src/core/storage';
+import {handleReturnPolicy,resetReturnPolicyBudgetForTests} from '../src/handlers/returnPolicy';
+import {sha256Hex} from '../src/core/receipt';
+beforeEach(()=>{resetReturnPolicyBudgetForTests();vi.useFakeTimers();vi.setSystemTime(new Date('2026-11-26T00:00:00Z'));});
+afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();vi.clearAllMocks();});
+it.each([['costco',null],['target',90],['ikea',365]])('live reviewed%s uses its actual full raw body and conditional window',async(retailer,days)=>{
+ const raw=readFileSync('tests/fixtures/return-policy/'+retailer+'.html','utf8');vi.stubGlobal('fetch',async()=>new Response(raw));const out=await handleReturnPolicy({retailer:retailer as string,product:'electronics'});expect(out.return_window_days).toBe(days);expect(out.verified).toBe(true);expect(out.scope).toContain('not a decision about a particular item');expect(vi.mocked(saveReceipt).mock.calls[0][1]).toBe(raw);expect((out.receipt as any).raw_response_sha256).toBe(sha256Hex(raw));
+ if(retailer==='costco')expect(out.conditions).toContainEqual(expect.stringContaining('electronics exception'));
+ if(retailer==='ikea')expect(out.conditions).toContainEqual(expect.stringContaining('180-day'));
+});
+it.each(['store','merchant','brand'])('accepts%s alias without guessing conflicting retailer',async(alias)=>{vi.stubGlobal('fetch',async()=>new Response(readFileSync('tests/fixtures/return-policy/target.html','utf8')));expect((await handleReturnPolicy({[alias]:'Target'})).retailer).toBe('Target US');await expect(handleReturnPolicy({retailer:'Apple',store:'Target'})).rejects.toMatchObject({status:400});});
+it.each(['costco','target','ikea'])('changed%s interpretation fails closed',async retailer=>{let raw=readFileSync('tests/fixtures/return-policy/'+retailer+'.html','utf8');raw=retailer==='costco'?raw.replace(/90 days/g,'91 days'):raw.replace(/365/g,'366');vi.stubGlobal('fetch',async()=>new Response(raw));await expect(handleReturnPolicy({retailer})).rejects.toMatchObject({code:'POLICY_UNVERIFIED'});expect(saveReceipt).not.toHaveBeenCalled();});
+it.each(['Amazon','Best Buy','Home Depot','Lowes','Nike','Macys'])('blocked%s official page has truthful no-data status and no invented body',async retailer=>{const f=vi.fn(async()=>new Response('denied',{status:403}));vi.stubGlobal('fetch',f);const out=await handleReturnPolicy({retailer});expect(out.return_window_days).toBeNull();expect(out.verified).toBe(false);expect(out.data_status).toBe('source_unavailable');expect(out.sources).toEqual([]);expect(out.attempted_sources).toHaveLength(1);const evidence=JSON.parse(vi.mocked(saveReceipt).mock.calls[0][1]!);expect(evidence.raw_body).toBeNull();expect(evidence.read_status).toBe('source_unavailable');expect(f).toHaveBeenCalledTimes(1);});
+it('retrieved unreviewed body is receipted exactly but never asserts remembered window',async()=>{vi.stubGlobal('fetch',async()=>new Response('actual official body, no interpreted policy'));const out=await handleReturnPolicy({retailer:'Amazon'});expect(out.return_window_days).toBeNull();expect(out.verified).toBe(false);expect(out.data_status).toBe('unreviewed_policy');expect(JSON.parse(vi.mocked(saveReceipt).mock.calls[0][1]!).raw_body).toBe('actual official body, no interpreted policy');});
+it('arbitrary URL never fetched or attributed as source',async()=>{const f=vi.fn();vi.stubGlobal('fetch',f);const out=await handleReturnPolicy({retailer:'https://private.invalid/'});expect(f).not.toHaveBeenCalled();expect(out.sources).toEqual([]);expect(out.return_window_days).toBeNull();});

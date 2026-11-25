@@ -1,0 +1,26 @@
+[
+  {
+    "url": "https://customerservice.costco.com/app/answers/detail/a_id/1191/",
+    "file": "costco.html",
+    "length": 115279,
+    "sha256": "3ad693b5821d92b4da92c6b143c0b9ad2f83cceecb18b19b6a5fdc991cb82f19",
+    "final": "https://customerservice.costco.com/app/answers/detail/a_id/1191/",
+    "fetched_date": "2026-11-26"
+  },
+  {
+    "url": "https://www.ikea.com/us/en/customer-service/returns-claims/return-policy/",
+    "file": "ikea.html",
+    "length": 907387,
+    "sha256": "e407b2aee825a7ea6a0b7844e4a3141c621b710e8b84137d7d1c20c6635c97c8",
+    "final": "https://www.ikea.com/us/en/customer-service/returns-claims/return-policy/",
+    "fetched_date": "2026-11-26"
+  },
+  {
+    "url": "https://www.target.com/returns",
+    "file": "target.html",
+    "length": 121448,
+    "sha256": "459b00671c1d7f29fbbe50c4fceae67be1a3009418b9a28ad908775d0c7398c4",
+    "final": "https://www.target.com/returns",
+    "fetched_date": "2026-11-26"
+  }
+]

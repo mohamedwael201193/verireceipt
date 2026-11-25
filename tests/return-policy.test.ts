@@ -15,8 +15,8 @@ it.each([['Apple US',apple,14],['Walmart US',walmart,90]])('real official %s pag
 it('Apple holiday deadline and carrier exclusions are explicit, without replacing standard14',async()=>{
  vi.stubGlobal('fetch',async()=>new Response(apple));const out=await handleReturnPolicy({retailer:'Apple'});expect(out.return_window_days).toBe(14);expect(out.answer).toContain('January 8, 2027');expect(out.answer).toContain('November 6 through December 25, 2026');expect(out.answer).toContain('T-Mobile or Verizon');
 });
-it.each(['Apple UK','Walmart Canada','Amazon','Apple for a phone','https://apple.com',''])('no retailer/country substitution for %s',async retailer=>{
- const f=vi.fn();vi.stubGlobal('fetch',f);await expect(handleReturnPolicy({retailer})).rejects.toMatchObject({status:retailer?422:400});expect(f).not.toHaveBeenCalled();
+it.each(['Apple UK','Walmart Canada','Apple for a phone','https://apple.com',''])('no retailer/country substitution for %s',async retailer=>{
+ const f=vi.fn();vi.stubGlobal('fetch',f);if(!retailer)await expect(handleReturnPolicy({retailer})).rejects.toMatchObject({status:400});else{const out=await handleReturnPolicy({retailer});expect(out.return_window_days).toBeNull();expect(out.verified).toBe(false);}expect(f).not.toHaveBeenCalled();
 });
 it.each(['window','holiday','exception','missing'])('refuses changed %s section, never returns a remembered window',async mode=>{
  const raw=mode==='window'?apple.replace('You have 14 calendar days','You have 30 calendar days'):mode==='holiday'?apple.replace(/January 8, 2027/g,'January 9, 2027'):mode==='exception'?apple.replace(/Opened software/g,'Different exclusion'):'<html>unavailable</html>';
