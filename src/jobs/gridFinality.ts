@@ -126,6 +126,8 @@ export interface Ymd {
 }
 
 /** Official GRID intent / conformance reference hour (miner.yaml + A8/A9). */
+export const GRID_DEMO_INTERVALS = ["2026-11-20T05:00:00.000Z", "2026-11-19T00:00:00.000Z"] as const;
+
 export const GRID_REFERENCE_INTERVAL = "2026-09-13T14:00:00.000Z";
 
 export const GRID_REFERENCE_CAISO_NODES: readonly string[] = [
@@ -256,7 +258,7 @@ export function isStoreableGridIntervalKey(intervalStart: string): boolean {
 
 export function isConfiguredGridReference(nodeOrZone: string, intervalStartIso: string): boolean {
   const iso = canonicalizeIntervalIso(intervalStartIso);
-  if (!iso || iso !== GRID_REFERENCE_INTERVAL) return false;
+  if (!iso || (iso !== GRID_REFERENCE_INTERVAL && !(nodeOrZone === "TH_NP15_GEN-APND" && (GRID_DEMO_INTERVALS as readonly string[]).includes(iso)))) return false;
   return (GRID_REFERENCE_CAISO_NODES as readonly string[]).includes(nodeOrZone);
 }
 

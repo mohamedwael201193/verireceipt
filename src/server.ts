@@ -17,7 +17,7 @@ import { handleTx } from "./handlers/txLookup";
 import { handleFilings } from "./handlers/filings";
 import { handleTvl, startTvlListsRefreshTimer, stopTvlListsRefreshTimer, tvlDiskListsPresent, warmLists } from "./handlers/tvl";
 import { handleRoute } from "./handlers/optimalRoute";
-import { handleGridPrice } from "./handlers/gridPrice";
+import { handleGridPrice, stopGridDemoRefreshes } from "./handlers/gridPrice";
 import { handleValidator } from "./handlers/validator";
 import { handleOnchainMetric } from "./handlers/onchainMetric";
 import { handlePackageSecurity } from "./handlers/packageSecurity";
@@ -448,6 +448,7 @@ export function buildServer(): FastifyInstance {
   // S2: serve the daily accuracy document (exact counts over stored
   // receipts, same contract as scripts/accuracy.mjs — core/accuracy.ts).
   registerAccuracyRoute(app);
+  app.addHook("onClose", async () => { stopGridDemoRefreshes(); });
 
   return app;
 }
@@ -483,6 +484,18 @@ function startGridIngesterIfPresent(): NodeJS.Timeout | null {
     }
   }
   return null;
+}
+
+/** Fixed demo cache warm has its own cadence and cannot hold up listen. */
+async function startGridDemoWarmIfPresent(): Promise<() => void> {
+  try {
+    const mod = await import("./jobs/gridDemoWarm");
+    mod.startGridDemoWarm();
+    return () => mod.stopGridDemoWarm();
+  } catch {
+    console.warn(JSON.stringify({event:"grid_demo_warm_start_unavailable",market:"CAISO"}));
+    return () => {};
+  }
 }
 
 /**
@@ -562,6 +575,8 @@ export async function main(): Promise<FastifyInstance> {
 
   const rawPort = Number(process.env.PORT ?? "10000");
   const port = Number.isFinite(rawPort) && rawPort > 0 ? Math.floor(rawPort) : 10000;
+  let stopGridDemoWarm = () => {};
+  app.addHook("onClose", async () => { stopGridDemoRefreshes(); stopGridDemoWarm(); });
   await app.listen({ host: "0.0.0.0", port });
   console.log(`verireceipt listening on 0.0.0.0:${port}`);
   // Grid ingester starts AFTER listen (A5-fix2, 2026-11-20, J2-R2 F1d):
@@ -573,6 +588,7 @@ export async function main(): Promise<FastifyInstance> {
   // after the socket is open. Grid-price serves cache-only until the
   // first cycle lands either way.
   const ingesterTimer = startGridIngesterIfPresent();
+  stopGridDemoWarm = await startGridDemoWarmIfPresent();
   // GRACEFUL-SHUTDOWN (2026-11-21, src/core/shutdown.ts): on Render's
   // deploy SIGTERM, drain in-flight requests, stop timers, close SQLite
   // (WAL checkpoint), exit 0. Without it Node died on the default signal
@@ -580,6 +596,8 @@ export async function main(): Promise<FastifyInstance> {
   installGracefulShutdown(app, {
     stopTimers: () => {
       if (ingesterTimer) clearInterval(ingesterTimer);
+      stopGridDemoRefreshes();
+      stopGridDemoWarm();
       stopTvlListsRefreshTimer();
       stopStoragePinger();
     },

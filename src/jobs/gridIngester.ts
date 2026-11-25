@@ -583,7 +583,10 @@ export async function fetchText(url: string, timeoutMs?: number): Promise<string
 export async function fetchBuffer(url: string, timeoutMs?: number): Promise<Buffer> {
   const { res, release, deadlineMs } = await fetchAllowed(url, timeoutMs);
   try {
-    if (!res.ok) throw new Error("HTTP " + res.status + " from " + url);
+    if (!res.ok) {
+      if(new URL(url).hostname === "oasis.caiso.com")console.warn(JSON.stringify({event:"oasis_fetch_failure",status:res.status,body_class:(res.headers.get("content-type")??"").includes("html")?"html":(res.headers.get("content-type")??"").includes("xml")?"xml":"other"}));
+      throw new Error("HTTP " + res.status + " from " + url);
+    }
     return Buffer.from(
       await readBodyWithDeadline(() => res.arrayBuffer(), deadlineMs, url),
     );

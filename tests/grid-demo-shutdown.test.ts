@@ -1,0 +1,43 @@
+import { expect, it, vi, afterEach, afterAll } from 'vitest';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {join} from 'node:path';
+const scratch=mkdtempSync('/tmp/grid-demo-shutdown-');process.env.SQLITE_PATH=join(scratch,'cache.sqlite');
+import {closeDb} from '../src/core/db';
+import {buildServer} from '../src/server';
+afterAll(()=>{closeDb();rmSync(scratch,{recursive:true,force:true});});
+const mocks = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), mark: vi.fn(), fetch: vi.fn() }));
+vi.mock('../src/core/storage', async importOriginal => ({ ...await importOriginal<object>(), getGridPrice: mocks.get, saveGridPrice: mocks.save, markGridRevalidateAttempt: mocks.mark }));
+vi.mock('../src/jobs/gridIngester', async importOriginal => ({ ...await importOriginal<object>(), fetchCaisoDamLmp: mocks.fetch }));
+import { handleGridPrice, stopGridDemoRefreshes } from '../src/handlers/gridPrice';
+import { gridDemoDeadline } from '../src/jobs/gridDemoDeadline';
+const interval = '2026-11-20T05:00:00.000Z';
+afterEach(() => { stopGridDemoRefreshes(); vi.useRealTimers(); vi.clearAllMocks(); });
+it.each(['success', 'failure'])('shutdown boundary prevents pending request refresh %s storage writes', async outcome => {
+ mocks.get.mockResolvedValue({ lmp_usd_per_mwh: 42, market: 'CAISO', ingested_at: '2026-11-20T07:00:00Z', upstream_url: 'https://oasis.caiso.com/oasisapi/SingleZip' });
+ let resolve!: (v: any) => void; let reject!: (e: Error) => void;
+ mocks.fetch.mockReturnValue(new Promise((r,j) => { resolve = r; reject = j; }));
+ await handleGridPrice({node_or_zone:'TH_NP15_GEN-APND',interval_start:interval});
+ const app=buildServer(); await app.ready(); await app.close();
+ if(outcome==='success')resolve({lmp:99,upstreamUrl:'https://oasis.caiso.com/oasisapi/SingleZip'});else reject(Error('late failure'));
+ await new Promise(r=>setImmediate(r)); expect(mocks.save).not.toHaveBeenCalled(); expect(mocks.mark).not.toHaveBeenCalled();
+});
+it('caller deadline rejects a longer shared flight without adopting its eventual result', async () => {
+ vi.useFakeTimers(); let resolve!: (n:number)=>void;
+ const longer = new Promise<number>(r=>{resolve=r;});
+ const result = gridDemoDeadline(longer).catch(e=>e.message);
+ await vi.advanceTimersByTimeAsync(15000); expect(await result).toBe('grid demo deadline exceeded');
+ resolve(99); await vi.advanceTimersByTimeAsync(0); expect(await result).toBe('grid demo deadline exceeded');
+});
+it('handler applies its own 15s deadline to a longer joined flight and never saves its late result', async () => {
+ vi.useFakeTimers();
+ mocks.get.mockResolvedValue({ lmp_usd_per_mwh: 42, market: 'CAISO', ingested_at: '2026-11-20T07:00:00Z', upstream_url: 'https://oasis.caiso.com/oasisapi/SingleZip' });
+ let resolve!: (v: any) => void;
+ mocks.fetch.mockReturnValue(new Promise(r => { resolve = r; }));
+ const response=await handleGridPrice({node_or_zone:'TH_NP15_GEN-APND',interval_start:interval});
+ expect(response.verdict).toBe('unverified');
+ await vi.advanceTimersByTimeAsync(14999); expect(mocks.mark).not.toHaveBeenCalled();
+ await vi.advanceTimersByTimeAsync(1); expect(mocks.mark).toHaveBeenCalledTimes(1);
+ expect(mocks.mark).toHaveBeenCalledWith('TH_NP15_GEN-APND',interval,expect.any(String));
+ resolve({lmp:99,upstreamUrl:'https://oasis.caiso.com/oasisapi/SingleZip'});
+ await vi.advanceTimersByTimeAsync(0); expect(mocks.save).not.toHaveBeenCalled(); expect(mocks.mark).toHaveBeenCalledTimes(1);
+});

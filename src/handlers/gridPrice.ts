@@ -1,3 +1,4 @@
+import { gridDemoDeadline } from '../jobs/gridDemoDeadline';
 import {withAnswerClass} from '../core/answerClass';
 import { plainDecimal } from "../core/plainDecimal";
 // GET /v1/grid-price — wholesale electricity LMP.
@@ -68,6 +69,7 @@ import {
 } from "../jobs/gridIngester";
 import {
   gridMarketKind,
+  GRID_DEMO_INTERVALS,
   needsGridRevalidation,
   provisionalCloseMs,
 } from "../jobs/gridFinality";
@@ -390,6 +392,11 @@ export function parseGridQuestion(question: string): {
   if (interval !== undefined) out.intervalStart = interval;
   return out;
 }
+
+let demoGeneration=0;
+export function stopGridDemoRefreshes():void { demoGeneration++; demoRefreshes.clear(); demoLastAttempt.clear(); }
+const demoRefreshes=new Map<string,Promise<void>>();
+const demoLastAttempt=new Map<string,number>();
 
 type GridCacheRow = NonNullable<Awaited<ReturnType<typeof getGridPrice>>>;
 
@@ -774,6 +781,23 @@ export async function handleGridPrice(
     throw error;
   }
 
+  const storedDemo=!fetchedLive && normalizedZone==="TH_NP15_GEN-APND" && (GRID_DEMO_INTERVALS as readonly string[]).includes(intervalStart)
+    && row.market==="CAISO" && !isCorruptGridRow(row) && Number.isFinite(Date.parse(row.ingested_at)) && Date.parse(row.ingested_at)<=nowMs;
+  if(storedDemo){
+    const key=normalizedZone+":"+intervalStart;
+    if(!demoRefreshes.has(key) && nowMs-(demoLastAttempt.get(key)??0)>=60_000){
+      demoLastAttempt.set(key,nowMs);
+      const generation=demoGeneration;
+      const refresh=(async()=>{try{
+        const fetched=await gridDemoDeadline(fetchCaisoDamLmp(normalizedZone,intervalStart,15_000));
+        if(generation!==demoGeneration)return;
+        if(fetched)await saveGridPrice(normalizedZone,intervalStart,fetched.lmp,"CAISO",new Date().toISOString(),fetched.upstreamUrl);
+        else await markGridRevalidateAttempt(normalizedZone,intervalStart,new Date().toISOString());
+      }catch{if(generation===demoGeneration)await markGridRevalidateAttempt(normalizedZone,intervalStart,new Date().toISOString());}})().catch(()=>{}).finally(()=>{if(generation===demoGeneration)demoRefreshes.delete(key);});
+      demoRefreshes.set(key,refresh);
+    }
+  }
+
   // Staleness bound: a row older than GRID_CACHE_TTL_MS is refused, and a
   // legacy row with no ingested_at at all is refused too (its freshness
   // cannot be proven). Neither is ever served as verified 1.0.
@@ -788,17 +812,18 @@ export async function handleGridPrice(
   const futureIngested = !Number.isNaN(ingestedMs) && ingestedMs > nowMs;
   const corruptRow = isCorruptGridRow(row);
   // Freshness: TTL, or past the provisional window (isFreshGridRow).
-  let stale = !isFreshGridRow(row, nowMs, intervalStart, windowMin, zone.market);
+  let stale = !storedDemo && !isFreshGridRow(row, nowMs, intervalStart, windowMin, zone.market);
   const needsRefresh =
     !corruptRow &&
     (await gridRowNeedsRevalidation(normalizedZone, intervalStart, zone.market, row, nowMs));
-  let unconfirmed = false;
+  let unconfirmed = storedDemo;
+  const revalidationDisclosure=storedDemo ? "background revalidation pending; serving the previously acquired stored observation" : FAILED_REVALIDATION;
   // CAISO live path: refresh a stale row, repair a corrupt row even
   // when the interval is already past the provisional window (J2 m4:
   // the single-node path previously returned 502 GRID_CACHE_INVALID
   // without a fetch),
   // and revalidate at least once after the provisional close (J2 m1).
-  if (zone.market === "CAISO" && (stale || corruptRow || needsRefresh)) {
+  if (zone.market === "CAISO" && !storedDemo && (stale || corruptRow || needsRefresh)) {
     let fetched: { lmp: number; upstreamUrl: string } | null = null;
     try {
       fetched = await fetchCaisoDamLmp(normalizedZone, intervalStart);
@@ -1033,7 +1058,7 @@ export async function handleGridPrice(
   } else if (unconfirmed && gridMarketKind(zone.market) === "ELERING") {
     quorumVotes = "1/1 cache row from official Elering/Nord Pool feed; " + ELERING_NO_HISTORICAL_REFETCH;
   } else if (unconfirmed) {
-    quorumVotes = "1/1 cache row from official ISO feed; " + FAILED_REVALIDATION;
+    quorumVotes = "1/1 cache row from official ISO feed; " + revalidationDisclosure;
   } else {
     quorumVotes = "1/1 cache row from verified ISO feed";
   }
@@ -1103,7 +1128,7 @@ export async function handleGridPrice(
   const answer =
     (unconfirmed
       ? "Unverified cached price: " +
-        (gridMarketKind(zone.market) === "ELERING" ? ELERING_NO_HISTORICAL_REFETCH : FAILED_REVALIDATION) +
+        (gridMarketKind(zone.market) === "ELERING" ? ELERING_NO_HISTORICAL_REFETCH : revalidationDisclosure) +
         ". " + measuredAnswer
       : measuredAnswer) + (substitutionNote ? " " + substitutionNote : "");
   return envelope(

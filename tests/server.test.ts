@@ -1,3 +1,4 @@
+import { __getGridDemoWarmTimerForTests } from '../src/jobs/gridDemoWarm';
 // Server tests — routing + error mapping via Fastify inject (no network).
 //
 // /health returns 200 with status ok; each of the five routes returns 400
@@ -345,6 +346,7 @@ describe("main() wiring — TVL hourly timer (round-3 R3, J2 FAIL F1)", () => {
     // not buildServer(). This runs before the wiring test below, while the
     // timer has never been started in this worker.
     expect(__getTvlListsRefreshTimerForTests()).toBeNull();
+    expect(__getGridDemoWarmTimerForTests()).toBeNull();
   });
 
   it("main() boots the real server AND starts the hourly TVL timer, then shuts down cleanly", async () => {
@@ -356,6 +358,7 @@ describe("main() wiring — TVL hourly timer (round-3 R3, J2 FAIL F1)", () => {
     let timer: NodeJS.Timeout | null = null;
     try {
       expect(__getTvlListsRefreshTimerForTests()).toBeNull();
+    expect(__getGridDemoWarmTimerForTests()).toBeNull();
       booted = await main();
       expect(booted.server.listening).toBe(true);
       const addr = booted.server.address();
@@ -373,6 +376,10 @@ describe("main() wiring — TVL hourly timer (round-3 R3, J2 FAIL F1)", () => {
       // Unref'd: the timer never keeps the process (or the runner) alive.
       expect(typeof timer?.hasRef).toBe("function");
       expect(timer?.hasRef()).toBe(false);
+      const demoTimer = __getGridDemoWarmTimerForTests();
+      expect(demoTimer).not.toBeNull();
+      expect((demoTimer as unknown as { _idleTimeout: number })._idleTimeout).toBe(3600000);
+      expect(demoTimer?.hasRef()).toBe(false);
       // The booted server answers while the timer runs.
       const health = await booted.inject({ method: "GET", url: "/health" });
       expect(health.statusCode).toBe(200);
@@ -389,5 +396,6 @@ describe("main() wiring — TVL hourly timer (round-3 R3, J2 FAIL F1)", () => {
     // the module-level handle, so the unref'd timer holds nothing.
     expect(booted?.server.listening).toBe(false);
     expect(__getTvlListsRefreshTimerForTests()).toBeNull();
+    expect(__getGridDemoWarmTimerForTests()).toBeNull();
   }, 30_000);
 });
