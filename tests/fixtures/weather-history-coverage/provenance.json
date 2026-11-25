@@ -1,0 +1,28 @@
+{
+  "retrieved_at": "2026-11-25T22:50:07.248760+00:00",
+  "sources": [
+    {
+      "url": "https://www.ncei.noaa.gov/access/services/data/v1?dataset=daily-summaries&stations=USW00094728&startDate=2026-11-01&endDate=2026-11-01&dataTypes=TMAX%2CTMIN%2CPRCP&format=json&units=metric&includeAttributes=true&includeStationName=true&includeStationLocation=true",
+      "file": "USW00094728.json",
+      "sha256": "25d5c96558ce5e203cba065a084e0f45ab0afe2f091eeda166158e4760a2d599"
+    },
+    {
+      "url": "https://www.ncei.noaa.gov/access/services/data/v1?dataset=daily-summaries&stations=USW00023174&startDate=2026-11-01&endDate=2026-11-01&dataTypes=TMAX%2CTMIN%2CPRCP&format=json&units=metric&includeAttributes=true&includeStationName=true&includeStationLocation=true",
+      "file": "USW00023174.json",
+      "sha256": "f4cc5a9c8eace786dc91b75bcfb90e23920640f1450f471a41626b53c8aac871"
+    },
+    {
+      "url": "https://www.ncei.noaa.gov/access/services/data/v1?dataset=daily-summaries&stations=USW00094846&startDate=2026-11-01&endDate=2026-11-01&dataTypes=TMAX%2CTMIN%2CPRCP&format=json&units=metric&includeAttributes=true&includeStationName=true&includeStationLocation=true",
+      "file": "USW00094846.json",
+      "sha256": "3c770da99f385d889149fb46ae601e969cd34cde66a32e951c7246df8bdd28d0"
+    },
+    {
+      "url": "https://www.ncei.noaa.gov/access/services/data/v1?dataset=daily-summaries&stations=ASN00066037&startDate=2026-11-01&endDate=2026-11-01&dataTypes=TMAX%2CTMIN%2CPRCP&format=json&units=metric&includeAttributes=true&includeStationName=true&includeStationLocation=true",
+      "file": "ASN00066037.json",
+      "sha256": "ff28d1457db644352b5be042dad7fe18a728d2b872f235c1f2fdf36f9b56cd0e"
+    }
+  ],
+  "station_metadata_url": "https://www.ncei.noaa.gov/pub/data/ghcn/daily/ghcnd-stations.txt",
+  "station_metadata_note": "Filtered original fixed-width rows only, not full original bytes",
+  "icao_url": "https://aviationweather.gov/api/data/stationinfo?ids=KLAX,KORD,YSSY,KNYC&format=json"
+}

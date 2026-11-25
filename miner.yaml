@@ -1206,7 +1206,7 @@ endpoints:
     external_path: /v1/weather-history
     method: GET
     description: 'Measured NOAA NCEI daily station archive only, for Cairo, London, New York JFK,
-      Dubai or Frankfurt on an explicit past YYYY-MM-DD date. Coverage depends on published complete
+      New York / New York City (Central Park), Los Angeles, Chicago, Sydney, Dubai or Frankfurt on an explicit past YYYY-MM-DD date. Coverage depends on published complete
       TMAX, TMIN and precipitation observations for the bound station. Missing or quality-failed days
       are refused, never replaced by zero, forecast or reanalysis. Reports a station-labelled climate
       day, not necessarily local midnight; weather condition is not inferred from daily extrema.'
@@ -1219,7 +1219,7 @@ endpoints:
           type: string
           intents:
           - WEATHER_FORECAST_VERIFY_GENERAL
-          description: 'Cairo, London, New York JFK, Dubai or Frankfurt; exact bound station only.'
+          description: 'Cairo, London, New York JFK, New York / New York City (Central Park), Los Angeles, Chicago, Sydney, Dubai or Frankfurt; exact bound station only.'
         - name: date
           type: string
           intents:

@@ -42,7 +42,7 @@ it('partial location spellings fail closed, no fuzzy match', async () => {
     try {
         const h = createWiredWeatherHandlers();
         await expect(h.current({ location: 'New York' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });
-        await expect(h.past({ location: 'New York', date: '2026-11-20' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });
+        await expect(h.past({ location: 'New', date: '2026-11-20' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });
         expect(fetchSpy).not.toHaveBeenCalled();
     }
     finally {

@@ -54,6 +54,18 @@ export const WEATHER_STATION_BINDINGS: readonly WeatherStationBinding[] = [
     { location: 'Frankfurt', icao: 'EDDF', ghcn: 'GMW00035032', metadataUrl: GHCN_STATIONS_METADATA, scope: 'Frankfurt Rhein-Main airport station for both current (EDDF METAR) and past (GHCN GMW00035032, WMO 10637).' },
 ];
 
+// Archive-only bindings: current /v1/weather coverage is deliberately unchanged.
+// IDs/names/coordinates verified against NOAA GHCN station metadata and matching
+// AviationWeather station records; actual complete daily observations captured.
+export const PAST_WEATHER_BINDINGS: readonly WeatherStationBinding[] = [
+    ...WEATHER_STATION_BINDINGS,
+    {location:'New York',icao:'KNYC',ghcn:'USW00094728',metadataUrl:GHCN_STATIONS_METADATA,scope:'New York Central Park station, not JFK or every point in the New York area.'},
+    {location:'New York City',icao:'KNYC',ghcn:'USW00094728',metadataUrl:GHCN_STATIONS_METADATA,scope:'New York Central Park station, not JFK or every point in the New York area.'},
+    {location:'Los Angeles',icao:'KLAX',ghcn:'USW00023174',metadataUrl:GHCN_STATIONS_METADATA,scope:'Los Angeles International Airport station, not every point in Los Angeles.'},
+    {location:'Chicago',icao:'KORD',ghcn:'USW00094846',metadataUrl:GHCN_STATIONS_METADATA,scope:"Chicago O'Hare International Airport station, not every point in Chicago."},
+    {location:'Sydney',icao:'YSSY',ghcn:'ASN00066037',metadataUrl:GHCN_STATIONS_METADATA,scope:'Sydney Airport station, not every point in Sydney.'},
+];
+
 export interface WiredWeatherHandlers {
     current: (q: Record<string, string | undefined>) => Promise<Record<string, unknown>>;
     past: (q: Record<string, string | undefined>) => Promise<Record<string, unknown>>;
@@ -65,7 +77,8 @@ export interface WiredWeatherHandlers {
  * observations and one NOAA leg for the past-day archive. */
 export function createWiredWeatherHandlers(): WiredWeatherHandlers {
     const noaa = noaaWeatherSources(WEATHER_STATION_BINDINGS, { current: NOAA_METAR_APPROVAL, past: NOAA_NCEI_APPROVAL });
-    const handlers = createWeatherObservationHandlers({ current: [noaa.current], past: [noaa.past] });
+    const archive = noaaWeatherSources(PAST_WEATHER_BINDINGS, { current: NOAA_METAR_APPROVAL, past: NOAA_NCEI_APPROVAL });
+    const handlers = createWeatherObservationHandlers({ current: [noaa.current], past: [archive.past] });
     return {
         current: handlers.current,
         past: handlers.past,
