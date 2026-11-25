@@ -21,15 +21,16 @@ describe('bounded AIS position event parser, controls are not live data',()=>{
   ['cached coordinates dissent',e=>e.lat=59],['missing latitude',e=>delete e.message.Latitude],
   ['missing speed never zero',e=>delete e.message.Sog],['string speed',e=>e.message.Sog='0'],
   ['speed sentinel',e=>e.message.Sog=102.3],['negative speed',e=>e.message.Sog=-1],
-  ['course sentinel',e=>e.message.Cog=360],['latitude sentinel',e=>e.message.Latitude=e.lat=91],
+  ['negative course',e=>e.message.Cog=-0.1],['course sentinel',e=>e.message.Cog=360],['latitude sentinel',e=>e.message.Latitude=e.lat=91],
   ['longitude sentinel',e=>e.message.Longitude=e.lon=181],['default null island',e=>{e.message.Latitude=e.lat=0;e.message.Longitude=e.lon=0;}],
   ['missing time',e=>delete e.time],['malformed time',e=>e.time='2026-11-25'],
   ['invalid calendar date',e=>e.time='2026-11-31T01:44:57Z'],['future event',e=>e.time='2026-11-25T01:45:01Z'],
   ['stale event',e=>e.time='2026-11-25T01:39:59Z'],['missing synthesis disclosure',e=>delete e.synthesized],
-  ['missing credit',e=>delete e.attribution],['missing licence',e=>delete e.license],
+  ['BarentsWatch credit phrase drift',e=>e.attribution=e.attribution.replace('Data delivered by BarentsWatch.','Data supplied without named provider.')],['missing credit',e=>delete e.attribution],['missing licence',e=>delete e.license],
   ['changed licence',e=>e.license='unverified'],['GeoJSON snapshot',e=>e.type='Feature'],
  ];
  for(const[name,fn]of controls)it('refuses '+name,()=>expect(()=>parse(changed(fn),vessel,now)).toThrow());
  it('accepts exactly five minutes but not a millisecond older',()=>{const t=Date.parse(JSON.parse(raw).time);expect(()=>parse(raw,vessel,t+300000)).not.toThrow();expect(()=>parse(raw,vessel,t+300001)).toThrow();});
+ it('refuses otherwise-valid oversized event with irrelevant padding',()=>{const oversized=changed(e=>e.padding='x'.repeat(32768));expect(()=>parse(oversized,vessel,now)).toThrow();});
  it('refuses nonfinite clock and oversized body',()=>{expect(()=>parse(raw,vessel,NaN)).toThrow();expect(()=>parse(' '.repeat(32769),vessel,now)).toThrow();});
 });
