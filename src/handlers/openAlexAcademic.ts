@@ -28,12 +28,27 @@ async function read(url:string){
  active.set(url,io);let timer:ReturnType<typeof setTimeout>|undefined;
  try{return await Promise.race([io,new Promise<never>((_,reject)=>{timer=setTimeout(()=>{abort.abort();reject(Error('OpenAlex deadline'));},2500);})]);}finally{clearTimeout(timer);}
 }
+export function academicSearchTerms(q:string):string {
+ const stripped=q.trim().replace(/^(?:(?:what|which) (?:are|is) (?:the )?(?:best |top |most cited |recent )?(?:papers|research|studies|articles)(?: (?:on|about|for))?|(?:can you |could you )?(?:find|show|list)(?: me)?(?: (?:the |some )?(?:papers|research|studies|articles))?(?: (?:on|about|for))?)\s+/i,'').replace(/\?$/,'').trim();
+ return normalizeAcademicQuery(stripped||q);
+}
+export function academicLeadAuthor(authors:string[]):string {
+ if(!authors.length)return 'authors unavailable';
+ const first=authors[0];
+ if(/\b(?:collaboration|consortium|group|team|committee|network)\b/i.test(first))return first+(authors.length>1?' et al.':'');
+ const surname=first.split(/\s+/).at(-1)!;
+ return surname+(authors.length>1?' et al.':'');
+}
 export async function openAlexAnswer(q:string,year?:number):Promise<Record<string,unknown>>{
- const url=`https://api.openalex.org/works?search=${encodeURIComponent(normalizeAcademicQuery(q))}&per-page=10${year?`&filter=publication_year:${year}`:''}`;
+ const url=`https://api.openalex.org/works?search=${encodeURIComponent(academicSearchTerms(q))}&per-page=10&select=id,display_name,doi,publication_year,primary_location,type,authorships,cited_by_count${year?`&filter=publication_year:${year}`:''}`;
  const observation=await read(url);const {total,papers}=parseOpenAlex(observation.raw,year);
  const evidence=JSON.stringify({query:q,year_filter:year??null,papers,total_matches:total,raw_body:observation.raw,fetched_at:observation.at,source_policy:'OpenAlex keyless index; source citation counts, not quality or peer-review proof; records missing both year and venue omitted; journal/proceedings metadata preferred; DOI-bearing records only'});
  const receipt=makeReceipt('ACADEMIC_SEARCH_GENERAL',url,evidence,'OpenAlex index metadata, not a quality or peer-review verdict');receipt.fetched_at=observation.at;
  try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
- const listing=papers.map(p=>`${p.title} (${p.publication_year??'year unavailable'}; ${p.venue??'venue unavailable'}; ${p.openalex_citation_count??'unknown'} OpenAlex citations; DOI ${p.doi})`).join('; ');
- return envelope('ACADEMIC_SEARCH_GENERAL',{papers,paper_titles:papers.map(p=>p.title),dois:papers.map(p=>p.doi),total_matches:total,brief:Array.from(`${papers.length} OpenAlex results: ${papers[0]?.title??'no eligible records'}`).slice(0,80).join(''),year_filter:year??null,as_of:observation.at,fetched_at:observation.at,age_seconds:Math.max(0,Math.floor((Date.now()-Date.parse(observation.at))/1000)),stale:false,metadata_scope:'OpenAlex indexed metadata and citation counts, not proof of peer review'},receipt,{answer:`OpenAlex index: ${total} query matches${year?` in ${year}`:''}; ${papers.length} eligible DOI-bearing records. ${listing}. Metadata and citation counts are OpenAlex-only, not quality or peer-review proof. Within returned results, journal/proceedings records with both year and venue are preferred. Records missing both year and venue omitted; named index only, not all scholarly papers. Acquired ${observation.at}, cache up to15minutes.`,verdict:'verified',confidence:0.85,source:url});
+ const details=(p:Paper,lead=false)=>`${p.title} (${lead?academicLeadAuthor(p.authors):(p.authors.slice(0,3).join(', ')||'authors unavailable')}, ${p.publication_year??'year unavailable'}, ${p.venue??'venue unavailable'}, ${p.openalex_citation_count??'unknown'} OpenAlex citations, DOI ${p.doi})`;
+ const asked=Array.from(q).slice(0,80).join('');
+ const lead=papers.length?`Top match for '${asked}': ${details(papers[0],true)}.`:`No eligible DOI-bearing records for '${asked}' in the returned sample.`;
+ const also=papers.length>1?` Also relevant: ${papers.slice(1,5).map(p=>details(p)).join('; ')}.`:'';
+ const answer=`${lead}${also} Returned ${papers.length} eligible records from ${total} index matches${year?` in ${year}`:''}. Single named index: OpenAlex; citation counts are its own, not quality or peer-review proof; fetched ${observation.at}, cache up to15minutes.`;
+ return envelope('ACADEMIC_SEARCH_GENERAL',{papers,paper_titles:papers.map(p=>p.title),dois:papers.map(p=>p.doi),total_matches:total,brief:Array.from(`${papers.length} OpenAlex results: ${papers[0]?.title??'no eligible records'}`).slice(0,80).join(''),year_filter:year??null,as_of:observation.at,fetched_at:observation.at,age_seconds:Math.max(0,Math.floor((Date.now()-Date.parse(observation.at))/1000)),stale:false,metadata_scope:'OpenAlex indexed metadata and citation counts, not proof of peer review'},receipt,{answer,verdict:'verified',confidence:0.85,source:url});
 }
