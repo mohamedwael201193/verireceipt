@@ -1,3 +1,4 @@
+import {liquidityChain,liquidityPair} from '../core/liquiditySelectors';
 import type { ObservationSource, SourceApproval } from '../core/observedSources';
 import type { PriceQuery, PriceValue, PoolQuery, PoolValue } from './financeObservations';
 import {withAnswerClass} from '../core/answerClass';
@@ -36,14 +37,16 @@ export interface PoolBinding {
     address: string;
     dexScreenerChain: string;
     dexId?: string;
+    pairAlias?: string;
+    tokenAddresses?: readonly string[];
 }
 // Canonical EVM chain slugs supported by the exact-pair endpoint. No arbitrary
 // URL paths, chain guessing, token-address search or similar-name substitution.
 const DEX_EVM_CHAINS=new Set(['ethereum','base','arbitrum','optimism','polygon','bsc','avalanche','linea','scroll','gnosis','zksync','blast','mantle','celo','sonic','unichain']);
 export function resolvePoolBinding(q:PoolQuery,bindings:readonly PoolBinding[]):PoolBinding {
-    const matches = bindings.filter(b => b.chain.toLowerCase() === q.chain.toLowerCase() && (b.pool.toLowerCase() === q.pool.toLowerCase() || b.address.toLowerCase() === q.pool.toLowerCase()));
+    const matches = bindings.filter(b => b.chain.toLowerCase() === liquidityChain(q.chain) && (b.pool.toLowerCase() === q.pool.toLowerCase() || b.address.toLowerCase() === q.pool.toLowerCase() || (b.pairAlias!==undefined && b.pairAlias===liquidityPair(q.pool))));
     const exactAddress=/^0x[0-9a-fA-F]{40}$/.test(q.pool);
-    const chain=q.chain.toLowerCase();
+    const chain=liquidityChain(q.chain);
     if(matches.length>1 || (!exactAddress && matches.length!==1) || (exactAddress&&!DEX_EVM_CHAINS.has(chain)))
         throw new Error('ambiguous pool binding');
     const p:PoolBinding=matches[0]??{pool:q.pool,chain,address:q.pool,dexScreenerChain:chain};
@@ -73,10 +76,14 @@ export function dexScreenerLiquiditySource(bindings: readonly PoolBinding[], app
             const rows = Array.isArray(j.pairs) ? j.pairs.filter((r: any) => r.chainId === p.dexScreenerChain && typeof r.pairAddress === 'string' && r.pairAddress.toLowerCase() === p.address.toLowerCase() && (!p.dexId || r.dexId === p.dexId)) : [];
             if (rows.length !== 1 || typeof rows[0].liquidity?.usd !== 'number' || !Number.isFinite(rows[0].liquidity.usd) || rows[0].liquidity.usd < 0)
                 throw new Error('wrong or duplicate pool identity');
+            if(p.tokenAddresses){
+              const tokens=[rows[0].baseToken?.address,rows[0].quoteToken?.address];
+              if(tokens.some(t=>typeof t!=='string')||tokens.map(t=>t.toLowerCase()).sort().join(',')!==[...p.tokenAddresses].map(t=>t.toLowerCase()).sort().join(','))throw Error('pool token identity mismatch');
+            }
             // The API exposes no per-pair observation timestamp: the
             // observation time is the retrieval time, disclosed as such in
             // the receipted evidence (same pattern as the NOAA archive).
-            return { identity: JSON.stringify([q.chain.toLowerCase(), q.pool.toLowerCase()]), sourceUrl: url, rawBody: JSON.stringify({ source_raw_body: b.raw, observed_at_semantics: 'retrieval time; the API exposes no per-pair observation timestamp' }), observedAt: b.fetchedAt, fetchedAt: b.fetchedAt, value: { chain: q.chain, pool: q.pool, liquidityUsd: rows[0].liquidity.usd } };
+            return { identity: JSON.stringify([q.chain.toLowerCase(), q.pool.toLowerCase()]), sourceUrl: url, rawBody: JSON.stringify({ source_raw_body: b.raw, pool_binding:p, selection_policy:'Pair aliases select this reviewed representative pool, not all pools for the pair; ETH in a pair means wrapped WETH', observed_at_semantics: 'retrieval time; the API exposes no per-pair observation timestamp' }), observedAt: b.fetchedAt, fetchedAt: b.fetchedAt, value: { chain: q.chain, pool: q.pool, liquidityUsd: rows[0].liquidity.usd,poolAddress:p.address,poolSelection:p.pairAlias?"reviewed representative pool; pair alias is not unique across venues or fees; ETH means wrapped WETH":"exact pool binding" } };
             }catch(error){try{if(error!==null&&typeof error==='object')withAnswerClass(error,'LIQUIDITY_DEPTH_VERIFY_GENERAL',{dexscreener_failure:failure});}catch{}throw error;}
         }
     };

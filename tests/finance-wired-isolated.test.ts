@@ -32,8 +32,8 @@ it('ticker bindings name the providers own canonical asset ids for exactly BTC a
     expect(COINMARKETCAP_TICKERS.map(b => `${b.symbol}:${b.cmcId}`).sort()).toEqual(['BTC:1', 'ETH:1027']);
 });
 
-it('pool binding is the verified Uniswap v3 USDC/WETH 0.05% pool only', () => {
-    expect(DEXSCREENER_POOLS.length).toBe(1);
+it('reviewed pool bindings retain the verified USDC/WETH pool and add UNI/WETH', () => {
+    expect(DEXSCREENER_POOLS.length).toBe(2);
     const p = DEXSCREENER_POOLS[0];
     expect(p.address).toBe('0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640');
     expect(p.chain).toBe('ethereum');

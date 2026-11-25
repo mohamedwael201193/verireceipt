@@ -76,9 +76,12 @@ export const COINMARKETCAP_TICKERS: readonly CmcTickerBinding[] = [
     { symbol: 'ETH', cmcId: '1027' },
     { symbol: 'BTC', cmcId: '1' },
 ];
-/** Reviewed DEX pool bindings. Named pools only, no search-position matching. */
+/** Reviewed representative pools, never search-position matching. Pair token0/token1
+ * verified on two Ethereum RPCs 2026-11-25; captured bodies in liquidity-address fixtures.
+ * Names are not unique across venues/fees; resolved address and selection are disclosed. */
 export const DEXSCREENER_POOLS: readonly PoolBinding[] = [
-    { pool: 'USDC/WETH 0.05%', chain: 'ethereum', address: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640', dexScreenerChain: 'ethereum', dexId: 'uniswap' },
+    { pool: 'USDC/WETH 0.05%', chain: 'ethereum', address: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640', dexScreenerChain: 'ethereum', dexId: 'uniswap',pairAlias:'USDC/WETH',tokenAddresses:['0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48','0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'] },
+    {pool:'UNI/WETH representative',chain:'ethereum',address:'0x1d42064Fc4Beb5F8aAF85F4617AE8b3b5B8Bd801',dexScreenerChain:'ethereum',dexId:'uniswap',pairAlias:'UNI/WETH',tokenAddresses:['0x1f9840a85d5af5bf1d1762f925bdaddc4201f984','0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2']},
 ];
 
 /** Reviewed Aave v3 Ethereum reserve bindings. dataProvider and

@@ -15,9 +15,14 @@ export function geckoPoolLiquiditySource(bindings:readonly PoolBinding[],approva
   const b=await readPublicBody(url,200000,2500);if(signal.aborted)throw Error('aborted');
   const j=JSON.parse(b.raw),data=j?.data,a=data?.attributes;
   if(data?.type!=='pool'||data.id!==`${network}_${address}`||typeof a?.address!=='string'||a.address.toLowerCase()!==address)throw Error('pool network/address identity mismatch');
+  if(pool.tokenAddresses){
+   const rel=data.relationships;
+   const tokens=[rel?.base_token?.data?.id,rel?.quote_token?.data?.id];
+   if(tokens.some(t=>typeof t!=='string')||tokens.map(t=>t.toLowerCase()).sort().join(',')!==pool.tokenAddresses.map(t=>network+'_'+t.toLowerCase()).sort().join(','))throw Error('pool token identity mismatch');
+  }
   const reserve=a.reserve_in_usd;
   if(typeof reserve!=='string'||!/^\d{1,13}(\.\d{1,12})?$/.test(reserve))throw Error('invalid reserve');
   const value=Number(reserve);if(!Number.isFinite(value)||value<1||value>1e12)throw Error('reserve outside canonical range');
-  return {identity:JSON.stringify([q.chain.toLowerCase(),q.pool.toLowerCase()]),sourceUrl:url,rawBody:JSON.stringify({source_raw_body:b.raw,observed_at_semantics:'retrieval time; the API exposes no pool reserve observation timestamp',terms_basis:'Owner standing terms-risk waiver dated 2026-11-23 for this testnet project only; not a provider licence or proof of commercial redistribution rights'}),observedAt:b.fetchedAt,fetchedAt:b.fetchedAt,value:{pool:q.pool,chain:q.chain,liquidityUsd:value}};
+  return {identity:JSON.stringify([q.chain.toLowerCase(),q.pool.toLowerCase()]),sourceUrl:url,rawBody:JSON.stringify({source_raw_body:b.raw,pool_binding:pool,selection_policy:"Pair aliases select this reviewed representative pool, not all pools for the pair; ETH in a pair means wrapped WETH",observed_at_semantics:'retrieval time; the API exposes no pool reserve observation timestamp',terms_basis:'Owner standing terms-risk waiver dated 2026-11-23 for this testnet project only; not a provider licence or proof of commercial redistribution rights'}),observedAt:b.fetchedAt,fetchedAt:b.fetchedAt,value:{pool:q.pool,chain:q.chain,liquidityUsd:value,poolAddress:pool.address,poolSelection:pool.pairAlias?"reviewed representative pool; pair alias is not unique across venues or fees; ETH means wrapped WETH":"exact pool binding"}};
  }};
 }

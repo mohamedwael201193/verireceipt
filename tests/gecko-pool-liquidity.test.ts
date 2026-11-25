@@ -33,7 +33,7 @@ it('fallback403 stops with no alternate route or receipt',async()=>{
  await expect(createWiredFinanceHandlers({}).liquidity(query)).rejects.toMatchObject({code:'APPROVED_SOURCES_UNAVAILABLE'});expect(f).toHaveBeenCalledTimes(2);expect(saveReceipt).not.toHaveBeenCalled();
 });
 it('ambiguous name never selects a pool in either provider',async()=>{
- const f=vi.fn();vi.stubGlobal('fetch',f);await expect(geckoPoolLiquiditySource(DEXSCREENER_POOLS,GECKOTERMINAL_APPROVAL).read({pool:'WETH/USDC',chain:'ethereum'},new AbortController().signal)).rejects.toThrow();expect(f).not.toHaveBeenCalled();
+ const f=vi.fn();vi.stubGlobal('fetch',f);await expect(geckoPoolLiquiditySource(DEXSCREENER_POOLS,GECKOTERMINAL_APPROVAL).read({pool:'UNKNOWN/USDC',chain:'ethereum'},new AbortController().signal)).rejects.toThrow();expect(f).not.toHaveBeenCalled();
 });
 
 it.each([68820142,'6.882e7',' 68820142.6838 '])('rejects noncanonical reserve type/format %s',async reserve=>{

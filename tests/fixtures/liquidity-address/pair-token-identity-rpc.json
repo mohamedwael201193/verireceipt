@@ -1,0 +1,26 @@
+[
+  {
+    "pool": "0x1d42064fc4beb5f8aaf85f4617ae8b3b5b8bd801",
+    "url": "https://eth.drpc.org",
+    "token0": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000001f9840a85d5af5bf1d1762f925bdaddc4201f984\"}",
+    "token1": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\"}"
+  },
+  {
+    "pool": "0x1d42064fc4beb5f8aaf85f4617ae8b3b5b8bd801",
+    "url": "https://rpc.mevblocker.io",
+    "token0": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x0000000000000000000000001f9840a85d5af5bf1d1762f925bdaddc4201f984\"}",
+    "token1": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\"}"
+  },
+  {
+    "pool": "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+    "url": "https://eth.drpc.org",
+    "token0": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48\"}",
+    "token1": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\"}"
+  },
+  {
+    "pool": "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+    "url": "https://rpc.mevblocker.io",
+    "token0": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48\"}",
+    "token1": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\"}"
+  }
+]

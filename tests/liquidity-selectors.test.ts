@@ -1,0 +1,18 @@
+import {it,expect,vi,afterEach} from 'vitest';
+import {readFileSync} from 'node:fs';
+vi.mock('../src/core/storage',()=>({saveReceipt:vi.fn(async()=>{})}));
+import {saveReceipt} from '../src/core/storage';
+import {createWiredFinanceHandlers,DEXSCREENER_POOLS,DEXSCREENER_APPROVAL,GECKOTERMINAL_APPROVAL} from '../src/handlers/financeWired';
+import {resolvePoolBinding,dexScreenerLiquiditySource} from '../src/handlers/marketSourceAdapters';
+import {geckoPoolLiquiditySource,resetGeckoPoolBudgetForTests} from '../src/handlers/geckoPoolLiquidity';
+import {liquidityChain} from '../src/core/liquiditySelectors';
+const usdc=readFileSync('tests/fixtures/liquidity-address/ethereum-usdc-weth.json','utf8');
+const uni=readFileSync('tests/fixtures/liquidity-address/ethereum-uni-weth.json','utf8');
+afterEach(()=>{vi.unstubAllGlobals();vi.clearAllMocks();resetGeckoPoolBudgetForTests();});
+it.each(['eth','mainnet','ethereum-mainnet','Ethereum'])('%s normalizes without changing pool identity',async chain=>{vi.stubGlobal('fetch',async()=>new Response(usdc));const out=await createWiredFinanceHandlers({}).liquidity({chain,pool:DEXSCREENER_POOLS[0].address});expect(out).toMatchObject({chain:'ethereum',liquidity_usd:JSON.parse(usdc).pairs[0].liquidity.usd});});
+it.each([['arb','arbitrum'],['op','optimism'],['base-mainnet','base'],['matic','polygon'],['avax','avalanche'],['bnb','bsc']])('%s only selects its own network', (alias,chain)=>{expect(liquidityChain(alias)).toBe(chain);expect(resolvePoolBinding({chain:alias,pool:'0x'+'1'.repeat(40)},[]).dexScreenerChain).toBe(chain);});
+it.each(['USDC/WETH','USDC-ETH','WETH/USDC','ETH/USDC','UNI/WETH'])('%s uses disclosed reviewed pool with token identity evidence',async pool=>{const raw=pool==='UNI/WETH'?uni:usdc;vi.stubGlobal('fetch',async()=>new Response(raw));const out=await createWiredFinanceHandlers({}).liquidity({chain:'eth',pool});expect(out.pool_address).toBe(JSON.parse(raw).pairs[0].pairAddress);expect(out.answer).toContain('representative pool');expect(out.answer).toContain('ETH means wrapped WETH');const evidence=JSON.parse(String(vi.mocked(saveReceipt).mock.calls[0][1]));expect(evidence.raw_body).toContain('tokenAddresses');});
+it('duplicate configured pair binding refuses, never picks first',()=>{expect(()=>resolvePoolBinding({chain:'eth',pool:'USDC/WETH'},[DEXSCREENER_POOLS[0],{...DEXSCREENER_POOLS[0],address:'0x'+'1'.repeat(40)}])).toThrow('ambiguous');});
+it.each(['USDC/WETH','UNI/WETH'])('same label but wrong token address in %s source is refused',async pool=>{const j=JSON.parse(pool==='UNI/WETH'?uni:usdc);j.pairs[0].baseToken.address='0x'+'1'.repeat(40);vi.stubGlobal('fetch',async()=>new Response(JSON.stringify(j)));await expect(dexScreenerLiquiditySource(DEXSCREENER_POOLS,DEXSCREENER_APPROVAL).read({chain:'eth',pool},new AbortController().signal)).rejects.toThrow('token identity');});
+it('fallback pair requires exact token relationship addresses',async()=>{const j=JSON.parse(readFileSync('tests/fixtures/gecko-pool-bound.json','utf8'));j.data.relationships.base_token.data.id='eth_0x'+'1'.repeat(40);vi.stubGlobal('fetch',async()=>new Response(JSON.stringify(j)));await expect(geckoPoolLiquiditySource(DEXSCREENER_POOLS,GECKOTERMINAL_APPROVAL).read({chain:'eth',pool:'USDC/WETH'},new AbortController().signal)).rejects.toThrow('token identity');});
+it.each(['eth/../../base','unknown','solana'])('%s never defaults or issues network reads',async chain=>{const f=vi.fn();vi.stubGlobal('fetch',f);await expect(createWiredFinanceHandlers({}).liquidity({chain,pool:'USDC/WETH'})).rejects.toMatchObject({code:'APPROVED_SOURCES_UNAVAILABLE'});expect(f).not.toHaveBeenCalled();});
