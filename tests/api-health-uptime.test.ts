@@ -9,9 +9,9 @@ vi.mock("node:http", async importOriginal => ({ ...await importOriginal<typeof i
 const scratch = mkdtempSync("/tmp/api-health-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); __setLookupForTests(null); });
+afterEach(() => { resetUptimeRefusalsForTests(); vi.unstubAllGlobals(); vi.clearAllMocks(); __setLookupForTests(null); });
 import { handleApiHealth } from "../src/handlers/apiHealth";
-import { handleServerUptime } from "../src/handlers/serverUptime";
+import { handleServerUptime, resetUptimeRefusalsForTests } from "../src/handlers/serverUptime";
 import { guardPublicHttpUrl, __setLookupForTests, __clearRateLimitsForTests } from "../src/handlers/ssrfGuard";
 import { buildServer } from "../src/server";
 import { getReceiptEvidence } from "../src/core/storage";
@@ -192,10 +192,10 @@ it('API health records failed DNS as a real negative observation, never an inven
  expect(raw.dns_observation).toMatchObject({kind:'resolution_failed',http_attempted:false});expect(raw.resolved_addresses).toEqual([]);expect(raw.measured.http_status).toBeNull();
  await expect(handleApiHealth({url:'https://api.example.com/status'})).rejects.toMatchObject({code:'RATE_LIMITED'});
 });
-it('DNS empty result is not connection refused and server uptime still refuses',async()=>{
+it('DNS empty result is not connection refused and uptime discloses not-probed',async()=>{
  fakeDns({'empty.example.com':[]});
  expect((await handleApiHealth({url:'empty.example.com'})).dns_status).toBe('no_addresses');
- __clearRateLimitsForTests();await expect(handleServerUptime({host:'missing.example.com'})).rejects.toMatchObject({code:'DNS_UNRESOLVABLE'});
+ __clearRateLimitsForTests();expect(await handleServerUptime({host:'missing.example.com'})).toMatchObject({guard_code:'DNS_UNRESOLVABLE',http_attempted:false,reachable_now:null});
 });
 it('DNS deadline emits a timeout observation at2s with no HTTP attempt',async()=>{
  vi.useFakeTimers();__setLookupForTests((async()=>new Promise(()=>{}))as any);vi.mocked(httpsRequest).mockClear();
@@ -210,4 +210,37 @@ it('arbitrary guard errors have no DNS metadata',async()=>{
  const {dnsProbeFailure}=await import('../src/handlers/ssrfGuard');let read=false;
  const e=Object.defineProperty({},'status',{get(){read=true;throw Error();}});expect(dnsProbeFailure(e)).toBeUndefined();expect(read).toBe(false);
  const proxy=new Proxy({},{get(){read=true;throw Error();}});expect(dnsProbeFailure(proxy)).toBeUndefined();expect(read).toBe(false);
+});
+it.each(['localhost','127.0.0.1','https://example.com:22','metadata.example.com'])('uptime guard discloses not-probed %s without connecting or inventing a negative measurement',async host=>{
+ fakeDns({'metadata.example.com':['169.254.169.254']});
+ vi.mocked(httpsRequest).mockClear();vi.mocked(httpRequest).mockClear();
+ const log=vi.spyOn(console,'info').mockImplementation(()=>{});
+ try{
+  const result=await handleServerUptime({host});expect(result).toMatchObject({reachable_now:null,http_status:null,latency_ms:null,http_attempted:false,verdict:'unverified',confidence:0});
+  expect(result.answer).toContain('Host not probed');expect(result.answer).toContain('unknown');expect(httpsRequest).not.toHaveBeenCalled();expect(httpRequest).not.toHaveBeenCalled();
+  expect(log).toHaveBeenCalledWith(JSON.stringify({event:'server_uptime_not_probed',guard_code:result.guard_code}));
+  const receipt=result.receipt as any;const stored=await getReceiptEvidence(receipt.receipt_id);expect(sha256Hex(stored.evidence!)).toBe(receipt.raw_response_sha256);expect(JSON.parse(stored.evidence!.toString())).toMatchObject({http_attempted:false,reachable_now:null});expect(Object.keys(JSON.parse(stored.evidence!.toString())).sort()).toEqual(['checked_at','guard_code','http_attempted','http_status','latency_ms','reachable_now','requested_target_sha256','scope'].sort());expect(stored.evidence!.toString()).not.toContain(host);expect(JSON.stringify(result)).not.toContain(host);expect(JSON.stringify(log.mock.calls)).not.toContain(host);
+ }finally{log.mockRestore();}
+});
+it('uptime malformed/missing input and rate limits remain refusals, not successful probes',async()=>{
+ await expect(handleServerUptime({})).rejects.toMatchObject({code:'MISSING_PARAM'});await expect(handleServerUptime({host:'ftp://example.com'})).rejects.toMatchObject({code:'BAD_SCHEME'});
+ fakeDns({'example.com':['93.184.216.34']});stubFetch(200);await handleServerUptime({host:'example.com'});await expect(handleServerUptime({host:'example.com'})).rejects.toMatchObject({code:'RATE_LIMITED'});
+});
+
+it('blocked uptime route returns an honest200unknown envelope without probing',async()=>{
+ const app=buildServer();vi.mocked(httpsRequest).mockClear();vi.mocked(httpRequest).mockClear();
+ try{const r=await app.inject({method:'GET',url:'/v1/server-uptime?host=localhost'});expect(r.statusCode).toBe(200);expect(r.json()).toMatchObject({http_attempted:false,reachable_now:null,verdict:'unverified',guard_code:'PRIVATE_HOST'});expect(httpsRequest).not.toHaveBeenCalled();expect(httpRequest).not.toHaveBeenCalled();}finally{await app.close();}
+});
+
+it('deduplicates guard refusal writes for one raw-input hash for60s, with bounded capacity',async()=>{
+ vi.useFakeTimers();try{await handleServerUptime({host:'localhost'});await expect(handleServerUptime({host:'localhost'})).rejects.toMatchObject({code:'RATE_LIMITED'});await vi.advanceTimersByTimeAsync(60000);expect(await handleServerUptime({host:'localhost'})).toMatchObject({http_attempted:false});}finally{vi.useRealTimers();}
+});
+it('guard refusal capacity admits1024distinct input hashes, refuses1025without receipt and frees after60s',async()=>{
+ vi.useFakeTimers();const log=vi.spyOn(console,'info').mockImplementation(()=>{});
+ try{
+  for(let i=0;i<1024;i++)await handleServerUptime({host:'blocked'+i+'.internal'});
+  const {getDb}=await import('../src/core/db');const count=()=>((getDb().prepare('SELECT COUNT(*) AS n FROM miner_receipts').get())as any).n;
+  const before=count();await expect(handleServerUptime({host:'overflow.internal'})).rejects.toMatchObject({code:'RATE_LIMITED'});expect(count()).toBe(before);
+  await vi.advanceTimersByTimeAsync(60000);expect(await handleServerUptime({host:'overflow.internal'})).toMatchObject({http_attempted:false});expect(count()).toBe(before+1);
+ }finally{log.mockRestore();vi.useRealTimers();}
 });
