@@ -14,7 +14,7 @@ describe("current frontend contract metadata", () => {
   const section = raw.toString().split("  supported_intents:\n")[1].split(/\n[^ ]/)[0];
   const listed = [...section.matchAll(/^    - ([A-Z0-9_]+)$/gm)].map(m => m[1]);
   expect(listed).toEqual([...DECLARED_INTENTS]);
-  expect(DECLARED_INTENT_COUNT).toBe(58);
+  expect(DECLARED_INTENT_COUNT).toBe(59);
   // Declaration metadata follows this file. Registered-chain metadata
   // is separate and must change only after a verified registration update.
   const workingHash = "0x" + createHash("sha256").update(raw).digest("hex");

@@ -27,6 +27,7 @@ export interface OutputMapping {
 /** Mirror of miner.yaml `intent_mapping.<INTENT>.output` (pinned by
  *  tests/shaped-fields.test.ts against the file itself). */
 export const OUTPUT_MAPPING: Record<string, Record<string, OutputMapping>> = {
+  VESSEL_TELEMETRY_VERIFY_GENERAL:{vessel:{path:"vessel"},speed_knots:{path:"speed_knots",unit:"knots"},latitude:{path:"latitude",unit:"degrees"},longitude:{path:"longitude",unit:"degrees"},course_deg:{path:"course_deg",unit:"degrees"},observed_at:{path:"observed_at"}},
   CRYPTO_YIELD_RATE_GENERAL:{supply_apy:{path:"supply_apy",unit:"basis points"}},
   GAME_RESULT_GENERAL:{winner:{path:"winner"},home_team:{path:"home_team"},away_team:{path:"away_team"},home_score:{path:"home_score",unit:"points"},away_score:{path:"away_score",unit:"points"},date:{path:"date"}},
   RETURN_POLICY_VERIFY_GENERAL:{retailer:{path:"retailer"},return_window_days:{path:"return_window_days",unit:"days"},conditions:{path:"conditions"},verified:{path:"verified"},sources:{path:"sources"}},
@@ -346,6 +347,7 @@ export interface FieldFormat {
 }
 
 export const FIELD_FORMAT: Record<string, Record<string, FieldFormat>> = {
+  VESSEL_TELEMETRY_VERIFY_GENERAL:{vessel:{type:"string"},speed_knots:{type:"number"},latitude:{type:"number"},longitude:{type:"number"},course_deg:{type:"number"},observed_at:{type:"datetime"}},
   CRYPTO_YIELD_RATE_GENERAL:{supply_apy:{type:"number"}},
   GAME_RESULT_GENERAL:{winner:{type:"string"},home_team:{type:"string"},away_team:{type:"string"},home_score:{type:"number"},away_score:{type:"number"},date:{type:"string"}},
   RETURN_POLICY_VERIFY_GENERAL:{retailer:{type:"string"},return_window_days:{type:"number"},conditions:{type:"list"},verified:{type:"bool"},sources:{type:"list"}},

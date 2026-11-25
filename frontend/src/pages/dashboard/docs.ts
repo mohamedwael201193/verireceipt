@@ -266,6 +266,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - RETURN_POLICY_VERIFY_GENERAL\n' +
     '    - GAME_RESULT_GENERAL\n' +
     '    - CRYPTO_YIELD_RATE_GENERAL\n' +
+    '    - VESSEL_TELEMETRY_VERIFY_GENERAL\n' +
     '  signal_mapping:\n' +
     '    confidence_field: confidence\n' +
     '    label_field: answer\n' +
@@ -1442,6 +1443,25 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          - CRYPTO_YIELD_RATE_GENERAL\n' +
     '          description: \'Exact ethereum, case-insensitive. No chain substitution.\'\n' +
     '\n' +
+    '  - path: /v1/vessel-telemetry\n' +
+    '    external_path: /v1/vessel-telemetry\n' +
+    '    method: GET\n' +
+    "    description: 'Decoded AIS position report via Open Waters and BarentsWatch, exact nine-digit\n" +
+    '      ship MMSI only. No vessel-name or IMO resolution. Event no older than five minutes;\n' +
+    '      missing, stale, invalid or conflicting fields are refused. Source event time is not\n' +
+    '      guaranteed GPS fix time; JSON-synthesized reports are disclosed. Norwegian source\n' +
+    "      coverage only, not global consensus, independent authentication or navigation advice.'\n" +
+    '    intents:\n' +
+    '    - VESSEL_TELEMETRY_VERIFY_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: vessel\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - VESSEL_TELEMETRY_VERIFY_GENERAL\n' +
+    "          description: 'Exact nine-digit ship MMSI beginning with 2 through 7. Names and IMO unsupported.'\n" +
+    '\n' +
     'intent_mapping:\n' +
     '  ONCHAIN_TX_LOOKUP_GENERAL:\n' +
     '    endpoint: /v1/tx\n' +
@@ -2383,7 +2403,30 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    output:\n' +
     '      supply_apy:\n' +
     '        path: supply_apy\n' +
-    '        unit: "basis points"\n',
+    '        unit: "basis points"\n' +
+    '\n' +
+    '  VESSEL_TELEMETRY_VERIFY_GENERAL:\n' +
+    '    endpoint: /v1/vessel-telemetry\n' +
+    '    input:\n' +
+    '      vessel:\n' +
+    '        from: vessel\n' +
+    '    output:\n' +
+    '      vessel:\n' +
+    '        path: vessel\n' +
+    '      speed_knots:\n' +
+    '        path: speed_knots\n' +
+    '        unit: "knots"\n' +
+    '      latitude:\n' +
+    '        path: latitude\n' +
+    '        unit: "degrees"\n' +
+    '      longitude:\n' +
+    '        path: longitude\n' +
+    '        unit: "degrees"\n' +
+    '      course_deg:\n' +
+    '        path: course_deg\n' +
+    '        unit: "degrees"\n' +
+    '      observed_at:\n' +
+    '        path: observed_at\n',
 
   cast: REGISTRATION_CAST_SNIPPET,
 };
