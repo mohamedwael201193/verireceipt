@@ -102,7 +102,7 @@ export async function handleAcademicSearch(query: Record<string, string | undefi
   const ageSeconds=Math.floor((Date.now()-Date.parse(fetchedAt))/1000),stale=Boolean(staleReason);
   const parsedWorks=parseCrossrefWorks(raw,recent?20:ROWS);
   const total=parsedWorks.total,eligible=parsedWorks.papers.filter(p=>(p.publication_year!==null||p.venue!==null)&&(year===undefined||p.publication_year===year)&&(!recent||(p.publication_year!==null&&p.publication_year>=recent.minYear&&p.publication_year<=recent.maxYear&&p.crossref_citation_count!==null&&p.crossref_citation_count>=1)));
-  if(recent){const items=JSON.parse(raw).message.items;const date=(p:AcademicPaper)=>{const parts=items.find((r:any)=>r.DOI===p.doi)?.published?.['date-parts']?.[0];return Array.isArray(parts)?[parts[0],String(parts[1]??1).padStart(2,'0'),String(parts[2]??1).padStart(2,'0')].join('-'):String(p.publication_year);};eligible.sort((a,b)=>date(b).localeCompare(date(a))||(b.crossref_citation_count??0)-(a.crossref_citation_count??0));}
+  if(recent){const items=JSON.parse(raw).message.items;const date=(p:AcademicPaper)=>{const parts=items.find((r:any)=>r?.DOI===p.doi)?.published?.['date-parts']?.[0];return Array.isArray(parts)?[parts[0],String(parts[1]??1).padStart(2,'0'),String(parts[2]??1).padStart(2,'0')].join('-'):String(p.publication_year);};eligible.sort((a,b)=>date(b).localeCompare(date(a))||(b.crossref_citation_count??0)-(a.crossref_citation_count??0));}
   const papers=eligible.slice(0,ROWS),skipped=parsedWorks.skipped+parsedWorks.papers.length-eligible.length;
   const asOf = fetchedAt;
   const titles = papers.map((p) => p.title);
