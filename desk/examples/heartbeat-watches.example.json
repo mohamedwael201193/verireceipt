@@ -1,0 +1,21 @@
+[
+  {
+    "id": "caiso-np15-evening-dispatch",
+    "intent": "GRID_POWER_PRICE_GENERAL",
+    "params": { "node_or_zone": "TH_NP15_GEN-APND" },
+    "field": "lmp_usd_per_mwh",
+    "rule": { "op": "lte", "value": "120" },
+    "max_age_seconds": 1800,
+    "cross_check": { "miner_id": "OTHER_MINER_ENGINE_ID", "tolerance_bps": 200 },
+    "rationale": "Only run the evening batch job while NP15 power is at or under $120/MWh; two providers must agree within 2% before the memo says so."
+  },
+  {
+    "id": "btc-treasury-floor",
+    "intent": "CRYPTO_PRICE_USD",
+    "params": { "symbol": "BTC" },
+    "field": "price_usd",
+    "rule": { "op": "gte", "value": "80000" },
+    "max_age_seconds": 900,
+    "rationale": "Treasury policy: flag for review whenever BTC trades under $80k. The memo records the checked price, its sources and receipts; the review itself is the user's decision."
+  }
+]
