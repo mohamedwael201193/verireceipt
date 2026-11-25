@@ -386,7 +386,8 @@ describe("handleGasPrice LIVE (real public RPCs, no stub)", () => {
       expect(sha256Hex(ev.evidence!)).toBe(rc.raw_response_sha256);
       // The stored evidence is a real eth_gasPrice JSON-RPC response.
       const parsed = JSON.parse(ev.evidence!.toString("utf8")) as { result: string };
-      expect(parsed.result).toMatch(/^0x[0-9a-fA-F]+$/);
+      const rawGas = (parsed as any).gas_price_raw ? JSON.parse((parsed as any).gas_price_raw) : parsed;
+      expect(rawGas.result).toMatch(/^0x[0-9a-fA-F]+$/);
     },
     LIVE_TIMEOUT_MS,
   );

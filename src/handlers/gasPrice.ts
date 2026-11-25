@@ -191,6 +191,33 @@ function agreeingPair(legs: GasLeg[]): { weiHex: string; count: number } | null 
   return best;
 }
 
+// Optional fee-market context is a separate exact2-of-N tuple vote. Never
+// derive a priority tip by subtracting gasPrice/baseFee, or claim a fee cap.
+const activeFeeContext = new Set<string>();
+async function feeContext(rpcs:string[]):Promise<{fields:Record<string,unknown>;evidence:unknown}|null>{
+ const deadline=Date.now()+1200;
+ const legs=await Promise.all(rpcs.map(async url=>{
+  if(activeFeeContext.has(url))return null;
+  activeFeeContext.add(url);const abort=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
+  const io=(async()=>{try{
+   const block=await rpcCall(url,'eth_getBlockByNumber',['latest',false],abort.signal);
+   const b=block.result as any;
+   if(!b||typeof b.number!=='string'||typeof b.baseFeePerGas!=='string'||!HEX_QTY_RE.test(b.number)||!HEX_QTY_RE.test(b.baseFeePerGas))return null;
+   if(abort.signal.aborted||Date.now()>=deadline)return null;
+   const tip=await rpcCall(url,'eth_maxPriorityFeePerGas',[],abort.signal);
+   if(typeof tip.result!=='string'||!HEX_QTY_RE.test(tip.result))return null;
+   const number=BigInt(b.number),base=BigInt(b.baseFeePerGas),priority=BigInt(tip.result);
+   if(number>1000000000000n||base>MAX_GAS_WEI||priority>MAX_GAS_WEI)return null;
+   return{url,key:[number,base,priority].join(':'),number:Number(number),base:Number(base)/1e9,priority:Number(priority)/1e9,raw:{block:block.rawText,priority:tip.rawText}};
+  }catch{return null;}finally{activeFeeContext.delete(url);}})();
+  try{return await Promise.race([io,new Promise<null>(resolve=>{timer=setTimeout(()=>{abort.abort();resolve(null);},Math.max(0,deadline-Date.now()));})]);}finally{clearTimeout(timer);}
+ }));
+ const good=legs.filter((l):l is NonNullable<typeof l>=>l!==null);
+ const winner=good.find(l=>good.filter(x=>x.key===l.key).length>=2);if(!winner)return null;
+ const agreeing=good.filter(l=>l.key===winner.key);
+ return{fields:{base_fee_gwei:winner.base,priority_fee_gwei:winner.priority,block_number:winner.number,fee_context_quorum:`${agreeing.length}/${rpcs.length} sources agreed`,fee_context_scope:'base fee at observed latest block; priority fee is the contemporaneous node suggestion, not a block-bound or future fee quote'},evidence:agreeing.map(l=>({url:l.url,...l.raw}))};
+}
+
 export async function handleGasPrice(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
@@ -265,7 +292,10 @@ export async function handleGasPrice(
   }
   const formula = `${gasPriceGwei} gwei x 21000 gas x ${tokenSymbol} $${Math.round(tokenUsd * 100) / 100} (Coinbase spot) / 1e9`;
 
+  const context = await feeContext(rpcs);
   const fields: Record<string, unknown> = {
+    base_fee_gwei:null,priority_fee_gwei:null,block_number:null,fee_context_quorum:null,
+    ...(context?.fields ?? {fee_context_scope:"fee context unavailable; no agreeing tuple of block, base fee and priority suggestion"}),
     chain,
     gas_price_gwei: gasPriceGwei,
     transfer_fee_usd: usdFee,
@@ -273,7 +303,8 @@ export async function handleGasPrice(
   };
 
   const defaultDisclosure = unsupported ? "Requested chain was not served; defaulted to ethereum; Ethereum quorum only" : !chainRaw ? "No chain given; defaulted to ethereum" : "";
-  const receiptDoc: Receipt = makeReceipt(INTENT, winner.rpcUrl, winner.rawText, votes + (defaultDisclosure ? `; ${defaultDisclosure}` : ""));
+  const evidence = context ? JSON.stringify({gas_price_raw:winner.rawText,fee_context:context.evidence}) : winner.rawText;
+  const receiptDoc: Receipt = makeReceipt(INTENT, winner.rpcUrl, evidence, votes + (defaultDisclosure ? `; ${defaultDisclosure}` : ""));
   receiptDoc.gas_token_spot = {
     source: `Coinbase ${tokenSymbol}-USD spot`,
     token_usd: tokenUsd,
@@ -281,7 +312,7 @@ export async function handleGasPrice(
     sha256: sha256Hex(spotBodies[0]),
   };
   try {
-    await saveReceipt(receiptDoc, winner.rawText);
+    await saveReceipt(receiptDoc, evidence);
   } catch {
     throw upstreamUnavailable(
       "RECEIPT_PERSIST_FAILED",
@@ -290,9 +321,9 @@ export async function handleGasPrice(
   }
 
   return envelope(INTENT, fields, receiptDoc, {
-    answer: defaulted
+    answer: (context ? `Fee context: block ${fields.block_number}, base fee ${fields.base_fee_gwei} gwei, suggested priority ${fields.priority_fee_gwei} gwei (${fields.fee_context_quorum}). Priority is a contemporaneous node suggestion, not a block-bound or future quote. ` : "Base fee, priority fee and block context unavailable; not estimated. ") + (defaulted
       ? `Current gas price on ethereum: ${gasPriceGwei} gwei (${unsupported ? "Requested chain was not served; defaulted to ethereum, not a quote for the requested chain" : "no chain given; defaulted to ethereum"}. ${votes}). 21,000-gas transfer ≈ $${usdFee} = ${formula}. Not a quote for a future transaction; the price moves block to block.`
-      : `Current gas price on ${chain}: ${gasPriceGwei} gwei (${votes}). 21,000-gas transfer ≈ $${usdFee} = ${formula}. Not a quote for a future transaction; the price moves block to block.`,
+      : `Current gas price on ${chain}: ${gasPriceGwei} gwei (${votes}). 21,000-gas transfer ≈ $${usdFee} = ${formula}. Not a quote for a future transaction; the price moves block to block.`),
     verdict: "verified",
     confidence: pair.count === total ? 1.0 : 0.9,
     source: `EVM RPC quorum (${chain}, 2-of-${total})`,
