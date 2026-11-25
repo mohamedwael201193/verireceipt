@@ -80,7 +80,7 @@ export async function handleCryptoPrice(query: Record<string, string | undefined
     crossBody=crossResult.value.body;
     try{crossPrice=parseKrakenSpot(crossBody,symbol);crossStatus='available';}catch{crossStatus='invalid_or_unlisted';}
   }
-  const deviationBps=crossPrice===undefined?null:Math.abs(crossPrice-primaryPrice)/primaryPrice*10000;
+  const deviationBps=crossPrice===undefined?null:Math.round(Math.abs(crossPrice-primaryPrice)/primaryPrice*10000*1e8)/1e8;
   if(crossPrice!==undefined&&!withinTwentyBps(JSON.parse(body).data.amount,JSON.parse(crossBody!).result[symbol+'/USD'].c[0]))throw upstreamUnavailable('SPOT_PRICE_CONFLICT','Coinbase and Kraken spot differ by more than20basispoints; no price certified');
   const price=crossPrice===undefined?primaryPrice:(primaryPrice+crossPrice)/2;
   const policy=crossPrice===undefined?'Coinbase single-source spot; independent Kraken cross-check unavailable; no median calculated, not an index or VWAP':'Coinbase spot and Kraken last trade agree within20bps; two-price median (midpoint), not a market-wide index';
