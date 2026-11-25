@@ -17,6 +17,7 @@
 // asks for a country or region's published statistic and the scored
 // reference is a country series; an aggregate input is 422. No fuzzy
 // substring matching: an unmatched country is 422 COUNTRY_NOT_FOUND.
+import {macroObservation,resetMacroSourceCacheForTests,readMacroText} from './macroSourceCache';
 import {withAnswerClass} from "../core/answerClass";
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, type Receipt } from "../core/receipt";
@@ -38,7 +39,6 @@ const SERIES: Record<string, { id: string; unit: string }> = {
   "real interest rate": { id: "FR.INR.RINR", unit: "% real interest rate" },
   "trade": { id: "NE.TRD.GNFS.ZS", unit: "% of GDP (exports plus imports of goods and services)" },
 };
-const HTTP_TIMEOUT_MS = 12000;
 const CATALOG_TTL_MS = 60 * 60 * 1000;
 
 const SUPPORTED_INDICATOR = "unemployment rate";
@@ -77,7 +77,7 @@ export function normalizeIndicator(input: string): string | null {
     "real gdp":"real gdp", "gdp constant":"real gdp", "ny.gdp.mktp.kd":"real gdp",
     "gdp growth rate":"gdp growth", "gdp growth annual":"gdp growth", "economic growth":"gdp growth",
     "interest rate":"real interest rate", "real interest rate":"real interest rate", "fr.inr.rinr":"real interest rate",
-    "trade % of gdp":"trade", "ne.trd.gnfs.zs":"trade",
+    "trade":"trade", "trade openness":"trade", "trade share of gdp":"trade", "trade % of gdp":"trade", "ne.trd.gnfs.zs":"trade",
     "inflation rate":"inflation", "consumer price inflation":"inflation", "cpi inflation":"inflation",
     inflation: "inflation", cpi: "inflation", "consumer prices": "inflation",
     "fp.cpi.totl.zg": "inflation", "gdp growth": "gdp growth",
@@ -147,25 +147,14 @@ let catalogCache: { at: number; countries: WbCountry[] } | null = null;
 /** Test seam: drop the cached catalog between cases. */
 export function resetMacroCachesForTests(): void {
   catalogCache = null;
+  resetMacroSourceCacheForTests();
 }
 
-async function fetchText(url: string): Promise<string> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
-    return await res.text();
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function loadCatalog(): Promise<WbCountry[]> {
+async function loadCatalog(deadline:number): Promise<WbCountry[]> {
   if (catalogCache && Date.now() - catalogCache.at < CATALOG_TTL_MS) {
     return catalogCache.countries;
   }
-  const raw = await fetchText(`${WB_BASE}/country?format=json&per_page=400`);
+  const raw = await readMacroText(`${WB_BASE}/country?format=json&per_page=400`,Math.min(deadline,Date.now()+12000));
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -219,6 +208,7 @@ export function resolveCountry(
 export async function handleMacro(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
+  const deadline=Date.now()+20000;
   const indicatorInput = query.indicator?.trim();
   const indicatorRaw = indicatorInput?.toLowerCase().replace(/\s+/g, " ");
   const countryRaw = query.country?.trim();
@@ -245,7 +235,7 @@ export async function handleMacro(
 
   let countries: WbCountry[];
   try {
-    countries = await loadCatalog();
+    countries = await loadCatalog(deadline);
   } catch (err) {
     if (err instanceof Error && err.name === "ApiError") throw err;
     throw upstreamUnavailable(
@@ -268,8 +258,15 @@ export async function handleMacro(
   const selector = requestedYear === undefined ? "mrnev=1" : `date=${requestedYear}`;
   const url = `${WB_BASE}/country/${encodeURIComponent(iso)}/indicator/${series.id}?${selector}&format=json&per_page=100`;
   let rawText: string;
+  let observation: { fetchedAt: string; stale?: boolean };
   try {
-    rawText = await fetchText(url);
+    const result=await macroObservation(url,deadline,body=>{
+      const data=JSON.parse(body);if(!Array.isArray(data)||(data[1]!==null&&!Array.isArray(data[1])))throw Error('invalid macro source payload');
+      const rows=(data[1]??[]) as Array<Record<string,unknown>>;
+      const selected=requestedYear===undefined?rows.filter(r=>/^\d{4}$/.test(String(r?.date))&&Number(r.date)>=1960&&Number(r.date)<=2100&&r.value!==null&&r.value!==undefined).sort((a,b)=>Number(b.date)-Number(a.date))[0]:rows.find(r=>String(r?.date)===String(requestedYear));
+      if(selected?.value!==null&&selected?.value!==undefined&&(typeof selected.value!=='number'||!Number.isFinite(selected.value)))throw Error('invalid macro observation');
+      return typeof selected?.value==='number'&&Number.isFinite(selected.value);
+    });rawText=result.body;observation=result;
   } catch {
     throw upstreamUnavailable("WORLD_BANK_UNAVAILABLE", "World Bank indicator API is unreachable");
   }
@@ -296,7 +293,7 @@ export async function handleMacro(
   const hasValue = typeof value === "number" && Number.isFinite(value);
   const percentSeries = !["gdp per capita", "population", "gdp", "real gdp"].includes(indicator);
   const ratePct = hasValue && percentSeries && value >= 0 && value <= 100 ? Math.round(value * 1e6) / 1e6 : null;
-  const asOf = new Date().toISOString();
+  const asOf = observation.fetchedAt;
   const fields: Record<string, unknown> = {
     rate_pct: ratePct,
     indicator,
@@ -306,10 +303,11 @@ export async function handleMacro(
     country_iso3: country.iso3 || country.id,
     year,
     year_resolution: requestedYear === undefined ? "latest_published_nonempty" : "requested_year",
-    as_of: asOf,
+    as_of: asOf, fetched_at:asOf, stale:Boolean(observation.stale),
   };
 
   const receiptDoc: Receipt = makeReceipt(INTENT, url, rawText, "1/1 authoritative source (World Bank)");
+  receiptDoc.fetched_at=asOf;
   try {
     await saveReceipt(receiptDoc, rawText);
   } catch {
@@ -320,9 +318,9 @@ export async function handleMacro(
   }
 
   return withAnswerClass(envelope(INTENT, fields, receiptDoc, {
-    answer: `${indicator==='real interest rate'?'World Bank real interest rate: lending interest rate adjusted for inflation using the GDP deflator, not a policy rate. ':''}${indicatorNormalized ? `"${indicatorInput}" read as "${indicator}". ` : ""}Mapping: ${indicator} -> World Bank ${series.id}. ${country.name}${requestedYear === undefined ? " latest published observation" : ""}${year === undefined ? "" : ` in ${year}`}: ${hasValue ? `${value} ${series.unit}.${ratePct === null ? " rate_pct is null: this observation is outside the scored 0..100 percent field or is not a percentage." : ""}` : "no data published for the requested observation; rate_pct is null, not zero."}`,
-    verdict: hasValue ? "verified" : "no_data",
-    confidence: hasValue ? 1.0 : 0,
+    answer: `${observation.stale?`STALE cached World Bank observation for ${year}; acquired ${asOf}, cache age ${Math.floor((Date.now()-Date.parse(asOf))/1000)} seconds, upstream unavailable; not a fresh query. `:''}${indicator==='real interest rate'?'World Bank real interest rate: lending interest rate adjusted for inflation using the GDP deflator, not a policy rate. ':''}${indicatorNormalized ? `"${indicatorInput}" read as "${indicator}". ` : ""}Mapping: ${indicator} -> World Bank ${series.id}. ${country.name}${requestedYear === undefined ? " latest published observation" : ""}${year === undefined ? "" : ` in ${year}`}: ${hasValue ? `${value} ${series.unit}.${ratePct === null ? " rate_pct is null: this observation is outside the scored 0..100 percent field or is not a percentage." : ""}` : "no data published for the requested observation; rate_pct is null, not zero."}`,
+    verdict: observation.stale?"stale":hasValue ? "verified" : "no_data",
+    confidence: observation.stale ? 0.5 : hasValue ? 1.0 : 0,
     source: "World Bank API (api.worldbank.org, authoritative publisher)",
   }), INTENT, {alias_known:true});
 }

@@ -98,7 +98,7 @@ for (const item of cases) describe(item.name, () => {
     const result = await call(item);
     const { receipt: returnedReceipt, ...fields } = result;
     // checked_at is this execution clock, not the original SQLite elapsed time.
-    expect(fields).toEqual({ ...item.captured.expected_fields, checked_at: item.captured.clock });
+    expect(fields).toEqual({ ...item.captured.expected_fields, checked_at: item.captured.clock, ...(item.route === "/v1/macro" ? { fetched_at: item.captured.clock, stale: false } : {}) });
     expect(saveReceipt).toHaveBeenCalledTimes(1);
     const [receipt, raw] = vi.mocked(saveReceipt).mock.calls[0];
     expect(returnedReceipt).toEqual(receipt); expect(raw).toBe(item.captured.expected_raw_text);
