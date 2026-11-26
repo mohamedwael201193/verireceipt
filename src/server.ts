@@ -195,10 +195,12 @@ export function buildServer(): FastifyInstance {
   const requestErrors = new WeakMap<object, string>();
   const requestRawErrors = new WeakMap<object, string>(); // server-owned error constants, for the refusal_param_class log line only
   const requestAnswers = new WeakMap<object, {receiptId?:string;answerClass?:Record<string,unknown>}>();
+  const requestNullAnswers = new WeakMap<object, {disclosedNull:true;nullStatus:string}>(); // any 200 payload whose own liquidity_usd is null; only /v1/liquidity consumes it (requestMetrics), fixed labels only
   app.addHook("preSerialization",async(request,reply,payload)=>{
     try { if(reply.statusCode===200){const intent=payload && typeof payload==='object' ? Object.getOwnPropertyDescriptor(Object.getOwnPropertyDescriptor(payload,'receipt')?.value??{},'intent')?.value : undefined;
       const routeIntent=intentFor(request.routeOptions.url);
-      if(typeof intent==='string'||routeIntent!=='other')requestAnswers.set(request,answerDiagnostics(typeof intent==='string'?intent:routeIntent,payload));} }catch{}return payload;
+      if(typeof intent==='string'||routeIntent!=='other')requestAnswers.set(request,answerDiagnostics(typeof intent==='string'?intent:routeIntent,payload));
+      if(payload&&typeof payload==='object'){const d=Object.getOwnPropertyDescriptor(payload,'liquidity_usd');if(d&&'value' in d&&d.value===null){const s=Object.getOwnPropertyDescriptor(payload,'data_status')?.value;requestNullAnswers.set(request,{disclosedNull:true,nullStatus:typeof s==='string'?s:'other'});}}} }catch{}return payload;
   });
   app.addHook("onRequest", async (request) => {
     requestStart.set(request, process.hrtime.bigint());
@@ -207,7 +209,7 @@ export function buildServer(): FastifyInstance {
   app.addHook("onResponse", async (request, reply) => {
     const started = requestStart.get(request);
     const elapsedMs = started === undefined ? 0 : Number(process.hrtime.bigint() - started) / 1e6;
-    recordRequestCompletion(request.routeOptions.url, reply.statusCode, elapsedMs, { query: request.query, errorCode: requestErrors.get(request), rawErrorCode: requestRawErrors.get(request), ...requestAnswers.get(request) });
+    recordRequestCompletion(request.routeOptions.url, reply.statusCode, elapsedMs, { query: request.query, errorCode: requestErrors.get(request), rawErrorCode: requestRawErrors.get(request), ...requestAnswers.get(request), ...requestNullAnswers.get(request) });
   });
 
   // Initialise storage (creates tables on first run). Handlers rely on it
