@@ -49,6 +49,9 @@ export interface PorFeed { asset: string; proxy: string; feedName: string; issue
 /** Feeds probed live 2026-11-23 from the official Chainlink reference data directory.
  *  issuer is named only where the feed's own documentation supports it. */
 export const POR_FEEDS: Record<string, PorFeed> = {
+  // Issuer names (2026-11-26) are the issuer of the asset, sourced from issuer pages: Lido help.lido.fi/en/articles/5230610-what-is-steth;
+  // ether.fi etherfi.gitbook.io/etherfi/products/staking/eeth; Bitget bitget.com/blog/articles/bitget-chainlink-proof-of-reserve-bgbtc-2025;
+  // Huobi htx.com/news/87636; Swell swellnetwork.io/post/rswethpor and chain.link/blog/chainlink-for-lsts-and-lrts; Kinesis support.kinesis.money (C1USD).
   // Additional feeds: directory and 3-of-3 RPC reads verified 2026-11-26. refuseStale: older than the heartbeat is refused, never served.
   STETH: {"asset": "stETH", "proxy": "0xAd410E655C0fE4741F573152592eeb766e686CE7", "feedName": "stETH Proof of Reserves", "issuer": "Lido", "heartbeat": 21600, "reserveUnit": "ETH", "refuseStale": true},
   EETH: {"asset": "eETH", "proxy": "0xC8cd82067eA907EA4af81b625d2bB653E21b5156", "feedName": "eETH Proof of Reserves", "issuer": "ether.fi", "heartbeat": 86400, "reserveUnit": "ETH", "refuseStale": true},
@@ -162,6 +165,14 @@ export function parseRoundData(hex: string): RoundData {
   };
 }
 
+/** Exact decimal rendering of a raw feed answer (BigInt, no float rounding), thousands-grouped, trailing zeros trimmed. Display only. */
+export function exactReserveText(raw: bigint, decimals: number): string {
+  const div = 10n ** BigInt(decimals);
+  const whole = (raw / div).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const frac = (raw % div).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : whole;
+}
+
 const RESERVE_ALIASES:Record<string,string>={
  'wrapped bitcoin':'WBTC','wrapped btc':'WBTC','coinbase wrapped bitcoin':'CBBTC','coinbase wrapped btc':'CBBTC','coinbase bitcoin':'CBBTC','trueusd':'TUSD','true usd':'TUSD',
  'ignition fbtc':'FBTC','lombard bitcoin':'LBTC','lombard btc':'LBTC','solv btc':'SOLVBTC','kinesis gold':'KAU','kinesis silver':'KAG'
@@ -270,7 +281,7 @@ export async function handleReserveAttestation(query: Record<string, string | un
   } catch {
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
-  const answer = `${feed.asset} attested reserve: ${human.toLocaleString("en-US", { maximumFractionDigits: decimals })} ${reserveUnit} (${micro.toString()} micro-units) per the Chainlink ${feed.feedName} feed${feed.issuer ? ` (issuer ${feed.issuer})` : ""}, round ${data.roundId}, attested ${updatedIso} (${Math.floor(ageS / 3600)}h ago${stale ? `, OLDER than the ${heartbeat / 3600}h heartbeat` : ""}). ` +
+  const answer = `${feed.asset} attested reserve: ${exactReserveText(data.answer, decimals)} ${reserveUnit} (${micro.toString()} micro-units) per the Chainlink ${feed.feedName} feed${feed.issuer ? ` (issuer ${feed.issuer})` : ""}, round ${data.roundId}, attested ${updatedIso} (${Math.floor(ageS / 3600)}h ago${stale ? `, OLDER than the ${heartbeat / 3600}h heartbeat` : ""}). ` +
     `${ethereumSupply === null ? "Ethereum total supply unavailable; no ratio asserted. " : `Ethereum total supply ${ethereumSupply} ${feed.asset}; reserve versus Ethereum-only supply ${ethereumRatio}%. `}This is not a global collateral ratio; collateral_ratio_pct is null. ${token ? "The reserve feed covers wider issuance and other native chains are excluded from the supply denominator. " : "No verified Ethereum issuance token binding is configured for this asset. "} Supply is read at latest while the reserve is the timestamped feed attestation, not a time-matched solvency audit. ` +
     `Read on ethereum mainnet through the RPC quorum; this is the feed's own attestation, not an independent audit.${remainder ? ` Micro-unit remainder floored: ${remainder}.` : ""}${feed.note ? ` ${feed.note}` : ""}`;
   return withAnswerClass(envelope(INTENT, {

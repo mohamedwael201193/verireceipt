@@ -5,7 +5,7 @@ const scratch = mkdtempSync("/tmp/reserve-attestation-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 afterEach(() => vi.unstubAllGlobals());
-import { handleReserveAttestation, parseRoundData, POR_FEEDS } from "../src/handlers/reserveAttestation";
+import { handleReserveAttestation, parseRoundData, POR_FEEDS, exactReserveText } from "../src/handlers/reserveAttestation";
 import { buildServer } from "../src/server";
 import { getReceiptEvidence } from "../src/core/storage";
 import { sha256Hex } from "../src/core/receipt";
@@ -274,5 +274,26 @@ describe('verified additional reserve feeds',()=>{
     }
     stub();
     for (const a of ["WBTC"]) expect(String((await handleReserveAttestation({ asset: a })).answer)).not.toContain("across chains");
+  });
+  it("exactReserveText renders the raw answer exactly, with no float noise", () => {
+    expect(exactReserveText(10880376940624000000000n, 18)).toBe("10,880.376940624");
+    expect(exactReserveText(9702767101123921852576946n, 18)).toBe("9,702,767.101123921852576946");
+    expect(exactReserveText(11614474510048n, 8)).toBe("116,144.74510048");
+    expect(exactReserveText(5000000n, 6)).toBe("5");
+    expect(exactReserveText(1n, 18)).toBe("0.000000000000000001");
+    expect(exactReserveText(999n, 0)).toBe("999");
+    expect(exactReserveText(1000000000000n, 6)).toBe("1,000,000");
+  });
+  it("swETH answer shows its exact reserve and the same scored micro value; every new feed answer has its exact text", async () => {
+    for (const f of fx26.feeds) {
+      vi.useFakeTimers();
+      try {
+        const rd = roundOf(f); vi.setSystemTime((rd.updatedAt + 60) * 1000); legStub(f);
+        const dec = Number(BigInt(JSON.parse(f.legs[0].decimals.raw).result));
+        const out = await handleReserveAttestation({ asset: f.asset });
+        expect(String(out.answer), f.asset).toContain(`attested reserve: ${exactReserveText(rd.answer, dec)} ${f.reserve_unit} (`);
+        if (f.asset === "swETH") { expect(String(out.answer)).toContain("10,880.376940624 ETH ("); expect(out.attested_reserve).toBe(10880376940); }
+      } finally { vi.useRealTimers(); }
+    }
   });
 });
