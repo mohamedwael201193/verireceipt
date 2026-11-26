@@ -21,7 +21,7 @@ const doc = loadYaml(readFileSync(resolve(process.cwd(), "miner.yaml"), "utf8"))
 describe("miner.yaml parses as real YAML (P1: on-chain rejection 6176)", () => {
   it("parses and keeps intents, mappings and endpoints consistent", () => {
     const intents = doc.semantics.supported_intents;
-    expect(intents).toHaveLength(57);
+    expect(intents).toHaveLength(58);
     expect(Object.keys(doc.intent_mapping).sort()).toEqual([...intents].sort());
     const paths = new Set(doc.endpoints.map((e) => e.path));
     for (const [intent, m] of Object.entries(doc.intent_mapping)) {

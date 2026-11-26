@@ -21,7 +21,7 @@ const ROUTE_INTENTS: Record<string, string> = {
   "/v1/token-supply": "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL", "/v1/macro": "MACRO_ECONOMIC_INDICATOR_GENERAL",
   "/v1/dns": "DNS_RECORD_LOOKUP_GENERAL", "/v1/ssl": "SSL_VERIFICATION_CERT",
   "/v1/cve": "CVE_LOOKUP_CVSS", "/v1/fx": "CURRENCY_EXCHANGE_CONVERT", "/v1/fx-now": "FX_NOW_EUR/CAD/SEK",
-  "/v1/token-holders": "TOKEN_HOLDER_COUNT_GENERAL", "/v1/email-security": "EMAIL_SECURITY_GENERAL",
+  "/v1/wash-trading": "WASH_TRADING_DETECTION_GENERAL", "/v1/token-holders": "TOKEN_HOLDER_COUNT_GENERAL", "/v1/email-security": "EMAIL_SECURITY_GENERAL",
   "/v1/vulnerability-triage": "VULNERABILITY_TRIAGE_GENERAL",
   "/v1/academic-search": "ACADEMIC_SEARCH_GENERAL",
   "/v1/code-patch": "CODE_PATCH_VERIFY_GENERAL",

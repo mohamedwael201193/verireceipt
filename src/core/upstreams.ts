@@ -222,6 +222,7 @@ export const INTENT_PRIMARY_UPSTREAM: Record<string, string> = {
   macro: "worldbank",
   "fx-now": "frankfurter",
   "token-holders": "blockscout",
+  "wash-trading": "geckoterminal",
   price: "chainlink-evm-rpc",
   liquidity: "dexscreener",
   yield: "aave-v3-evm-rpc",

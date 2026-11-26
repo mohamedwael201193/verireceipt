@@ -66,6 +66,7 @@ import { handleEmailSecurity } from "./handlers/emailSecurity";
 import { exactQuery } from "./core/exactQuery";
 import { intentFor, diagnosticErrorCode, recordRequestArrival, recordRequestCompletion, requestMetricsSnapshot } from "./core/requestMetrics";
 import { handleMacro } from "./handlers/macroEconomic";
+import { handleWashTrading } from "./handlers/washTrading";
 import { handleTokenHolders, holderUpstreamForQuery, startHolderBootWarm, stopHolderBootWarm } from "./handlers/tokenHolders";
 import {handleBuoySensor} from "./handlers/buoyWired";
 import {handleVesselPosition} from "./handlers/vesselWired";
@@ -413,6 +414,9 @@ export function buildServer(): FastifyInstance {
   });
   app.get("/v1/fx-now", async (request) =>
     trackIntent("fx-now", () => handleFxNow(asQuery(request.query))),
+  );
+  app.get("/v1/wash-trading", async (request) =>
+    trackIntent("wash-trading", () => handleWashTrading(asQuery(request.query))),
   );
   app.get("/v1/token-holders", async (request) =>
     trackIntent("token-holders", () => handleTokenHolders(asQuery(request.query)), holderUpstreamForQuery(asQuery(request.query))),

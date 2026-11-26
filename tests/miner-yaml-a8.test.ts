@@ -251,6 +251,7 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, Outpu
     inputs: ["token", "chain"],
     outputs: { token: null, chain: null, holders_count: "addresses", token_symbol: null },
   },
+  WASH_TRADING_DETECTION_GENERAL: { endpoint: "/v1/wash-trading", inputs: ["subject"], outputs: { subject: null, verdict: null, wash_volume_pct: "percent", signals: null, summary: null } },
   TRANSACTION_RISK_GENERAL: {
     endpoint: "/v1/transaction-risk",
     inputs: ["transaction"],
@@ -307,7 +308,7 @@ const OFFICIAL: Record<string, { endpoint: string; outputs: Record<string, Outpu
 };
 
 describe("A8 miner.yaml vs the official intent schemas", () => {
-  it("declares exactly the fifty-seven reviewed intents, each on its own endpoint", () => {
+  it("declares exactly the fifty-eight reviewed intents, each on its own endpoint", () => {
     const si = block("  supported_intents:").map((l) => l.trim().replace(/^- /, "")).filter(Boolean);
     expect(si).toEqual(Object.keys(OFFICIAL));
     for (const [intent, o] of Object.entries(OFFICIAL)) {

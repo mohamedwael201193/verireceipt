@@ -101,6 +101,7 @@ semantics:
     - STOCK_PRICE_US_EQUITY
     - THREAT_INTELLIGENCE_INDICATOR
     - TOKEN_HOLDER_COUNT_GENERAL
+    - WASH_TRADING_DETECTION_GENERAL
     - TRANSACTION_RISK_GENERAL
     - TRAVEL_DISRUPTION_GENERAL
     - URL_SAFE_GENERAL
@@ -898,6 +899,23 @@ endpoints:
           intents:
           - TOKEN_HOLDER_COUNT_GENERAL
           description: Chain of the token
+
+  - path: /v1/wash-trading
+    external_path: /v1/wash-trading
+    method: GET
+    description: A disclosed wash-trading proxy for a DEX pool or token address, from the latest 300
+      public pool trades (matched same-sender round trips), with a SHA-256 receipt over the exact
+      upstream bodies.
+    intents:
+    - WASH_TRADING_DETECTION_GENERAL
+    params:
+      query:
+        required:
+        - name: subject
+          type: string
+          intents:
+          - WASH_TRADING_DETECTION_GENERAL
+          description: Pool or token contract address (0x...)
 
   - path: /v1/transaction-risk
     external_path: /v1/transaction-risk
@@ -1829,6 +1847,24 @@ intent_mapping:
     output:
       malicious:
         path: malicious
+
+  WASH_TRADING_DETECTION_GENERAL:
+    endpoint: /v1/wash-trading
+    input:
+      subject:
+        from: subject
+    output:
+      subject:
+        path: subject
+      verdict:
+        path: verdict
+      wash_volume_pct:
+        path: wash_volume_pct
+        unit: "percent"
+      signals:
+        path: signals
+      summary:
+        path: summary
 
   TOKEN_HOLDER_COUNT_GENERAL:
     endpoint: /v1/token-holders

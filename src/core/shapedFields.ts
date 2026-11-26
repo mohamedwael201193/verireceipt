@@ -228,6 +228,13 @@ export const OUTPUT_MAPPING: Record<string, Record<string, OutputMapping>> = {
     holders_count: { path: "holders_count", unit: "addresses" },
     token_symbol: { path: "token_symbol" },
   },
+  WASH_TRADING_DETECTION_GENERAL: {
+    subject: { path: "subject" },
+    verdict: { path: "verdict" },
+    wash_volume_pct: { path: "wash_volume_pct", unit: "percent" },
+    signals: { path: "signals" },
+    summary: { path: "summary" },
+  },
   TRANSACTION_RISK_GENERAL: {
     risk_score: { path: "risk_score", unit: "fraction (0-1)" },
     signals: { path: "signals" },
@@ -548,6 +555,13 @@ export const FIELD_FORMAT: Record<string, Record<string, FieldFormat>> = {
     chain: { type: "string" },
     holders_count: { type: "number" },
     token_symbol: { type: "string" },
+  },
+  WASH_TRADING_DETECTION_GENERAL: {
+    subject: { type: "string" },
+    verdict: { type: "enum", allowed: ["wash_trading", "likely_wash_trading", "inconclusive", "organic"] },
+    wash_volume_pct: { type: "number" },
+    signals: { type: "list" },
+    summary: { type: "string" },
   },
   TRANSACTION_RISK_GENERAL: {
     risk_score: { type: "number" },
