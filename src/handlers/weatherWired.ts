@@ -3,7 +3,8 @@ import {openMeteoArchive} from './openMeteoArchive';
 //
 // Enables the measured-weather handlers with reviewed station bindings
 // and NOAA source terms. Current observations remain measured-station only.
-// Past-day queries can use separately disclosed ERA5 reanalysis fallback.
+// Past-day queries can use separately disclosed ERA5 reanalysis fallback. A location with no
+// reviewed NOAA binding is geocoded by Open-Meteo (unique populated place only) and served from ERA5 alone.
 // No field-level blending or station-measurement claim for reanalysis; exact location
 // spellings only, no fuzzy city/station resolution; a location with no
 // reviewed binding fails closed.
@@ -79,9 +80,12 @@ export function createWiredWeatherHandlers(options:{archiveFallback?:boolean}={}
     const noaa = noaaWeatherSources(WEATHER_STATION_BINDINGS, { current: NOAA_METAR_APPROVAL, past: NOAA_NCEI_APPROVAL });
     const archive = noaaWeatherSources(PAST_WEATHER_BINDINGS, { current: NOAA_METAR_APPROVAL, past: NOAA_NCEI_APPROVAL });
     const handlers = createWeatherObservationHandlers({ current: [noaa.current], past: options.archiveFallback===false?[archive.past]:[archive.past,openMeteoArchive] });
+    // Locations without a reviewed NOAA binding: a single source, Open-Meteo ERA5 at a geocoded point, never blended.
+    const unbound = createWeatherObservationHandlers({ current: [], past: [openMeteoArchive] });
+    const bound = new Set(PAST_WEATHER_BINDINGS.map(b => b.location.toLowerCase()));
     return {
         current: handlers.current,
-        past: handlers.past,
+        past: (q) => options.archiveFallback===false || bound.has((q.location?.trim() ?? '').toLowerCase()) ? handlers.past(q) : unbound.past(q),
         currentSourceNames: [noaa.current.name],
         pastSourceNames: options.archiveFallback===false?[archive.past.name]:[archive.past.name,openMeteoArchive.name],
     };

@@ -45,8 +45,10 @@ it.each(['2026-02-29','2026-11-31','2026-11-01T00:00:00Z','2026-1-1','',null,1])
  expect(valueMatchesFormat(date,FIELD_FORMAT[intent].date)).toBe(false);
 });
 it('unsupported locations and missing dates remain refusals before any external request',async()=>{
- const fetch=vi.fn();vi.stubGlobal('fetch',fetch);const h=createWiredWeatherHandlers();
+ const fetch=vi.fn(async()=>new Response('{"results":[]}'));vi.stubGlobal('fetch',fetch);const h=createWiredWeatherHandlers();
  await expect(h.past({location:'Unbound place',date:'2026-11-01'})).rejects.toMatchObject({code:'APPROVED_SOURCES_UNAVAILABLE'});
+ expect(fetch.mock.calls.map(c=>String(c[0]).split('?')[0])).toEqual(['https://geocoding-api.open-meteo.com/v1/search']);
+ fetch.mockClear();
  await expect(h.past({location:'New York JFK'})).rejects.toMatchObject({status:400});
  expect(fetch).not.toHaveBeenCalled();expect(saveReceipt).not.toHaveBeenCalled();
 });

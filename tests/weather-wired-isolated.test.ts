@@ -79,17 +79,19 @@ it('unbound locations fail closed for current and past without touching the netw
 });
 
 it('routes /v1/weather and /v1/weather-history are wired and fail closed for unbound locations', async () => {
-    const fetchSpy = vi.fn();
+    const fetchSpy = vi.fn(async () => new Response('{"results":[]}'));
     vi.stubGlobal('fetch', fetchSpy);
     const app = buildServer();
     try {
         const current = await app.inject({ method: 'GET', url: '/v1/weather?location=Atlantis' });
         expect(current.statusCode).toBe(502);
         expect(current.json().code).toBe('APPROVED_SOURCES_UNAVAILABLE');
+        expect(fetchSpy).not.toHaveBeenCalled();
         const past = await app.inject({ method: 'GET', url: '/v1/weather-history?location=Atlantis&date=2026-11-20' });
         expect(past.statusCode).toBe(502);
         expect(past.json().code).toBe('APPROVED_SOURCES_UNAVAILABLE');
-        expect(fetchSpy).not.toHaveBeenCalled();
+        // past history may ask the geocoder only; an unresolvable place never reaches the archive.
+        expect(fetchSpy.mock.calls.map((c) => String(c[0]).split('?')[0])).toEqual(['https://geocoding-api.open-meteo.com/v1/search']);
     }
     finally {
         await app.close();
