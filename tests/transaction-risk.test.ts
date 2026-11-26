@@ -119,7 +119,7 @@ describe("transaction-risk follow-ups (reviewer)", () => {
       const u = String(url);
       if (u.includes("ofac.treas.gov")) return new Response(sdnWithout, { status: 200 });
       const method = JSON.parse(String(init?.body ?? "{}")).method;
-      return new Response(rpcBody(method === "eth_getTransactionReceipt" ? byzantine : txResult), { status: 200 });
+      return new Response(rpcBody(method === "eth_getTransactionReceipt" ? byzantine : {...txResult,blockNumber:byzantine.blockNumber}), { status: 200 });
     });
     const ok = await handleTransactionRisk({ transaction: TX_HASH });
     expect(ok.risk_level).toBe("LOW"); // root present: NOT flagged reverted
@@ -149,3 +149,11 @@ it('RPC error envelopes never masquerade as null not-found quorum',async()=>{
  vi.stubGlobal('fetch',async(u:unknown)=>new Response(String(u).includes('ofac.treas.gov')?sdnWithout:JSON.stringify({jsonrpc:'2.0',id:1,error:{code:-32029,message:'synthetic rate limit'}})));
  await expect(handleTransactionRisk({transaction:TX_HASH})).rejects.toMatchObject({status:502,code:'RPC_QUORUM_UNREACHABLE'});
 });
+
+it.each(['','<html>unavailable</html>','transaction data unavailable','"123","entity","no currency addresses"'])('200invalid corpus never means sanctions clear: %s',async body=>{stub({sdn:body});await expect(handleTransactionRisk({transaction:TX_HASH})).rejects.toMatchObject({code:'SANCTIONS_UNAVAILABLE'});});
+it.each(['blockHash','blockNumber'])('cross-binds independent tx/receipt quorum %s',async field=>{stub();const base=fetch;vi.stubGlobal('fetch',async(u:unknown,o:any)=>{const method=o?.body?JSON.parse(String(o.body)).method:null;if(method==='eth_getTransactionReceipt'){const r=structuredClone(receiptResult);r[field]=field==='blockHash'?'0x'+'a'.repeat(64):'0x123';return new Response(rpcBody(r));}return base(u as string,o);});await expect(handleTransactionRisk({transaction:TX_HASH})).rejects.toMatchObject({code:'TX_RECEIPT_BLOCK_MISMATCH'});});
+it('oversized sanctions body refuses rather than grading LOW',async()=>{stub({sdn:sdnWithout+' '.repeat(12000001)});await expect(handleTransactionRisk({transaction:TX_HASH})).rejects.toMatchObject({code:'SANCTIONS_UNAVAILABLE'});});
+it('sanctions hard deadline covers a source ignoring abort',async()=>{vi.useFakeTimers();try{vi.stubGlobal('fetch',()=>new Promise(()=>{}));const p=handleTransactionRisk({transaction:TX_HASH}).catch(e=>e);await vi.advanceTimersByTimeAsync(15101);expect(await p).toMatchObject({code:'SANCTIONS_UNAVAILABLE'});}finally{vi.useRealTimers();}});
+
+it('follows exactly the verified government publication host without retaining signed URL',async()=>{stub();const base=fetch,seen:string[]=[];vi.stubGlobal('fetch',async(u:unknown,o:any)=>{const url=String(u);seen.push(url);if(url.includes('ofac.treas.gov')){expect(o.redirect).toBe('manual');return new Response('',{status:302,headers:{location:'https://wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com/Published/control/SDN.CSV?signature=CONTROL_ONLY'}});}if(url.includes('amazonaws.com')){expect(o.redirect).toBe('error');return new Response(sdnWithout);}return base(u as string,o);});const out=await handleTransactionRisk({transaction:TX_HASH});expect(out.risk_level).toBe('LOW');const stored=await getReceiptEvidence((out.receipt as any).receipt_id);expect(stored.evidence!.toString()).not.toContain('CONTROL_ONLY');expect(JSON.stringify(out)).not.toContain('CONTROL_ONLY');expect(seen.some(s=>s.includes('amazonaws.com'))).toBe(true);});
+it.each(['https://evil.example/Published/SDN.CSV','http://wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com/Published/x','https://wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com/not-published/x'])('refuses unapproved sanctions redirect destination %s',async location=>{const f=vi.fn(async()=>new Response('',{status:302,headers:{location}}));vi.stubGlobal('fetch',f);await expect(handleTransactionRisk({transaction:TX_HASH})).rejects.toMatchObject({code:'SANCTIONS_UNAVAILABLE'});expect(f).toHaveBeenCalledTimes(1);});

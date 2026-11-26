@@ -29,7 +29,7 @@ it.each(['Transaction did not revert','If transaction reverted','Transaction rev
 it.each([tx.hash.toUpperCase(),tx.hash.slice(2).toUpperCase()])('normalizes valid case/prefix without moving hash lookup into scenario mode',async(transaction)=>{
  const hashes:string[]=[];
  vi.stubGlobal('fetch',async(url:unknown,init?:RequestInit)=>{
-  if(String(url).includes('ofac.treas.gov'))return new Response('');
+  if(String(url).includes('ofac.treas.gov'))return new Response(readFileSync(join(__dirname,'fixtures/transaction-risk/sdn-excerpt.csv'),'utf8'));
   const q=JSON.parse(String(init?.body));hashes.push(q.params[0]);
   return new Response(JSON.stringify({result:q.method==='eth_getTransactionReceipt'?rc:tx}));
  });

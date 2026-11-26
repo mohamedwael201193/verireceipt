@@ -78,17 +78,34 @@ export function extractSdnCryptoAddresses(raw: string): string[] {
   return [...out];
 }
 
-async function fetchSdnAddresses(): Promise<{ addresses: string[]; body: string }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SDN_TIMEOUT_MS);
-  try {
-    const res = await fetch(SDN_URL, { signal: controller.signal, headers: { "User-Agent": UA } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const body = await res.text();
-    return { addresses: extractSdnCryptoAddresses(body), body };
-  } finally {
-    clearTimeout(timer);
+/** OFAC redirects exports to its government S3 publication host. Follow only
+ * that fixed host, once; signed redirect URLs never enter evidence or logs. */
+async function readSdnBody():Promise<{raw:string}>{
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),SDN_TIMEOUT_MS);
+ try{
+  let res=await fetch(SDN_URL,{redirect:'manual',signal:controller.signal,headers:{'User-Agent':UA,Accept:'text/csv'}});
+  if([301,302,303,307,308].includes(res.status)){
+   const location=res.headers.get('location');if(!location)throw Error('missing source redirect');const u=new URL(location);
+   if(u.protocol!=='https:'||u.hostname!=='wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com'||u.username||u.password||u.port||!u.pathname.startsWith('/Published/'))throw Error('unsupported source redirect');
+   await res.body?.cancel();res=await fetch(u.toString(),{redirect:'error',signal:controller.signal,headers:{'User-Agent':UA,Accept:'text/csv'}});
   }
+  if(!res.ok||!res.body)throw Error('sanctions source unavailable');
+  const reader=res.body.getReader(),parts:Uint8Array[]=[];let size=0;
+  try{while(true){const p=await reader.read();if(p.done)break;size+=p.value.byteLength;if(size>12000000){await reader.cancel();throw Error('sanctions body limit');}parts.push(p.value);}}finally{reader.releaseLock();}
+  return {raw:Buffer.concat(parts).toString('utf8')};
+ }finally{clearTimeout(timer);}
+}
+
+async function fetchSdnAddresses(): Promise<{ addresses: string[]; body: string }> {
+ let timer:ReturnType<typeof setTimeout>;
+ try{
+  const got=await Promise.race([readSdnBody(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(Error('sanctions source deadline')),SDN_TIMEOUT_MS+100);})]);
+  const body=got.raw,addresses=extractSdnCryptoAddresses(body);
+  // A200 error page/empty body is not a negative screening result. This checks
+  // corpus shape and address presence, not cryptographic completeness/currentness.
+  if(!addresses.length||body.trimStart().startsWith('<')||!body.split(/\r?\n/).some(line=>/^"?\d+"?,/.test(line)))throw Error('unusable sanctions corpus');
+  return {addresses,body};
+ }finally{clearTimeout(timer!);}
 }
 
 export function riskLevel(score: number): string {
@@ -170,6 +187,8 @@ export async function handleTransactionRisk(query: Record<string, string | undef
   const tx = await transactionQuorum(rpcs, txHash, url => rpcCall(url, "eth_getTransactionByHash", [txHash], 4000));
   const receipt = await receiptQuorum(rpcs,txHash,url=>rpcCall(url,"eth_getTransactionReceipt",[txHash],4000),{legacyRootBeforeBlock:4370000n});
   if(!receipt.result)throw unprocessable("TX_NOT_FOUND","receipt not found by two-source agreement");
+  const sameBlock=typeof tx.result.blockHash==='string'&&typeof receipt.result.blockHash==='string'&&tx.result.blockHash.toLowerCase()===receipt.result.blockHash.toLowerCase()&&typeof tx.result.blockNumber==='string'&&typeof receipt.result.blockNumber==='string'&&BigInt(tx.result.blockNumber)===BigInt(receipt.result.blockNumber);
+  if(!sameBlock)throw upstreamUnavailable('TX_RECEIPT_BLOCK_MISMATCH','transaction and receipt quorum observations do not identify the same mined block; risk is unassessed');
   const from = String(tx.result.from ?? "").toLowerCase();
   const to = tx.result.to === null || tx.result.to === undefined ? null : String(tx.result.to).toLowerCase();
   const valueWei = BigInt(String(tx.result.value ?? "0x0"));
