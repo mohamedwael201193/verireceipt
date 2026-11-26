@@ -27,23 +27,33 @@ export function annualUsdFact(raw:string,cik:string,tag:string,annualAnchors:Rec
 }
 
 export async function annualFinancialMetrics(cik:string,ua:string,fetchText:(url:string,ua:string)=>Promise<string>):Promise<Record<string,unknown>> {
- const specs=[['annual_revenue','RevenueFromContractWithCustomerExcludingAssessedTax'],['annual_net_income','NetIncomeLoss'],['annual_total_assets','Assets']];
- const results=await Promise.all(specs.map(async([name,tag])=>{
+ const deadline=Date.now()+10000;
+ const revenueTags=['RevenueFromContractWithCustomerExcludingAssessedTax','Revenues','SalesRevenueNet','RevenueFromContractWithCustomerIncludingAssessedTax'];
+ const read=async(tag:string)=>{
   const url=`https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap/${tag}.json`;
+  let timer:ReturnType<typeof setTimeout>|undefined;
   try {
-   const observation=await cachedSecFinancial('facts',cik+':'+tag,()=>fetchText(url,ua),raw=>{annualUsdFact(raw,cik,tag);});
+   const observation=await Promise.race([cachedSecFinancial('facts',cik+':'+tag,()=>fetchText(url,ua),raw=>{annualUsdFact(raw,cik,tag);}),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(Error('annual enrichment deadline')),Math.max(0,deadline-Date.now()));})]);
    const fact=annualUsdFact(observation.body,cik,tag);
-   return [name,{status:fact?'reported':'no_annual_fact',fact,source_url:url,fetched_at:observation.fetchedAt,raw_body:observation.body}];
+   return {status:fact?'reported':'no_annual_fact',fact,source_url:url,fetched_at:observation.fetchedAt,raw_body:observation.body};
   } catch {
-   return [name,{status:'unavailable',fact:null,attempted_source_url:url,raw_body:null}];
-  }
- }));
- const metrics=Object.fromEntries(results);
+   return {status:'unavailable',fact:null,attempted_source_url:url,raw_body:null};
+  }finally{clearTimeout(timer);}
+ };
+ // At most three concurrent SEC calls. Revenue concepts are checked in order,
+ // not raced past the shared source capacity guard.
+ const [revenues,income,totalAssets]=await Promise.all([(async()=>{const rows=[];for(const tag of revenueTags){if(Date.now()>=deadline)break;rows.push(await read(tag));}return rows;})(),read('NetIncomeLoss'),read('Assets')]);
+ const available=revenues.filter(row=>row.fact).sort((a,b)=>String(b.fact!.period_end).localeCompare(String(a.fact!.period_end))||String(b.fact!.filed).localeCompare(String(a.fact!.filed)));
+ const selected=available[0]??revenues[0];
+ const metrics:Record<string,any>={annual_revenue:{...selected,selection_method:'latest annual period end across revenue concepts, then latest filing, then stated concept order; including/excluding tax meanings are not equated',candidate_observations:revenues},annual_net_income:income,annual_total_assets:totalAssets};
  const anchors=['annual_revenue','annual_net_income'].map(key=>metrics[key].fact).filter(Boolean) as Record<string,unknown>[];
  const assets=metrics.annual_total_assets;
  if(assets.raw_body){
   try{assets.fact=annualUsdFact(assets.raw_body,cik,'Assets',anchors);assets.status=assets.fact?'reported':'no_annual_fact';if(assets.fact)assets.fact.annual_period_evidence=anchors.filter(anchor=>anchor.period_end===assets.fact!.period_end&&anchor.accession===assets.fact!.accession&&anchor.filed===assets.fact!.filed);}
   catch{assets.fact=null;assets.status='unavailable';}
  }
+ const periods=Object.values(metrics).map((m:any)=>m.fact?.period_end).filter(Boolean);
+ const aligned=new Set(periods).size<=1;
+ for(const metric of Object.values(metrics))metric.period_alignment=aligned?'reported annual periods align':'mixed annual period ends; compare each disclosed period, not one fiscal year';
  return metrics;
 }
