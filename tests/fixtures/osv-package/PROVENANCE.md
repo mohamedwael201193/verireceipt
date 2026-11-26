@@ -18,3 +18,10 @@ next-13.0.0.json was fetched from the same OSV endpoint with npm next version
 mongodb-3.0.0.json was fetched at about 16:15 UTC, same endpoint, npm mongodb
 version 3.0.0. It retains a real record whose publication time follows its
 modification time. Both timestamps remain validated as finite and not future.
+
+requests-2.19.0.json: POST https://api.osv.dev/v1/query, package requests,
+ecosystem PyPI, version 2.19.0, fetched about 07:08 UTC on November 26, 2026.
+CVE-2022-25883.json and GHSA-c2qf-rxjj-qqgw.json: GET
+https://api.osv.dev/v1/vulns/{id}, same time. All exact unmodified bodies.
+The 404 body {"code":5,"message":"Vulnerability not found"} was returned for
+CVE-2099-0001 at the same time and is inlined in tests.

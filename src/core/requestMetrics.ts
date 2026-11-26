@@ -1,3 +1,4 @@
+import { targetShapeOf } from '../handlers/packageSecurity';
 import {sanitizeAnswerClass} from "./answerClass";
 // Fixed-label observability. Only route-owned closed enums may expose canonical values.
 // Never retain free text, URL/query strings, bodies, headers, IPs or user ids.
@@ -175,6 +176,7 @@ export function recordRequestArrival(route?: string, query?: unknown): void {
     const intent = intentFor(route); bucket(intent).arrived++;
     if (intent !== "other") console.info(JSON.stringify({ event: "request_start", intent, path: route,
       param_keys: query && typeof query === "object" ? KNOWN_QUERY_KEYS.filter(key => Object.hasOwn(query, key)) : [],
+      ...(route === "/v1/security-review" ? { target_shape: targetShapeOf(ownString(query, "target")) } : {}),
       input_enums: safeRequestEnums(route!, query) }));
   } catch { /* observability never changes a response */ }
 }
@@ -210,6 +212,7 @@ export function recordRequestCompletion(route: string | undefined, status: numbe
       const dnsClass=intent==='DNS_RECORD_LOOKUP_GENERAL'&&status>=400?{dns_refusal_reason:typeof details.errorCode==='string'&&Object.hasOwn(dnsReasons,details.errorCode)?dnsReasons[details.errorCode]:'other'}:undefined;
       const answerClass=sanitizeAnswerClass(intent,details.answerClass??dnsClass??paymentClass??refused);
       console.info(JSON.stringify({ event: "request_complete", intent, path: route, param_keys,
+        ...(route === "/v1/security-review" ? { target_shape: targetShapeOf(ownString(details.query, "target")) } : {}),
         ...(input_shape ? { input_shape } : {}), ...(receiptId?{receipt_id:receiptId}:{}), ...(answerClass?{answer_class:answerClass}:{}),
         error_code: details.errorCode == null ? null : diagnosticErrorCode(details.errorCode), status: code, latency_ms: latency }));
     }
