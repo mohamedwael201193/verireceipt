@@ -71,13 +71,13 @@ describe("SPORTS_SCORE_GENERAL", () => {
     expect(result.date).toBe("2026-06-15");
   });
   it("several matches fail closed as ambiguous, listing the candidates", async () => {
-    stub();
+    const rows=JSON.parse(NHL);rows.games.push({...rows.games[0],gameDate:"2026-11-21"});stub({nhlBody:JSON.stringify(rows)});
     const app = buildServer();
-    const res = await app.inject({ method: "GET", url: "/v1/sports-score?game=Rangers%20or%20Lightning" });
+    const res = await app.inject({ method: "GET", url: "/v1/sports-score?game=Rangers" });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe("AMBIGUOUS_GAME");
     expect(res.body).toContain("Rangers");
-    expect(res.body).toContain("Lightning");
+    expect(res.body).toContain("2026-11-21");
     await app.close();
   });
   it("an uncovered game returns disclosed null-score coverage result", async () => {
@@ -116,3 +116,19 @@ it("football answer persists exact captured bytes and never exposes hosting link
  const out=await handleSportsScore({game:"Arsenal vs Chelsea"});expect(out.home_score).toBe(2);expect(out.away_score).toBe(1);expect(out.answer).not.toContain("github");
  const r=out.receipt as {receipt_id:string;raw_response_sha256:string};const stored=await getReceiptEvidence(r.receipt_id);expect(sha256Hex(stored.evidence!)).toBe(r.raw_response_sha256);expect(String(stored.evidence)).toContain("Arsenal FC");
 });
+
+it.each(['Hurricanes at Lightning','Hurricanes vs unknown','Rangers vs unknown','Philadelphia game','Rangers Lightning'])('wrong opponent/location-only query has disclosed no_match: %s',async game=>{stub();const out=await handleSportsScore({game});expect(out.home_score).toBeNull();expect(out.away_score).toBeNull();expect(out.reason_code).toBe('no_match');});
+it('explicit ISO date drives source URL and rejects wrong-date body',async()=>{stub();const base=fetch,urls:string[]=[];vi.stubGlobal('fetch',async(u:unknown)=>{urls.push(String(u));return base(u as string);});const out=await handleSportsScore({game:'Hurricanes at Rangers on 2026-11-20'});expect(out.home_score).toBeNull();expect(urls.some(u=>u.includes('/score/2026-11-20'))).toBe(true);expect(urls.some(u=>u.includes('/score/2026-11-22'))).toBe(false);});
+it('MLB date mismatch cannot return the captured June game for November request',async()=>{stub();const out=await handleSportsScore({game:'Phillies vs Marlins 2026-11-22'});expect(out.home_score).toBeNull();});
+it('exact requested date can match captured June game',async()=>{stub();const out=await handleSportsScore({game:'Phillies vs Marlins 2026-06-15'});expect(out.home_score).toBe(7);expect(out.away_score).toBe(0);expect(out.date).toBe('2026-06-15');});
+it.each(['2026-02-30','2026-11-22 2026-11-21'])('invalid/conflicting date refuses before network %s',async date=>{const f=vi.fn();vi.stubGlobal('fetch',f);await expect(handleSportsScore({game:'Hurricanes at Rangers '+date})).rejects.toMatchObject({status:400});expect(f).not.toHaveBeenCalled();});
+
+it('undated Manchester United Liverpool chooses captured prior final before future scheduled',async()=>{stub();const base=fetch;vi.stubGlobal('fetch',async(u:unknown)=>{const url=String(u);if(url.includes('raw.githubusercontent.com'))return new Response(readFileSync(join(__dirname,'fixtures/sports-football',url.includes('/2025-26/')&&url.endsWith('/en.1.json')?'en.1-previous-pair.json':url.split('/').pop()!),'utf8'));return base(u as string);});const out=await handleSportsScore({game:'Manchester United vs. Liverpool'});expect(out).toMatchObject({home_team:'Manchester United FC',away_team:'Liverpool FC',home_score:3,away_score:2,date:'2026-05-03',status:'final'});expect(out.answer).toContain('Most recent completed scored fixture');});
+it('explicit football date never falls back to another meeting',async()=>{stub();const base=fetch;vi.stubGlobal('fetch',async(u:unknown)=>String(u).includes('raw.githubusercontent.com')?new Response(readFileSync(join(__dirname,'fixtures/sports-football',String(u).split('/').pop()!),'utf8')):base(u as string));const out=await handleSportsScore({game:'Arsenal vs Chelsea 2026-11-20'});expect(out.home_score).toBeNull();expect(out.reason_code).toBe('no_match');});
+it.each(['Boston Red Sox vs Boston Red Sox','Red Sox vs unknown'])('shared compound nickname cannot identify two sides: %s',async game=>{stub();const base=fetch;const rows=JSON.parse(MLB);const g=rows.dates[0].games[0];g.teams.home.team.name='Boston Red Sox';g.teams.away.team.name='Chicago White Sox';// identity perturbation only, no new claimed result fixture
+vi.stubGlobal('fetch',async(u:unknown)=>String(u).includes('statsapi.mlb.com')?new Response(JSON.stringify(rows)):base(u as string));const r=await handleSportsScore({game});expect(r.home_score).toBeNull();expect(r.reason_code).toBe('no_match');});
+it('unseparated Red Sox identifies only Red Sox, not White Sox from shared final token',async()=>{stub();const base=fetch;const rows=JSON.parse(MLB);rows.dates[0].games[0].teams.home.team.name='Boston Red Sox';rows.dates[0].games[1].teams.home.team.name='Chicago White Sox';vi.stubGlobal('fetch',async(u:unknown)=>String(u).includes('statsapi.mlb.com')?new Response(JSON.stringify(rows)):base(u as string));const r=await handleSportsScore({game:'Red Sox'});expect(r.home_team).toBe('Boston Red Sox');});
+it.each(['today yesterday','today on 2026-11-21','yesterday on 2026-11-22'])('all relative and ISO date conflicts refuse before network: %s',async words=>{const f=vi.fn();vi.stubGlobal('fetch',f);await expect(handleSportsScore({game:'Hurricanes vs Rangers '+words})).rejects.toMatchObject({code:'AMBIGUOUS_DATE'});expect(f).not.toHaveBeenCalled();});
+it('NHL body bound covers oversized valid-looking response',async()=>{stub();const base=fetch;vi.stubGlobal('fetch',async(u:unknown)=>String(u).includes('api-web.nhle.com')?new Response(NHL+' '.repeat(1500001)):base(u as string));await expect(handleSportsScore({game:'Hurricanes vs Rangers'})).rejects.toMatchObject({code:'NHL_SCOREBOARD_UNAVAILABLE'});});
+it('MLB body bound covers oversized valid-looking response',async()=>{stub();const base=fetch;vi.stubGlobal('fetch',async(u:unknown)=>String(u).includes('statsapi.mlb.com')?new Response(MLB+' '.repeat(1500001)):base(u as string));await expect(handleSportsScore({game:'Phillies game'})).rejects.toMatchObject({code:'MLB_SCOREBOARD_UNAVAILABLE'});});
+it('league reader hard timeout covers a source ignoring abort',async()=>{vi.stubGlobal('fetch',()=>new Promise(()=>{}));const p=handleSportsScore({game:'Hurricanes vs Rangers'}).catch(e=>e);await vi.advanceTimersByTimeAsync(3101);expect(await p).toMatchObject({code:'NHL_SCOREBOARD_UNAVAILABLE'});});

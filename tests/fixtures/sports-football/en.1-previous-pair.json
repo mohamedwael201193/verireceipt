@@ -1,0 +1,39 @@
+{
+  "name": "English Premier League 2025/26",
+  "matches": [
+    {
+      "round": "Matchday 8",
+      "date": "2025-10-19",
+      "time": "16:30",
+      "team1": "Liverpool FC",
+      "team2": "Manchester United FC",
+      "score": {
+        "ft": [
+          1,
+          2
+        ],
+        "ht": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "round": "Matchday 35",
+      "date": "2026-05-03",
+      "time": "15:30",
+      "team1": "Manchester United FC",
+      "team2": "Liverpool FC",
+      "score": {
+        "ft": [
+          3,
+          2
+        ],
+        "ht": [
+          2,
+          0
+        ]
+      }
+    }
+  ]
+}

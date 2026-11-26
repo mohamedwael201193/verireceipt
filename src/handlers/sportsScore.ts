@@ -1,3 +1,4 @@
+import {readPublicBody} from "../core/publicSource";
 // SPORTS_SCORE_GENERAL — GET /v1/sports-score?game=<free text>
 //
 // Zero-LLM. Answers "what is/was the score of this game?" with a
@@ -34,23 +35,11 @@ interface Candidate {
 }
 
 async function fetchJson(url: string, code: string): Promise<{ body: string; parsed: unknown }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-  let res: Response;
-  try {
-    res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
-  } catch (e) {
-    throw upstreamUnavailable(code, `${url} could not be reached: ${e instanceof Error ? e.message : String(e)}`);
-  } finally {
-    clearTimeout(timer);
-  }
-  const body = await res.text();
-  if (!res.ok) throw upstreamUnavailable(code, `${url} answered HTTP ${res.status}; refusing to guess a score`);
-  try {
-    return { body, parsed: JSON.parse(body) };
-  } catch {
-    throw upstreamUnavailable(code, `${url} returned a body that is not JSON; refusing to answer`);
-  }
+  let timer:ReturnType<typeof setTimeout>;
+  try{
+   const body=await Promise.race([readPublicBody(url,1500000,3000,UA).then(r=>r.raw),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(Error('scoreboard deadline')),3100);})]);
+   return {body,parsed:JSON.parse(body)};
+  }catch{throw upstreamUnavailable(code,'official scoreboard unavailable or invalid; no score asserted');}finally{clearTimeout(timer!);}
 }
 
 function isoDate(d: Date): string {
@@ -123,6 +112,42 @@ async function mlbCandidates(dates: string[]): Promise<{ candidates: Candidate[]
   return { candidates, bodies };
 }
 
+function teamIdentities(team:string,abbrev?:string):string[]{
+ const full=team.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+ // MLB compound nicknames are identities in their own right, never shared Sox.
+ const compound=/\b(red sox|white sox|blue jays)$/.exec(full)?.[1];
+ const nickname=compound??full.split(/\s+/).slice(-1)[0];
+ return [...new Set([full,nickname,...(abbrev?[abbrev.toLowerCase()]:[])])].filter(t=>t.length>=3);
+}
+function teamNamed(query:string,team:string,abbrev?:string):boolean{
+ const q=' '+query.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()+' ';
+ return teamIdentities(team,abbrev).some(t=>q.includes(' '+t+' '));
+}
+function requestedDate(game:string,today:Date):string|null{
+ const dates:string[]=game.match(/\b\d{4}-\d{2}-\d{2}\b/g)??[];
+ if(/\byesterday\b/i.test(game))dates.push(isoDate(new Date(today.getTime()-86400000)));
+ if(/\btoday\b/i.test(game))dates.push(isoDate(today));
+ if(new Set(dates).size>1)throw badRequest('AMBIGUOUS_DATE','name exactly one game date');
+ const date=dates[0]??null;
+ if(date&&(!Number.isFinite(Date.parse(date+'T00:00:00Z'))||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date))throw badRequest('INVALID_DATE','game date must be a real ISO calendar date');
+ return date;
+}
+function candidateMatches(c:Candidate,game:string):boolean{
+ const sides=game.toLowerCase().split(/\s+(?:vs\.?|versus|at|v\.?|@)\s+/);
+ const homeAbbr=c.league==='NHL'?c.tokens[2]:undefined,awayAbbr=c.league==='NHL'?c.tokens[3]:undefined;
+ if(sides.length===2){if(sides.some(side=>teamNamed(side,c.home_team,homeAbbr)&&teamNamed(side,c.away_team,awayAbbr)))return false;return (teamNamed(sides[0],c.home_team,homeAbbr)&&teamNamed(sides[1],c.away_team,awayAbbr))||(teamNamed(sides[1],c.home_team,homeAbbr)&&teamNamed(sides[0],c.away_team,awayAbbr));}
+ if(sides.length>2)return false;
+ // Unseparated queries must name both teams, or exactly one team with only
+ // ordinary score-query filler. City-only MLB tokens are never identities.
+ const home=teamNamed(game,c.home_team,homeAbbr),away=teamNamed(game,c.away_team,awayAbbr);
+ if(home&&away)return true;
+ let remainder=game.toLowerCase().replace(/\b\d{4}-\d{2}-\d{2}\b/g,' ');
+ const terms=[...teamIdentities(c.home_team,homeAbbr),...teamIdentities(c.away_team,awayAbbr)].sort((a,b)=>b.length-a.length);
+ for(const term of terms)remainder=(' '+remainder+' ').replace(' '+term.toLowerCase()+' ',' ');
+ remainder=remainder.replace(/\b(?:what|was|is|the|score|of|game|result|today|yesterday|nhl|mlb|on|please)\b/g,'').replace(/[^a-z0-9]/g,'');
+ return (home||away)&&remainder==='';
+}
+
 export async function handleSportsScore(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const game = query.game?.trim();
   if (!game) throw badRequest("MISSING_PARAM", "game is required: free text naming the teams, e.g. 'Hurricanes at Rangers'");
@@ -130,7 +155,8 @@ export async function handleSportsScore(query: Record<string, string | undefined
   const asOf = new Date().toISOString();
   const today = new Date();
   const yesterday = new Date(today.getTime() - 86400_000);
-  const dates = [isoDate(today), isoDate(yesterday)];
+  const explicitDate=requestedDate(game,today);
+  const dates = explicitDate?[explicitDate]:[isoDate(today), isoDate(yesterday)];
 
   const [nhl, mlb] = await Promise.all([nhlCandidates(dates), mlbCandidates(dates)]);
   const seen = new Set<string>();
@@ -141,27 +167,21 @@ export async function handleSportsScore(query: Record<string, string | undefined
     return true;
   });
   const bodies = [...nhl.bodies, ...mlb.bodies];
-  const q = game.toLowerCase();
-  const words = q.split(/[^a-z0-9]+/).filter(Boolean);
-  const matches = candidates.filter((c) => {
-    // A candidate matches when at least one of its tokens appears as a
-    // whole word in the query; multiword MLB names match on the
-    // distinctive last word (team name) or full string containment.
-    return c.tokens.some((t) => words.includes(t) || (t.includes(" ") && q.includes(t)));
-  });
+  const matches=candidates.filter(c=>(!explicitDate||c.date===explicitDate)&&candidateMatches(c,game));
 
   if (matches.length === 0) {
     let football: Awaited<ReturnType<typeof footballLookup>>;
-    try { football = await footballLookup(game, today); } catch { throw upstreamUnavailable("FOOTBALL_UNAVAILABLE", "major-football reference unavailable or ambiguous; refusing to guess"); }
+    try { football = await footballLookup(game, today,explicitDate??undefined); } catch { throw upstreamUnavailable("FOOTBALL_UNAVAILABLE", "major-football reference unavailable or ambiguous; refusing to guess"); }
     const m = football.match;
-    const scope = "NHL and MLB official scoreboards for today/yesterday; major football current-season openfootball snapshot (five leagues), not a live score feed; other leagues including NBA are not covered";
+    const scope = "NHL and MLB official scoreboards for requested ISO date (UTC today/yesterday if no date); major football current/prior-season openfootball snapshot (five leagues), not a live score feed; other leagues including NBA are not covered";
     const evidence = JSON.stringify({ game_query: game, matched: m, scope, upstream_bodies: [...bodies, ...football.bodies], football_urls: football.urls, fetched_at: asOf });
     const receipt = makeReceipt(INTENT, football.urls[0], evidence, "openfootball football.json CC0 snapshot; exact source bytes; null means no score, never zero");
     receipt.fetched_at = asOf;
     try { await saveReceipt(receipt, evidence); } catch { throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable"); }
-    const fields = m ?? { home_team: null, away_team: null, home_score: null, away_score: null, status: "not_found", date: null, league: null };
-    const answer = m ? `${m.league}, ${m.date}: ${m.away_team} ${m.away_score ?? "no score"} at ${m.home_team} ${m.home_score ?? "no score"} (${m.status}). Source: openfootball football.json, CC0, community snapshot. ${scope}.` : `No matching fixture in sources covered: ${scope}. Scores are null, not zero.`;
-    return envelope(INTENT, { ...fields, found: !!m, summary: answer }, receipt, { answer, verdict: m ? "verified" : "not_found", confidence: m ? 0.8 : 0, source: "openfootball football.json, CC0 public-domain current-season snapshots" });
+    const fields = m ?? {reason_code:"no_match",requested_date:explicitDate, home_team: null, away_team: null, home_score: null, away_score: null, status: "not_found", date: null, league: null };
+    const selection=explicitDate?'Exact requested ISO date only.':m?.status==='final'?'Most recent completed scored fixture in current/prior-season snapshots; no date requested.':'No completed scored fixture found in covered current/prior-season snapshots; next scheduled fixture only, scores unknown.';
+    const answer = m ? `${m.league}, ${m.date}: ${m.away_team} ${m.away_score ?? "no score"} at ${m.home_team} ${m.home_score ?? "no score"} (${m.status}). Source: openfootball football.json, CC0, community snapshot. ${scope}. ${selection}` : `No matching fixture in sources covered: ${scope}. Scores are null, not zero.`;
+    return envelope(INTENT, { ...fields, found: !!m, selection_scope:selection,requested_date:explicitDate, summary: answer }, receipt, { answer, verdict: m ? "verified" : "not_found", confidence: m ? 0.8 : 0, source: "openfootball football.json, CC0 public-domain current-season snapshots" });
   }
   if (matches.length > 1) {
     const listing = matches.map((m) => `${m.league} ${m.away_team} at ${m.home_team} (${m.date})`).join("; ");
