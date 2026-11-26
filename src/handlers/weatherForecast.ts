@@ -1,3 +1,5 @@
+import {forecastExtras} from './forecastExtras';
+import {readMetForecast,compareMetForecast} from './metForecast';
 // WEATHER_FORECAST_GENERAL — GET /v1/weather-forecast?location=<place|lat,lon>&window_hours=<1-240>
 //
 // Zero-LLM. A forecast HIGH/LOW temperature, peak precipitation
@@ -151,7 +153,7 @@ export async function handleWeatherForecast(query: Record<string, string | undef
   // local hour after 00:00 needs hours from the following day(s).
   const forecastDays = Math.min(16, Math.ceil(windowHours / 24) + 1);
   const fcUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-    `&hourly=temperature_2m,precipitation_probability,weather_code&forecast_days=${forecastDays}&timezone=auto`;
+    `&hourly=temperature_2m,precipitation_probability,weather_code,precipitation,wind_speed_10m,wind_gusts_10m,cloud_cover,relative_humidity_2m&forecast_days=${forecastDays}&timezone=auto`;
   let fcEntry: {body:string;fetchedAt:string};
   try { fcEntry=await readForecastSource('forecast',fcUrl); }
   catch { throw upstreamUnavailable('UPSTREAM_UNREACHABLE','Open-Meteo forecast source unavailable'); }
@@ -166,7 +168,7 @@ export async function handleWeatherForecast(query: Record<string, string | undef
   } catch {
     throw upstreamUnavailable("FORECAST_MALFORMED", "the forecast API returned a body that is not JSON; refusing to answer");
   }
-  const h = fc.hourly;
+  const h = fc.hourly as (NonNullable<FcBody["hourly"]>&Record<string,unknown>)|undefined;
   if (!h?.time?.length || !h.temperature_2m || h.time.length !== h.temperature_2m.length) {
     throw upstreamUnavailable("FORECAST_MALFORMED", "the forecast body is missing aligned hourly arrays; refusing to answer from a partial view");
   }
@@ -207,6 +209,9 @@ export async function handleWeatherForecast(query: Record<string, string | undef
   const codes=codesRaw as number[];
   const condition=dominantCondition(codes);
   rememberForecastSource('forecast',fcUrl,fcEntry);
+  const extras=forecastExtras(h,fc.hourly_units as Record<string,unknown>,startIdx,times,temps as number[],precipVals);
+  let second:{url:string;body:string;fetchedAt:string}|undefined;let comparison:Record<string,unknown>;
+  try{second=await readMetForecast(lat,lon);const utcHours=times.map(t=>new Date(Date.parse(t+':00Z')-offsetSec*1000).toISOString());comparison=compareMetForecast(second.body,lat,lon,utcHours,temps as number[]);}catch{comparison={status:'unavailable',models:['Open-Meteo best-match'],note:'Met.no independent forecast unavailable or unaligned; primary model only, no two-model agreement claimed'};}
   const asOf = fcEntry.fetchedAt;
   const when = `${times[0]} to ${times[times.length - 1]} ${tzAbbr} (${windowHours}h window)`;
 
@@ -215,13 +220,13 @@ export async function handleWeatherForecast(query: Record<string, string | undef
     window_hours: windowHours, when, timezone: tzName,
     temp_max_c: tempMax, temp_min_c: tempMin,
     precipitation_probability_pct: precipPeak, precip_hours_reporting: precipVals.length,
-    condition,
-    method: "Open-Meteo best-match NWP model forecast (single model, no ensemble spread), hourly values sliced from the current local hour; NOT a measurement",
+    condition,extras,model_comparison:comparison,secondary_upstream:second??null,
+    method: "Open-Meteo best-match NWP model forecast (primary model, no ensemble spread), hourly values sliced from the current local hour; NOT a measurement",
     geocode_upstream: geoUrl ? { url: geoUrl, raw_body: geoBody, sha256: sha256Hex(Buffer.from(geoBody!, "utf8")) } : "not used (coordinates given directly)",
     forecast_upstream: { url: fcUrl, raw_body: fcBody, sha256: sha256Hex(Buffer.from(fcBody, "utf8")) },
     fetched_at: asOf,
   });
-  const receipt = makeReceipt(INTENT, fcUrl, evidence, "single model forecast over the exact retrieved hourly arrays; geocoder body receipted when used");
+  const receipt = makeReceipt(INTENT, fcUrl, evidence, "primary model hourly arrays and independent secondary-model comparison when available; exact bodies and geocoder retained");
   receipt.fetched_at = asOf;
   try {
     await saveReceipt(receipt, evidence);
@@ -232,14 +237,14 @@ export async function handleWeatherForecast(query: Record<string, string | undef
     `Forecast for ${resolvedName}, ${when}: high ${tempMax}°C, low ${tempMin}°C, ` +
     (precipPeak !== null ? `peak precipitation chance ${precipPeak}%, ` : "no precipitation-probability data in the window, ") +
     `dominant condition: ${condition}. ` +
-    `This is a single-model numerical forecast (Open-Meteo best-match) for ${tzName}, not a measurement, and carries no ensemble spread.${locationSelection ? " Location selection: " + locationSelection + ". Geocoding: Open-Meteo / GeoNames (CC BY 4.0)." : ""}`;
+    `Peak precipitation probability hour: ${extras.precipitation_probability_peak_hour} ${tzAbbr}. Additional weather extrema and first/next/last12h buckets are in the structured fields; absent fields are null. ${comparison.status==='available'?`Two models compared (Open-Meteo best-match and Met.no Locationforecast): ${comparison.compared_hours}/${comparison.requested_hours} aligned hours, maximum hourly temperature difference ${comparison.max_hourly_temperature_difference_c}°C; ${comparison.temperature_agreement}. Primary values remain Open-Meteo, not an average.`:`This is a single-model numerical forecast (Open-Meteo best-match); Met.no independent forecast unavailable or unaligned.`} Numerical forecast for ${tzName}, not a measurement, and carries no ensemble spread.${locationSelection ? " Location selection: " + locationSelection + ". Geocoding: Open-Meteo / GeoNames (CC BY 4.0)." : ""}`;
   return envelope(INTENT, {
     location: resolvedName,
     when,
     temp_max_c: tempMax,
     temp_min_c: tempMin,
     precipitation_probability_pct: precipPeak,
-    condition,
+    condition,...extras,model_comparison:comparison,
     timezone: tzName,
     summary: `${resolvedName}: ${tempMin}–${tempMax}°C, ${condition}${precipPeak !== null ? `, ${precipPeak}% peak precip chance` : ""} over the next ${windowHours}h (model forecast, not measured).`,
   }, receipt, { answer, verdict: "verified", confidence: 0.85,

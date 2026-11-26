@@ -10,8 +10,8 @@ afterEach(()=>{resetForecastSourcesForTests();vi.unstubAllGlobals();vi.restoreAl
 function freeze(){vi.useFakeTimers();vi.setSystemTime(new Date('2026-11-23T10:00:00Z'));}
 it('reuses exact validated geocode and forecast bytes with original forecast acquisition time',async()=>{
  freeze();const f=vi.fn(async(u:any)=>new Response(String(u).includes('geocoding-')?geo:fc));vi.stubGlobal('fetch',f);
- const a=await handleWeatherForecast({location:'Cairo'});await vi.advanceTimersByTimeAsync(299999);const b=await handleWeatherForecast({location:'Cairo'});expect(f).toHaveBeenCalledTimes(2);expect((b.receipt as any).fetched_at).toBe((a.receipt as any).fetched_at);
- await vi.advanceTimersByTimeAsync(1);await handleWeatherForecast({location:'Cairo'});expect(f).toHaveBeenCalledTimes(3);expect(f.mock.calls.filter(([u])=>String(u).includes('geocoding-'))).toHaveLength(1);
+ const a=await handleWeatherForecast({location:'Cairo'});await vi.advanceTimersByTimeAsync(299999);const b=await handleWeatherForecast({location:'Cairo'});expect(f.mock.calls.filter(([u])=>!String(u).includes('api.met.no'))).toHaveLength(2);expect((b.receipt as any).fetched_at).toBe((a.receipt as any).fetched_at);
+ await vi.advanceTimersByTimeAsync(1);await handleWeatherForecast({location:'Cairo'});expect(f.mock.calls.filter(([u])=>!String(u).includes('api.met.no'))).toHaveLength(3);expect(f.mock.calls.filter(([u])=>String(u).includes('geocoding-'))).toHaveLength(1);
 });
 it.each([429,500,503])('HTTP%s retries only once after1second and never logs query or body',async(status)=>{
  freeze();const spy=vi.spyOn(console,'info').mockImplementation(()=>{});let n=0;const f=vi.fn(async()=>++n===1?new Response('PRIVATE BODY',{status}):new Response(fc));vi.stubGlobal('fetch',f);

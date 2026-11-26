@@ -1,0 +1,18 @@
+# Expanded hourly model forecast and independent comparison
+
+Primary Open-Meteo hourly request now includes precipitation(mm per hourly interval),10m wind speed/gusts(km/h),cloud cover(%),relative humidity(%). Existing temperature/probability/condition and location selection unchanged. Optional added fields must align across the entire requested window, have exact units and valid finite ranges; otherwise their extrema remain null with named unavailable fields. No substitution from another model. Window min/max plus first12h,next12h,last12h buckets. Bucket timestamps/hours explicitly returned; for windows shorter than36h they may overlap and for longer windows they do not cover the intervening hours. Peak precipitation-probability hour is first maximum tie in the place's local hourly timestamps/timezone. Precipitation is hourly amount extrema, not accumulated window total.
+
+Met.no Locationforecast compact is one additional read-only source call, no retry, nonpersonal project User-Agent VeriReceipt/2.0 (https://verireceipt.vercel.app), no redirects.4second caller deadline separate from in-flight transport ownership. SameURL coalesced, maximum4owned works globally,20starts/minute,250ms between starts. Response cap1.5MB; cancellation of oversize/nonOK bodies awaited before ownership release. Hung fetch/body/cancel cannot free ownership early or create unbounded starts. Secondary failure never erases valid primary forecast, and says primary only. Location/units/timestamps validated. Compare exactly aligned UTC instants, report number of hours and whether full/partial coverage. Two models, not a blended mean or ensemble. Agreement means every aligned hour differs by at most2C, only if full-window coverage; otherwise actual maximum difference and partial-only label. Primary score values unchanged. No measurements claimed.
+
+Live sources26November2026:
+- https://api.open-meteo.com/v1/forecast?latitude=38.2&longitude=-79&hourly=temperature_2m%2Cprecipitation_probability%2Cweather_code%2Cprecipitation%2Cwind_speed_10m%2Cwind_gusts_10m%2Ccloud_cover%2Crelative_humidity_2m&forecast_days=3&timezone=auto
+- https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=38.2000&lon=-79.0000
+- https://api.met.no/weatherapi/locationforecast/2.0/documentation
+- https://docs.api.met.no/doc/locationforecast/HowTO.html
+- https://docs.api.met.no/doc/locationforecast/datamodel.html
+
+Primary direct requests timed out; subsequent permitted public fetch returned actual current JSON. Test primary fixture is the returned JSON reserialized, not byte-exact HTTP body. Met.no fixture is directHTTP200body. Runtime receipt retains actual exact source bytes from both successful reads and geocoder when used. No request for Verona-specific geocode fixture was invented; test coordinates explicit and disclosed. Existing Cairo geocode fixtures continue to protect location behavior.
+
+Operational review correction: completed successful normalizedURLresponses cached with exact original bytes/acquisition time for at least3hours at every point (including non-Nordic), extended to valid later Expires. Last-Modified retained for If-Modified-Since revalidation after expiry;304retains original body/acquisition and refreshes reuse deadline. No stale response served as fresh on failure. Cache bounded256entries.
+
+Full-validator correction: the identical shared Met parser validates coordinates, units, every temperature and uniqueness of normalized UTC instants both before completed caching and before comparison. Alternate timestamp spellings cannot overwrite an instant; duplicates refuse the secondary while preserving the primary forecast.
