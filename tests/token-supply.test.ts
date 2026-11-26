@@ -120,6 +120,13 @@ describe("handleTokenSupply validation (no network use)", () => {
   });
 });
 
+it.each([[123456789012345678901234567890123456789n,18],[1n,6],[0n,0]])('preserves the exact chain base integer and decimals %s',async(supply,decimals)=>{
+ stubSupplyFetch(Object.fromEntries(ETH.map(url=>[url,supplyBehavior(supply,decimals,'USDC')])));
+ const out=await handleTokenSupply({token:'USDC',chain:'ethereum'});
+ expect(out.supply_base_units).toBe(supply.toString());expect(out.decimals).toBe(decimals);
+ const evidence=await getReceiptEvidence((out.receipt as any).receipt_id);expect(JSON.parse(evidence.evidence!)).toMatchObject({supply_base_units:supply.toString(),decimals});
+});
+
 describe("display-label input validation", () => {
   it.each([{token:'USDC'}, {token:'USDC on ethereum'}, {token:USDC_ETH,chain:'ethereum'}])('chain total has no aggregate-provider dependency: %j', async query=>{
     const capture=JSON.parse(readFileSync(join(__dirname,'fixtures/token-chain-supply/usdc-finalized.json'),'utf8'));
@@ -136,6 +143,7 @@ describe("display-label input validation", () => {
     const raw=BigInt(JSON.parse(capture.legs[0].responses[0].raw).result);
     const decimals=Number(BigInt(JSON.parse(capture.legs[0].responses[1].raw).result));
     const digits=raw.toString().padStart(decimals+1,'0');
+    expect(out.supply_base_units).toBe(digits);expect(out.decimals).toBe(decimals);
     expect(out.total_supply).toBe(Number(digits.slice(0,-decimals)+'.'+digits.slice(-decimals)));
     expect(out.chain).toBe('ethereum');
     expect(String(out.total_supply_scope)).toContain('chain-specific');
@@ -257,6 +265,7 @@ describe("handleTokenSupply quorum (stubbed fetch)", () => {
     });
     const res = await handleTokenSupply({ token: "USDC on ethereum" });
     expect(res.total_supply).toBe(41000000.123456);
+    expect(res.supply_base_units).toBe("41000000123456");expect(res.decimals).toBe(6);
     expect(res.token_symbol).toBe("USDC");
     expect(res.chain).toBe("ethereum");
     expect(res.confidence).toBe(1.0);

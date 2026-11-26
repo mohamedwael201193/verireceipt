@@ -258,6 +258,8 @@ export async function handleTokenSupply(
 
   const fields: Record<string, unknown> = {
     total_supply: totalSupply,
+    supply_base_units: winner.supply.toString(),
+    decimals: winner.decimals,
     total_supply_scope: "chain-specific ERC-20 totalSupply, decimals applied; not a global asset or circulating supply",
     token_symbol: symbol,
     chain,
@@ -276,6 +278,7 @@ export async function handleTokenSupply(
     method: "eth_call totalSupply+decimals+symbol",
     rpc_url: winner.rpcUrl,
     supply_base_units_hex: winner.supplyHex,
+    supply_base_units: winner.supply.toString(),
     token_contract: contract,
     token_symbol_onchain: winner.symbol,
   });

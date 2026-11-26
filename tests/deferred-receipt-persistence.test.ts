@@ -33,6 +33,9 @@ const supplyScope = "chain-specific ERC-20 totalSupply, decimals applied; not a 
 fixture.scenarios.supply.expected_fields.total_supply_scope = supplyScope;
 const supplyEvidence = JSON.parse(fixture.scenarios.supply.expected_raw_text);
 supplyEvidence.total_supply_scope = supplyScope;
+supplyEvidence.supply_base_units = BigInt(supplyEvidence.supply_base_units_hex).toString();
+fixture.scenarios.supply.expected_fields.supply_base_units = supplyEvidence.supply_base_units;
+fixture.scenarios.supply.expected_fields.decimals = supplyEvidence.decimals;
 fixture.scenarios.supply.expected_raw_text = JSON.stringify(supplyEvidence, Object.keys(supplyEvidence).sort());
 fixture.scenarios.supply.expected_raw_sha256 = sha256Hex(fixture.scenarios.supply.expected_raw_text);
 for (const name of ['macro_latest','macro_year']) {
