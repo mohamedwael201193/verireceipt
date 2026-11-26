@@ -96,5 +96,26 @@
     "window_basis": "one year from purchase as stated; days:null because calendar year not fixed days",
     "url": "https://www.llbean.com/llb/shop/510624?page=returns-and-exchanges",
     "sectionHash": "69e99105c21de1a715e54c2085e3b3a7a4130bde5e862253b7c66248883c9447"
+  },
+  {
+    "key": "purism",
+    "file": "purism",
+    "name": "Purism US",
+    "days": 14,
+    "start": "All returned products are processed via Return Merchandise Authorization",
+    "end": "Refunds # Refunds are processed through the original payment method",
+    "quotes": [
+      "All RMAs must be requested within 14 calendar days from initial date of delivery.",
+      "All returns not resulting from mistakes in configuration or packaging by Purism incur a 20% restocking fee.",
+      "must be evaluated as like-new or better condition."
+    ],
+    "conditions": [
+      "Return Merchandise Authorization (RMA) required: request it from Purism support within 14 calendar days of the initial delivery date; the return shipment must then be postmarked within 3 calendar days of receiving the RMA.",
+      "Returns must be in like-new or better condition, in the original packaging with all original contents; a 20% restocking fee applies unless the return results from a Purism mistake in configuration or packaging.",
+      "A return request is denied if shipment arrives without prior authorization, or the device shows damage from mishandling or misuse or was modified; defective hardware is handled under the Warranty section. See the quoted policy section."
+    ],
+    "window_basis": "RMA must be requested within 14 calendar days of initial delivery; return postmarked within 3 calendar days of RMA receipt; no region claim beyond the page",
+    "url": "https://docs.puri.sm/about/policy.html",
+    "sectionHash": "fc831955616cfb7fde63b56405047ee6eb6c50324f6f478d10e27eaa3dde3356"
   }
 ]

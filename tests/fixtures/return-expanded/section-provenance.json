@@ -33,5 +33,12 @@
     "original_raw_sha256": "f250f162968981686ff340a77f8b6173dfbc5fdd2f84ec9c9de492cb59d69f10",
     "reviewed_section_sha256": "69e99105c21de1a715e54c2085e3b3a7a4130bde5e862253b7c66248883c9447",
     "fixture_kind": "EXTRACTED REVIEWED POLICY SECTION ONLY. Not a full raw HTTP response."
+  },
+  {
+    "retailer": "purism",
+    "source_url": "https://docs.puri.sm/about/policy.html",
+    "original_raw_sha256": "5be904b932192b0106d2a4b0e573022f5cb0d2e76a1480c30fc680bb3d7e85fd",
+    "reviewed_section_sha256": "fc831955616cfb7fde63b56405047ee6eb6c50324f6f478d10e27eaa3dde3356",
+    "fixture_kind": "EXTRACTED REVIEWED POLICY SECTION ONLY. Not a full raw HTTP response."
   }
 ]
