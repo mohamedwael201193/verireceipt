@@ -24,6 +24,7 @@ import { saveReceipt } from "../core/storage";
 import { wikipediaEventOutcome } from './eventWikipedia';
 import {wikidataEventOutcome} from './eventWikidata';
 import {eventBody} from './eventSource';
+import {willRewrite,sameContent,scopeTokens} from './eventRewrite';
 
 
 const UA = "VeriReceipt/2.0 event-resolution observer (+https://verireceipt.vercel.app)";
@@ -101,6 +102,8 @@ export function resolveMarket(m: PmMarket): Resolution {
   return { outcome: winner.toLowerCase() as "yes" | "no", resolved_yes: winner.toLowerCase() === "yes", winner };
 }
 
+function rawBodies(body:string,r?:{first_search_body:string}):Record<string,string>{return r?{search:r.first_search_body,rewritten_search:body}:{search:body};}
+function rewriteNote(r:{query:string;rule:string;url:string;scope_tokens:string[];first_search_url:string}){return {rewritten_query:r.query,rule:r.rule,first_search_url:r.first_search_url,rewritten_search_url:r.url,scope_tokens:r.scope_tokens};}
 export function eventInputClass(input:string|undefined):'sport'|'election'|'price'|'other'{
  const text=(input??'').toLowerCase();
  const classes=[/\b(election|elected|presidential|president|senate|governor|ballot|vote|voting)\b/.test(text)?'election':null,/\b(price|market cap|trading|trade above|trade below|usd|dollars|bitcoin|ethereum|btc|eth)\b|\$\s*\d/.test(text)?'price':null,/\b(world cup|super bowl|nba|nfl|nhl|mlb|champions league|premier league|match|tournament|finals|touchdown|goals?|score)\b/.test(text)?'sport':null].filter(Boolean);
@@ -117,7 +120,8 @@ async function handleEvent(query: Record<string, string | undefined>,deadlineAt:
   const event = query.event?.trim();
   if (!event) throw badRequest("MISSING_PARAM", "event is required (the market question)");
   if (event.length > 200) throw badRequest("EVENT_TOO_LONG", "event must be at most 200 characters");
-  const url = `https://gamma-api.polymarket.com/public-search?q=${encodeURIComponent(event)}&limit_per_type=3`;
+  let url = `https://gamma-api.polymarket.com/public-search?q=${encodeURIComponent(event)}&limit_per_type=3`;
+  let rewritten:{query:string;rule:string;url:string;body:string;scope_tokens:string[];first_search_url:string;first_search_body:string}|undefined;
   const fetchedAt = new Date().toISOString();
   let body='';
   let unavailable:ApiError|undefined;
@@ -128,6 +132,24 @@ async function handleEvent(query: Record<string, string | undefined>,deadlineAt:
     const markets=parseSearch(body);
     try{market=matchMarket(markets,event);}catch(error){
       if(!(error instanceof ApiError)||error.code!=='EVENT_NOT_FOUND')throw error;
+    }
+    // No match for the sentence as asked: retry once with Polymarket's "Will ..." wording.
+    // Same match rules, plus the matched question must equal the rewritten query up to stopwords, so no year, date, number or qualifier can differ. A failed retry changes nothing.
+    const rewrite=market?null:willRewrite(event);
+    if(rewrite){
+      const rUrl=`https://gamma-api.polymarket.com/public-search?q=${encodeURIComponent(rewrite.query)}&limit_per_type=3`;
+      try{
+        const rBody=(await eventBody(rUrl,deadlineAt)).raw;
+        const rMarkets=parseSearch(rBody);
+        const found=matchMarket(rMarkets,rewrite.query);
+        if(sameContent(rewrite.query,found.question)){
+          market=found;
+          rewritten={query:rewrite.query,rule:rewrite.rule,url:rUrl,body:rBody,scope_tokens:scopeTokens(event),first_search_url:url,first_search_body:body};
+          url=rUrl;body=rBody;
+        }
+      }catch(error){
+        if(error instanceof ApiError&&error.code==='AMBIGUOUS_EVENT')throw error;
+      }
     }
   }
   if(!market){
@@ -152,7 +174,7 @@ async function handleEvent(query: Record<string, string | undefined>,deadlineAt:
   if(r.outcome==='unresolved'){
     if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(market.slug))throw unprocessable('EVENT_NOT_RESOLVED','open market has no usable source slug; no outcome asserted');
     const sourceUrl=`https://polymarket.com/event/${market.slug}`;
-    const evidence=JSON.stringify({event,as_of:asOf,matched_market:market,candidates_seen:markets.length,source_policy:'Found explicitly open binary market only; unresolved is not a negative outcome or price probability',raw_bodies:{search:body},fetched_at:fetchedAt});
+    const evidence=JSON.stringify({event,as_of:asOf,matched_market:market,candidates_seen:markets.length,source_policy:'Found explicitly open binary market only; unresolved is not a negative outcome or price probability',raw_bodies:rawBodies(body,rewritten),...(rewritten?{question_rewrite:rewriteNote(rewritten)}:{}),fetched_at:fetchedAt});
     const receipt=makeReceipt(INTENT,url,evidence,'Polymarket gamma single source; explicitly open binary market, no outcome asserted');receipt.fetched_at=fetchedAt;
     try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
     return withAnswerClass(envelope(INTENT,{outcome:'unresolved',resolved_yes:false,event:market.question,sources:[sourceUrl]},receipt,{answer:`Polymarket market '${market.question}' is not resolved as of ${fetchedAt}; no outcome is asserted. resolved_yes=false does not assert NO when outcome is unresolved.`,verdict:'unresolved',confidence:0.9,source:`${url}; explicitly open market status only; fetched ${fetchedAt}`}),INTENT,{outcome:'unresolved',source:'polymarket'});
@@ -160,7 +182,7 @@ async function handleEvent(query: Record<string, string | undefined>,deadlineAt:
   const evidence = JSON.stringify({ event, as_of: asOf,
     matched_market: market, candidates_seen: markets.length,
     source_policy: "Polymarket gamma public-search; closed + UMA-resolved + clean 1/0 pair only; one venue's resolution record, not an independent determination",
-    raw_bodies: { search: body }, fetched_at: fetchedAt });
+    raw_bodies: rawBodies(body,rewritten), ...(rewritten?{question_rewrite:rewriteNote(rewritten)}:{}), fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, url, evidence, "Polymarket gamma single source; resolved binary markets only, never inferred");
   receipt.fetched_at = fetchedAt;
   try {
@@ -171,7 +193,8 @@ async function handleEvent(query: Record<string, string | undefined>,deadlineAt:
   const answer =
     `"${market.question}" resolved ${r.winner.toUpperCase()} on Polymarket (UMA resolution status: resolved; market closed, end date ${market.endDate})` +
     `${market.resolutionSource ? `; named resolution source: ${market.resolutionSource}` : ""}. ` +
-    `This is one venue's resolution record (Polymarket), not an independent determination of the underlying event.`;
+    `This is one venue's resolution record (Polymarket), not an independent determination of the underlying event.` +
+    `${rewritten?` The question was matched by rewriting the past-tense form to Polymarket's "Will" wording (${rewritten.query}); year, date and numbers are identical.`:""}`;
   return withAnswerClass(envelope(INTENT, {
     outcome: r.outcome,
     resolved_yes: r.resolved_yes,
