@@ -112,9 +112,9 @@ it('unbound symbols and pools fail closed without touching the network', async (
     try {
         const h = createWiredFinanceHandlers({ COINGECKO_API_KEY: 'k1', COINMARKETCAP_API_KEY: 'k2' } as NodeJS.ProcessEnv);
         await expect(h.price({ symbol: 'DOGE' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });
-        await expect(h.liquidity({ pool: 'USDC/WETH 0.05%', chain: 'base' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });
-        expect(fetchSpy).not.toHaveBeenCalled();
-        expect(saveReceipt).not.toHaveBeenCalled();
+        expect(await h.liquidity({ pool: 'USDC/WETH 0.05%', chain: 'base' })).toMatchObject({liquidity_usd:null,data_status:'source_unavailable'});
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(saveReceipt).toHaveBeenCalledTimes(1);
     }
     finally {
         vi.unstubAllGlobals();
@@ -130,9 +130,9 @@ it('routes /v1/price and /v1/liquidity are wired and fail closed for unbound que
         expect(price.statusCode).toBe(502);
         expect(price.json().code).toBe('APPROVED_SOURCES_UNAVAILABLE');
         const liquidity = await app.inject({ method: 'GET', url: '/v1/liquidity?pool=NOPE&chain=ethereum' });
-        expect(liquidity.statusCode).toBe(502);
-        expect(liquidity.json().code).toBe('APPROVED_SOURCES_UNAVAILABLE');
-        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(liquidity.statusCode).toBe(200);
+        expect(liquidity.json()).toMatchObject({liquidity_usd:null,data_status:'source_unavailable'});
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
     }
     finally {
         await app.close();

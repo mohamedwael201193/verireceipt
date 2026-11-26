@@ -1,3 +1,5 @@
+import {discoverLiquidity} from './liquidityDiscovery';
+import {resolvePoolBinding} from './marketSourceAdapters';
 import {geckoPoolLiquiditySource} from './geckoPoolLiquidity';
 // WIRED finance observation configuration (expansion slice, 2026-11-23).
 //
@@ -141,7 +143,7 @@ export function createWiredFinanceHandlers(env: NodeJS.ProcessEnv = process.env)
     const handlers = createFinanceObservationHandlers(lists);
     return {
         price: handlers.price,
-        liquidity: q => ['gemini','bitstamp'].includes(q.chain?.toLowerCase() ?? '') ? handleCexDepth(q) : handlers.liquidity(q),
+        liquidity: q => {if(['gemini','bitstamp'].includes(q.chain?.toLowerCase()??''))return handleCexDepth(q);if(!q.pool?.trim()||!q.chain?.trim())return handlers.liquidity(q);try{resolvePoolBinding({pool:q.pool,chain:q.chain},DEXSCREENER_POOLS);return handlers.liquidity(q);}catch{return discoverLiquidity(q);}},
         yield: handlers.yield,
         priceSourceNames: price.map(s => s.name),
         liquiditySourceNames: liquidity.map(s => s.name),

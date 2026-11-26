@@ -15,7 +15,7 @@ it.each(['transport','body_read','malformed','identity_or_value','binding'])('cl
  const bad=Object.defineProperty(Error('PRIVATE'),'status',{get(){throw Error('must not inspect');}});
  vi.stubGlobal('fetch',async()=>{if(category==='transport')throw bad;if(category==='body_read')return {ok:true,headers:new Headers(),body:new ReadableStream({start(c){c.error(bad);}})};if(category==='malformed')return new Response('{PRIVATE');return new Response(JSON.stringify({pairs:[]}));});
  const e=await createWiredFinanceHandlers({}).liquidity(category==='binding'?{pool:'PRIVATE',chain:'ethereum'}:query).catch(e=>e);
- expect(e.code).toBe('APPROVED_SOURCES_UNAVAILABLE');expect(diagnostics(e)).toEqual({dexscreener_failure:category});expect(JSON.stringify(diagnostics(e))).not.toContain('PRIVATE');
+ if(category==='binding'){expect(e).toMatchObject({liquidity_usd:null,data_status:'source_unavailable'});expect(diagnostics(e)).toBeUndefined();}else{expect(e.code).toBe('APPROVED_SOURCES_UNAVAILABLE');expect(diagnostics(e)).toEqual({dexscreener_failure:category});}if(category!=='binding')expect(JSON.stringify(diagnostics(e))).not.toContain('PRIVATE');
 });
 it.each([false,true])('bounded diagnostic timeout, ignoring abort=%s, unchanged runner deadline and no late receipt',async ignores=>{
  vi.useFakeTimers();let release:(r:Response)=>void=()=>{};

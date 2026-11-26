@@ -1,0 +1,30 @@
+[
+  {
+    "fixture": "gecko-search-base.json",
+    "source_url": "https://api.geckoterminal.com/api/v2/search/pools?query=WETH%20USDC&network=base&page=1",
+    "sha256": "7ba085364ae0ee6c7da343e2e4eced223e05177e7a29d0d12d46f8cfc4d1f4ef",
+    "capture_date": "2026-11-26",
+    "extraction": "exact retrieved JSON body"
+  },
+  {
+    "fixture": "gecko-exact-base.json",
+    "source_url": "https://api.geckoterminal.com/api/v2/networks/base/pools/0x6c561b446416e1a00e8e93e221854d6ea4171372",
+    "sha256": "395f4ea309c83006446e571e797322d2087c41778c55ef47e901b40baa61c174",
+    "capture_date": "2026-11-26",
+    "extraction": "exact retrieved JSON body"
+  },
+  {
+    "fixture": "gecko-search-solana.json",
+    "source_url": "https://api.geckoterminal.com/api/v2/search/pools?query=SOL%20USDC&network=solana&page=1",
+    "sha256": "6c19ad46e7bfc5208b9b932cbe63bcb3f24a66c247ade9f6322175b4e8883c6b",
+    "capture_date": "2026-11-26",
+    "extraction": "exact retrieved JSON body"
+  },
+  {
+    "fixture": "gecko-exact-solana.json",
+    "source_url": "https://api.geckoterminal.com/api/v2/networks/solana/pools/Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtLG4crryfu44zE",
+    "sha256": "8427ee8d46557910e4467c1a44c442718af4870f334de9f7f2d37773bd6e93a7",
+    "capture_date": "2026-11-26",
+    "extraction": "exact retrieved JSON body"
+  }
+]
