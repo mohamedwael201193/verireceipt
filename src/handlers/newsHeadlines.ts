@@ -22,6 +22,8 @@ export function topicFeed(topic:string):{url:string;label:string}|null{
 
 export async function handleNewsHeadlines(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const sourceDeadline=Date.now()+2500;
+  // Google News alone gets +800 ms so one retry after a timeout fits; total stays under the 4500 ms validator timeout (receipt deadline gnewsDeadline+450 = 3750).
+  const gnewsDeadline=sourceDeadline+800;
   const topic = query.topic?.trim();
   if (!topic) throw badRequest("MISSING_PARAM", "topic is required");
   if (topic.length > 120) throw badRequest("TOPIC_TOO_LONG", "topic must be at most 120 characters");
@@ -45,7 +47,7 @@ export async function handleNewsHeadlines(query: Record<string, string | undefin
   // Start the fallback HN query only after strict HN is empty, while other
   // concurrent sources finish, so a slow RSS search cannot consume its budget.
   const hnWork=(async()=>{const result=await fetchIndex(hnUrl,sourceDeadline);const parsed=parsedSource(result,parseHn);if(!parsed?.some(i=>topicMatches(topic,i.title)&&inWindow(i,cutoffIso)&&Date.parse(i.published)<=now)&&keywords.length&&Date.now()<sourceDeadline)wide.result=await fetchIndex(wideUrl,sourceDeadline);return result;})();
-  const [hnRes,gnewsRes,feedResults]=await Promise.all([hnWork,fetchIndex(gnewsUrl,sourceDeadline),Promise.all(BBC_CATEGORIES.map(async category=>({category,...await headlineFeed(category,sourceDeadline)})))]);
+  const [hnRes,gnewsRes,feedResults]=await Promise.all([hnWork,fetchIndex(gnewsUrl,gnewsDeadline,{timeoutRetry:true}),Promise.all(BBC_CATEGORIES.map(async category=>({category,...await headlineFeed(category,sourceDeadline)})))]);
   const bbcRes=feedResults.find(f=>f.category==='world')!.result;
   const topicRes=feed?feedResults.find(f=>feed.url.includes('/'+f.category+'/'))!.result:null;
   const gdeltRes={ok:false,body:''}; // GDELT omitted from headlines hot path, search handler unchanged.
@@ -107,7 +109,7 @@ export async function handleNewsHeadlines(query: Record<string, string | undefin
   const receipt = makeReceipt(INTENT, hnUrl, evidence, "named keyless sources (HN Algolia + Google News RSS + five BBC RSS feeds); GDELT omitted, honestly scoped");
   receipt.fetched_at = fetchedAt;
   try {
-    await withinNewsDeadline(saveReceipt(receipt, evidence),sourceDeadline+450);
+    await withinNewsDeadline(saveReceipt(receipt, evidence),gnewsDeadline+450);
   } catch {
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }

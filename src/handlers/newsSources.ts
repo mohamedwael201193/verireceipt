@@ -230,7 +230,9 @@ export function inWindow(item: NewsItem, cutoffIso: string): boolean {
 
 export interface FetchResult { ok: boolean; body: string; failure_reason?: string }
 
-export async function fetchIndex(url:string,deadlineAt=Date.now()+SOURCE_TIMEOUT_MS):Promise<FetchResult>{
+export const TIMEOUT_RETRY_RESERVE_MS=1200;
+/** opts.timeoutRetry: Google News only, one retry after a timeout, only when TIMEOUT_RETRY_RESERVE_MS remains; the first attempt leaves that reserve. */
+export async function fetchIndex(url:string,deadlineAt=Date.now()+SOURCE_TIMEOUT_MS,opts:{timeoutRetry?:boolean}={}):Promise<FetchResult>{
  const host=new URL(url).hostname,slow=host==='api.gdeltproject.org'||host==='news.google.com';
  if(slow&&(Date.now()<(blockedUntil.get(host)??0)||activeSlowHosts.has(host)))return{ok:false,body:"",failure_reason:"circuit_open"};
  if(Date.now()>=deadlineAt)return{ok:false,body:"",failure_reason:"timeout"};
@@ -238,11 +240,16 @@ export async function fetchIndex(url:string,deadlineAt=Date.now()+SOURCE_TIMEOUT
  const release=()=>{if(slow&&workflowDone&&outstanding===0)activeSlowHosts.delete(host);};
  if(slow)activeSlowHosts.add(host);
  try{
-  const attempt=async()=>{outstanding++;return fetchText(url,Math.min(SOURCE_TIMEOUT_MS,deadlineAt-Date.now()),()=>{outstanding--;release();});};
+  const retryable=!!opts.timeoutRetry&&host==='news.google.com';
+  const attempt=async(first=false)=>{outstanding++;return fetchText(url,Math.min(SOURCE_TIMEOUT_MS,deadlineAt-Date.now()-(first&&retryable?TIMEOUT_RETRY_RESERVE_MS:0)),()=>{outstanding--;release();});};
   let body:string;
-  try{body=await attempt();}catch(e){
+  try{body=await attempt(true);}catch(e){
+   const timedOut=retryable&&((e as any).name==='TimeoutError'||(e as any).name==='AbortError');
+   if(timedOut){if(deadlineAt-Date.now()<TIMEOUT_RETRY_RESERVE_MS-100)throw e;body=await attempt();}
+   else{
    if(host!=='news.google.com'||(e as any).safeStatus!==429||deadlineAt-Date.now()<=1100)throw e;
    await new Promise(r=>setTimeout(r,1000));body=await attempt();
+   }
   }
   return{ok:true,body};
  }catch(error){
