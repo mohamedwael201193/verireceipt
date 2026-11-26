@@ -3,7 +3,7 @@
 // https://devnode.telegraphprotocol.com/engine/v1/intents/SECURITY_REVIEW_GENERAL
 // Source semantics: https://google.github.io/osv.dev/post-v1-query/
 // Not a source-code audit, exploitability assessment or safety guarantee.
-import { ApiError, badRequest, unprocessable, upstreamUnavailable } from '../core/errors';
+import { badRequest, unprocessable, upstreamUnavailable } from '../core/errors';
 import { envelope, makeReceipt } from '../core/receipt';
 import { saveReceipt } from '../core/storage';
 import { PublicBodyCache, StartBudget } from '../core/publicSource';
@@ -92,18 +92,12 @@ export type TargetShape = 'npm' | 'pypi' | 'cve' | 'ghsa' | 'url' | 'other';
 export type SecurityTarget =
   | { kind: 'package'; ecosystems: Eco[]; name: string; version: string; shape: 'npm' | 'pypi' | 'other' }
   | { kind: 'id'; id: string; shape: 'cve' | 'ghsa' }
-  | { kind: 'unsupported'; shape: 'url' | 'other'; label?: string; unparseable?: true };
-// Only these fixed labels are ever echoed; any other user-supplied label is dropped.
-const KNOWN_OTHER_ECOSYSTEMS: ReadonlySet<string> = new Set(['cargo', 'crates', 'maven', 'go', 'golang', 'gem', 'rubygems', 'nuget', 'composer', 'packagist', 'hex', 'pub', 'cocoapods', 'swift', 'conan', 'cran', 'hackage', 'docker', 'deb', 'debian', 'apk', 'alpine', 'rpm', 'github', 'actions', 'homebrew', 'conda', 'bioconductor', 'julia']);
+  | { kind: 'unsupported'; shape: 'url' | 'other' };
 const PYPI_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 const PYPI_VERSION = /^(0|[1-9]\d*)(?:\.(0|[1-9]\d*))*(?:(?:a|b|rc)(0|[1-9]\d*))?(?:\.post(0|[1-9]\d*))?(?:\.dev(0|[1-9]\d*))?$/;
 const NPM_PREFIX = /^npm:/i, PYPI_PREFIX = /^(?:pip|pypi):/i;
-/** Classify without logging or echoing the value. Anything unparseable is a disclosed not-covered answer, never a 4xx. */
+/** Classify without logging or echoing the value. Malformed input throws 400 INVALID_TARGET. */
 export function parseSecurityTarget(target: string | undefined): SecurityTarget {
-  try { return parseSecurityTargetStrict(target); }
-  catch (e) { if (e instanceof ApiError && e.code === 'INVALID_TARGET') return { kind: 'unsupported', shape: 'other', unparseable: true }; throw e; }
-}
-function parseSecurityTargetStrict(target: string | undefined): SecurityTarget {
   const bad = () => badRequest('INVALID_TARGET', 'target must be npm:name@x.y.z, pip:name@version, PyPI:name@version, name@x.y.z, or a CVE-/GHSA- id');
   if (!target || target.length > 256 || target !== target.trim()) throw bad();
   const cve = /^CVE-(\d{4})-(\d{4,19})$/i.exec(target);
@@ -118,7 +112,7 @@ function parseSecurityTargetStrict(target: string | undefined): SecurityTarget {
     return { kind: 'package', ecosystems: ['PyPI'], name: m[1], version: m[2], shape: 'pypi' };
   }
   const eco = /^([a-z][a-z0-9+._-]{0,30}):[^@\s]+@\S+$/i.exec(target);
-  if (eco) { const l = eco[1].toLowerCase(); return { kind: 'unsupported', shape: 'other', ...(KNOWN_OTHER_ECOSYSTEMS.has(l) ? { label: l } : {}) }; }
+  if (eco) return { kind: 'unsupported', shape: 'other' };
   const m = /^([^@]+)@(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(target);
   if (!m) throw bad();
   const version = `${m[2]}.${m[3]}.${m[4]}`;
@@ -172,17 +166,8 @@ async function persist(receipt: ReturnType<typeof makeReceipt>, evidence: string
   catch { throw upstreamUnavailable('RECEIPT_PERSIST_FAILED', 'receipt evidence could not be stored; answer unavailable'); }
 }
 const NOT_AUDIT = 'This is a known-advisory lookup, not a source-code audit, exploitability assessment or complete security review.';
-async function handleUnsupported(t: Extract<SecurityTarget, { kind: 'unsupported' }>): Promise<Record<string, unknown>> {
-  const now = new Date().toISOString();
-  const what = t.shape === 'url' ? 'URL targets' : t.label ? `the ${t.label} ecosystem` : 'the requested ecosystem';
-  const lead = t.unparseable ? 'Target not parseable: it is not npm:name@x.y.z, pip:name@version, PyPI:name@version, name@x.y.z, or a CVE-/GHSA- id.' : `Ecosystem not covered: ${what} cannot be checked here.`;
-  const summary = `${lead} Covered: npm and PyPI name@exact-version, and CVE-/GHSA- ids, all via OSV. No advisory lookup ran, so the vulnerability count is unknown, not zero, and nothing here says the target is secure. ${NOT_AUDIT}`;
-  const evidence = JSON.stringify({ kind: t.unparseable ? 'unparseable' : 'not_covered', target_shape: t.shape, ecosystem_label: t.label ?? null, lookup_performed: false, checked_at: now,
-    scope: 'No source was queried. Covered: npm and PyPI exact releases, CVE and GHSA ids.' });
-  const receipt = makeReceipt('SECURITY_REVIEW_GENERAL', 'urn:verireceipt:local-not-covered', evidence, 'no lookup performed; target outside covered ecosystems'); receipt.fetched_at = now;
-  await persist(receipt, evidence);
-  return envelope('SECURITY_REVIEW_GENERAL', { target_shape: t.shape, ecosystem: t.label ?? null, vulnerability_count: null, issues: [], covered: false, ...(t.unparseable ? { parseable: false } : {}), summary, observed_at: now },
-    receipt, { answer: summary, verdict: 'Inconclusive', confidence: 1, source: 'none queried; target outside covered ecosystems (npm, PyPI, CVE/GHSA ids)' });
+function refuseUnsupported(t: Extract<SecurityTarget, { kind: 'unsupported' }>): never {
+  throw unprocessable('ECOSYSTEM_NOT_COVERED', `${t.shape === 'url' ? 'URL targets are' : 'this ecosystem is'} not covered; covered: npm and PyPI name@exact-version, and CVE-/GHSA- ids via OSV. No lookup ran, so no vulnerability count or verdict is issued`);
 }
 async function handleIdLookup(t: Extract<SecurityTarget, { kind: 'id' }>): Promise<Record<string, unknown>> {
   let obs;
@@ -193,29 +178,18 @@ async function handleIdLookup(t: Extract<SecurityTarget, { kind: 'id' }>): Promi
   const source = VULN_URL + t.id;
   const found = typeof JSON.parse(obs.raw)?.id === 'string';
   const rec = found ? parseVulnRecord(obs.raw, t.id) : null;
-  if (rec?.withdrawn) {
-    const summary = `OSV marks ${rec.id} as withdrawn, so it is not an active advisory. The vulnerability count is unknown, not zero. ${NOT_AUDIT}`;
-    const evidence = JSON.stringify({ target: t.id, source_url: source, fetched_at: obs.fetchedAt, withdrawn: true, source_raw_body: obs.raw });
-    const receipt = makeReceipt('SECURITY_REVIEW_GENERAL', source, evidence, 'OSV id lookup; withdrawn record'); receipt.fetched_at = obs.fetchedAt; await persist(receipt, evidence);
-    return envelope('SECURITY_REVIEW_GENERAL', { target: t.id, target_shape: t.shape, vulnerability_count: null, issues: [], summary, observed_at: obs.fetchedAt }, receipt,
-      { answer: summary, verdict: 'Inconclusive', confidence: 0.85, source: `${source}; retrieved ${obs.fetchedAt}` });
-  }
-  const evidence = JSON.stringify({ target: t.id, request: { method: 'GET', path: `/v1/vulns/${t.id}` }, source_url: source, fetched_at: obs.fetchedAt, found, record: rec, source_raw_body: obs.raw,
-    scope: 'OSV lookup by id; one database; absence from OSV is not proof the id is harmless' });
+  if (!rec || rec.withdrawn) throw unprocessable('NO_ADVISORY_COVERAGE', rec ? 'OSV marks this record withdrawn, so there is no active advisory to rate; no verdict is issued' : 'OSV has no record for this id; absence from one database is not proof the id is harmless, and no verdict is issued');
+  const evidence = JSON.stringify({ target: t.id, request: { method: 'GET', path: `/v1/vulns/${t.id}` }, source_url: source, fetched_at: obs.fetchedAt, record: rec, source_raw_body: obs.raw,
+    scope: 'OSV lookup by id; one database; a record lookup, not a statement that any dependency is affected' });
   const receipt = makeReceipt('SECURITY_REVIEW_GENERAL', source, evidence, 'OSV single database, lookup by advisory id'); receipt.fetched_at = obs.fetchedAt;
   await persist(receipt, evidence);
-  if (!rec) {
-    const summary = `OSV has no record for ${t.id}. The vulnerability count is unknown, not zero: absence from one database is not proof the id is harmless or that it does not exist elsewhere. ${NOT_AUDIT}`;
-    return envelope('SECURITY_REVIEW_GENERAL', { target: t.id, target_shape: t.shape, vulnerability_count: null, issues: [], summary, observed_at: obs.fetchedAt }, receipt,
-      { answer: summary, verdict: 'Inconclusive', confidence: 0.85, source: `${source}; retrieved ${obs.fetchedAt}` });
-  }
   const sev = rec.cvss.length ? `${rec.severity}; ${rec.cvss.join('; ')}` : rec.severity;
   const summary = `OSV has a record for ${rec.id}${rec.aliases.length ? ` (aliases ${rec.aliases.join(', ')})` : ''}: severity ${sev}; OSV lists ${rec.packages.length ? rec.packages.join(', ') : 'no package'} as affected.${rec.summary ? ` ${rec.summary}` : ''} This is a record lookup by id only. It does not say whether your dependency, at the version you use, is affected. ${NOT_AUDIT}`;
   return envelope('SECURITY_REVIEW_GENERAL', { target: t.id, target_shape: t.shape, vulnerability_count: 1,
     issues: [`${rec.id}${rec.aliases.length ? ` (${rec.aliases.join(', ')})` : ''}; severity ${sev}`],
     aliases: rec.aliases, affected_packages: rec.packages, severity_scores: rec.cvss, references: rec.references, published: rec.published, modified: rec.modified,
     summary, observed_at: obs.fetchedAt }, receipt,
-    { answer: summary, verdict: 'Record found', confidence: 0.85,
+    { answer: summary, verdict: 'Needs changes', confidence: 0.85,
       source: `${source}; lookup by id; retrieved ${obs.fetchedAt}; cached at most 5 minutes; not a safety guarantee` });
 }
 async function observePackage(eco: Eco, name: string, version: string) {
@@ -228,7 +202,7 @@ export function targetShapeOf(target: unknown): TargetShape {
 }
 export async function handlePackageSecurity(q: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const t = parseSecurityTarget(q.target);
-  if (t.kind === 'unsupported') return handleUnsupported(t);
+  if (t.kind === 'unsupported') return refuseUnsupported(t);
   if (t.kind === 'id') return handleIdLookup(t);
   let eco: Eco | undefined, observation, advisories: ReturnType<typeof parsePackageAdvisories> = [];
   for (const candidate of t.ecosystems) {

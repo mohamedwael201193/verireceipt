@@ -18,13 +18,9 @@ describe('target classification',()=>{
   expect(parseSecurityTarget('cve-2022-25883')).toMatchObject({id:'CVE-2022-25883'});expect(parseSecurityTarget('GHSA-C2QF-RXJJ-QQGW')).toMatchObject({id:'GHSA-c2qf-rxjj-qqgw'});
   expect(parseSecurityTarget('semver@7.5.1')).toMatchObject({ecosystems:['npm','PyPI']});expect(parseSecurityTarget('Django@3.0.0')).toMatchObject({ecosystems:['PyPI']});
  });
- it.each(['','lodash','npm:semver@^7.5.1','pip:requests@>=2','pip:requests@2.*','pip:requests@1!2.0','pip:requests@2.0+local','semver@1.2','CVE-22-1','GHSA-zzzz-zzzz-zzzz',' semver@7.5.1','x'.repeat(257),undefined])('classifies %j as unparseable, not an error',t=>expect(parseSecurityTarget(t as any)).toEqual({kind:'unsupported',shape:'other',unparseable:true}));
- it('unparseable targets are a disclosed 200 with no lookup and no echo',async()=>{
-  const f=vi.fn();vi.stubGlobal('fetch',f);
-  for(const t of ['lodash','npm:secret-pkg@^7','pip:secret@>=2','',undefined]){const r:any=await handlePackageSecurity({target:t as any});
-   expect(r.vulnerability_count).toBeNull();expect(r.covered).toBe(false);expect(r.parseable).toBe(false);expect(r.verdict).toBe('Inconclusive');expect(r.answer).toContain('Target not parseable');expect(r.answer).toContain('not zero');expect(JSON.stringify(r)).not.toContain('secret');
-   const e=JSON.parse((await getReceiptEvidence(r.receipt.receipt_id)).evidence!.toString());expect(e.kind).toBe('unparseable');expect(e.lookup_performed).toBe(false);}
-  expect(f).not.toHaveBeenCalled();
+ it.each(['','lodash','npm:semver@^7.5.1','pip:requests@>=2','pip:requests@2.*','pip:requests@1!2.0','pip:requests@2.0+local','semver@1.2','CVE-22-1','GHSA-zzzz-zzzz-zzzz',' semver@7.5.1','x'.repeat(257),undefined])('keeps %j a 400 INVALID_TARGET with no lookup',async t=>{
+  expect(()=>parseSecurityTarget(t as any)).toThrow(expect.objectContaining({status:400,code:'INVALID_TARGET'}));
+  const f=vi.fn();vi.stubGlobal('fetch',f);await expect(handlePackageSecurity({target:t as any})).rejects.toMatchObject({status:400,code:'INVALID_TARGET'});expect(f).not.toHaveBeenCalled();
  });
  it('shape labels never contain the value',()=>{for(const t of ['npm:semver@7.5.1','pip:a@1.0','CVE-2022-25883','GHSA-c2qf-rxjj-qqgw','https://secret.example/x','cargo:secretname@1.0.0','zzz',undefined])expect(['npm','pypi','cve','ghsa','url','other']).toContain(targetShapeOf(t));});
 });
@@ -64,31 +60,31 @@ describe('CVE and GHSA ids',()=>{
  it('refuses a record for a different id',()=>expect(()=>parseVulnRecord(ghsa,'CVE-2000-0001')).toThrow());
  it('looks up by id, GET with no redirect, and returns the record fields',async()=>{
   const f=vi.fn(async(u:any,o:any)=>{expect(String(u)).toBe('https://api.osv.dev/v1/vulns/CVE-2022-25883');expect(o.method).toBe('GET');expect(o.redirect).toBe('error');return new Response(cve);});vi.stubGlobal('fetch',f);
-  const r:any=await handlePackageSecurity({target:'cve-2022-25883'});expect(r.vulnerability_count).toBe(1);expect(r.target).toBe('CVE-2022-25883');expect(r.target_shape).toBe('cve');expect(r.aliases).toContain('GHSA-c2qf-rxjj-qqgw');expect(r.affected_packages).toEqual([]);expect(r.answer).toContain('OSV lists no package as affected');expect(r.severity_scores[0]).toContain('CVSS');expect(r.references.length).toBeGreaterThan(0);expect(r.verdict).toBe('Record found');expect(r.answer).toContain('does not say whether your dependency');expect(r.answer).not.toContain('Needs changes');expect(r.answer).not.toContain('https://');
+  const r:any=await handlePackageSecurity({target:'cve-2022-25883'});expect(r.vulnerability_count).toBe(1);expect(r.target).toBe('CVE-2022-25883');expect(r.target_shape).toBe('cve');expect(r.aliases).toContain('GHSA-c2qf-rxjj-qqgw');expect(r.affected_packages).toEqual([]);expect(r.answer).toContain('OSV lists no package as affected');expect(r.severity_scores[0]).toContain('CVSS');expect(r.references.length).toBeGreaterThan(0);expect(r.verdict).toBe('Needs changes');expect(['Secure','Needs changes','Insecure']).toContain(r.verdict);expect(typeof r.vulnerability_count).toBe('number');expect(r.answer).toContain('does not say whether your dependency');expect(r.answer).not.toContain('Needs changes');expect(r.answer).not.toContain('https://');
   expect(JSON.parse((await getReceiptEvidence(r.receipt.receipt_id)).evidence!.toString()).source_raw_body).toBe(cve);
  });
  it('GHSA id lookup uses the GHSA url',async()=>{const f=vi.fn(async(u:any)=>{expect(String(u)).toBe('https://api.osv.dev/v1/vulns/GHSA-c2qf-rxjj-qqgw');return new Response(ghsa);});vi.stubGlobal('fetch',f);const r:any=await handlePackageSecurity({target:'GHSA-c2qf-rxjj-qqgw'});expect(r.aliases).toContain('CVE-2022-25883');expect(r.affected_packages).toContain('npm:semver');});
- it('a real OSV 404 is a disclosed unknown, not zero and not Secure',async()=>{
-  vi.stubGlobal('fetch',async()=>new Response(NF,{status:404}));const r:any=await handlePackageSecurity({target:'CVE-2099-0001'});expect(r.vulnerability_count).toBeNull();expect(r.verdict).toBe('Inconclusive');expect(r.summary).toContain('unknown, not zero');
+ it('a real OSV 404 is a 422 refusal, never zero or Secure, with no id echoed',async()=>{
+  vi.stubGlobal('fetch',async()=>new Response(NF,{status:404}));await expect(handlePackageSecurity({target:'CVE-2099-0001'})).rejects.toMatchObject({status:422,code:'NO_ADVISORY_COVERAGE'});
  });
- it('a withdrawn record is unknown, not an active advisory',async()=>{const d=JSON.parse(cve);d.withdrawn='2026-01-01T00:00:00Z';vi.stubGlobal('fetch',async()=>new Response(JSON.stringify(d)));const r:any=await handlePackageSecurity({target:'CVE-2022-25883'});expect(r.vulnerability_count).toBeNull();expect(r.summary).toContain('withdrawn');});
+ it('a withdrawn record is a 422 refusal, not an active advisory',async()=>{const d=JSON.parse(cve);d.withdrawn='2026-01-01T00:00:00Z';vi.stubGlobal('fetch',async()=>new Response(JSON.stringify(d)));await expect(handlePackageSecurity({target:'CVE-2022-25883'})).rejects.toMatchObject({status:422,code:'NO_ADVISORY_COVERAGE'});});
  it('a mismatched, malformed or failed source is 502',async()=>{
   for(const res of [()=>new Response(ghsa.replace('GHSA-c2qf-rxjj-qqgw','GHSA-aaaa-bbbb-cccc')),()=>new Response('{"vulns":[]}'),()=>new Response('boom',{status:500}),()=>new Response('{"code":9}',{status:404})]){
    vi.stubGlobal('fetch',async()=>res());await expect(handlePackageSecurity({target:'CVE-2022-25999'})).rejects.toMatchObject({status:502,code:'OSV_UNAVAILABLE'});}
  });
 });
 describe('unknown ecosystems',()=>{
- it.each(['cargo:serde@1.0.0','https://github.com/a/b','maven:org.x:y@1.0'])('%s is a disclosed 200 with no lookup',async t=>{
-  const f=vi.fn();vi.stubGlobal('fetch',f);const r:any=await handlePackageSecurity({target:t});expect(f).not.toHaveBeenCalled();
-  expect(r.vulnerability_count).toBeNull();expect(r.covered).toBe(false);expect(r.verdict).toBe('Inconclusive');expect(r.answer).toContain('Ecosystem not covered');expect(r.answer).toContain('not zero');
-  const e=JSON.parse((await getReceiptEvidence(r.receipt.receipt_id)).evidence!.toString());expect(e.lookup_performed).toBe(false);expect(JSON.stringify(e)).not.toContain('github.com');
+ it.each(['cargo:serde@1.0.0','https://github.com/a/b','maven:org.x:y@1.0','zzsecretlabel:pkg@1.0.0'])('%s is a 422 ECOSYSTEM_NOT_COVERED refusal with no lookup and no value echoed',async t=>{
+  const f=vi.fn();vi.stubGlobal('fetch',f);const e:any=await handlePackageSecurity({target:t}).then(()=>null,x=>x);
+  expect(f).not.toHaveBeenCalled();expect(e).toMatchObject({status:422,code:'ECOSYSTEM_NOT_COVERED'});
+  const body=JSON.stringify({m:e.message,b:e.responseBody??null}).toLowerCase();for(const bit of ['serde','github','secret','zzsecretlabel','cargo','maven'])expect(body).not.toContain(bit);
  });
 });
 describe('server logging',()=>{
  it('logs target_shape only, never the value',async()=>{
   const log=vi.spyOn(console,'info').mockImplementation(()=>{}),app=buildServer();vi.stubGlobal('fetch',async()=>new Response(cve));
   try{const seen:string[]=[];
-   for(const [t,shape,status] of [['CVE-2022-25883','cve',200],['cargo:secretpkg@1.0.0','other',200],['https://secret.example/path','url',200],['npm:secretpkg@x','other',200]] as const){
+   for(const [t,shape,status] of [['CVE-2022-25883','cve',200],['cargo:secretpkg@1.0.0','other',422],['https://secret.example/path','url',422],['npm:secretpkg@x','other',400]] as const){
     log.mockClear();const res=await app.inject({method:'GET',url:'/v1/security-review?target='+encodeURIComponent(t)});expect(res.statusCode).toBe(status);
     const rows=log.mock.calls.map(c=>{try{return JSON.parse(String(c[0]));}catch{return null;}}).filter(r=>r?.event==='request_start'||r?.event==='request_complete');
     expect(rows).toHaveLength(2);for(const r of rows)expect(r.target_shape).toBe(shape);const text=JSON.stringify(rows);expect(text).not.toContain('secret');seen.push(shape);}
@@ -98,13 +94,6 @@ describe('server logging',()=>{
 });
 
 describe('review fixes',()=>{
- it('echoes only allowlisted ecosystem labels, never an arbitrary one, in response or evidence',async()=>{
-  vi.stubGlobal('fetch',vi.fn());
-  for(const t of ['zzsecretlabel:pkg@1.0.0','Zz_Secret.Label:pkg@1.0.0']){const r:any=await handlePackageSecurity({target:t});
-   expect(r.ecosystem).toBeNull();expect(JSON.stringify(r).toLowerCase()).not.toContain('secret');expect(r.answer).toContain('the requested ecosystem');
-   expect((await getReceiptEvidence(r.receipt.receipt_id)).evidence!.toString().toLowerCase()).not.toContain('secret');}
-  const k:any=await handlePackageSecurity({target:'Cargo:serde@1.0.0'});expect(k.ecosystem).toBe('cargo');expect(k.answer).toContain('the cargo ecosystem');
- });
  it('cancels and drains the body of a non-OK OSV response',async()=>{
   const cancel=vi.fn(async()=>{});vi.stubGlobal('fetch',async()=>({ok:false,status:503,body:{cancel,getReader:()=>{throw new Error('must not read');}}}));
   await expect(handlePackageSecurity({target:'pip:requests@2.19.0'})).rejects.toMatchObject({status:502,code:'OSV_UNAVAILABLE'});expect(cancel).toHaveBeenCalledTimes(1);
