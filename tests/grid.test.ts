@@ -3839,7 +3839,7 @@ describe("A9 r2 post-provisional revalidation and single-node live repair", () =
     }
   }, 8000);
 
-  it("a failed post-provisional revalidation still serves the valid cached price and does not storm", async () => {
+  it("a failed post-provisional revalidation refuses the cached price (disclosed 502, never served) and does not storm", async () => {
     saveGridPrice("TH_NP15_GEN-APND", HOUR, 38.09459, "CAISO", "2026-09-14T12:00:00.000Z");
     const realFetch = globalThis.fetch;
     let fetchCalls = 0;
@@ -3849,20 +3849,13 @@ describe("A9 r2 post-provisional revalidation and single-node live repair", () =
       return new Response("unavailable", { status: 503 });
     }) as typeof fetch;
     try {
-      const res = await handleGridPrice({ node_or_zone: "TH_NP15_GEN-APND", interval_start: HOUR });
-      expect(res.lmp_usd_per_mwh).toBe(38.09459);
-      expect(res.verdict).toBe(GRID_UNCONFIRMED_VERDICT);
-      expect(res.confidence).toBe(GRID_UNCONFIRMED_CONFIDENCE);
-      expect(String(res.source)).toContain("post-close revalidation did not confirm");
-      expect(String(res.answer)).toMatch(/unverified/i);
-      expect(String(res.answer)).toContain("post-close revalidation did not confirm");
-      const receipt = res.receipt as Record<string, unknown>;
-      expect(receipt.fetched_at).toBe("2026-09-14T12:00:00.000Z");
-      expect(String(receipt.quorum_votes)).toContain("post-close revalidation did not confirm");
+      const err: any = await handleGridPrice({ node_or_zone: "TH_NP15_GEN-APND", interval_start: HOUR }).then(() => null, (e) => e);
+      expect(err).toMatchObject({ code: "GRID_CACHE_STALE" });
+      expect(String(err.message)).toContain("not served");
+      expect(String(err.message)).not.toContain("38.09459");
       expect(fetchCalls).toBe(CAISO_LIVE_ATTEMPTS);
-      const res2 = await handleGridPrice({ node_or_zone: "TH_NP15_GEN-APND", interval_start: HOUR });
-      expect(res2.lmp_usd_per_mwh).toBe(38.09459);
-      expect(res2.verdict).toBe(GRID_UNCONFIRMED_VERDICT);
+      const err2: any = await handleGridPrice({ node_or_zone: "TH_NP15_GEN-APND", interval_start: HOUR }).then(() => null, (e) => e);
+      expect(err2).toMatchObject({ code: "GRID_CACHE_STALE" });
       expect(fetchCalls).toBe(CAISO_LIVE_ATTEMPTS); // cooldown, no second storm
     } finally {
       globalThis.fetch = realFetch;

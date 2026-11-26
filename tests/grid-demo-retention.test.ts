@@ -15,23 +15,22 @@ it.each(['2026-11-20T05:00:00.000Z', '2026-11-19T00:00:00.000Z'])('fixed demo ho
  expect(isConfiguredGridReference('TH_SP15_GEN-APND', interval)).toBe(false);
  expect(isConfiguredGridReference('TH_NP15_GEN-APND', '2026-11-18T00:00:00.000Z')).toBe(false);
 });
-it('held demo row answers promptly while OASIS is pending, with one refresh and retry throttle after failure', async () => {
+it('held demo row: pending OASIS is awaited within the 15s bound, then the cached price is refused (never served); retry throttle holds', async () => {
  vi.useFakeTimers();
  const interval = '2026-11-20T05:00:00.000Z';
  saveGridPrice('TH_NP15_GEN-APND', interval, 53.65098, 'CAISO', '2026-11-20T07:00:00.000Z', 'https://oasis.caiso.com/oasisapi/SingleZip');
  markGridRevalidateAttempt('TH_NP15_GEN-APND', interval, new Date().toISOString());
  const fetch = vi.fn(async () => new Promise<Response>(() => {})); vi.stubGlobal('fetch', fetch);
- const result = await handleGridPrice({ node_or_zone: 'TH_NP15_GEN-APND', interval_start: interval });
- expect(result.lmp_usd_per_mwh).toBe(53.65098); expect(result.verdict).toBe('unverified');
- expect(result.confidence).toBe(0.5); expect(String(result.answer)).toContain('background revalidation pending');
+ const first = handleGridPrice({ node_or_zone: 'TH_NP15_GEN-APND', interval_start: interval }).then(r=>r,e=>e);
+ await vi.advanceTimersByTimeAsync(15000);
+ const err: any = await first;
+ expect(err).toMatchObject({ code: 'GRID_CACHE_STALE' }); expect(String(err.message)).toContain('not served'); expect(String(err.message)).not.toContain('53.65098');
  expect(fetch).toHaveBeenCalledTimes(1);
- await handleGridPrice({ node_or_zone: 'TH_NP15_GEN-APND', interval_start: interval }); expect(fetch).toHaveBeenCalledTimes(1);
- // The bounded background operation rejects even when fetch ignores abort.
- await vi.advanceTimersByTimeAsync(16000);
- await handleGridPrice({ node_or_zone: 'TH_NP15_GEN-APND', interval_start: interval }); expect(fetch).toHaveBeenCalledTimes(1);
+ // Inside the 60s throttle: refused at once, no second fetch.
+ await expect(handleGridPrice({ node_or_zone: 'TH_NP15_GEN-APND', interval_start: interval })).rejects.toMatchObject({ code: 'GRID_CACHE_STALE' }); expect(fetch).toHaveBeenCalledTimes(1);
  await vi.advanceTimersByTimeAsync(45000);
- await handleGridPrice({ node_or_zone: 'TH_NP15_GEN-APND', interval_start: interval }); expect(fetch).toHaveBeenCalledTimes(2);
- await vi.advanceTimersByTimeAsync(16000);
+ const second = handleGridPrice({ node_or_zone: 'TH_NP15_GEN-APND', interval_start: interval }).then(r=>r,e=>e);
+ await vi.advanceTimersByTimeAsync(15000); expect(await second).toMatchObject({ code: 'GRID_CACHE_STALE' }); expect(fetch).toHaveBeenCalledTimes(2);
 });
 it('future-ingested demo rows never receive the cached-observation shortcut', async () => {
  const interval = '2026-11-19T00:00:00.000Z';

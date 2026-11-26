@@ -412,8 +412,8 @@ export function parseGridQuestion(question: string): {
 }
 
 let demoGeneration=0;
-export function stopGridDemoRefreshes():void { demoGeneration++; demoRefreshes.clear(); demoLastAttempt.clear(); }
-const demoRefreshes=new Map<string,Promise<void>>();
+export function stopGridDemoRefreshes():void { demoGeneration++; demoInflight.clear(); demoLastAttempt.clear(); }
+const demoInflight=new Map<string,Promise<GridCacheRow|null>>();
 const demoLastAttempt=new Map<string,number>();
 
 type GridCacheRow = NonNullable<Awaited<ReturnType<typeof getGridPrice>>>;
@@ -799,20 +799,37 @@ export async function handleGridPrice(
     throw error;
   }
 
-  const storedDemo=!fetchedLive && normalizedZone==="TH_NP15_GEN-APND" && (GRID_DEMO_INTERVALS as readonly string[]).includes(intervalStart)
-    && row.market==="CAISO" && !isCorruptGridRow(row) && Number.isFinite(Date.parse(row.ingested_at)) && Date.parse(row.ingested_at)<=nowMs;
+  let storedDemo=!fetchedLive && normalizedZone==="TH_NP15_GEN-APND" && (GRID_DEMO_INTERVALS as readonly string[]).includes(intervalStart)
+    && row.market==="CAISO" && !isCorruptGridRow(row) && Number.isFinite(Date.parse(row.ingested_at)) && Date.parse(row.ingested_at)<=nowMs
+    && (await isPostCloseUnconfirmed(normalizedZone,intervalStart,row.market,row,nowMs) || await gridRowNeedsRevalidation(normalizedZone,intervalStart,row.market,row,nowMs));
   if(storedDemo){
+    // Historical interval with revalidation pending: fetch fresh from OASIS now. Concurrent
+    // callers for the same hour share ONE in-flight fetch (each under its own deadline); only
+    // requests arriving after a failed attempt, inside the 60 s retry throttle, are refused at
+    // once. The cached price is never served: a failed or timed-out fetch is refused below.
     const key=normalizedZone+":"+intervalStart;
-    if(!demoRefreshes.has(key) && nowMs-(demoLastAttempt.get(key)??0)>=60_000){
+    let inflight=demoInflight.get(key);
+    if(!inflight && nowMs-(demoLastAttempt.get(key)??0)>=60_000){
       demoLastAttempt.set(key,nowMs);
       const generation=demoGeneration;
-      const refresh=(async()=>{try{
-        const fetched=await gridDemoDeadline(fetchCaisoDamLmp(normalizedZone,intervalStart,15_000));
-        if(generation!==demoGeneration)return;
-        if(fetched)await saveGridPrice(normalizedZone,intervalStart,fetched.lmp,"CAISO",new Date().toISOString(),fetched.upstreamUrl);
-        else await markGridRevalidateAttempt(normalizedZone,intervalStart,new Date().toISOString());
-      }catch{if(generation===demoGeneration)await markGridRevalidateAttempt(normalizedZone,intervalStart,new Date().toISOString());}})().catch(()=>{}).finally(()=>{if(generation===demoGeneration)demoRefreshes.delete(key);});
-      demoRefreshes.set(key,refresh);
+      inflight=(async()=>{
+        let fetched: { lmp: number; upstreamUrl: string } | null = null;
+        try{ fetched=await gridDemoDeadline(fetchCaisoDamLmp(normalizedZone,intervalStart,15_000)); }catch{ fetched=null; }
+        if(generation!==demoGeneration)return null;
+        if(fetched){
+          const ingestedAt=new Date().toISOString();
+          await saveGridPrice(normalizedZone,intervalStart,fetched.lmp,"CAISO",ingestedAt,fetched.upstreamUrl);
+          return {lmp_usd_per_mwh:fetched.lmp,market:"CAISO",ingested_at:ingestedAt,upstream_url:fetched.upstreamUrl};
+        }
+        await markGridRevalidateAttempt(normalizedZone,intervalStart,new Date().toISOString());
+        return null;
+      })().catch(()=>null).finally(()=>{if(demoInflight.get(key)===inflight)demoInflight.delete(key);});
+      demoInflight.set(key,inflight);
+    }
+    if(inflight){
+      let fresh: GridCacheRow | null = null;
+      fresh=await inflight; // already bounded by gridDemoDeadline inside the shared flight; never rejects
+      if(fresh){ row=fresh;fetchedLive=true;storedDemo=false;nowMs=Date.now(); }
     }
   }
 
@@ -954,6 +971,16 @@ export async function handleGridPrice(
     (await isPostCloseUnconfirmed(normalizedZone, intervalStart, zone.market, row, nowMs))
   ) {
     unconfirmed = true;
+  }
+  // CAISO historical interval whose revalidation did not confirm the price (failed or
+  // timed-out OASIS fetch, or inside the failed-attempt throttle): the cached price is
+  // never served. Disclosed 502 (the price field is not nullable in the contract).
+  if (zone.market === "CAISO" && unconfirmed && !fetchedLive && !stale) {
+    throw upstreamUnavailable(
+      "GRID_CACHE_STALE",
+      "cached price for " + normalizedZone + " at " + intervalStart +
+        " was not confirmed: the post-close revalidation against the official CAISO OASIS did not return this hour, so the cached price is not served",
+    );
   }
   if (stale) {
     // A4-FIX F6: a stale row
