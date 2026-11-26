@@ -22,7 +22,7 @@ const normName = (eco: Eco, n: string) => eco === 'PyPI' ? n.toLowerCase().repla
 function affectedRelease(affected: Obj, version: string, eco: Eco = 'npm'): boolean | null {
   if (Array.isArray(affected.versions) && affected.versions.includes(version)) return true;
   // PyPI: only plain dotted-numeric releases are compared locally; anything else stays an OSV-only match.
-  if (eco === 'PyPI' && !/^\d+(\.\d+)*$/.test(version)) return Array.isArray(affected.versions) && affected.versions.length ? false : null;
+  if (eco === 'PyPI' && !/^\d+(\.\d+)*$/.test(version)) return null;
   const value = version.split('.').map(BigInt);
   const compare = (bound: unknown): number => {
     if (bound === '0') return 1;
@@ -93,6 +93,8 @@ export type SecurityTarget =
   | { kind: 'package'; ecosystems: Eco[]; name: string; version: string; shape: 'npm' | 'pypi' | 'other' }
   | { kind: 'id'; id: string; shape: 'cve' | 'ghsa' }
   | { kind: 'unsupported'; shape: 'url' | 'other'; label?: string; unparseable?: true };
+// Only these fixed labels are ever echoed; any other user-supplied label is dropped.
+const KNOWN_OTHER_ECOSYSTEMS: ReadonlySet<string> = new Set(['cargo', 'crates', 'maven', 'go', 'golang', 'gem', 'rubygems', 'nuget', 'composer', 'packagist', 'hex', 'pub', 'cocoapods', 'swift', 'conan', 'cran', 'hackage', 'docker', 'deb', 'debian', 'apk', 'alpine', 'rpm', 'github', 'actions', 'homebrew', 'conda', 'bioconductor', 'julia']);
 const PYPI_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 const PYPI_VERSION = /^(0|[1-9]\d*)(?:\.(0|[1-9]\d*))*(?:(?:a|b|rc)(0|[1-9]\d*))?(?:\.post(0|[1-9]\d*))?(?:\.dev(0|[1-9]\d*))?$/;
 const NPM_PREFIX = /^npm:/i, PYPI_PREFIX = /^(?:pip|pypi):/i;
@@ -116,7 +118,7 @@ function parseSecurityTargetStrict(target: string | undefined): SecurityTarget {
     return { kind: 'package', ecosystems: ['PyPI'], name: m[1], version: m[2], shape: 'pypi' };
   }
   const eco = /^([a-z][a-z0-9+._-]{0,30}):[^@\s]+@\S+$/i.exec(target);
-  if (eco) return { kind: 'unsupported', shape: 'other', label: eco[1].toLowerCase() };
+  if (eco) { const l = eco[1].toLowerCase(); return { kind: 'unsupported', shape: 'other', ...(KNOWN_OTHER_ECOSYSTEMS.has(l) ? { label: l } : {}) }; }
   const m = /^([^@]+)@(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(target);
   if (!m) throw bad();
   const version = `${m[2]}.${m[3]}.${m[4]}`;
@@ -134,7 +136,7 @@ async function fetchOsv(url: string, init: RequestInit, allow404 = false): Promi
   try {
     const r = await fetch(url, { ...init, redirect: 'error', signal: abort.signal,
       headers: { accept: 'application/json', 'user-agent': 'VeriReceipt/2.0 package advisory observer', ...(init.method === 'POST' ? { 'content-type': 'application/json' } : {}) } });
-    if (!r.ok && !(allow404 && r.status === 404)) throw new Error(`OSV HTTP ${r.status}`);
+    if (!r.ok && !(allow404 && r.status === 404)) { try { await r.body?.cancel(); } catch { /* body already closed */ } throw new Error(`OSV HTTP ${r.status}`); }
     const reader = r.body?.getReader(); if (!reader) throw new Error('OSV body missing');
     const parts: Uint8Array[] = []; let bytes = 0;
     try { while (true) { const p = await reader.read(); if (p.done) break; bytes += p.value.byteLength;
@@ -172,7 +174,7 @@ async function persist(receipt: ReturnType<typeof makeReceipt>, evidence: string
 const NOT_AUDIT = 'This is a known-advisory lookup, not a source-code audit, exploitability assessment or complete security review.';
 async function handleUnsupported(t: Extract<SecurityTarget, { kind: 'unsupported' }>): Promise<Record<string, unknown>> {
   const now = new Date().toISOString();
-  const what = t.shape === 'url' ? 'URL targets' : `the ${t.label ?? 'requested'} ecosystem`;
+  const what = t.shape === 'url' ? 'URL targets' : t.label ? `the ${t.label} ecosystem` : 'the requested ecosystem';
   const lead = t.unparseable ? 'Target not parseable: it is not npm:name@x.y.z, pip:name@version, PyPI:name@version, name@x.y.z, or a CVE-/GHSA- id.' : `Ecosystem not covered: ${what} cannot be checked here.`;
   const summary = `${lead} Covered: npm and PyPI name@exact-version, and CVE-/GHSA- ids, all via OSV. No advisory lookup ran, so the vulnerability count is unknown, not zero, and nothing here says the target is secure. ${NOT_AUDIT}`;
   const evidence = JSON.stringify({ kind: t.unparseable ? 'unparseable' : 'not_covered', target_shape: t.shape, ecosystem_label: t.label ?? null, lookup_performed: false, checked_at: now,
@@ -208,12 +210,12 @@ async function handleIdLookup(t: Extract<SecurityTarget, { kind: 'id' }>): Promi
       { answer: summary, verdict: 'Inconclusive', confidence: 0.85, source: `${source}; retrieved ${obs.fetchedAt}` });
   }
   const sev = rec.cvss.length ? `${rec.severity}; ${rec.cvss.join('; ')}` : rec.severity;
-  const summary = `OSV record ${rec.id}${rec.aliases.length ? ` (aliases ${rec.aliases.join(', ')})` : ''}: severity ${sev}; affects ${rec.packages.length ? rec.packages.join(', ') : 'no package named in OSV'}.${rec.summary ? ` ${rec.summary}` : ''} Whether your code is exposed depends on the version and usage. ${NOT_AUDIT}`;
+  const summary = `OSV has a record for ${rec.id}${rec.aliases.length ? ` (aliases ${rec.aliases.join(', ')})` : ''}: severity ${sev}; OSV lists ${rec.packages.length ? rec.packages.join(', ') : 'no package'} as affected.${rec.summary ? ` ${rec.summary}` : ''} This is a record lookup by id only. It does not say whether your dependency, at the version you use, is affected. ${NOT_AUDIT}`;
   return envelope('SECURITY_REVIEW_GENERAL', { target: t.id, target_shape: t.shape, vulnerability_count: 1,
     issues: [`${rec.id}${rec.aliases.length ? ` (${rec.aliases.join(', ')})` : ''}; severity ${sev}`],
     aliases: rec.aliases, affected_packages: rec.packages, severity_scores: rec.cvss, references: rec.references, published: rec.published, modified: rec.modified,
     summary, observed_at: obs.fetchedAt }, receipt,
-    { answer: `${summary} Needs changes: review the advisory and fixed versions.`, verdict: 'Needs changes', confidence: 0.85,
+    { answer: summary, verdict: 'Record found', confidence: 0.85,
       source: `${source}; lookup by id; retrieved ${obs.fetchedAt}; cached at most 5 minutes; not a safety guarantee` });
 }
 async function observePackage(eco: Eco, name: string, version: string) {

@@ -64,7 +64,7 @@ describe('CVE and GHSA ids',()=>{
  it('refuses a record for a different id',()=>expect(()=>parseVulnRecord(ghsa,'CVE-2000-0001')).toThrow());
  it('looks up by id, GET with no redirect, and returns the record fields',async()=>{
   const f=vi.fn(async(u:any,o:any)=>{expect(String(u)).toBe('https://api.osv.dev/v1/vulns/CVE-2022-25883');expect(o.method).toBe('GET');expect(o.redirect).toBe('error');return new Response(cve);});vi.stubGlobal('fetch',f);
-  const r:any=await handlePackageSecurity({target:'cve-2022-25883'});expect(r.vulnerability_count).toBe(1);expect(r.target).toBe('CVE-2022-25883');expect(r.target_shape).toBe('cve');expect(r.aliases).toContain('GHSA-c2qf-rxjj-qqgw');expect(r.affected_packages).toEqual([]);expect(r.answer).toContain('no package named in OSV');expect(r.severity_scores[0]).toContain('CVSS');expect(r.references.length).toBeGreaterThan(0);expect(r.verdict).toBe('Needs changes');expect(r.answer).not.toContain('https://');
+  const r:any=await handlePackageSecurity({target:'cve-2022-25883'});expect(r.vulnerability_count).toBe(1);expect(r.target).toBe('CVE-2022-25883');expect(r.target_shape).toBe('cve');expect(r.aliases).toContain('GHSA-c2qf-rxjj-qqgw');expect(r.affected_packages).toEqual([]);expect(r.answer).toContain('OSV lists no package as affected');expect(r.severity_scores[0]).toContain('CVSS');expect(r.references.length).toBeGreaterThan(0);expect(r.verdict).toBe('Record found');expect(r.answer).toContain('does not say whether your dependency');expect(r.answer).not.toContain('Needs changes');expect(r.answer).not.toContain('https://');
   expect(JSON.parse((await getReceiptEvidence(r.receipt.receipt_id)).evidence!.toString()).source_raw_body).toBe(cve);
  });
  it('GHSA id lookup uses the GHSA url',async()=>{const f=vi.fn(async(u:any)=>{expect(String(u)).toBe('https://api.osv.dev/v1/vulns/GHSA-c2qf-rxjj-qqgw');return new Response(ghsa);});vi.stubGlobal('fetch',f);const r:any=await handlePackageSecurity({target:'GHSA-c2qf-rxjj-qqgw'});expect(r.aliases).toContain('CVE-2022-25883');expect(r.affected_packages).toContain('npm:semver');});
@@ -94,5 +94,23 @@ describe('server logging',()=>{
     expect(rows).toHaveLength(2);for(const r of rows)expect(r.target_shape).toBe(shape);const text=JSON.stringify(rows);expect(text).not.toContain('secret');seen.push(shape);}
    expect(seen).toEqual(['cve','other','url','other']);
   }finally{log.mockRestore();await app.close();}
+ });
+});
+
+describe('review fixes',()=>{
+ it('echoes only allowlisted ecosystem labels, never an arbitrary one, in response or evidence',async()=>{
+  vi.stubGlobal('fetch',vi.fn());
+  for(const t of ['zzsecretlabel:pkg@1.0.0','Zz_Secret.Label:pkg@1.0.0']){const r:any=await handlePackageSecurity({target:t});
+   expect(r.ecosystem).toBeNull();expect(JSON.stringify(r).toLowerCase()).not.toContain('secret');expect(r.answer).toContain('the requested ecosystem');
+   expect((await getReceiptEvidence(r.receipt.receipt_id)).evidence!.toString().toLowerCase()).not.toContain('secret');}
+  const k:any=await handlePackageSecurity({target:'Cargo:serde@1.0.0'});expect(k.ecosystem).toBe('cargo');expect(k.answer).toContain('the cargo ecosystem');
+ });
+ it('cancels and drains the body of a non-OK OSV response',async()=>{
+  const cancel=vi.fn(async()=>{});vi.stubGlobal('fetch',async()=>({ok:false,status:503,body:{cancel,getReader:()=>{throw new Error('must not read');}}}));
+  await expect(handlePackageSecurity({target:'pip:requests@2.19.0'})).rejects.toMatchObject({status:502,code:'OSV_UNAVAILABLE'});expect(cancel).toHaveBeenCalledTimes(1);
+ });
+ it.each(['2.19.0rc1','2.19.0.post1','2.19.0.dev1'])('PyPI %s that OSV matched is a disclosed 200 with local range unavailable, not a 502',async v=>{
+  const d=JSON.parse(py);d.vulns=d.vulns.slice(0,1);vi.stubGlobal('fetch',async()=>new Response(JSON.stringify(d)));
+  const r:any=await handlePackageSecurity({target:`pip:requests@${v}`});expect(r.vulnerability_count).toBe(1);expect(r.issues[0]).toContain('local range interpretation unavailable');expect(r.answer).toContain('local range interpretation is unavailable');
  });
 });
