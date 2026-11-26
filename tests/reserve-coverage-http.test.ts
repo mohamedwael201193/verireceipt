@@ -1,0 +1,5 @@
+import {afterAll,it,expect,vi} from 'vitest';import {mkdtempSync,rmSync} from 'node:fs';import {join} from 'node:path';
+const tmp=mkdtempSync('/tmp/reserve-privacy-http-');process.env.SQLITE_PATH=join(tmp,'db.sqlite');
+import {buildServer} from '../src/server';import {getReceiptEvidence} from '../src/core/storage';
+afterAll(()=>rmSync(tmp,{recursive:true,force:true}));
+it.each(['PRIVATE123','555010234567','XYZ.A','name@example.invalid'])('HTTP receipt and diagnostics do not retain unbound input %s',async value=>{const log=vi.spyOn(console,'info').mockImplementation(()=>{});const app=buildServer();try{const response=await app.inject('/v1/reserve-attestation?asset='+encodeURIComponent(value));expect(response.statusCode).toBe(200);const r=response.json();expect(r.asset).toBeNull();const ev=await getReceiptEvidence(r.receipt.receipt_id);expect(String(ev.evidence)).not.toContain(value);expect(JSON.parse(String(ev.evidence))).not.toHaveProperty('public_symbol');expect(JSON.stringify(log.mock.calls)).not.toContain(value);}finally{await app.close();log.mockRestore();}});

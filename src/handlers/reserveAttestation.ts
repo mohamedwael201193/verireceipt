@@ -1,3 +1,5 @@
+import {handleTokenSupply} from './tokenSupply';
+import {TOKEN_CONTRACTS,ADDRESS_RE} from './tokenContracts';
 // ASSET_RESERVE_ATTESTATION_GENERAL: exact symbols in POR_FEEDS, plus verified issuance aliases.
 //
 // Zero-LLM. The latest Chainlink Proof-of-Reserve attestation for a
@@ -163,6 +165,7 @@ export function reserveInputDiagnostic(input:string):Record<string,unknown> {
 }
 export async function handleReserveAttestation(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const assetRaw = query.asset?.trim();
+  if(assetRaw&&assetRaw.length>256)throw badRequest('BAD_ASSET','asset too long');
   if (!assetRaw) throw badRequest("MISSING_PARAM", `asset is required, one of: ${Object.values(POR_FEEDS).map((f) => f.asset).join(", ")}`);
   // Exact Ethereum issuance-address aliases only; never prefixes or cross-chain guesses.
   const addressKey = Object.entries(ETHEREUM_TOKENS).find(([,token]) => token.address === assetRaw.toLowerCase())?.[0];
@@ -170,10 +173,16 @@ export async function handleReserveAttestation(query: Record<string, string | un
   const feed = Object.hasOwn(POR_FEEDS, key) ? POR_FEEDS[key] : undefined;
   if (!feed) {
     console.info(JSON.stringify({event:"reserve_asset_unmapped",...reserveInputDiagnostic(assetRaw)}));
-    return withAnswerClass({ answer: `No probed-live Chainlink PoR feed is enabled for "${assetRaw.slice(0, 80)}". Covered assets: ${Object.values(POR_FEEDS).map(f => f.asset).join(", ")}. No reserve is asserted; this coverage-only response is outside the scored numeric attestation contract.`,
-      asset: assetRaw.slice(0, 80), attested_reserve: null, ethereum_total_supply: null,
-      reserve_vs_ethereum_supply_pct: null, collateral_ratio_pct: null,
-      verdict: "unavailable", confidence: 0, receipt: null }, INTENT, {asset_known:false,source_kind:"coverage_only",numeric_vs_null:"null",reserve_asset_bucket:"other"});
+    const publicSymbol=Object.hasOwn(TOKEN_CONTRACTS.ethereum,key)&&/^[A-Z0-9.-]{2,12}$/.test(key)?key:undefined;
+    const contract=ADDRESS_RE.test(assetRaw)?assetRaw:TOKEN_CONTRACTS.ethereum[key];
+    let issuance:Record<string,unknown>|null=null;
+    if(contract){try{const supplied=await handleTokenSupply({token:contract,chain:'ethereum'});issuance={total_supply:supplied.total_supply,supply_base_units:supplied.supply_base_units,decimals:supplied.decimals,symbol:supplied.token_symbol,contract,chain:'ethereum',scope:'Ethereum ERC20 issuance only, not reserves, backing or solvency',source_receipt:supplied.receipt};}catch{issuance=null;}}
+    const fetchedAt=new Date().toISOString();
+    const fields={asset:publicSymbol??null,attested_reserve:null,ethereum_total_supply:issuance?.total_supply??null,reserve_vs_ethereum_supply_pct:null,collateral_ratio_pct:null,issuance,status:issuance?'issuance_only':'coverage_unavailable',reason_code:'no_verified_reserve_source'};
+    const evidence=JSON.stringify({requested_asset_sha256:sha256Hex(assetRaw),...(publicSymbol?{public_symbol:publicSymbol}:{}),...fields,method:'No verified reserve source; available Ethereum issuance is separately receipted and is not collateral evidence',fetched_at:fetchedAt});
+    const receipt=makeReceipt(INTENT,'urn:verireceipt:reserve-coverage',evidence,'coverage decision; no reserve attestation or collateral ratio asserted');
+    try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','coverage evidence could not be stored');}
+    return withAnswerClass(envelope(INTENT,fields,receipt,{answer:`No verified reserve source is configured for this asset. No reserve or collateral ratio is asserted. ${issuance?'Ethereum ERC20 issuance was separately read by quorum: '+issuance.total_supply+' tokens. This is issuance only, not reserve backing or a solvency audit.':'Ethereum issuance is unavailable or no exact Ethereum token binding resolves; no value is guessed.'} Covered PoR feeds: ${Object.values(POR_FEEDS).map(f=>f.asset).join(', ')}.`,verdict:'unavailable',confidence:0,source:'local coverage decision'+(issuance?'; separately receipted Ethereum token issuance quorum':'')}),INTENT,{asset_known:false,source_kind:issuance?'issuance_only':'coverage_only',numeric_vs_null:'null',reserve_asset_bucket:'other',...(publicSymbol?{reserve_public_symbol:publicSymbol}:{})});
   }
   const heartbeat = feed.heartbeat ?? DEFAULT_HEARTBEAT_S;
   const reserveUnit = feed.reserveUnit ?? feed.asset;
