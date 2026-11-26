@@ -254,3 +254,52 @@ describe("route /v1/wash-trading", () => {
   it("request metrics label the route with its intent", () => { expect(intentFor("/v1/wash-trading")).toBe("WASH_TRADING_DETECTION_GENERAL"); });
   it("the 502 path attributes failures to geckoterminal", () => { expect(INTENT_PRIMARY_UPSTREAM["wash-trading"]).toBe("geckoterminal"); });
 });
+
+describe("source failure classes through the real public-source reader", () => {
+  const classLines = (spy: any) => spy.mock.calls.map((c: any[]) => { try { return JSON.parse(String(c[0])); } catch { return {}; } }).filter((o: any) => o.event === "wash_source_failure");
+  const cases: [string, () => Response | Promise<never>, string, string][] = [
+    ["HTTP 403", () => new Response("denied", { status: 403 }), "http_403", "TRADE_SOURCE_UNREACHABLE"],
+    ["HTTP 429", () => new Response("slow down", { status: 429 }), "http_429", "UPSTREAM_RATE_LIMITED"],
+    ["HTTP 404", () => new Response("no", { status: 404 }), "http_4xx", "TRADE_SOURCE_UNREACHABLE"],
+    ["HTTP 503", () => new Response("down", { status: 503 }), "http_5xx", "TRADE_SOURCE_UNREACHABLE"],
+    ["transport error", () => Promise.reject(new TypeError("fetch failed")), "transport", "TRADE_SOURCE_UNREACHABLE"],
+  ];
+  for (const [label, impl, cls, code] of cases) {
+    it(`${label}: logs class ${cls} only, returns ${code}`, async () => {
+      setWashFetchForTests(null); resetUpstreamsForTests();
+      const info = vi.spyOn(console, "info").mockImplementation(() => {});
+      vi.stubGlobal("fetch", async () => impl());
+      await err(handleWashTrading({ subject: POOL }), 502, code);
+      const lines = classLines(info);
+      expect(lines).toEqual([{ event: "wash_source_failure", class: cls }]);
+      expect(JSON.stringify(info.mock.calls)).not.toContain(POOL);
+      expect(getUpstreamsSnapshot().geckoterminal?.last_error).toBe(code === "UPSTREAM_RATE_LIMITED" ? "UPSTREAM_RATE_LIMITED" : "INDEXER_UNREACHABLE");
+      vi.unstubAllGlobals();
+    });
+  }
+  it("timeout: logs class timeout", async () => {
+    setWashFetchForTests(null);
+    vi.useFakeTimers();
+    try {
+      const info = vi.spyOn(console, "info").mockImplementation(() => {});
+      vi.stubGlobal("fetch", (_u: string, init: any) => new Promise((_res, rej) => { init.signal.addEventListener("abort", () => rej(new Error("aborted"))); }));
+      const p = handleWashTrading({ subject: POOL }).then(() => null, (e: any) => e);
+      await vi.advanceTimersByTimeAsync(2600);
+      const e: any = await p;
+      expect(e).toBeInstanceOf(ApiError); expect(e.code).toBe("TRADE_SOURCE_UNREACHABLE");
+      expect(classLines(info)).toEqual([{ event: "wash_source_failure", class: "timeout" }]);
+    } finally { vi.useRealTimers(); vi.unstubAllGlobals(); }
+  });
+  it("our own start budget exhaustion is labelled budget and stays rate limited", async () => {
+    setWashFetchForTests(async () => { throw Object.assign(new Error("x"), { status: 429 }); });
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    await err(handleWashTrading({ subject: POOL }), 502, "UPSTREAM_RATE_LIMITED");
+    expect(classLines(info)).toEqual([{ event: "wash_source_failure", class: "budget" }]);
+  });
+  it("an unlabelled failure is class other", async () => {
+    setWashFetchForTests(async () => { throw new Error("weird"); });
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    await err(handleWashTrading({ subject: POOL }), 502, "TRADE_SOURCE_UNREACHABLE");
+    expect(classLines(info)).toEqual([{ event: "wash_source_failure", class: "other" }]);
+  });
+});

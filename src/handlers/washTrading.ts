@@ -17,7 +17,7 @@
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
-import { readPublicBody, StartBudget } from "../core/publicSource";
+import { publicSourceFailure, readPublicBody, StartBudget } from "../core/publicSource";
 import { recordUpstreamError } from "../core/upstreams";
 
 export const INTENT = "WASH_TRADING_DETECTION_GENERAL";
@@ -129,10 +129,15 @@ async function compute(subject: string, deadlineAt: number): Promise<Computed> {
   return { unpriced, network, pool, poolName, selection, stats, rawBody: JSON.stringify({ search_url: searchUrl, search_source_raw_body: searchRaw, trades_url: tradesUrl, trades_source_raw_body: tradesRaw }), tradesUrl, fetchedAt: new Date().toISOString() };
 }
 
+const FAILURE_CLASSES = new Set(["http_403", "http_429", "http_4xx", "http_5xx", "transport", "timeout"]);
 function sourceFailure(e: unknown): Error {
-  const status = (e as any)?.status;
-  recordUpstreamError("geckoterminal", status === 429 ? "UPSTREAM_RATE_LIMITED" : "INDEXER_UNREACHABLE");
-  return upstreamUnavailable(status === 429 ? "UPSTREAM_RATE_LIMITED" : "TRADE_SOURCE_UNREACHABLE", "GeckoTerminal trade source unavailable; no answer is guessed");
+  const budget = (e as any)?.status === 429; // this process's own start budget, not the source
+  const label = publicSourceFailure(e);
+  const cls = budget ? "budget" : FAILURE_CLASSES.has(label) ? label : "other";
+  const limited = budget || cls === "http_429";
+  console.info(JSON.stringify({ event: "wash_source_failure", class: cls }));
+  recordUpstreamError("geckoterminal", limited ? "UPSTREAM_RATE_LIMITED" : "INDEXER_UNREACHABLE");
+  return upstreamUnavailable(limited ? "UPSTREAM_RATE_LIMITED" : "TRADE_SOURCE_UNREACHABLE", "GeckoTerminal trade source unavailable; no answer is guessed");
 }
 
 export async function handleWashTrading(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
