@@ -1,0 +1,189 @@
+[
+  {
+    "chain": "base",
+    "symbol": "WSTETH",
+    "address": "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452",
+    "source_url": "https://docs.lido.fi/deployed-contracts/",
+    "rpc_url": "https://base-mainnet.public.blastapi.io",
+    "calls": [
+      {
+        "selector": "0x18160ddd",
+        "error_class": "HTTPError"
+      },
+      {
+        "selector": "0x313ce567",
+        "error_class": "HTTPError"
+      }
+    ]
+  },
+  {
+    "chain": "arbitrum",
+    "symbol": "WSTETH",
+    "address": "0x5979D7b546E38E414F7E9822514be443A4800529",
+    "source_url": "https://docs.lido.fi/deployed-contracts/",
+    "rpc_url": "https://arbitrum.drpc.org",
+    "calls": [
+      {
+        "selector": "0x18160ddd",
+        "error_class": "HTTPError"
+      },
+      {
+        "selector": "0x313ce567",
+        "error_class": "HTTPError"
+      }
+    ]
+  },
+  {
+    "chain": "optimism",
+    "symbol": "WSTETH",
+    "address": "0x1F32b1c2345538c0c6f582fCB022739c4A194Ebb",
+    "source_url": "https://docs.lido.fi/deployed-contracts/",
+    "rpc_url": "https://optimism.drpc.org",
+    "calls": [
+      {
+        "selector": "0x18160ddd",
+        "error_class": "HTTPError"
+      },
+      {
+        "selector": "0x313ce567",
+        "error_class": "HTTPError"
+      }
+    ]
+  },
+  {
+    "chain": "optimism",
+    "symbol": "STETH",
+    "address": "0x76A50b8c7349cCDDb7578c6627e79b5d99D24138",
+    "source_url": "https://docs.lido.fi/deployed-contracts/",
+    "rpc_url": "https://optimism.drpc.org",
+    "calls": [
+      {
+        "selector": "0x18160ddd",
+        "error_class": "HTTPError"
+      },
+      {
+        "selector": "0x313ce567",
+        "error_class": "HTTPError"
+      }
+    ]
+  },
+  {
+    "chain": "ethereum",
+    "symbol": "USDE",
+    "address": "0x4c9edd5852cd905f086c759e8383e09bff1e68b3",
+    "source_url": "https://docs.ethena.fi/technical-design/key-addresses",
+    "rpc_url": "https://eth-mainnet.public.blastapi.io",
+    "calls": [
+      {
+        "selector": "0x18160ddd",
+        "error_class": "HTTPError"
+      },
+      {
+        "selector": "0x313ce567",
+        "error_class": "HTTPError"
+      }
+    ]
+  },
+  {
+    "chain": "ethereum",
+    "symbol": "SUSDE",
+    "address": "0x9d39a5de30e57443bff2a8307a4256c8797a3497",
+    "source_url": "https://docs.ethena.fi/technical-design/key-addresses",
+    "rpc_url": "https://eth-mainnet.public.blastapi.io",
+    "calls": [
+      {
+        "selector": "0x18160ddd",
+        "error_class": "HTTPError"
+      },
+      {
+        "selector": "0x313ce567",
+        "error_class": "HTTPError"
+      }
+    ]
+  },
+  {
+    "chain": "ethereum",
+    "symbol": "ENA",
+    "address": "0x57e114B691Db790C35207b2e685D4A43181e6061",
+    "source_url": "https://docs.ethena.fi/technical-design/key-addresses",
+    "rpc_url": "https://eth-mainnet.public.blastapi.io",
+    "calls": [
+      {
+        "selector": "0x18160ddd",
+        "error_class": "HTTPError"
+      },
+      {
+        "selector": "0x313ce567",
+        "error_class": "HTTPError"
+      }
+    ]
+  },
+  {
+    "chain": "ethereum",
+    "symbol": "CBBTC",
+    "address": "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
+    "source_url": "https://www.coinbase.com/blog/coinbase-wrapped-btc-cbbtc-is-now-live",
+    "rpc_url": "https://eth-mainnet.public.blastapi.io",
+    "calls": [
+      {
+        "selector": "0x18160ddd",
+        "error_class": "HTTPError"
+      },
+      {
+        "selector": "0x313ce567",
+        "error_class": "HTTPError"
+      }
+    ]
+  },
+  {
+    "chain": "base",
+    "symbol": "CBBTC",
+    "address": "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
+    "source_url": "https://www.coinbase.com/blog/coinbase-wrapped-btc-cbbtc-is-now-live",
+    "rpc_url": "https://base-mainnet.public.blastapi.io",
+    "calls": [
+      {
+        "selector": "0x18160ddd",
+        "error_class": "HTTPError"
+      },
+      {
+        "selector": "0x313ce567",
+        "error_class": "HTTPError"
+      }
+    ]
+  },
+  {
+    "chain": "arbitrum",
+    "symbol": "CBBTC",
+    "address": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+    "source_url": "https://www.coinbase.com/blog/coinbase-wrapped-btc-cbbtc-is-now-live",
+    "rpc_url": "https://arbitrum.drpc.org",
+    "calls": [
+      {
+        "selector": "0x18160ddd",
+        "error_class": "HTTPError"
+      },
+      {
+        "selector": "0x313ce567",
+        "error_class": "HTTPError"
+      }
+    ]
+  },
+  {
+    "chain": "polygon",
+    "symbol": "AAVE",
+    "address": "0xd6df932a45c0f255f85145f286ea0b292b21c90b",
+    "source_url": "https://dash.tools.aave.com/reserve/137-0xd6df932a45c0f255f85145f286ea0b292b21c90b-aave-v3/",
+    "rpc_url": "https://polygon.drpc.org",
+    "calls": [
+      {
+        "selector": "0x18160ddd",
+        "error_class": "HTTPError"
+      },
+      {
+        "selector": "0x313ce567",
+        "error_class": "HTTPError"
+      }
+    ]
+  }
+]

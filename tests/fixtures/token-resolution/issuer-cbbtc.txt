@@ -1,0 +1,656 @@
+[1] Coinbase Wrapped BTC (cbBTC) is now live — coinbase.com (2024-09-12)
+https://www.coinbase.com/blog/coinbase-wrapped-btc-cbbtc-is-now-live
+
+Coinbase Wrapped BTC (cbBTC) is now live
+
+# Coinbase Wrapped BTC (cbBTC) is now live
+
+By Coinbase Sep 12, 2024 • 5min read
+
+TL;DR: Starting today, Coinbase is rolling out cbBTC – Coinbase Wrapped BTC – an ERC20 token that is backed 1:1 by Bitcoin (BTC) held by Coinbase. At launch, cbBTC will be supported on Base and Ethereum, with plans to support more chains. With cbBTC, we continue to increase economic freedom by giving users more ways to use their Bitcoin. 
+
+![cbBTC logo](https://images.ctfassets.net/sygt3q11s4a9/6R07qw0kh3o7bIzoN7wvmO/f6e9465003d4a5df8c9fe3bb82313d57/unnamed__22_.png)
+
+As the oldest and most widely held crypto asset, Bitcoin plays an important role in onboarding users to crypto. Coinbase has been increasing utility for Bitcoin, first through the integration of the Lightning Network to drive instant low cost payments, and now with cbBTC. Starting today, millions of Coinbase customers can seamlessly and securely access financial apps within the Ethereum ecosystem using Bitcoin they already hold. 
+
+Access to secure and deep liquidity 
+
+Coinbase is pioneering a new era for DeFi with cbBTC—a trusted and reputable wrapped version of Bitcoin. cbBTC is backed 1:1 by BTC held in custody by Coinbase – which has a 10+ year record of securely custodying billions in Bitcoin for institutions and customers across the globe. Greater transparency with proof of reserves has been part of our roadmap since the conception of cbBTC and will follow.* Coinbase is for the first time linking deep off-chain Bitcoin liquidity to low cost, high speed financial rails on Base and Ethereum. By bringing assets across more chains, wrapped assets like cbBTC help build a more efficient, interconnected and expansive financial ecosystem.
+
+Do more with Bitcoin onchain
+
+cbBTC removes a key point of friction by allowing customers to use Bitcoin they already hold in new ways onchain. cbBTC is built to be seamlessly compatible with DeFi applications, so users can now tap into novel DeFi use cases like providing their Bitcoin as liquidity to DeFi protocols, or using it as collateral to borrow other crypto assets. We’re excited to announce that many popular DeFi apps will support cbBTC on day one: 
+
+DEX: Aerodrome, Curve, Matcha, Uniswap
+
+Lending apps: Aave, Compound, Morpho, Moonwell, Spark 
+
+Yield Vaults: Mellow, Veda 
+
+xChain Swaps: DeBridge, DeFinitive 
+
+Risk Curators: Block Analitica, Gauntlet, Steakhouse, Re7
+
+RWA: Maple
+
+BTC Fee Hedging: Alkimiya 
+
+This is just the start. By bringing Bitcoin onto Base and Ethereum, Coinbase is excited to spur innovative financial apps and wider adoption of Bitcoin in DeFi. We’re also working to expand native cbBTC support to additional chains.
+
+How cbBTC works
+
+When Coinbase users send their BTC from Coinbase to an address on Base or Ethereum, that BTC will automatically be converted 1:1 to cbBTC. When users receive cbBTC in their Coinbase accounts, it will be converted 1:1 from cbBTC to BTC. Notably, cbBTC will not have a separate order book or trading pair on Coinbase. cbBTC will also be available to trade on DEXs using Coinbase Wallet, and may be available on other third party exchanges that choose to support it. At launch, cbBTC send & receive will be available on Coinbase in the US (excluding New York State), UK, EEA states, Australia, and Brazil. cbBTC will be accessible globally on Base and Ethereum. Learn more here. 
+
+cbBTC is moving money forward. We’re one step closer to bringing 1 billion people onchain. 
+
+The following are the smart contract addresses for cbBTC on all blockchains on which it is currently issued.
+
+1. Base: 0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf
+2. Ethereum: 0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf
+3. Solana `cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij`` `
+4. Arbitrum `0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf`
+
+* Updated on September 23, 2024
+
+[2] Coinbase Wrapped Assets — coinbase.com
+https://www.coinbase.com/cbbtc
+
+# Coinbase Wrapped Assets
+
+Do more with your assets onchain
+
+Send assets onchain
+
+![CBBTC - cbBTC_hero](https://images.ctfassets.net/o10es7wu5gm1/37aAVi9OD30wGKYdDLbEw5/461cb88bc46ceff5422897a44392b42b/Group_316123501.png)
+
+Don't have a Coinbase account yet? Sign up
+
+## Benefits of Coinbase wrapped assets
+
+Coinbase is pioneering a new era for DeFi with wrapped assets – a trusted and reputable wrapped version of your eligible assets that can be used onchain.
+
+![](https://static-assets.coinbase.com/ui-infra/illustration/v1/pictogram/svg/light/securityCoinShield-5.svg)
+
+### Secure
+
+Coinbase wrapped assets are backed 1:1 and held in custody by Coinbase – which has a 10+ year record of securely custodying crypto for institutions and customers.
+
+![](https://static-assets.coinbase.com/ui-infra/illustration/v1/pictogram/svg/light/fast-3.svg)
+
+### Faster and cheaper access
+
+Coinbase is linking deep off-chain liquidity to low-cost, high-speed financial rails on Base (see FAQs for all available networks).
+
+![](https://static-assets.coinbase.com/ui-infra/illustration/v1/pictogram/svg/light/sellSendAnytime-3.svg)
+
+### Seamless
+
+Coinbase customers can use the send & receive feature to seamlessly move eligible assets on and offchain. Assets that are transferred from a Coinbase account to an address on Base automatically convert to the Coinbase wrapped asset 1:1.
+
+![cbBTC-what-is-cbBTC](https://images.ctfassets.net/o10es7wu5gm1/7Il3CIefpyWxHa7Vb9joWr/133e79fd55a0cec2bd6f474af1c857f0/240905_CB_cbBTC_LandingPage_2_Body_750x750px_MC.png)
+
+## How cbBTC works
+
+Coinbase customers in select jurisdictions can use the send & receive feature to seamlessly move eligible assets on and offchain. When users send eligible assets from Coinbase to Base, it will automatically be converted 1:1 to a Coinbase wrapped asset. When users receive a Coinbase wrapped asset in their Coinbase accounts, it will be converted 1:1 to the underlying asset. Notably, wrapped assets will not have a separate order book or trading pair on Coinbase.
+
+Help page
+
+## Coinbase wrapped assets ecosystem
+
+Use your wrapped assets on a growing number of DeFi applications
+
+![Aerodrome.png](https://images.ctfassets.net/o10es7wu5gm1/5VlVORuDNoXZ3xAjf3VHfp/318d56ee767da49ef5ccdbf77a378c7a/Aerodrome.png)
+
+### Aerodrome
+
+Aerodrome is a next-generation AMM designed to serve as Base's central liquidity hub.
+
+Aerodrome
+
+![Curve](https://images.ctfassets.net/o10es7wu5gm1/61kVn2MuCApKvFqAkjwdpX/6607d33aa05968305f35249ff2da3a13/curve-dao-token-crv-logo.png)
+
+### Curve
+
+Curve is an exchange liquidity pool on Ethereum designed for extremely efficient stablecoin trading.
+
+Curve
+
+![Oku.webp](https://images.ctfassets.net/o10es7wu5gm1/46GZeiEKu7ExrCvW481VbA/24408d7c15cd320dcfce3e018008a46d/Oku.webp)
+
+### Oku
+
+Oku is a decentralized exchange trading platform and bridge aggregator.
+
+Oku
+
+![Aave](https://images.ctfassets.net/o10es7wu5gm1/4DziVlmjFVQa3JnQ3jRvHF/fa6a283af98f487aec265eb29e58d01e/Group_316126372-3.png)
+
+### Aave
+
+Aave is a decentralised non-custodial liquidity market protocol where users can participate as suppliers or borrowers.
+
+Aave
+
+![Morpho.svg](https://images.ctfassets.net/o10es7wu5gm1/Xe9tnXX8Hx3NRaZFhDixA/c67c6c48d919cdd290f1f52680385f21/Morpho.svg)
+
+### Morpho
+
+Morpho is an open platform that allows users to earn yield, borrow assets, curate markets and vaults, and build applications.
+
+Morpho
+
+![Compound](https://images.ctfassets.net/o10es7wu5gm1/5NkfFB3EVI9Z7msi6KnsJ0/d7a61d02aedc6dcfd799d024ceca1950/Group_316126372.png)
+
+### Compound
+
+Compound is an algorithmic, autonomous interest rate protocol built for developers, to unlock a universe of open financial applications.
+
+Compound
+
+![well_logo.svg](https://images.ctfassets.net/o10es7wu5gm1/7H0c2y1mNaBfO17oC3gNty/42cba4bd0af6f1c672b994c6c5022dd5/well_logo.svg)
+
+### Moonwell
+
+Moonwell is an open lending and borrowing protocol on Base, Moonbeam, and Moonriver.
+
+Moonwell
+
+![spark-logo.png](https://images.ctfassets.net/o10es7wu5gm1/7FiQRQpIcP1p3b5uqy4Pvh/9d9b55962db8f0d8ed5f405cbd7f2631/Spark_logo.svg)
+
+### Spark
+
+Spark is on a mission to empower the DAI ecosystem. As part of the Sky Ecosystem, Spark builds and manages DeFi infrastructure.
+
+Spark
+
+![Chronicle.png](https://images.ctfassets.net/o10es7wu5gm1/52cLZnrcPkhp7A4XEPP0uF/61454e753eea6d2df1aaccde0dbc7e15/Chronicle.png)
+
+### Chronicle
+
+Chronicle Protocol is a community-powered consensus network of 22 Validator node operators.
+
+Chronicle
+
+![Veda.png](https://images.ctfassets.net/o10es7wu5gm1/216ag94Wv5LfNCwr0YABsN/9d57de8fd3a0989c9c1dc6edeefb513a/Veda.png)
+
+### Veda
+
+Veda is a native yield infrastructure for protocols and applications.
+
+Veda
+
+![Mellow.png](https://images.ctfassets.net/o10es7wu5gm1/7uay97dbTQB1plPaHfv2Mq/5bdc762fb3bb51d9143ea8f4667122a2/Mellow.png)
+
+### Mellow
+
+Mellow is a platform for building automatic trustless DeFi strategies.
+
+Mellow
+
+![Definitive.png](https://images.ctfassets.net/o10es7wu5gm1/tZg5FJ3wwi0RpLT79HhcY/51beec3ae84dde674dcf55043ffe3247/Definitive.png)
+
+### Definitive
+
+Definitive is a non-custodial execution platform and API for DeFi.
+
+Definitive
+
+![debridge.png](https://images.ctfassets.net/o10es7wu5gm1/1d5eWpMZPLeQx9hWPSKAcz/89a446d08d853c4d79b33c773c870ea9/debridge.png)
+
+### deBridge
+
+deBridge is a liquidity unlocking and cross-chain bridging DApp.
+
+deBridge
+
+![Block A.jpeg](https://images.ctfassets.net/o10es7wu5gm1/1zE86VCm1udboOM7J3rM8L/5ac3ded69405754ba2215c45f735ffbc/Block_A.jpeg)
+
+### Block Analitica
+
+Block Analitica is a dedicated risk management firm.
+
+Block Analitica
+
+![Steakhouse.svg](https://images.ctfassets.net/o10es7wu5gm1/2U90TUjirmNHDDtkMgKEXl/c50802b1a3d5a59d92590147b02389a3/Steakhouse.svg)
+
+### Steakhouse
+
+Steakhouse Financial is a company that provides financial advisory services for DAOs in the crypto space.
+
+Steakhouse
+
+![Gauntlet.png](https://images.ctfassets.net/o10es7wu5gm1/5uDegrVfdFhALXnOSl3yDc/200b015034564b9136b94478ac1db54b/Gauntlet.png)
+
+### Gauntlet
+
+Gauntlet helps improve the understanding of crypto-native economics and optimize the growth of crypto protocols.
+
+Gauntlet
+
+![alkimiya.png](https://images.ctfassets.net/o10es7wu5gm1/5u8DDzfy6g3CfUu7zQhkNL/2b97495e292910888bac21b721706e0f/alkimiya.png)
+
+### Alkimiya
+
+Alkimiya is a permissionless open-sourced protocol for hashpower-backed contracts issuance and structured products.
+
+Alkimiya
+
+![maple.png](https://images.ctfassets.net/o10es7wu5gm1/3LycXBVgTaY1KxugA6nAx5/eede618ca48201c24da0c11ffd29a94e/maple.png)
+
+### Maple
+
+Maple is a protocol that allows institutional and individual lenders to access a range of lending options and yield opportunities.
+
+Maple
+
+![Uniswap logo](https://images.ctfassets.net/o10es7wu5gm1/2yBrWxAvopjDx6ft8TbykT/ba772c82006d8018d340dc360378bc58/uniswap-uni-logo.png)
+
+### Uniswap
+
+A leading decentralized crypto trading protocol, governed by a global community.
+
+Uniswap
+
+![matcha_logo.png](https://images.ctfassets.net/o10es7wu5gm1/wdjVIMQKRyavmUmtr2NK2/a45c7104e906dbe5881409e283eb8f65/image_13.png)
+
+### Matcha
+
+Matcha is a decentralized exchange meaning that allows users to swap their tokens peer-to-peer through the Ethereum smart contract infrastructure.
+
+Matcha
+
+![re7 capital logo.png](https://images.ctfassets.net/o10es7wu5gm1/64HqGlAn65GanDz8pAvMfR/28c61004b7421c14fdd0127222089484/re7_capital_logo.png)
+
+### Re7
+
+Re7 Labs applies advanced in-house risk tooling and research capabilities to support a wide range of DeFi protocols as a curator and advisor.
+
+Re7
+
+![Seamless_Logo_Black_Transparent.webp](https://images.ctfassets.net/o10es7wu5gm1/12xp0qX1xN5HhwOKIEVelE/a4eaed6d5d4304448e12af7adec6446f/Seamless_Logo_Black_Transparent.webp)
+
+### Seamless
+
+As the largest native lending protocol on Base, Seamless gives you have access to the most popular assets.
+
+Seamless
+
+![Solana_logo.png](https://images.ctfassets.net/o10es7wu5gm1/1nk5zu1nAZTriduVEG0QpW/2bfdbdf2505218cbde9660db0c91832e/Solana_logo.png)
+
+### Solana
+
+Solana supports blockchain experiences for power users, new consumers, and everyone in between.
+
+Solana
+
+![logo-bright.svg](https://images.ctfassets.net/o10es7wu5gm1/6fZXF4DkIiZriTOSZfSV0l/cb57cf33b206e2a592a74e19886ec982/logo-bright.svg)
+
+### Jupiter
+
+Jupiter is one of the largest decentralized trading platforms, with a wide array of products and trading tools.
+
+Jupiter
+
+![logo-meteora-symbol-onLight.png](https://images.ctfassets.net/o10es7wu5gm1/PsLytr6W5bqXOXcW5we08/38d72bab397f0b1ea95054b7a4063d73/logo-meteora-symbol-onLight.png)
+
+### Meteora
+
+Meteora is a decentralized exchange focused on improving P&L for LPs by introducing advanced features like dynamic fees and zero slippage price bins
+
+Meteora
+
+![kamino1710490105643.png](https://images.ctfassets.net/o10es7wu5gm1/1LbGiCi9K2HeUNe3EYhUh2/8a38cfac02a91e4cae93232e346b306f/kamino1710490105643.png)
+
+### Kamino
+
+Kamino is the leading money market on Solana, enabling you to earn yield and borrow against your assets
+
+Kamino
+
+![JitoSOL_Token_Logo_Green.svg](https://images.ctfassets.net/o10es7wu5gm1/16uPDwCOP2BPIWe7hzDTrT/e49e99e2f56206ed7030b96d54209f7e/JitoSOL_Token_Logo_Green.svg)
+
+### Jito
+
+JitoSOL is the largest LST on Solana powering its dominant MEV network.
+
+Jito
+
+![Phoenix Icon.jpg](https://images.ctfassets.net/o10es7wu5gm1/697tIBD4XkjAVehjESmeqr/b35cd9e76cb95b841acae9fa68bf1a65/Phoenix_Icon.jpg)
+
+### Phoenix
+
+Phoenix is a leading, fully onchain orderbook DEX
+
+Phoenix
+
+![DRIFT.webp](https://images.ctfassets.net/o10es7wu5gm1/1E1EZQvv1Vh9Scnxy891Oe/360b2e9ca5adf277177a0699b0092b7d/DRIFT.webp)
+
+### Drift
+
+Drift is a leading decentralized finance (DeFi) platform on Solana, offering perpetual futures, borrow-lend and an integrated spot DEX in a unified account.
+
+Drift
+
+![Raydium logo.png](https://images.ctfassets.net/o10es7wu5gm1/3TP9l6iWfFXOLhng24ELNF/632c6acfc36cbb1d14c015a47125e149/Raydium_logo.png)
+
+### Raydium
+
+Pioneer of the hybrid AMM and the first permissionless DEX on Solana.
+
+Raydium
+
+![Loopscale.png](https://images.ctfassets.net/o10es7wu5gm1/5aJYPxw6eJhPSU1MVHYRu1/58c3c06ed138098b0ddee9baa77d3c2e/Loopscale.png)
+
+### Loopscale
+
+Loopscale is a modular lending protocol that leverages a novel creditbook architecture to offer lending products at better rates against more collateral assets.
+
+Loopscale
+
+![orca-orca-logo.png](https://images.ctfassets.net/o10es7wu5gm1/6sAYPofNQlgj55LPl18BcF/349dbbbaeca99d40f7fbc012ab76f546/orca-orca-logo.png)
+
+### Orca
+
+Orca is a unique protocol centered around a CLMM with powerful features that allow users to access constant-product-like functionalities.
+
+Orca
+
+![save.svg](https://images.ctfassets.net/o10es7wu5gm1/ZsYoCJVPS75KSxg3GxMSg/4062d245eedd76dbf3bc18d98adc771c/save.svg)
+
+### Save
+
+Save is Solana's permissionless savings account and one of the most resilient lending protocols.
+
+Save
+
+![manifest logo.webp](https://images.ctfassets.net/o10es7wu5gm1/1qABxei4rKiaLsGf6yw1V9/57a4bb2b21368883b87fde9c3e4871cb/manifest_logo.webp)
+
+### Manifest
+
+Manifest is the 3rd generation of Solana CLOB DEXs allowing users to trade the price they want.
+
+Manifest
+
+![Arbitrum Logo.png](https://images.ctfassets.net/o10es7wu5gm1/58GNTPOfgF0PcyXodomSfv/d7503641b03ebdde9f6d18c16916108b/Arbitrum_Logo.png)
+
+### Arbitrum
+
+Arbitrum is a Layer 2 scaling solution for Ethereum that uses Optimistic Rollups to improve transaction speed and reduce costs while leveraging the security of the Ethereum network.
+
+Arbitrum
+
+![Fluid Logo.png](https://images.ctfassets.net/o10es7wu5gm1/1m90cbbwjwNkFcKAoPQxbC/6ebbdc80a22407bb3dc20184c1538f2a/Fluid_Logo.png)
+
+### Fluid
+
+Fluid is a decentralized finance (DeFi) platform that provides liquidity solutions and tokenized assets to enable efficient trading, lending, and borrowing in the crypto ecosystem.
+
+Fluid
+
+![Ramses.webp](https://images.ctfassets.net/o10es7wu5gm1/1CRadLyYbX5NpYFlZxtR03/38310ca8edad1f406ba20dc49d2fc7e8/veRAM.png)
+
+### Ramses
+
+Ramses is a decentralized exchange (DEX) built on the Arbitrum network, focusing on optimizing trading efficiency and minimizing fees through an innovative automated market maker (AMM) model.
+
+Ramses
+
+![Camelot Exchange logo.svg](https://images.ctfassets.net/o10es7wu5gm1/21PgOt3ZFncRlAYSrgSKIK/80f8626e7297ca1f96a9b0a9f4edae37/Camelot_Exchange_logo.svg)
+
+### Camelot
+
+Camelot is a decentralized exchange that acts as the battle-tested liquidity hub for the Arbitrum ecosystem.
+
+Camelot
+
+![Sol Protocol.png](https://images.ctfassets.net/o10es7wu5gm1/6J3zSvBr6TYGUQqdluOa3g/ef4c25916cfb79e1f635c3a668e33aee/Sol_Protocol.png)
+
+### Solv
+
+Solv is a blockchain-based platform that enables the creation, issuance, and trading of tokenized real-world assets.
+
+Solv
+
+![CoW-AMM-icon-circle-dark-green.png](https://images.ctfassets.net/o10es7wu5gm1/1Pt9DejTxjNcg1KZBF7DH7/9ca1fad3636aaf53e3e406499e86b692/CoW-AMM-icon-circle-dark-green.png)
+
+### CoW AMM
+
+A MEV-Capturing AMM that enables efficient, low-slippage trades and aggregate liquidity from multiple sources for less risk and more return.
+
+CoW AMM
+
+![Arcadia.jpg](https://images.ctfassets.net/o10es7wu5gm1/4vppGvwi7GOGd31B35KaGi/1b602f04fba55390be8d375996233849/Arcadia.jpg)
+
+### Arcadia
+
+Arcadia is an open-source financial technology platform that makes it easy to discover, invest, and manage yield bearing assets on blockchains.
+
+Arcadia
+
+![open_cover.png](https://images.ctfassets.net/o10es7wu5gm1/5EQGiWEH53UAZ7BejwozL2/eca4d2b7de89b11eeea5608609894fbf/open_cover.png)
+
+### OpenCover
+
+Onchain protection against smart contract hacks, stablecoin depegs, and more
+
+OpenCover
+
+![Garden Finance](https://images.ctfassets.net/o10es7wu5gm1/4URP7NwG5dS2EyN2pP5Rge/64459e8ecd46c41400e62ad223d97dd5/gardenfi.svg)
+
+### Garden
+
+Bridge Bitcoin across chains in 30 seconds with Garden's secure, decentralized BTC bridge.
+
+Garden
+
+![Superform](https://images.ctfassets.net/o10es7wu5gm1/4zYccY91dTtfXr7xHrZtYJ/ad5ca77aa49831198225c8c882204e66/UP.svg)
+
+### Superform
+
+The user-owned neobank. Save, swap, send, and earn the best returns in a single tap.
+
+Superform
+
+## What the industry is saying
+
+![cbBTC industry quotes.png](https://images.ctfassets.net/o10es7wu5gm1/1iKGOyzmsoSJzJRzau9swx/428e998f5524ff7e61f2621f2a4a0dec/Frame_26.png)
+
+## Wrapped Assets Advantages
+
+![](https://static-assets.coinbase.com/ui-infra/illustration/v1/pictogram/svg/light/economyGlobal-3.svg)
+
+### A more expansive ecosystem
+
+By bringing more assets onchain via wrapped assets, Coinbase is helping build a more efficient, interconnected and expansive financial ecosystem.
+
+![](https://static-assets.coinbase.com/ui-infra/illustration/v1/pictogram/svg/light/selfServe-3.svg)
+
+### A financial system that works for all
+
+With Coinbase wrapped assets, we continue to increase economic freedom by giving users more ways to use their assets onchain.
+
+![](https://static-assets.coinbase.com/ui-infra/illustration/v1/pictogram/svg/light/signInNavigation-5.svg)
+
+### Driving financial innovation
+
+Coinbase wrapped assets are moving money forward. We’re one step closer bringing 1 billion people onchain.
+
+## FAQs
+
+What assets are eligible to be wrapped?
+
+󰀒
+
+󰖦
+
+Coinbase Wrapped BTC (cbBTC)
+
+- Networks: Base, Ethereum, Solana, Arbitrum
+
+Coinbase Wrapped DOGE (cbDOGE)
+
+- Networks: Base
+
+Coinbase Wrapped XRP (cbXRP)
+
+- Networks: Base
+
+Coinbase Wrapped LTC (cbLTC)
+
+- Networks: Base
+
+Coinbase Wrapped ADA (cbADA)
+
+- Networks: Base
+
+Coinbase Wrapped ETH (cbETH)
+
+- See more about how cbETH works here. 
+
+Coinbase Wrapped MEGA (cbMEGA)
+
+- Networks: Base
+
+Coinbase Wrapped HYPE (cbHYPE)
+
+- Networks: Base
+
+**Coinbase Wrapped ZEC (cbZEC) - **
+
+- Networks**:** Base
+
+| Asset | Network | Address | Link |
+| --- | --- | --- | --- |
+| cbBTC | Base | 0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf | https://basescan.org/token/0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf |
+| cbBTC | Ethereum | 0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf | https://etherscan.io/token/0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf |
+| cbBTC | Arbitrum | 0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf | https://arbiscan.io/token/0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf |
+| cbBTC | Solana | cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij | https://explorer.solana.com/address/cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij |
+| cbDOGE | Base | 0xcbD06E5A2B0C65597161de254AA074E489dEb510 | https://basescan.org/token/0xcbD06E5A2B0C65597161de254AA074E489dEb510 |
+| cbXRP | Base | 0xcb585250f852C6c6bf90434AB21A00f02833a4af | https://basescan.org/token/0xcb585250f852C6c6bf90434AB21A00f02833a4af |
+| cbLTC | Base | 0xcb17C9Db87B595717C857a08468793f5bAb6445F | https://basescan.org/token/0xcb17C9Db87B595717C857a08468793f5bAb6445F |
+| cbADA | Base | 0xcbADA732173e39521CDBE8bf59a6Dc85A9fc7b8c | https://basescan.org/token/0xcbADA732173e39521CDBE8bf59a6Dc85A9fc7b8c |
+| cbMEGA | Base | 0xcb111E6A2a3bde90856D299d61341ac302167D23 | https://basescan.org/token/0xcb111E6A2a3bde90856D299d61341ac302167D23 |
+| cbHYPE | Base | 0xB200000000000000000000451d033a5000cb479e | https://basescan.org/token/0xB200000000000000000000451d033a5000cb479e |
+| Wrapped ZEC | Base | 0xB2000000000000000000008501b13360000cb2EC | https://basescan.org/token/0xB2000000000000000000008501b13360000cb2EC |
+
+What are Coinbase wrapped assets?
+
+󰀒
+
+󰖦
+
+Coinbase wrapped assets are tokens that are backed 1:1 and held by Coinbase. Wrapped assets, like cbBTC, cbXRP, cbDOGE, cbADA, cbLTC, cbMEGA, cbHYPE and cbZEC are transferable tokens that represent ownership of the underlying asset). Wrapped assets are fully transferable, and Coinbase customers can unwrap and redeem a corresponding amount of the underlying asset simply by depositing the wrapped asset into their Coinbase accounts.
+
+cbETH is structured differently than most Coinbase wrapped assets. See more about how cbETH works here.
+
+How can I get Coinbase wrapped assets?
+
+󰀒
+
+󰖦
+
+When Coinbase users send their eligible assets from Coinbase to an address on Base or Ethereum, that asset will automatically be converted 1:1 to the Coinbase wrapped asset.  When users receive Coinbase wrapped assets in their Coinbase accounts, it will be converted 1:1 to the underlying asset.  Note that Coinbase wrapped assets will not have a separate order book or trading pair on Coinbase.
+
+Why would I wrap my assets?
+
+󰀒
+
+󰖦
+
+Wrapped assets allow you to seamlessly use your assets onchain across a range of DeFi apps, which may allow you to borrow, lend or discover other new ways to put your assets to work.
+
+What is token wrapping?
+
+󰀒
+
+󰖦
+
+Token wrapping is a process in which a crypto asset is locked up in a smart contract and a new token (the wrapped token) is issued on the blockchain to represent the original token. 
+
+Wrapped tokens provide cross-chain compatibility, allowing customers to freely trade or transfer their assets on one chain while the underlying token remains locked on another.
+
+Am I eligible to wrap my assets?
+
+󰀒
+
+󰖦
+
+Wrapped assets are only available to Coinbase customers whose accounts are in good standing and who are located in the US (excluding New York State), UK, EEA states, Singapore, Australia, and Brazil. You can also purchase Coinbase wrapped assets through Coinbase Wallet or on other third party exchanges that support it.
+
+How are wrapped assets backed 1:1 with the underlying asset on Coinbase?
+
+󰀒
+
+󰖦
+
+Wrapped assets are backed 1:1 by the underlying asset held in custody by Coinbase – which has a 10+ year record of securely custodying billions in crypto for institutions and customers across the globe. The underlying asset backing Coinbase wrapped assets will never be sold, transferred, or utilized for any other purpose.
+
+Can I trade Coinbase wrapped assets on Coinbase?
+
+󰀒
+
+󰖦
+
+No, Coinbase wrapped assets will not have a separate trading book or order pair listed on Coinbase. 
+Learn more about trading cbETH here.
+
+How do I send and receive wrapped assets on Coinbase?
+
+󰀒
+
+󰖦
+
+You can send / receive wrapped assets on Coinbase using multichain send/receive flows of the underlying asset.
+
+For example, you can send cbBTC on Base via send flow of BTC:
+
+(1) Open the Coinbase app, tap Transfer, then tap Send Crypto and choose bitcoin (2) Scan the QR code, or input wallet address for the receiving address on Base (3) Enter the amount you want to send and confirm (4) Your BTC will show up as cbBTC onchain
+
+Similarly, you can receive cbBTC on Base via receive flow of BTC:
+
+(1) Open the Coinbase app, tap Transfer, then tap Receive Crypto (2) Choose bitcoin and select Base network, (3) Copy the address and complete the send of cbBTC from the sending wallet, (4) Receive BTC in your Coinbase account.
+
+For information on how institutions can send wrapped assets on Coinbase Exchange, see our help center.
+
+Will Coinbase report the wrapping or unwrapping of assets as a taxable event to the IRS?
+
+󰀒
+
+󰖦
+
+- Under recently issued U.S. tax reporting guidance, Coinbase does not intend to report the wrapping or unwrapping of assets as a taxable event to the IRS.
+- Coinbase does not provide tax advice. Taxpayers should consult with their own tax professionals.
+
+What is Proof of Reserves?
+
+󰀒
+
+󰖦
+
+Proof of Reserves (PoR) demonstrate that Coinbase, the custodian, holds 1:1 reserves of the underlying assets that back Coinbase wrapped assets. It ensures transparency and trust by showing that the reserve funds are segregated and held 1-1 in a set of dedicated addresses that are shared publicly and can be verified by anyone, including users and independent third parties.
+
+To enhance security and operational efficiency, reserves are distributed across multiple addresses. This segregation allows Coinbase to manage and secure smaller amounts of funds per address, lowering the risk of total loss or compromise. New addresses will be added to the list as more wrapped assets are minted and more underlying assets are held in reserve.
+
+Reserve might be higher than wrapped asset supply due to timing differences in ledger updates, delayed transactions, operational fees for blockchain transactions, or operational movements between hot and cold wallets.
+
+See more:
+
+- cbBTC Proof of Reserves
+- cbDOGE Proof of Reserves
+- cbXRP Proof of Reserves cb
+- cbADA Proof of Reserves
+- cbLTC Proof of Reserves
+- cbMEGA Proof of Reserves
+
+![ ](https://images.ctfassets.net/o10es7wu5gm1/5ETCfaYhQGW6hfqLwH3sap/e4dd09eb1c15090914e7212550bbe0c3/coinbase_account_image.jpeg)
+
+## Don’t have a Coinbase account?
+
+We’re committed to creating more economic freedom through accessible, safe, and secure financial tools for everyone.
+
+Create an account
+
+```json
+{"@context":"http://schema.org","@type":"Organization","url":"https://www.coinbase.com","logo":"https://www.coinbase.com/images/logo.png","contactPoint":[{"@type":"ContactPoint","telephone":"+1-888-908–7930","contactType":"Customer support"}]}
+
+```

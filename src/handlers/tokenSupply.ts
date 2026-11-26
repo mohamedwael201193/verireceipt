@@ -1,3 +1,5 @@
+import {discoverSupplyChains} from './tokenChainDiscovery';
+import {withAnswerClass} from '../core/answerClass';
 // TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL — GET /v1/token-supply?token=
 //
 // Zero-LLM. Answers the current total minted supply of an ERC-20 token
@@ -20,7 +22,7 @@
 // same as the wallet-balance handler (see walletBalance.ts header,
 // measured live 2026-11-22). A symbol outside the curated verified
 // TOKEN_CONTRACTS map is 422 UNSUPPORTED_TOKEN; a raw 0x contract
-// address always works. Native coins have no totalSupply() contract —
+// address with an explicit chain uses the finalized quorum. Native coins have no totalSupply() contract —
 // a native symbol is 422 with a pointer to WETH/WPOL.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, stableStringify, type Receipt } from "../core/receipt";
@@ -150,6 +152,8 @@ function agreeingPair(legs: SupplyLeg[]): { leg: SupplyLeg; count: number } | nu
   return best;
 }
 
+export function supplyInputClass(token:string|undefined,chain:string|undefined){const value=token?.trim()??'';return{token_shape:!value?'empty':ADDRESS_RE.test(value)?'address':/\s/.test(value)?'name_with_spaces':'symbol',has_chain:!!chain,in_registry:!!value&&Object.keys(TOKEN_CONTRACTS).some(c=>!!tokenContractFor(c,value))};}
+
 export async function handleTokenSupply(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
@@ -180,7 +184,7 @@ export async function handleTokenSupply(
   // from the registry (single-chain symbols to their only chain;
   // multi-chain symbols to the first canonical-order chain listing
   // them). The resolution is disclosed in the answer and receipt,
-  // never silent. A raw 0x address still needs an explicit chain.
+  // never silent. A raw0x address without chain uses bounded discovery below.
   let homeChain: string | null = null;
   if (tokenRaw && !chain && !ADDRESS_RE.test(tokenRaw)) {
     const home = canonicalHomeChain(tokenRaw);
@@ -189,11 +193,25 @@ export async function handleTokenSupply(
       homeChain = home.chain;
     }
   }
+  let discovery:Awaited<ReturnType<typeof discoverSupplyChains>>|undefined;
+  if(tokenRaw&&ADDRESS_RE.test(tokenRaw)&&!chain){
+    discovery=await discoverSupplyChains(tokenRaw);
+    const matched=discovery.filter(p=>p.status==='matched'),unknown=discovery.filter(p=>p.status==='unavailable');
+    if(matched.length===1&&unknown.length===0){chain=matched[0].chain;}
+    else{
+      const asOf=new Date().toISOString(),matchedChains=matched.map(p=>p.chain),unavailableChains=unknown.map(p=>p.chain);
+      const answer=`No chain given. Read-only short discovery matched ERC-20 totalSupply and decimals on: ${matchedChains.join(', ')||'none'}. Unavailable chains: ${unavailableChains.join(', ')||'none'}. ${matched.length>1?'Multiple chains matched; specify a chain.':unknown.length?'Incomplete discovery cannot establish a unique chain; specify a chain.':'No supported chain matched; specify a chain to check explicitly.'} Supply is unknown (null); discovery is not a supply quorum or token identity verification.`;
+      const evidence=stableStringify({token_contract:tokenRaw,as_of:asOf,discovery,scope:answer});
+      const receipt=makeReceipt(INTENT,discovery[0].rpc_url,evidence,'bounded chain discovery only; no supply verdict');
+      try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
+      return envelope(INTENT,{total_supply:null,chain:null,matched_chains:matchedChains,unavailable_chains:unavailableChains,as_of:asOf},receipt,{answer,verdict:'no_data',confidence:0,source:'read-only finalized ERC-20 discovery, one RPC per supported chain; not a quorum'});
+    }
+  }
   if (!tokenRaw || !chain) {
-    throw badRequest(
+    throw withAnswerClass(badRequest(
       "MISSING_PARAM",
       "token (symbol or 0x contract, e.g. 'USDC on ethereum') is a required query parameter; a bare symbol must be one of the listed tokens, and a raw contract address needs its chain",
-    );
+    ),INTENT,supplyInputClass(tokenRaw,chainRaw));
   }
   const rpcs = CHAIN_RPCS[chain];
   if (!rpcs || !SUPPORTED_CHAINS.includes(chain)) {
@@ -258,6 +276,7 @@ export async function handleTokenSupply(
 
   const fields: Record<string, unknown> = {
     total_supply: totalSupply,
+    ...(discovery?{chain_resolution:"unique bounded ERC-20 chain discovery followed by finalized quorum"}:{}),
     supply_base_units: winner.supply.toString(),
     decimals: winner.decimals,
     total_supply_scope: "chain-specific ERC-20 totalSupply, decimals applied; not a global asset or circulating supply",
@@ -270,7 +289,8 @@ export async function handleTokenSupply(
     as_of: asOf,
     block_tag: "finalized",
     chain,
-    chain_resolution: homeChain
+    ...(discovery?{chain_discovery:discovery}:{}),
+    chain_resolution: discovery?{resolved_chain:chain,note:"unique complete read-only discovery; numeric supply independently requires finalized quorum"}:homeChain
       ? { input: tokenInput, resolved_chain: homeChain, note: "no chain given; resolved to the symbol's canonical home chain in the registry, disclosed, never a silent pick" }
       : "not used (chain given)",
     total_supply_scope: "chain-specific ERC-20 totalSupply, decimals applied; not a global asset or circulating supply",
@@ -293,7 +313,7 @@ export async function handleTokenSupply(
   }
 
   return envelope(INTENT, fields, receiptDoc, {
-    answer: `${homeChain ? `No chain was given; ${symbol} resolved to its canonical home chain ${homeChain} (disclosed, not a silent pick). ` : ""}${symbol} total supply on ${chain}: ${totalSupply} (finalized block, ${votes}).`,
+    answer: `${discovery?`No chain was given; exactly one supported chain matched bounded discovery: ${chain}. Finalized quorum checked separately. `:""}${homeChain ? `No chain was given; ${symbol} resolved to its canonical home chain ${homeChain} (disclosed, not a silent pick). ` : ""}${symbol} total supply on ${chain}: ${totalSupply} (finalized block, ${votes}).`,
     verdict: "verified",
     confidence: pair.count === total ? 1.0 : 0.9,
     source: `EVM RPC quorum (${chain}, 2-of-${total}, finalized)`,

@@ -168,9 +168,11 @@ describe("display-label input validation", () => {
     expect(String(out.answer)).toContain("canonical home chain arbitrum");
   });
 
-  it("a chainless UNLISTED symbol still refuses, and a raw address still needs a chain", async () => {
+  it("a chainless UNLISTED symbol refuses; raw address discloses incomplete discovery", async () => {
     await expectApiError(handleTokenSupply({ token: "NOSUCHTOKEN" }), 400, "MISSING_PARAM");
-    await expectApiError(handleTokenSupply({ token: USDC_ETH }), 400, "MISSING_PARAM");
+    vi.stubGlobal('fetch',async()=>new Response('',{status:503}));
+    const out=await handleTokenSupply({token:USDC_ETH});
+    expect(out).toMatchObject({total_supply:null,chain:null,matched_chains:[],verdict:'no_data'});
   });
 
   it("an explicit chain is unchanged and carries no home-chain disclosure", async () => {

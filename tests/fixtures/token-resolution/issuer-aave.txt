@@ -1,0 +1,148 @@
+[1] dash.tools.aave.com
+https://dash.tools.aave.com/reserve/137-0xd6df932a45c0f255f85145f286ea0b292b21c90b-aave-v3/
+
+AAVE
+
+Polygon / v3
+
+vToken
+
+Total supplied
+
+$1.86m
+
+19.48k
+
+Total borrowed
+
+Available Liquidity
+
+$1.86m
+
+19.48k
+
+Utilization Rate
+
+0.00%
+
+Price
+
+$95.5
+
+ID
+
+6
+
+Active
+
+Total supplied
+
+$1.86m
+
+19.48k
+
+Total borrowed
+
+Available Liquidity
+
+$1.86m
+
+19.48k
+
+Utilization Rate
+
+Price
+
+$95.5
+
+6
+
+Total supplied
+
+19.48k / 25.3k
+
+$1.86m / $2.42m
+
+APY
+
+stataToken
+
+Can't be collateral
+
+Max LTV 0%
+
+Liquidation threshold 70%
+
+Liquidation penalty 7.5%
+
+Can't be collateral
+
+Max LTV 0%
+
+Liquidation threshold 70%
+
+Liquidation penalty 7.5%
+
+Borrow data
+
+Total borrowed
+
+AAVE__USDCn_USDT (id: 4)
+
+Max LTV
+
+63%
+
+70%
+
+Liquidation bonus
+
+7.5%
+
+USDT0
+
+USDC
+
+AAVE
+
+Collector Contract
+
+Liquidation protocol fee
+
+10%
+
+Reserve factor
+
+Fees (accruedToTreasury)
+
+Virtual accounting & Deficit
+
+Virtual underlying balance
+
+19.48k
+
+Virtual accounting delta
+
+Difference between all the available withdrawal liquidity if all debt would be closed and all suppliers withdrawal rights. A zero or positive number means the system is perfectly healthy
+
+Formula:
+
+(totalDebt + virtualBalance) - (aTokenSupply + accruedToTreasury)
+
+Virtual accounting delta (%)
+
+Formula: virtualAccountingDelta / virtualUnderlyingBalance * 100
+
+Deficit
+
+Interest Rate Model
+
+Variable rate slope 1 7%
+
+Variable rate slope 2 300%
+
+Optimal utilization 45%
+
+Borrow APR
+
+Supply APR

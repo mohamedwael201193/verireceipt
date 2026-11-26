@@ -1,3 +1,4 @@
+import issuerTokens from '../data/supplyIssuerTokens.json';
 // Shared token contract registry + ERC-20 helpers for the wallet-balance
 // and token-supply handlers (intent expansion, 2026-11-22).
 //
@@ -122,6 +123,9 @@ export const TOKEN_CONTRACTS: Record<string, Record<string, string>> = {
     LINK: "0x779877A7B0D9E8603169DdbD7836e478b4624789",
   },
 };
+
+// Issuer-published additions, captured26Nov2026. Public source URLs live with each address.
+for(const token of issuerTokens){TOKEN_CONTRACTS[token.chain]??={};if(!TOKEN_CONTRACTS[token.chain][token.symbol])TOKEN_CONTRACTS[token.chain][token.symbol]=token.address;}
 
 /**
  * True when `symbol` names the chain's native coin. "ETH" is native on
