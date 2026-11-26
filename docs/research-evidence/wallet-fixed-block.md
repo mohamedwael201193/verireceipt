@@ -12,3 +12,9 @@ Live public-chain run on 2026-11-26: Base USDC for public address 0x111111111111
 - https://mainnet.base.org
 
 Ethereum native and DAI receipt controls were re-captured through the final fixed-block handler against existing configured public RPCs; exact request/response bodies, hashes and expected evidence are in the deferred-persistence fixture. No fabricated measurement or old-tag capture relabelled to a fixed tag. Mock values only drive clearly hermetic failure/selection controls. No transaction signing, registration or deployment.
+
+## Overlap correction
+
+Same-chain callers join the same in-flight RPC key (URL, method and exact params). Different requests may overlap up to three transports per URL, still within the global twelve-owned-transports and 120starts/minute bounds. A shared request has one4second deadline, not a fresh timer per join; a caller cannot abort another caller's healthy in-flight result. Ownership persists after caller timeout until actual fetch/body/cancel drain. No completed RPC cache was introduced.
+
+Two simultaneous real Base USDC balance calls for different public accounts succeeded in1.66seconds at the same selected block62414580. Hermetic controls pin concurrent handler success and exact head deduplication, per-URL3admission and drain, global12admission and drain, and joined hung requests. Removing singleflight, lifting per-URL3to30or global12to120each makes the isolated controls fail.
