@@ -1,3 +1,4 @@
+vi.mock('../src/handlers/equityVolume',()=>({equityVolume:async()=>({value_usd:null,basis:'unavailable',status:'unavailable',raw_body:null,window_start:null,window_end:null,fetched_at:null})}));
 import {resetSecFinancialCacheForTests} from '../src/handlers/secFinancialCache';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
@@ -76,7 +77,7 @@ describe("FINANCIAL_DATA_GENERAL", () => {
     expect(ans).toContain("shares outstanding reported to the SEC as of 2026-10-23");
     expect(ans).toContain("derived");
     expect(ans).toContain("may be delayed");
-    expect(ans).toContain("Rolling 24h USD volume is not served");
+    expect(ans).toContain("Trailing24h bucket estimate unavailable");
     expect(result.metrics).toContain("latest_regular_session.volume_usd_estimate=27642038215");
   });
   it("latestShares picks the most recent reporting date", () => {
