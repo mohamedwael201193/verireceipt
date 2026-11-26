@@ -18,7 +18,14 @@ describe('target classification',()=>{
   expect(parseSecurityTarget('cve-2022-25883')).toMatchObject({id:'CVE-2022-25883'});expect(parseSecurityTarget('GHSA-C2QF-RXJJ-QQGW')).toMatchObject({id:'GHSA-c2qf-rxjj-qqgw'});
   expect(parseSecurityTarget('semver@7.5.1')).toMatchObject({ecosystems:['npm','PyPI']});expect(parseSecurityTarget('Django@3.0.0')).toMatchObject({ecosystems:['PyPI']});
  });
- it.each(['','lodash','npm:semver@^7.5.1','pip:requests@>=2','pip:requests@2.*','pip:requests@1!2.0','pip:requests@2.0+local','semver@1.2','CVE-22-1','GHSA-zzzz-zzzz-zzzz',' semver@7.5.1','x'.repeat(257)])('keeps %j a 400',t=>expect(()=>parseSecurityTarget(t)).toThrow(expect.objectContaining({status:400,code:'INVALID_TARGET'})));
+ it.each(['','lodash','npm:semver@^7.5.1','pip:requests@>=2','pip:requests@2.*','pip:requests@1!2.0','pip:requests@2.0+local','semver@1.2','CVE-22-1','GHSA-zzzz-zzzz-zzzz',' semver@7.5.1','x'.repeat(257),undefined])('classifies %j as unparseable, not an error',t=>expect(parseSecurityTarget(t as any)).toEqual({kind:'unsupported',shape:'other',unparseable:true}));
+ it('unparseable targets are a disclosed 200 with no lookup and no echo',async()=>{
+  const f=vi.fn();vi.stubGlobal('fetch',f);
+  for(const t of ['lodash','npm:secret-pkg@^7','pip:secret@>=2','',undefined]){const r:any=await handlePackageSecurity({target:t as any});
+   expect(r.vulnerability_count).toBeNull();expect(r.covered).toBe(false);expect(r.parseable).toBe(false);expect(r.verdict).toBe('Inconclusive');expect(r.answer).toContain('Target not parseable');expect(r.answer).toContain('not zero');expect(JSON.stringify(r)).not.toContain('secret');
+   const e=JSON.parse((await getReceiptEvidence(r.receipt.receipt_id)).evidence!.toString());expect(e.kind).toBe('unparseable');expect(e.lookup_performed).toBe(false);}
+  expect(f).not.toHaveBeenCalled();
+ });
  it('shape labels never contain the value',()=>{for(const t of ['npm:semver@7.5.1','pip:a@1.0','CVE-2022-25883','GHSA-c2qf-rxjj-qqgw','https://secret.example/x','cargo:secretname@1.0.0','zzz',undefined])expect(['npm','pypi','cve','ghsa','url','other']).toContain(targetShapeOf(t));});
 });
 describe('PyPI',()=>{
@@ -81,7 +88,7 @@ describe('server logging',()=>{
  it('logs target_shape only, never the value',async()=>{
   const log=vi.spyOn(console,'info').mockImplementation(()=>{}),app=buildServer();vi.stubGlobal('fetch',async()=>new Response(cve));
   try{const seen:string[]=[];
-   for(const [t,shape,status] of [['CVE-2022-25883','cve',200],['cargo:secretpkg@1.0.0','other',200],['https://secret.example/path','url',200],['npm:secretpkg@x','other',400]] as const){
+   for(const [t,shape,status] of [['CVE-2022-25883','cve',200],['cargo:secretpkg@1.0.0','other',200],['https://secret.example/path','url',200],['npm:secretpkg@x','other',200]] as const){
     log.mockClear();const res=await app.inject({method:'GET',url:'/v1/security-review?target='+encodeURIComponent(t)});expect(res.statusCode).toBe(status);
     const rows=log.mock.calls.map(c=>{try{return JSON.parse(String(c[0]));}catch{return null;}}).filter(r=>r?.event==='request_start'||r?.event==='request_complete');
     expect(rows).toHaveLength(2);for(const r of rows)expect(r.target_shape).toBe(shape);const text=JSON.stringify(rows);expect(text).not.toContain('secret');seen.push(shape);}

@@ -3,7 +3,7 @@
 // https://devnode.telegraphprotocol.com/engine/v1/intents/SECURITY_REVIEW_GENERAL
 // Source semantics: https://google.github.io/osv.dev/post-v1-query/
 // Not a source-code audit, exploitability assessment or safety guarantee.
-import { badRequest, unprocessable, upstreamUnavailable } from '../core/errors';
+import { ApiError, badRequest, unprocessable, upstreamUnavailable } from '../core/errors';
 import { envelope, makeReceipt } from '../core/receipt';
 import { saveReceipt } from '../core/storage';
 import { PublicBodyCache, StartBudget } from '../core/publicSource';
@@ -92,12 +92,16 @@ export type TargetShape = 'npm' | 'pypi' | 'cve' | 'ghsa' | 'url' | 'other';
 export type SecurityTarget =
   | { kind: 'package'; ecosystems: Eco[]; name: string; version: string; shape: 'npm' | 'pypi' | 'other' }
   | { kind: 'id'; id: string; shape: 'cve' | 'ghsa' }
-  | { kind: 'unsupported'; shape: 'url' | 'other'; label?: string };
+  | { kind: 'unsupported'; shape: 'url' | 'other'; label?: string; unparseable?: true };
 const PYPI_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 const PYPI_VERSION = /^(0|[1-9]\d*)(?:\.(0|[1-9]\d*))*(?:(?:a|b|rc)(0|[1-9]\d*))?(?:\.post(0|[1-9]\d*))?(?:\.dev(0|[1-9]\d*))?$/;
 const NPM_PREFIX = /^npm:/i, PYPI_PREFIX = /^(?:pip|pypi):/i;
-/** Classify without logging or echoing the value. Malformed input in a covered ecosystem stays a 400. */
+/** Classify without logging or echoing the value. Anything unparseable is a disclosed not-covered answer, never a 4xx. */
 export function parseSecurityTarget(target: string | undefined): SecurityTarget {
+  try { return parseSecurityTargetStrict(target); }
+  catch (e) { if (e instanceof ApiError && e.code === 'INVALID_TARGET') return { kind: 'unsupported', shape: 'other', unparseable: true }; throw e; }
+}
+function parseSecurityTargetStrict(target: string | undefined): SecurityTarget {
   const bad = () => badRequest('INVALID_TARGET', 'target must be npm:name@x.y.z, pip:name@version, PyPI:name@version, name@x.y.z, or a CVE-/GHSA- id');
   if (!target || target.length > 256 || target !== target.trim()) throw bad();
   const cve = /^CVE-(\d{4})-(\d{4,19})$/i.exec(target);
@@ -169,12 +173,13 @@ const NOT_AUDIT = 'This is a known-advisory lookup, not a source-code audit, exp
 async function handleUnsupported(t: Extract<SecurityTarget, { kind: 'unsupported' }>): Promise<Record<string, unknown>> {
   const now = new Date().toISOString();
   const what = t.shape === 'url' ? 'URL targets' : `the ${t.label ?? 'requested'} ecosystem`;
-  const summary = `Ecosystem not covered: ${what} cannot be checked here. Covered: npm and PyPI name@exact-version, and CVE-/GHSA- ids, all via OSV. No advisory lookup ran, so the vulnerability count is unknown, not zero, and nothing here says the target is secure. ${NOT_AUDIT}`;
-  const evidence = JSON.stringify({ kind: 'not_covered', target_shape: t.shape, ecosystem_label: t.label ?? null, lookup_performed: false, checked_at: now,
+  const lead = t.unparseable ? 'Target not parseable: it is not npm:name@x.y.z, pip:name@version, PyPI:name@version, name@x.y.z, or a CVE-/GHSA- id.' : `Ecosystem not covered: ${what} cannot be checked here.`;
+  const summary = `${lead} Covered: npm and PyPI name@exact-version, and CVE-/GHSA- ids, all via OSV. No advisory lookup ran, so the vulnerability count is unknown, not zero, and nothing here says the target is secure. ${NOT_AUDIT}`;
+  const evidence = JSON.stringify({ kind: t.unparseable ? 'unparseable' : 'not_covered', target_shape: t.shape, ecosystem_label: t.label ?? null, lookup_performed: false, checked_at: now,
     scope: 'No source was queried. Covered: npm and PyPI exact releases, CVE and GHSA ids.' });
   const receipt = makeReceipt('SECURITY_REVIEW_GENERAL', 'urn:verireceipt:local-not-covered', evidence, 'no lookup performed; target outside covered ecosystems'); receipt.fetched_at = now;
   await persist(receipt, evidence);
-  return envelope('SECURITY_REVIEW_GENERAL', { target_shape: t.shape, ecosystem: t.label ?? null, vulnerability_count: null, issues: [], covered: false, summary, observed_at: now },
+  return envelope('SECURITY_REVIEW_GENERAL', { target_shape: t.shape, ecosystem: t.label ?? null, vulnerability_count: null, issues: [], covered: false, ...(t.unparseable ? { parseable: false } : {}), summary, observed_at: now },
     receipt, { answer: summary, verdict: 'Inconclusive', confidence: 1, source: 'none queried; target outside covered ecosystems (npm, PyPI, CVE/GHSA ids)' });
 }
 async function handleIdLookup(t: Extract<SecurityTarget, { kind: 'id' }>): Promise<Record<string, unknown>> {
