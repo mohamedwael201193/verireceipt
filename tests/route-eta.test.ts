@@ -12,6 +12,8 @@ import { buildServer } from "../src/server";
 import { getReceiptEvidence } from "../src/core/storage";
 import { sha256Hex } from "../src/core/receipt";
 // Real OSRM demo-server body, retrieved 2026-11-23.
+const namedRoute = readFileSync(join(__dirname,"fixtures/route-binding/austin-calallen.json"),"utf8");
+const geoCalallen=JSON.stringify({results:[{name:'Calallen',latitude:27.8006,longitude:-97.3961,country:'United States',admin1:'Texas',country_code:'US'}]});
 const corpus = readFileSync(join(__dirname, "fixtures/route-eta/osrm-corpus-to-calallen.json"), "utf8");
 function stub(body: string | "ERR" = corpus, status = 200): void {
   vi.stubGlobal("fetch", async () => {
@@ -37,12 +39,12 @@ describe("ROUTE_ETA_GENERAL", () => {
     const geoAustin = JSON.stringify({ results: [{ name: "Austin", latitude: 30.2672, longitude: -97.7431, country: "United States", admin1: "Texas", country_code: "US" }] });
     vi.stubGlobal("fetch", async (url: unknown) => {
       const u = String(url);
-      if (u.startsWith("https://geocoding-api.open-meteo.com/")) return new Response(geoAustin, { status: 200 });
-      if (u.startsWith("https://router.project-osrm.org/")) return new Response(corpus, { status: 200 });
+      if (u.startsWith("https://geocoding-api.open-meteo.com/")) return new Response(u.includes("Calallen")?geoCalallen:geoAustin, { status: 200 });
+      if (u.startsWith("https://router.project-osrm.org/")) return new Response(namedRoute, { status: 200 });
       throw new Error(`unexpected fetch ${u}`);
     });
-    const result = await handleRouteEta({ origin: "Austin, Texas", destination: "Austin, Texas" });
-    expect(result.duration).toBe(5282);
+    const result = await handleRouteEta({ origin: "Austin, Texas", destination: "Calallen, Texas" });
+    expect(result.duration).toBe(Math.round(JSON.parse(namedRoute).routes[0].duration));
     const ans = String(result.answer);
     expect(ans).toContain("Austin, Texas, United States (30.2672, -97.7431)");
     expect(ans).toContain("static car-profile estimate");
@@ -106,8 +108,8 @@ describe('route-eta source validation',()=>{
  });
  it('named endpoint receipts retain geocoder raw bodies as well as hashes',async()=>{
   const geo=JSON.stringify({results:[{name:'Austin',latitude:30.2672,longitude:-97.7431,country:'United States',admin1:'Texas',country_code:'US'}]});
-  vi.stubGlobal('fetch',async(url:unknown)=>new Response(String(url).includes('geocoding-api')?geo:corpus));
-  const out=await handleRouteEta({origin:'Austin, Texas',destination:'Austin, Texas'});
+  vi.stubGlobal('fetch',async(url:unknown)=>new Response(String(url).includes('geocoding-api')?(String(url).includes('Calallen')?geoCalallen:geo):namedRoute));
+  const out=await handleRouteEta({origin:'Austin, Texas',destination:'Calallen, Texas'});
   const stored=await getReceiptEvidence((out.receipt as any).receipt_id);const evidence=JSON.parse(String(stored.evidence));
   expect(evidence.geocoders).toHaveLength(2);expect(evidence.geocoders[0].raw_body).toBe(geo);expect(evidence.geocoders[0].sha256).toBe(sha256Hex(geo));
  });

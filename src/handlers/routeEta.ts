@@ -63,6 +63,16 @@ export function parseOsrm(raw: string): OsrmRoute {
   };
 }
 
+/** Check source-reported snapping distances against endpoint coordinates. Small implementation
+ * differences are tolerated; no maximum snap is invented or silently clamped. */
+export function verifyRouteEndpoints(route:OsrmRoute,origin:{lat:number;lon:number},destination:{lat:number;lon:number}):void{
+ const distance=(a:{lat:number;lon:number},b:[number,number])=>{const r=Math.PI/180,x=Math.sin((b[1]-a.lat)*r/2)**2+Math.cos(a.lat*r)*Math.cos(b[1]*r)*Math.sin((b[0]-a.lon)*r/2)**2;return 6371000*2*Math.atan2(Math.sqrt(x),Math.sqrt(Math.max(0,1-x)));};
+ for(const [point,snapped,reported] of [[origin,route.origin_snapped,route.origin_snap_m],[destination,route.destination_snapped,route.destination_snap_m]] as const){
+  const computed=distance(point,snapped),tolerance=Math.max(20,reported*.02);
+  if(Math.abs(computed-reported)>tolerance)throw unprocessable('ROUTE_ENDPOINT_MISMATCH','source snapped waypoint does not match requested endpoint and reported snap distance; no duration asserted');
+ }
+}
+
 export const INTENT = "ROUTE_ETA_GENERAL";
 
 interface ResolvedPoint { lat:number;lon:number;label:string;selection:string;geocoders:{url:string;body:string;fetched_at:string}[] }
@@ -125,6 +135,7 @@ export async function handleRouteEta(query: Record<string, string | undefined>):
     throw upstreamUnavailable("OSRM_UNREACHABLE", "the OSRM demo server could not be reached");
   }
   const route = parseOsrm(body);
+  verifyRouteEndpoints(route,o,dst);
   const durationS = route.duration_s; // Validated source value, rounded only; never clamped.
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({ origin: `${o.lat},${o.lon}`, destination: `${dst.lat},${dst.lon}`,

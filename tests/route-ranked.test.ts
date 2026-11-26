@@ -7,17 +7,19 @@ import {parseRankedLocation,resetRouteGeocoderForTests,resolveRoutePlace} from '
 import {getReceiptEvidence} from '../src/core/storage';
 import {sha256Hex} from '../src/core/receipt';
 const raw=(name:string)=>readFileSync(join(__dirname,'fixtures/route-ranked',name+'.json'),'utf8');
+const springfieldRoute=readFileSync(join(__dirname,'fixtures/route-binding/springfield-calallen.json'),'utf8');
+const dcRoute=readFileSync(join(__dirname,'fixtures/route-binding/dc-calallen.json'),'utf8');
 const route=readFileSync(join(__dirname,'fixtures/route-eta/osrm-corpus-to-calallen.json'),'utf8');
 beforeEach(()=>resetRouteGeocoderForTests());afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();resetRouteGeocoderForTests();});afterAll(()=>rmSync(scratch,{recursive:true,force:true}));
 it('real ambiguous city uses first provider result, count and full-precision coordinates disclosed',async()=>{
- const body=raw('springfield'),j=JSON.parse(body),hit=j.results[0];const f=vi.fn(async(url:unknown)=>new Response(String(url).includes('geocoding-api')?body:route));vi.stubGlobal('fetch',f);
+ const body=raw('springfield'),j=JSON.parse(body),hit=j.results[0];const f=vi.fn(async(url:unknown)=>new Response(String(url).includes('geocoding-api')?body:springfieldRoute));vi.stubGlobal('fetch',f);
  const out=await handleRouteEta({origin:'Springfield',destination:'27.8006,-97.3961'});expect(out.origin).toBe(hit.latitude+','+hit.longitude);expect(String(out.answer)).toContain('of '+j.results.length+' matches');expect(String(out.answer)).toContain('rank 1, provider order; not confirmed unique');
  expect(f.mock.calls.some(([url])=>String(url).includes('photon'))).toBe(false);
  const r=out.receipt as any,ev=String((await getReceiptEvidence(r.receipt_id)).evidence),e=JSON.parse(ev);expect(sha256Hex(ev)).toBe(r.raw_response_sha256);expect(e.geocoders[0].raw_body).toBe(body);expect(e.origin_selection).toContain('of '+j.results.length+' matches');expect(e.origin).toBe(out.origin);
 });
 it('real public street capture falls through a real empty city capture, exact evidence retained',async()=>{
  const city=raw('street-city-negative'),street=raw('street'),hit=JSON.parse(street).features[0],c=hit.geometry.coordinates;
- vi.stubGlobal('fetch',async(url:unknown)=>new Response(String(url).includes('geocoding-api')?city:String(url).includes('photon')?street:route));
+ vi.stubGlobal('fetch',async(url:unknown)=>new Response(String(url).includes('geocoding-api')?city:String(url).includes('photon')?street:dcRoute));
  const out=await handleRouteEta({origin:'1600 Pennsylvania Avenue NW, Washington DC',destination:'27.8006,-97.3961'});expect(out.origin).toBe(c[1]+','+c[0]);expect(String(out.answer)).toContain('Photon');expect(String(out.answer)).toContain('OpenStreetMap');expect(String(out.answer)).toContain('ODbL');
  const ev=JSON.parse(String((await getReceiptEvidence((out.receipt as any).receipt_id)).evidence));expect(ev.geocoders.map((g:any)=>g.raw_body)).toEqual([city,street]);
 });
