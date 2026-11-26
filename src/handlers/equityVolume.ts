@@ -1,8 +1,3 @@
-import {PublicBodyCache} from '../core/publicSource';
-import {fetchYahooBody} from './yahooTransport';
-import {assertYahooAllowed,noteYahooRateLimit} from './equityQuoteCache';
-let cache=new PublicBodyCache(64,300000,()=>Date.now());
-export function resetEquityVolumeForTests(){cache=new PublicBodyCache(64,300000,()=>Date.now());}
 export function parseEquityVolume(raw:string,ticker:string,at:number){
  const r=JSON.parse(raw)?.chart?.result?.[0],m=r?.meta,q=r?.indicators?.quote?.[0];
  if(!Number.isFinite(at))throw Error('invalid observation time');
@@ -28,10 +23,10 @@ export function parseEquityVolume(raw:string,ticker:string,at:number){
  if(!Number.isFinite(value)||value<0||value>1e15)throw Error('volume outside range');
  return {value_usd:Math.round(value),window_start:new Date(start).toISOString(),window_end:new Date(end).toISOString(),bucket_count:rows.size,basis:'trailing24h_regular_session_5m_close_times_share_volume_estimate',scope:'regular sessions only; excludes pre/post-market, uses bucket close not actual trade prices; latest incomplete bucket excluded',method:'sum of close USD times share volume for complete5minute regular-session buckets within trailing24hours ending at previous5minute boundary; not exact traded-dollar turnover'};
 }
-export async function equityVolume(ticker:string){
- const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=5m&range=5d`;
- try{
-  const observation=await cache.get(url,async()=>{const raw=await fetchYahooBody(url,assertYahooAllowed,noteYahooRateLimit);const fetchedAt=new Date().toISOString();parseEquityVolume(raw,ticker,Date.parse(fetchedAt));return{url,raw,fetchedAt};});
-  return {...parseEquityVolume(observation.raw,ticker,Date.parse(observation.fetchedAt)),source_url:url,fetched_at:observation.fetchedAt,raw_body:observation.raw,status:'estimated'};
- }catch{return {value_usd:null,basis:'unavailable',status:'unavailable',attempted_source_url:url,raw_body:null,window_start:null,window_end:null,fetched_at:null};}
+/** Optional enrichment must never spend a second Yahoo request or delay quotes.
+ * The shared canonical chart currently has daily granularity, so null is honest.
+ * Intraday observations supplied by that shared source can be parsed without I/O. */
+export function equityVolumeFromObservation(ticker:string,raw:string,fetchedAt:string,sourceUrl:string){
+ try{return {...parseEquityVolume(raw,ticker,Date.parse(fetchedAt)),source_url:sourceUrl,fetched_at:fetchedAt,raw_body:raw,status:'estimated'};}
+ catch{return{value_usd:null,basis:'unavailable',status:'unavailable',reason:'shared canonical quote has no complete validated intraday volume window; no additional Yahoo request made',raw_body:null,window_start:null,window_end:null,fetched_at:fetchedAt};}
 }

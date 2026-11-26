@@ -1,4 +1,4 @@
-import {equityVolume} from './equityVolume';
+import {equityVolumeFromObservation} from './equityVolume';
 import {annualFinancialMetrics} from './annualFinancialMetrics';
 import {financialCoin} from './financialCoins';
 import {internationalEquity} from './financialInternational';
@@ -266,8 +266,8 @@ async function financialData(query: Record<string, string | undefined>): Promise
   const marketTime = typeof meta.regularMarketTime === "number" ? new Date(meta.regularMarketTime * 1000).toISOString() : "unknown";
   const cap = Math.round(price * shares.val);
   if (cap <= 0 || cap > 1e15) throw unprocessable("OUT_OF_CONTRACT_RANGE", "the computed cap is outside the contract range; refusing to serve it");
-  // Intraday regular-session estimate is separately sourced and labeled.
-  const volumeObservation=await equityVolume(ticker);
+  // Volume is derived only from the canonical quote observation, never extra I/O.
+  const volumeObservation=equityVolumeFromObservation(ticker,quote.body,quote.fetchedAt,`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`);
   const volumeUsd: number | null = volumeObservation.value_usd;
   const {raw_body:volumeRaw,...volumePublic}=volumeObservation;
   const sessionVolumeUsd = Number.isFinite(volumeShares) && volumeShares >= 0 ? Math.round(volumeShares * price) : null;

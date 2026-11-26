@@ -1,4 +1,4 @@
-vi.mock('../src/handlers/equityVolume',()=>({equityVolume:async()=>({value_usd:null,basis:'unavailable',status:'unavailable',raw_body:null,window_start:null,window_end:null,fetched_at:null})}));
+vi.mock('../src/handlers/equityVolume',()=>({equityVolumeFromObservation:()=>({value_usd:null,basis:'unavailable',status:'unavailable',raw_body:null,window_start:null,window_end:null,fetched_at:null})}));
 import {resetSecFinancialCacheForTests} from '../src/handlers/secFinancialCache';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
