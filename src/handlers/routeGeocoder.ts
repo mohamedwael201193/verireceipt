@@ -9,6 +9,8 @@ export function parseRankedLocation(raw:string,provider:'Open-Meteo'|'Photon'):R
  if(typeof lat!=='number'||typeof lon!=='number'||!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180||!label|| (provider==='Photon'&&(h.geometry?.type!=='Point'||!Array.isArray(h.geometry.coordinates)||h.geometry.coordinates.some((x:unknown)=>typeof x!=='number'))))throw new Error('invalid top geocoder result');
  return {latitude:lat,longitude:lon,label,count:rows.length,rank:1,provider};
 }
+/** True for a populated place or administrative division (GeoNames PPL*, ADM*). A missing feature code is not accepted. */
+export const isCityRow=(r:any):boolean=>typeof r?.feature_code==='string'&&/^(PPL|ADM)/.test(r.feature_code);
 /** Time one request may spend waiting in and reading from the geocoder queue. The route read after it
  * keeps its own 6 s limit. The validator's own timeout is not published; this is a conservative
  * share of a 9 s request, leaving 1.5 s for the route read. Reads stay 1.1 s apart whatever it is. */
@@ -39,7 +41,10 @@ export async function resolveRoutePlace(query:string,deadlineAt:number=Date.now(
  const captures:{url:string;body:string;fetched_at:string}[]=[];
  for(const provider of ['Open-Meteo','Photon'] as const){
   const url=provider==='Open-Meteo'?`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=10&language=en&format=json`:`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=10&lang=en`;
-  try{const body=await read(url,deadlineAt);captures.push({url,body:body.raw,fetched_at:body.fetchedAt});const hit=parseRankedLocation(body.raw,provider);if(hit)return {hit,captures};}catch(e){if(e instanceof GeocoderBusy)throw upstreamUnavailable('GEOCODER_BUSY','route geocoder queue is full for this request: reads are kept 1.1 s apart and the wait would exceed the response budget; nothing was guessed, retry shortly');throw upstreamUnavailable('GEOCODER_UNREACHABLE','route geocoder unavailable or invalid; no retry, bypass or guessed location');}
+  try{const body=await read(url,deadlineAt);captures.push({url,body:body.raw,fetched_at:body.fetchedAt});const hit=parseRankedLocation(body.raw,provider);
+   // An Open-Meteo rank 1 that is not a populated place or administrative division (a park, a mountain, a monument) is not a city: ask the street geocoder, never fall back to it.
+   if(hit&&provider==='Open-Meteo'&&!isCityRow(JSON.parse(body.raw).results[0]))continue;
+   if(hit)return {hit,captures};}catch(e){if(e instanceof GeocoderBusy)throw upstreamUnavailable('GEOCODER_BUSY','route geocoder queue is full for this request: reads are kept 1.1 s apart and the wait would exceed the response budget; nothing was guessed, retry shortly');throw upstreamUnavailable('GEOCODER_UNREACHABLE','route geocoder unavailable or invalid; no retry, bypass or guessed location');}
  }
  throw unprocessable('PLACE_NOT_FOUND','neither city nor street geocoder returned a location; pass valid lat,lon');
 }

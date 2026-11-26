@@ -13,7 +13,7 @@ import { getReceiptEvidence } from "../src/core/storage";
 import { sha256Hex } from "../src/core/receipt";
 // Real OSRM demo-server body, retrieved 2026-11-23.
 const namedRoute = readFileSync(join(__dirname,"fixtures/route-binding/austin-calallen.json"),"utf8");
-const geoCalallen=JSON.stringify({results:[{name:'Calallen',latitude:27.8006,longitude:-97.3961,country:'United States',admin1:'Texas',country_code:'US'}]});
+const geoCalallen=JSON.stringify({results:[{name:'Calallen',latitude:27.8006,longitude:-97.3961,country:'United States',admin1:'Texas',country_code:'US',feature_code:'PPL'}]});
 const corpus = readFileSync(join(__dirname, "fixtures/route-eta/osrm-corpus-to-calallen.json"), "utf8");
 function stub(body: string | "ERR" = corpus, status = 200): void {
   vi.stubGlobal("fetch", async () => {
@@ -36,7 +36,7 @@ describe("ROUTE_ETA_GENERAL", () => {
   });
 
   it("R1: place-name endpoints resolve with named disclosure in the answer", async () => {
-    const geoAustin = JSON.stringify({ results: [{ name: "Austin", latitude: 30.2672, longitude: -97.7431, country: "United States", admin1: "Texas", country_code: "US" }] });
+    const geoAustin = JSON.stringify({ results: [{ name: "Austin", latitude: 30.2672, longitude: -97.7431, country: "United States", admin1: "Texas", country_code: "US", feature_code: "PPL" }] });
     vi.stubGlobal("fetch", async (url: unknown) => {
       const u = String(url);
       if (u.startsWith("https://geocoding-api.open-meteo.com/")) return new Response(u.includes("Calallen")?geoCalallen:geoAustin, { status: 200 });
@@ -107,7 +107,7 @@ describe('route-eta source validation',()=>{
   const j=JSON.parse(corpus);j.waypoints[0].distance=distance;expect(()=>parseOsrm(JSON.stringify(j))).toThrow();
  });
  it('named endpoint receipts retain geocoder raw bodies as well as hashes',async()=>{
-  const geo=JSON.stringify({results:[{name:'Austin',latitude:30.2672,longitude:-97.7431,country:'United States',admin1:'Texas',country_code:'US'}]});
+  const geo=JSON.stringify({results:[{name:'Austin',latitude:30.2672,longitude:-97.7431,country:'United States',admin1:'Texas',country_code:'US',feature_code:'PPL'}]});
   vi.stubGlobal('fetch',async(url:unknown)=>new Response(String(url).includes('geocoding-api')?(String(url).includes('Calallen')?geoCalallen:geo):namedRoute));
   const out=await handleRouteEta({origin:'Austin, Texas',destination:'Calallen, Texas'});
   const stored=await getReceiptEvidence((out.receipt as any).receipt_id);const evidence=JSON.parse(String(stored.evidence));
@@ -122,4 +122,4 @@ describe('OSRM transport real deadline',()=>{
 
 it('healthy overlapping route reads both complete with the real numeric fixture',async()=>{const {resetRouteSourceForTests}=await import('../src/handlers/routeEta');resetRouteSourceForTests();const releases:((r:Response)=>void)[]=[];vi.stubGlobal('fetch',()=>new Promise<Response>(r=>releases.push(r)));const q={origin:'27.345,-97.225',destination:'27.8006,-97.3961'};const a=handleRouteEta(q),b=handleRouteEta(q);await new Promise(r=>setTimeout(r,0));expect(releases.length).toBe(2);for(const r of releases)r(new Response(corpus));expect((await a).duration).toBe(5282);expect((await b).duration).toBe(5282);});
 it('numeric duration and distance companions bind unchanged source estimate',async()=>{stub();const r=await handleRouteEta({origin:'27.345,-97.225',destination:'27.8006,-97.3961'});expect(r.duration_seconds).toBe(r.duration);expect(r.duration_minutes).toBe(5282/60);expect(r.distance_km).toBe(64.7205);});
-it('endpoint resolution overlaps slow first provider without bypassing1.1second spacing',async()=>{vi.useFakeTimers();resetRouteGeocoderForTests();const starts:number[]=[];const zero=Date.now();vi.stubGlobal('fetch',async(u:any)=>{const url=String(u);if(url.includes('geocoding-api')){starts.push(Date.now()-zero);if(url.includes('Austin')){await new Promise(r=>setTimeout(r,1150));return new Response(JSON.stringify({results:[{name:'Austin',latitude:30.2672,longitude:-97.7431}]}));}return new Response(geoCalallen);}return new Response(namedRoute);});try{const p=handleRouteEta({origin:'Austin',destination:'Calallen'});await vi.advanceTimersByTimeAsync(1100);expect(starts).toEqual([0,1100]);await vi.advanceTimersByTimeAsync(50);expect((await p).duration_seconds).toBe(Math.round(JSON.parse(namedRoute).routes[0].duration));}finally{vi.useRealTimers();resetRouteGeocoderForTests();}});
+it('endpoint resolution overlaps slow first provider without bypassing1.1second spacing',async()=>{vi.useFakeTimers();resetRouteGeocoderForTests();const starts:number[]=[];const zero=Date.now();vi.stubGlobal('fetch',async(u:any)=>{const url=String(u);if(url.includes('geocoding-api')){starts.push(Date.now()-zero);if(url.includes('Austin')){await new Promise(r=>setTimeout(r,1150));return new Response(JSON.stringify({results:[{name:'Austin',latitude:30.2672,longitude:-97.7431,feature_code:'PPL'}]}));}return new Response(geoCalallen);}return new Response(namedRoute);});try{const p=handleRouteEta({origin:'Austin',destination:'Calallen'});await vi.advanceTimersByTimeAsync(1100);expect(starts).toEqual([0,1100]);await vi.advanceTimersByTimeAsync(50);expect((await p).duration_seconds).toBe(Math.round(JSON.parse(namedRoute).routes[0].duration));}finally{vi.useRealTimers();resetRouteGeocoderForTests();}});

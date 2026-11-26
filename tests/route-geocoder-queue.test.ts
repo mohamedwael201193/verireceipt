@@ -13,7 +13,7 @@ const coords=(name:string)=>{let h=0;for(const c of name)h=(h*31+c.charCodeAt(0)
 function stub(log:{t:number;kind:string;q:string}[]=[],zero=Date.now()){
  vi.stubGlobal('fetch',async(u:unknown)=>{const url=new URL(String(u));
   if(url.hostname==='geocoding-api.open-meteo.com'){const q=url.searchParams.get('name')!;log.push({t:Date.now()-zero,kind:'city',q});
-   if(q.startsWith('street '))return new Response(raw('street-city-negative'));const c=coords(q);return new Response(JSON.stringify({results:[{name:q,latitude:c.lat,longitude:c.lon,admin1:'A',country:'C'}]}));}
+   if(q.startsWith('street '))return new Response(raw('street-city-negative'));const c=coords(q);return new Response(JSON.stringify({results:[{name:q,latitude:c.lat,longitude:c.lon,admin1:'A',country:'C',feature_code:'PPL'}]}));}
   if(url.hostname==='photon.komoot.io'){const q=url.searchParams.get('q')!;log.push({t:Date.now()-zero,kind:'street',q});const c=coords(q);return new Response(JSON.stringify({features:[{geometry:{type:'Point',coordinates:[c.lon,c.lat]},properties:{name:q,city:'X',country:'C'}}]}));}
   const m=/driving\/([^;]+);([^?]+)\?/.exec(url.pathname+'?')!;const [a,b]=[m[1],m[2]].map(s=>s.split(',').map(Number));
   return new Response(JSON.stringify({code:'Ok',routes:[{duration:1000+Math.round(a[0]+b[0]),distance:5000}],waypoints:[{location:a,distance:0.5},{location:b,distance:0.5}]}));});
