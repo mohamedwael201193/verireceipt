@@ -35,7 +35,7 @@ describe("ASSET_RESERVE_ATTESTATION_GENERAL", () => {
   it("requires an asset and discloses coverage-only unknown responses", async () => {
     await expect(handleReserveAttestation({})).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });
     stub();
-    expect(await handleReserveAttestation({ asset: "stETH" })).toMatchObject({ attested_reserve: null, verdict: "unavailable" });
+    expect(await handleReserveAttestation({ asset: "ION" })).toMatchObject({ attested_reserve: null, verdict: "unavailable" });
     expect(await handleReserveAttestation({ asset: "DOGE" })).toMatchObject({ attested_reserve: null, verdict: "unavailable" });
   });
   it("parses the real round body", () => {
@@ -169,4 +169,77 @@ describe('verified additional reserve feeds',()=>{
  });
  it('USDW uses12h, not default24h staleness and discloses it',async()=>{vi.useFakeTimers();const f=fixture.feeds.find((f:any)=>f.asset==='USDW');const rd=parseRoundData(JSON.parse(f.legs[0].round.raw).result);vi.setSystemTime((rd.updatedAt+43201)*1000);vi.stubGlobal('fetch',async(_u:any,o:any)=>new Response(JSON.parse(o.body).params[0].data==='0x313ce567'?f.legs[0].decimals.raw:f.legs[0].round.raw));try{const out=await handleReserveAttestation({asset:'USDW'});expect(out.answer).toContain('OLDER than the 12h heartbeat');const st=await getReceiptEvidence((out.receipt as any).receipt_id);expect(JSON.parse(Buffer.from(st.evidence!).toString()).stale).toBe(true);}finally{vi.useRealTimers();}});
  it.each(['FBTCsuffix','LB','ethereum:LBTC','0x75A0d3264a949C2C920d7F25Df174af1FaF73399'])('no partial names or feed proxy-as-token aliases %s',async asset=>{const f=vi.fn();vi.stubGlobal('fetch',f);expect((await handleReserveAttestation({asset})).attested_reserve).toBeNull();if(/^0x[0-9a-fA-F]{40}$/.test(asset))expect(f.mock.calls.every(([,o]:any)=>!String(o.body).includes('0xfeaf968c'))).toBe(true);else expect(f).not.toHaveBeenCalled();});
+
+  // 2026-11-26 expansion: stETH, eETH, BGBTC, HBTC, swETH, rswETH, C1USD from captured 3-leg bodies.
+  const fx26 = JSON.parse(readFileSync(join(__dirname, "fixtures/reserve-attestation/expansion-20261126.json"), "utf8"));
+  const legStub = (f: any, round?: (leg: any) => string) => vi.stubGlobal("fetch", async (url: any, o: any) => {
+    const c = JSON.parse(o.body).params[0]; expect(c.to).toBe(f.proxy);
+    const leg = f.legs.find((l: any) => l.url === String(url)); expect(leg).toBeDefined();
+    return new Response(c.data === "0x313ce567" ? leg.decimals.raw : round ? round(leg) : leg.round.raw);
+  });
+  const roundOf = (f: any) => parseRoundData(JSON.parse(f.legs[0].round.raw).result);
+  it("fixture covers exactly the seven new feeds", () => {
+    expect(fx26.feeds.map((f: any) => f.asset)).toEqual(["stETH", "eETH", "BGBTC", "HBTC", "swETH", "rswETH", "C1USD"]);
+  });
+  it.each(fx26.feeds)("$asset serves the exact feed, micro value inside [1,1e18], with the directory heartbeat", async (f: any) => {
+    vi.useFakeTimers();
+    try {
+      const rd = roundOf(f); vi.setSystemTime((rd.updatedAt + 3600) * 1000); legStub(f);
+      const dec = Number(BigInt(JSON.parse(f.legs[0].decimals.raw).result));
+      const micro = dec <= 6 ? rd.answer * 10n ** BigInt(6 - dec) : rd.answer / 10n ** BigInt(dec - 6);
+      expect(micro >= 1n && micro <= 10n ** 18n).toBe(true);
+      const out = await handleReserveAttestation({ asset: f.asset.toLowerCase() });
+      expect(out).toMatchObject({ asset: f.asset, attested_reserve: Number(micro), reserve_unit: f.reserve_unit, heartbeat_seconds: f.heartbeat, ethereum_total_supply: null, collateral_ratio_pct: null });
+      expect(out.source_feed).toContain(f.proxy);
+      const st = await getReceiptEvidence((out.receipt as any).receipt_id);
+      const ev = JSON.parse(Buffer.from(st.evidence!).toString());
+      expect(ev).toMatchObject({ proxy: f.proxy, stale: false, answer_raw: rd.answer.toString() });
+    } finally { vi.useRealTimers(); }
+  });
+  it("stETH is about 9.70e12 micro-ETH, inside the contract range", async () => {
+    const f = fx26.feeds[0]; vi.useFakeTimers();
+    try { vi.setSystemTime((roundOf(f).updatedAt + 60) * 1000); legStub(f); const out = await handleReserveAttestation({ asset: "stETH" }); expect(out.attested_reserve).toBe(9702767101123); expect(out.attested_reserve as number).toBeLessThanOrEqual(1e18); }
+    finally { vi.useRealTimers(); }
+  });
+  it.each(fx26.feeds)("$asset one second past its heartbeat refuses, exactly at it still serves", async (f: any) => {
+    vi.useFakeTimers();
+    try {
+      const rd = roundOf(f); legStub(f);
+      vi.setSystemTime((rd.updatedAt + f.heartbeat) * 1000);
+      expect(await handleReserveAttestation({ asset: f.asset })).toMatchObject({ asset: f.asset });
+      vi.setSystemTime((rd.updatedAt + f.heartbeat + 1) * 1000);
+      await expect(handleReserveAttestation({ asset: f.asset })).rejects.toMatchObject({ status: 502, code: "STALE_ATTESTATION" });
+    } finally { vi.useRealTimers(); }
+  });
+  it("a stale refusal stores no answer and names no figure", async () => {
+    const f = fx26.feeds[3]; vi.useFakeTimers();
+    try {
+      const rd = roundOf(f); vi.setSystemTime((rd.updatedAt + f.heartbeat + 5) * 1000); legStub(f);
+      const err: any = await handleReserveAttestation({ asset: "HBTC" }).catch((e) => e);
+      expect(err.code).toBe("STALE_ATTESTATION"); expect(String(err.message)).not.toContain(rd.answer.toString());
+    } finally { vi.useRealTimers(); }
+  });
+  it("a new feed needs quorum: one dissenting leg is outvoted, three different answers refuse", async () => {
+    const f = fx26.feeds[2]; vi.useFakeTimers();
+    const bump = (raw: string, d: string) => raw.replace(/(0x[0-9a-f]{64})([0-9a-f]{63})([0-9a-f])/, (_m: string, a: string, b: string, c: string) => a + b + d);
+    try {
+      const rd = roundOf(f); vi.setSystemTime((rd.updatedAt + 60) * 1000);
+      legStub(f, (leg) => (leg.url.includes("drpc") ? bump(leg.round.raw, "1") : leg.round.raw));
+      expect(await handleReserveAttestation({ asset: "BGBTC" })).toMatchObject({ attested_reserve: 1419999837 });
+      legStub(f, (leg) => (leg.url.includes("drpc") ? bump(leg.round.raw, "1") : leg.url.includes("mevblocker") ? bump(leg.round.raw, "2") : leg.round.raw));
+      await expect(handleReserveAttestation({ asset: "BGBTC" })).rejects.toMatchObject({ status: 502 });
+    } finally { vi.useRealTimers(); }
+  });
+  it("old feeds keep serving stale data with staleness stated (no behaviour change)", async () => {
+    const fb = fixture.feeds.find((x: any) => x.asset === "FBTC"); vi.useFakeTimers();
+    try {
+      const rd = parseRoundData(JSON.parse(fb.legs[0].round.raw).result); vi.setSystemTime((rd.updatedAt + fb.heartbeat + 100) * 1000);
+      vi.stubGlobal("fetch", async (_u: any, o: any) => new Response(JSON.parse(o.body).params[0].data === "0x313ce567" ? fb.legs[0].decimals.raw : fb.legs[0].round.raw));
+      expect(await handleReserveAttestation({ asset: "FBTC" })).toMatchObject({ asset: "FBTC" });
+    } finally { vi.useRealTimers(); }
+  });
+  it.each(["0xAd410E655C0fE4741F573152592eeb766e686CE7", "stETHx", "steth proof"])("no proxy-address or partial alias for %s", async (asset) => {
+    const f = vi.fn(); vi.stubGlobal("fetch", f);
+    expect((await handleReserveAttestation({ asset })).attested_reserve).toBeNull();
+  });
 });

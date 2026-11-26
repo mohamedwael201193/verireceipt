@@ -17,19 +17,22 @@ import {TOKEN_CONTRACTS,ADDRESS_RE} from './tokenContracts';
 // FEEDS: official Chainlink reference data directory
 // (reference-data-directory.vercel.app/feeds-mainnet.json, retrieved
 // 2026-11-23, hashed into the fixture set). Only feeds probed live
-// AND inside the contract's micro-unit range are served: stETH PoR
-// (18 decimals, ~9.7e18 micro-ETH) exceeds the contract range and is
-// not enabled. Unlisted assets get a disclosed coverage-only null answer.
+// AND inside the contract's micro-unit range are served. (An earlier
+// note here said stETH PoR exceeds the range. It does not: 18 decimals,
+// answer ~9.70e24 raw x 10^(6-18) = ~9.70e12 micro-ETH, inside [1, 1e18].
+// Checked 2026-11-26.) Unlisted assets get a disclosed coverage-only null answer.
 // Micro-unit conversion:
 // answer x 10^(6 - feedDecimals); a non-zero remainder is floored and
 // the remainder disclosed in the receipt.
 //
 // QUORUM: decimals() and latestRoundData() are eth_call'd at "latest"
-// on every ethereum RPC leg; the legs must agree EXACTLY on decimals,
-// roundId, answer and updatedAt, else 502. The attestation's own
+// on every ethereum RPC leg; at least 2 legs must return the identical
+// response body (2-of-N: a single dissenting leg is outvoted), else 502.
+// Feeds flagged refuseStale are refused with 502 STALE_ATTESTATION when
+// older than their heartbeat; the earlier feeds still serve it flagged. The attestation's own
 // updatedAt is always named with its age; the feed's heartbeat is
-// feed-specific (86400s default), and stale data is served with staleness stated,
-// never silently refreshed.
+// feed-specific (86400s default). Without refuseStale, stale data is served
+// with staleness stated, never silently refreshed.
 import {withAnswerClass} from "../core/answerClass";
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, sha256Hex } from "../core/receipt";
@@ -42,10 +45,18 @@ const DEFAULT_HEARTBEAT_S = 86400;
 
 export const INTENT = "ASSET_RESERVE_ATTESTATION_GENERAL";
 
-export interface PorFeed { asset: string; proxy: string; feedName: string; issuer?: string; heartbeat?: number; reserveUnit?: string }
+export interface PorFeed { asset: string; proxy: string; feedName: string; issuer?: string; heartbeat?: number; reserveUnit?: string; refuseStale?: boolean }
 /** Feeds probed live 2026-11-23 from the official Chainlink reference data directory.
  *  issuer is named only where the feed's own documentation supports it. */
 export const POR_FEEDS: Record<string, PorFeed> = {
+  // Additional feeds: directory and 3-of-3 RPC reads verified 2026-11-26. refuseStale: older than the heartbeat is refused, never served.
+  STETH: {"asset": "stETH", "proxy": "0xAd410E655C0fE4741F573152592eeb766e686CE7", "feedName": "stETH Proof of Reserves", "issuer": "Lido", "heartbeat": 21600, "reserveUnit": "ETH", "refuseStale": true},
+  EETH: {"asset": "eETH", "proxy": "0xC8cd82067eA907EA4af81b625d2bB653E21b5156", "feedName": "eETH Proof of Reserves", "issuer": "ether.fi", "heartbeat": 86400, "reserveUnit": "ETH", "refuseStale": true},
+  BGBTC: {"asset": "BGBTC", "proxy": "0xADcc914F882965Ef1B2f1043522b3B81ED081491", "feedName": "BGBTC Proof of Reserves", "issuer": "Bitget", "heartbeat": 86400, "reserveUnit": "BTC", "refuseStale": true},
+  HBTC: {"asset": "HBTC", "proxy": "0x0A8cD0115B1EE87EbA5b8E06A9a15ED93e230f7a", "feedName": "HBTC Proof of Reserves", "issuer": "Huobi", "heartbeat": 259200, "reserveUnit": "BTC", "refuseStale": true},
+  SWETH: {"asset": "swETH", "proxy": "0x60cbE8D88EF519cF3C62414D76f50818D211fea1", "feedName": "Swell ETH Proof of Reserves", "issuer": "Swell Network", "heartbeat": 86400, "reserveUnit": "ETH", "refuseStale": true},
+  RSWETH: {"asset": "rswETH", "proxy": "0x0c89c488e763AC2d69cB058CCAC7A8B283EE3DbA", "feedName": "Swell Restaked ETH Proof of Reserves", "issuer": "Swell Network", "heartbeat": 86400, "reserveUnit": "ETH", "refuseStale": true},
+  C1USD: {"asset": "C1USD", "proxy": "0xAFa801e508613be7CA88D2d0fDB3F84f4c1B0384", "feedName": "C1USD Reserves", "issuer": "Kinesis Money", "heartbeat": 86400, "reserveUnit": "USD", "refuseStale": true},
   // Additional feeds: directory and 3-of-3 RPC reads verified 2026-11-25.
   FBTC: {"asset": "FBTC", "proxy": "0x75A0d3264a949C2C920d7F25Df174af1FaF73399", "feedName": "FBTC Proof of Reserves", "issuer": "Ignition", "heartbeat": 86400, "reserveUnit": "BTC"},
   LBTC: {"asset": "LBTC", "proxy": "0x70c158c7731Da2C14BC84aEBa39A4FF703DDc7d2", "feedName": "Lombard Proof of Reserves", "issuer": "Lombard", "heartbeat": 86400, "reserveUnit": "BTC"},
@@ -215,6 +226,9 @@ export async function handleReserveAttestation(query: Record<string, string | un
   const updatedIso = new Date(data.updatedAt * 1000).toISOString();
   const ageS = Math.max(0, Math.floor(Date.now() / 1000) - data.updatedAt);
   const stale = ageS > heartbeat;
+  if (stale && feed.refuseStale) {
+    throw upstreamUnavailable("STALE_ATTESTATION", `the ${feed.asset} feed's latest attestation is ${Math.floor(ageS / 3600)}h old, older than its ${Math.floor(heartbeat / 3600)}h heartbeat; refusing to serve a stale reserve`);
+  }
   const asOf = new Date().toISOString();
   const human = Number(data.answer) / 10 ** decimals;
   let ethereumSupply: number | null = null;
