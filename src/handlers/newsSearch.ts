@@ -4,7 +4,7 @@ import {envelope,makeReceipt} from '../core/receipt';
 import {saveReceipt} from '../core/storage';
 import {withinNewsDeadline,NewsItem,fetchIndex,hnSearchUrl,parseBbcRss,parseHn,parsedSource,rankHn,rankRecent,topicMatches} from './newsSources';
 import {BBC_CATEGORIES,headlineFeed,headlineKeywords,anyHeadlineKeyword} from './newsHeadlineFeeds';
-import {relaxedSearchHn,referenceSearchUrl,parseReferenceSearch,REFERENCE_INDEX,DISPATCH_INDEX} from './newsSearchFallback';
+import {relaxedSearchHn,closeEnough,referenceSearchUrl,parseReferenceSearch,REFERENCE_INDEX,DISPATCH_INDEX} from './newsSearchFallback';
 export const INTENT='NEWS_SEARCH_GENERAL';
 export function capBytes(text:string,maxBytes:number):string{
  const enc=new TextEncoder();if(enc.encode(text).length<=maxBytes)return text;
@@ -40,9 +40,11 @@ export async function handleNewsSearch(query:Record<string,string|undefined>):Pr
  const unique=(items:NewsItem[])=>{const seen=new Set<string>();return items.filter(i=>{if(seen.has(i.url))return false;seen.add(i.url);return true;});};
  let selected=unique(exact),scope='exact title keyword match in named sources';
  if(!selected.length){
+  // Relevance bar for closest items lives in closeEnough (newsSearchFallback): max(2,ceil(n/2)) shared words incl. one non-generic word.
+  const sharesTwo=(i:NewsItem)=>closeEnough(words,i.title);
   const storyClosest=rankHn(stories.closest.filter(eligible)).map(i=>({...i,index:SEARCH_INDEX}));
-  const overlap=rankRecent([...feedItems,...dispatches,...refs].filter(i=>anyHeadlineKeyword(words,i.title)));
-  selected=unique([...storyClosest,...overlap]).slice(0,10);scope='closest match only: any query keyword, story search widened to365days and ranked by points; current feeds and reference pages by date. Not an exact match';
+  const overlap=rankRecent([...feedItems,...dispatches,...refs].filter(sharesTwo));
+  selected=unique([...storyClosest,...overlap]).slice(0,10);scope='closest match only: items sharing at least half of the query keywords (minimum two) including a non-generic one, story search widened to365days and ranked by points; current feeds and reference pages by date. Not an exact match';
  }
  const storyOk=stories.captures.some(c=>parsedSource(c.result,parseHn)!==null);
  if(!storyOk&&referenceItems===null&&dispatchItems===null&&!feedCaptures.some(f=>f.items!==null))throw upstreamUnavailable('NEWS_INDEXES_UNREACHABLE','all named search sources failed; no answer is guessed');
@@ -55,7 +57,7 @@ export async function handleNewsSearch(query:Record<string,string|undefined>):Pr
  const receipt=makeReceipt(INTENT,strictUrl,evidence,'named-source search with disclosed closest matches');receipt.fetched_at=fetchedAt;
  try{await withinNewsDeadline(saveReceipt(receipt,evidence),sourceDeadline+450);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
  const details=selected.map(i=>({title:i.title,url:i.url,date:i.published,date_kind:(i as NewsItem&{date_kind?:string}).date_kind??'source publication time',source:i.points!==null?SEARCH_INDEX:i.index,points:i.points}));
- const lead=selected.length?(exact.length?'Exact title keyword matches. ':'Closest match only, not an exact answer to the full query. ')+details.slice(0,3).map(i=>`"${i.title}" (${i.date}, ${i.source}, ${i.date_kind}) ${i.url}`).join('; '):'No usable keyword match found in the named sources. Sources searched: '+indexes.join('; ')+'; zero matches.';
+ const lead=selected.length?(exact.length?'Exact title keyword matches. ':'')+details.slice(0,3).map(i=>`"${i.title}" (${i.date}, ${i.source}, ${i.date_kind}) ${i.url}`).join('; ')+'.':'No usable keyword match found in the named sources. Sources searched: '+indexes.join('; ')+'; zero matches.';
  const answer=lead+' Scope: '+scope+'. Reference pages are background, not news articles. Feed cache up to60seconds; original acquisition times retained in receipt. Named sources only, never comprehensive news coverage.'+(unavailable.length?' Degraded: '+unavailable.join('; ')+' unavailable.':'');
  return envelope(INTENT,{brief,result_count:selected.length,hn_window_days:stories.captures.length>1?365:7,sources:indexes,match_scope:scope,results:details,urls:details.map(i=>i.url)},receipt,{answer,verdict:'verified',confidence:exact.length?0.8:0.5,source:indexes.join(' + ')});
 }
