@@ -1,3 +1,4 @@
+import {triageSignals,triagePriority,PRIORITY_RULE} from './triageSignals';
 import{TenMinuteObservation}from'./tenMinuteObservation';
 import {queryFallback} from '../core/queryFallback';
 // CVE_LOOKUP_CVSS: real CVSS v3 assessments from the published CVE record.
@@ -205,6 +206,7 @@ async function loadVulnTriage(query: Record<string, string | undefined>): Promis
   const id = query.cve_id?.trim().toUpperCase();
   if (!id) throw badRequest("MISSING_PARAM", "cve_id is required");
   if (!/^CVE-\d{4}-\d{4,19}$/.test(id)) throw badRequest("INVALID_CVE", "cve_id must have CVE-YYYY-NNNN format");
+  const signalsPending=triageSignals(id);
   const nvd = `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${id}`;
   const mitre = `https://cveawg.mitre.org/api/cve/${id}`;
   const nvdEnabled = process.env.CVE_NVD_ENABLED === "true";
@@ -229,8 +231,11 @@ async function loadVulnTriage(query: Record<string, string | undefined>): Promis
   // Source order keeps the NVD primary assessment first when NVD served one.
   const winner = candidates[0];
   const chosen = winner.assessment;
+  const signals=await signalsPending;
+  const {raw_body:kevRaw,...kevPublic}=signals.kev,{raw_body:epssRaw,...epssPublic}=signals.epss;
+  const priority=triagePriority(chosen.score,signals.kev.kev_listed,signals.epss.epss_probability);
   const asOf = new Date().toISOString();
-  const evidence = JSON.stringify({ cve_id: id, as_of: asOf, selected: chosen, nvd_enabled: nvdEnabled,
+  const evidence = JSON.stringify({ triage_signals:signals,priority,priority_rule:PRIORITY_RULE,cve_id: id, as_of: asOf, selected: chosen, nvd_enabled: nvdEnabled,
     source_policy: nvdEnabled ? "NVD explicitly enabled; aggregate egress ownership required" : "NVD disabled; published CVE record only, degraded single-source coverage",
     contract_note: "cvss_base_score is the published CVSS v3.1 base score; not an EPSS probability or percentile",
     sources: records.map((r) => ({ url: r.url, assessment: r.assessment, raw_body: r.raw, fetched_at: r.fetchedAt })),
@@ -245,10 +250,10 @@ async function loadVulnTriage(query: Record<string, string | undefined>): Promis
   }
   const assessmentText = candidates.map((c) => `${c.assessment.assessor}: ${c.assessment.score}`).join("; ");
   return envelope(TRIAGE_INTENT, { cve_id: id, cvss_base_score: chosen.score, severity: cvssSeverity(chosen.score),
-    cvss_version: chosen.version, vector: chosen.vector, description: winner.description, published: winner.published,
+    kev_listed:signals.kev.kev_listed,kev_date_added:signals.kev.kev_date_added,kev_required_action:signals.kev.kev_required_action,epss_probability:signals.epss.epss_probability,epss_percentile:signals.epss.epss_percentile,epss_date:signals.epss.epss_date,triage_sources:{kev:kevPublic,epss:epssPublic},priority,priority_rule:PRIORITY_RULE,cvss_version: chosen.version, vector: chosen.vector, description: winner.description, published: winner.published,
     references: winner.references, as_of: asOf }, receipt, {
     answer: `${id}: CVSS v3.1 base score ${chosen.score}/10 (${cvssSeverity(chosen.score)}), ${chosen.assessor}. ` +
-      `Vector: ${chosen.vector}. Published v3.1 assessments: ${assessmentText}. ` +
+      `CISA KEV status: ${signals.kev.kev_listed===null?'unavailable':signals.kev.kev_listed?'listed':'not listed in checked catalog'}. EPSS probability ${signals.epss.epss_probability??'unavailable'}, percentile ${signals.epss.epss_percentile??'unavailable'}, score date ${signals.epss.epss_date??'unavailable'}. Derived priority ${priority}. ${PRIORITY_RULE} Vector: ${chosen.vector}. Published v3.1 assessments: ${assessmentText}. ` +
       (candidates.length === 1 ? "Only one usable CVSS v3.1 assessment was available; coverage is degraded. " : "") +
       (!nvdEnabled ? "NVD access is disabled by source policy. " : "") +
       "This is a published base severity score: not an EPSS probability, not a prediction of exploitation, not your environment's risk. " +
@@ -262,5 +267,5 @@ export async function handleVulnTriage(query:Record<string,string|undefined>):Pr
  const filled=queryFallback(query,'cve_id',text=>text.match(/CVE-\d{4}-\d{4,}/i)?.[0].toUpperCase());
  const id=filled.cve_id?.trim().toUpperCase();
  if(!id||!/^CVE-\d{4}-\d{4,19}$/.test(id))return loadVulnTriage(filled);
- return triageCache.get(id+':nvd:'+(process.env.CVE_NVD_ENABLED==='true'),()=>loadVulnTriage(filled));
+ return triageCache.get(id+':nvd:'+(process.env.CVE_NVD_ENABLED==='true'),()=>loadVulnTriage(filled),result=>{const sources=result.triage_sources as any;return Math.min(sources?.kev?.kev_status==='available'?Date.parse(sources.kev.kev_catalog_released)+7*86400000:Infinity,sources?.epss?.epss_status==='available'?Date.parse(sources.epss.epss_date)+3*86400000:Infinity);});
 }
