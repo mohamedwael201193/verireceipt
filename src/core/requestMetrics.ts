@@ -1,5 +1,6 @@
 import { targetShapeOf } from '../handlers/packageSecurity';
 import {sanitizeAnswerClass} from "./answerClass";
+import {refusalParamClass,REFUSAL_INTENTS} from "./refusalClass";
 import { hostClassOf } from "./hostClass";
 // Fixed-label observability. Only route-owned closed enums may expose canonical values.
 // Never retain free text, URL/query strings, bodies, headers, IPs or user ids.
@@ -188,13 +189,19 @@ export function recordRequestArrival(route?: string, query?: unknown): void {
   } catch { /* observability never changes a response */ }
 }
 
-export function recordRequestCompletion(route: string | undefined, status: number, latencyMs: number, details: { query?: unknown; errorCode?: unknown; receiptId?:unknown; answerClass?:unknown } = {}): void {
+export function recordRequestCompletion(route: string | undefined, status: number, latencyMs: number, details: { query?: unknown; errorCode?: unknown; receiptId?:unknown; answerClass?:unknown; rawErrorCode?:unknown } = {}): void {
   try {
     const intent = intentFor(route), row = bucket(intent);
     const code = Number.isInteger(status) && status >= 100 && status <= 599 ? String(status) : "other";
     const latency = Number.isFinite(latencyMs) ? Math.max(0, Math.round(latencyMs * 10) / 10) : 0;
     row.completed++; row.total_latency_ms += latency; row.max_latency_ms = Math.max(row.max_latency_ms, latency);
     row.statuses[code] = (row.statuses[code] ?? 0) + 1;
+    // Emitted just before request_complete so the completion line stays the last line of a request.
+    if(status>=400&&route!==undefined&&Object.hasOwn(REFUSAL_INTENTS,route)){
+      const errorCode=typeof details.rawErrorCode==='string'?details.rawErrorCode:typeof details.errorCode==='string'?details.errorCode:'';
+      const cls=refusalParamClass(route,errorCode,details.query);
+      if(cls)console.info(JSON.stringify({event:'refusal_param_class',intent:REFUSAL_INTENTS[route],error_code:/^[A-Z][A-Z0-9_]{2,47}$/.test(errorCode)?errorCode:'OTHER_ERROR',status:code,...cls}));
+    }
     if (intent !== "other") {
       const query = details.query;
       const param_keys = query !== null && typeof query === "object" ? KNOWN_QUERY_KEYS.filter(key => Object.hasOwn(query, key)) : [];

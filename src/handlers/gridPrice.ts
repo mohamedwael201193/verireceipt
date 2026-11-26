@@ -238,6 +238,24 @@ export function resolveNaturalZoneAlias(spelling: string): string | undefined {
     : undefined;
 }
 
+/**
+ * Coarse class of a requested node for refusal logging only: a fixed label, never the input.
+ * default_used is true when the spelling names an ISO with no node (answered for a disclosed default hub).
+ */
+export function gridRefusalClass(raw: string | undefined): { node_class: string; default_used: boolean } {
+  const key = (raw ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  if (!key) return { node_class: "other", default_used: false };
+  const systemRequest = Object.hasOwn(CAISO_SYSTEM_REQUESTS, key) || Object.hasOwn(MISO_SYSTEM_REQUESTS, key) || Object.hasOwn(ERCOT_SYSTEM_REQUESTS, key);
+  if (systemRequest) return { node_class: "iso_token", default_used: true };
+  const hub = resolveCaisoHubAlias(key);
+  if (hub !== undefined) return { node_class: /np15/i.test(hub) ? "np15" : /sp15/i.test(hub) ? "sp15" : /zp26/i.test(hub) ? "zp26" : "other", default_used: false };
+  if (/\bnp15\b|^[a-z0-9_-]*np15/.test(key)) return { node_class: "np15", default_used: false };
+  if (/\bsp15\b|^[a-z0-9_-]*sp15/.test(key)) return { node_class: "sp15", default_used: false };
+  if (/\bzp26\b|^[a-z0-9_-]*zp26/.test(key)) return { node_class: "zp26", default_used: false };
+  if (/^(?:nyiso|pjm|isone|iso-ne|iso ne|spp|elering|ieso|aeso|caiso|miso|ercot)$/.test(key)) return { node_class: "iso_token", default_used: false };
+  return { node_class: "other", default_used: false };
+}
+
 /** Canonical CAISO hub for a hub short name, or undefined. */
 export function resolveCaisoHubAlias(spelling: string): string | undefined {
   const key = spelling.trim().replace(/\s+/g, " ").toLowerCase();
