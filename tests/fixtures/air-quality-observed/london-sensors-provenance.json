@@ -1,0 +1,7 @@
+{
+  "source_url": "https://data.sensor.community/airrohr/v1/filter/box=51.417467,-0.272292,51.597333,0.016692",
+  "raw_body_sha256": "6ab10792124a6a9b481e630f5378c15d7071676e7686bf768ed97e2b574a9f7d",
+  "source_row_count": 54,
+  "eligible_sensor_count": 6,
+  "transformation": "Only selected outdoor particulate sensor necessary fields retained. Raw source and other sensor rows discarded; fixture is transformed evidence, not exact provider bytes."
+}

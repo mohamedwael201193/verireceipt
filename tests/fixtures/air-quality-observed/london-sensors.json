@@ -1,0 +1,1 @@
+[{"sensor":{"id":43419,"sensor_type":{"name":"SDS011"}},"location":{"latitude":"51.514","longitude":"-0.178","indoor":0},"timestamp":"2026-11-26 01:45:02","sensordatavalues":[{"value_type":"P1","value":"51.13"},{"value_type":"P2","value":"23.30"}]}]

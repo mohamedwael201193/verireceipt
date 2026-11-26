@@ -25,6 +25,8 @@
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
+import {aqiCategory,particulateSummary} from "./airQualityParticulate";
+import {readAirSensors} from "./airQualitySensors";
 import { readPublicBody } from "../core/publicSource";
 
 const SOURCE_TIMEOUT_MS = 6000;
@@ -74,7 +76,7 @@ export function parseAirQuality(raw: string, expected?: { lat: number; lon: numb
   if (us < 0 || latitude === null || Math.abs(latitude) > 90 || longitude === null || Math.abs(longitude) > 180 ||
       !validStamp || Date.now() - stamp > 3 * 3600_000 || stamp > Date.now() + 300_000 ||
       d.utc_offset_seconds !== 0 || interval === null || interval <= 0 || interval > 3600 || units?.us_aqi !== "USAQI" ||
-      (cur.european_aqi != null && (num(cur.european_aqi) === null || Number(cur.european_aqi) < 0)) ||
+      (cur.european_aqi != null && (num(cur.european_aqi) === null || Number(cur.european_aqi) < 0 || units?.european_aqi !== "EAQI")) ||
       pollutants.some(key => cur[key] != null && (num(cur[key]) === null || Number(cur[key]) < 0 || units?.[key] !== "μg/m³"))) {
     throw unprocessable("INVALID_AQI_OBSERVATION", "invalid, stale, future-dated or wrong-unit current model observation");
   }
@@ -114,10 +116,14 @@ export async function handleAirQuality(query: Record<string, string | undefined>
   } catch {
     throw upstreamUnavailable("OPEN_METEO_UNREACHABLE", "the Open-Meteo air-quality API could not be reached");
   }
+  const sensors=await readAirSensors(lat,lon);
+  // Validate after independent read too, so the added wait cannot serve stale model data.
   const r = parseAirQuality(body, { lat, lon });
+  const pm=particulateSummary(r.pm2_5,r.pm10);
   const acceptable = r.us_aqi <= ACCEPTABLE_US_AQI;
   const asOf = new Date().toISOString();
   const evidence = JSON.stringify({ lat, lon, as_of: asOf, reading: r, acceptable,
+    observed_sensor_section:sensors,model_pm_comparison:pm,aqi_category:aqiCategory(r.us_aqi),
     source_policy: "Open-Meteo air-quality current block only; model blend at nearest grid cell, model-derived current estimate, not a measured station value, never a ground-station claim",
     raw_bodies: { current: body }, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, url, evidence, "Open-Meteo single source; current block only");
@@ -131,9 +137,15 @@ export async function handleAirQuality(query: Record<string, string | undefined>
     `Current US AQI ${r.us_aqi} (EPA scale) at grid cell ${r.grid_latitude}, ${r.grid_longitude}` +
     ` (nearest cell to ${lat}, ${lon}), upstream hour ${r.time}Z — ${acceptable ? "acceptable (at or below 100, EPA moderate or better)" : "above 100 (unhealthy for sensitive groups or worse)"}.` +
     ` PM2.5 ${r.pm2_5 ?? "n/a"} µg/m³, PM10 ${r.pm10 ?? "n/a"} µg/m³, NO2 ${r.nitrogen_dioxide ?? "n/a"} µg/m³, O3 ${r.ozone ?? "n/a"} µg/m³.` +
-    ` These are Open-Meteo modelled current conditions (CAMS blend) at the returned grid cell, interval ${r.interval_seconds} seconds, not a ground-station measurement. This current estimate may be derived from model output.`;
+    ` These are Open-Meteo modelled current conditions (CAMS blend) at the returned grid cell, interval ${r.interval_seconds} seconds, not a ground-station measurement. This current estimate may be derived from model output. Category ${aqiCategory(r.us_aqi)}. Dominant particulate ${pm.dominant_pollutant??"unknown"}, PM2.5-vs-PM10 snapshot equivalent only, not the dominant pollutant of the provider AQI. `+
+    (sensors.observed?`Independent observed sensor ${sensors.observed.sensor_id}, ${sensors.observed.distance_km.toFixed(2)}km away, ${sensors.eligible_sensor_count} eligible outdoor sensors, timestamp ${sensors.observed.observed_at}: PM2.5 ${sensors.observed.pm2_5_ugm3}, PM10 ${sensors.observed.pm10_ugm3} µg/m³. Indicative PM-only equivalent ${sensors.observed.indicative_pm_aqi??"unknown"}, not EPA daily AQI or NowCast; not interchangeable with model AQI. ${sensors.attribution}.`:`Independent observed sensor section is null (${sensors.status}); no eligible reading asserted within 10km and 20 minutes. Model is not an observed station substitute.`);
   return envelope(INTENT, {
     aqi: r.us_aqi,
+    aqi_category:aqiCategory(r.us_aqi),
+    dominant_pollutant:pm.dominant_pollutant,dominant_pollutant_scope:pm.dominant_pollutant_scope,
+    particulate_snapshot_equivalent:pm,
+    observed:sensors.observed,observed_status:sensors.status,observed_search:{radius_km:sensors.search_radius_km,max_age_seconds:sensors.max_age_seconds,eligible_sensor_count:sensors.eligible_sensor_count,source_url:sensors.source_url,fetched_at:sensors.fetched_at,attribution:sensors.attribution},
+    comparison_scope:"Top-level AQI is model-derived; independent citizen PM snapshot is not a regulatory measurement, daily AQI or NowCast. Different locations, averaging periods, pollutants and methods; no merged AQI.",
     aqi_scale: "US EPA",
     acceptable,
     european_aqi: r.european_aqi,
