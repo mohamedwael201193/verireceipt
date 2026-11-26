@@ -1,9 +1,9 @@
 // SERVER_UPTIME_MONITOR_GENERAL — GET /v1/server-uptime?host=<hostname>
 //
-// Zero-LLM. A single reachability measurement for a public host,
+// Zero-LLM. A short-window three-probe reachability sample for a public host,
 // receipted. Honest scope, stated in every answer: this is
 // point-in-time reachability from this server's vantage, NOT an uptime
-// percentage or history — one observation cannot measure uptime.
+// percentage or history — three short-window observations cannot measure historical uptime.
 // SSRF hardening lives in ssrfGuard.ts.
 import { ApiError, upstreamUnavailable, unprocessable } from "../core/errors";
 import { envelope, makeReceipt, sha256Hex } from "../core/receipt";
@@ -52,34 +52,36 @@ export async function handleServerUptime(query: Record<string, string | undefine
     });
   }
   const checkedAt = new Date().toISOString();
-  let status = 0; let latency = -1; let reachableNow = false; let errorClass = "";
-  try {
-    const m = await measureGet(target, TIMEOUT_MS, UA);
-    status = m.status; latency = m.latency_ms; reachableNow = true;
-  } catch (e) {
-    reachableNow = false;
-    errorClass = e instanceof Error && e.name === "AbortError" ? "timeout" : "connect-failure";
+  const probes:{checked_at:string;reachable_now:boolean;http_status:number|null;latency_ms:number|null;error:string|null}[]=[];
+  for(let attempt=0;attempt<3;attempt++){
+    if(attempt>0)await new Promise(r=>setTimeout(r,250));
+    const at=new Date().toISOString();
+    try{const m=await measureGet(target,TIMEOUT_MS,UA);probes.push({checked_at:at,reachable_now:true,http_status:m.status,latency_ms:m.latency_ms,error:null});}
+    catch(e){probes.push({checked_at:at,reachable_now:false,http_status:null,latency_ms:null,error:e instanceof Error&&e.name==='AbortError'?'timeout':'connect-failure'});}
   }
+  const last=probes[probes.length-1],status=last.http_status,latency=last.latency_ms,reachableNow=last.reachable_now,errorClass=last.error;
+  const successful=probes.filter(p=>p.reachable_now),latencies=successful.map(p=>p.latency_ms!).sort((a,b)=>a-b);
+  const median=latencies.length?latencies.length%2?latencies[Math.floor(latencies.length/2)]:(latencies[latencies.length/2-1]+latencies[latencies.length/2])/2:null;
+  const sample={probe_count:3,probe_successes:successful.length,median_latency_ms:median,sample_started_at:checkedAt,sample_ended_at:new Date().toISOString(),sample_scope:'short-window sample from one server vantage; successes mean HTTP response, including error status; median is successful-probe header latency only; not an SLA, uptime percentage or history'};
   const evidence = JSON.stringify({ host: target.hostname, checked_at: checkedAt,
     resolved_addresses: target.addresses, port: target.port,
-    measured: { reachable_now: reachableNow, http_status: status || null, latency_ms: latency >= 0 ? latency : null, error: errorClass || null },
-    vantage: "point-in-time reachability from this server; NOT an uptime percentage or history",
+    measured: { reachable_now: reachableNow, http_status: status || null, latency_ms: latency, error: errorClass || null },
+    probes,sample,vantage: "short-window reachability sample from this server; NOT an SLA, uptime percentage or history",
     raw_bodies: {}, fetched_at: checkedAt });
-  const receipt = makeReceipt(INTENT, target.url, evidence, "single reachability measurement from server vantage; SSRF-guarded public targets only");
+  const receipt = makeReceipt(INTENT, target.url, evidence, "three spaced reachability measurements from server vantage; SSRF-guarded public targets only");
   receipt.fetched_at = checkedAt;
   try {
     await saveReceipt(receipt, evidence);
   } catch {
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
-  const answer = reachableNow
-    ? `${target.hostname} (port ${target.port}) is reachable now — HTTP ${status} in ${latency} ms — measured once from this server at ${checkedAt}. Point-in-time reachability only: this is not an uptime percentage or history, and the host may answer differently from other vantages.`
-    : `${target.hostname} (port ${target.port}) did not answer within ${TIMEOUT_MS / 1000}s (${errorClass}), measured once from this server at ${checkedAt}. Point-in-time from one vantage: the host may be up and reachable from elsewhere.`;
+  const answer=`${target.hostname} (port ${target.port}): ${sample.probe_successes} successes of 3 spaced probes in a short-window sample from ${sample.sample_started_at} through ${sample.sample_ended_at}. Success means an HTTP response, including error statuses; median successful-probe header latency ${median===null?'unknown':median+' ms'}. Last probe ${reachableNow?`is reachable now, HTTP ${status} in ${latency} ms`:`did not answer within ${TIMEOUT_MS/1000}s (${errorClass}); the host may be up and reachable from elsewhere`}. This is not an uptime percentage or history, and not an SLA. One server vantage, no historical availability claim.`;
   return envelope(INTENT, {
     host: target.hostname,
+    ...sample,
     reachable_now: reachableNow,
     http_status: status || null,
-    latency_ms: latency >= 0 ? latency : null,
+    latency_ms: latency,
   }, receipt, { answer, verdict: "verified", confidence: 0.85,
-    source: `measured from this server at ${checkedAt}; single probe, redirects not followed` });
+    source: `measured from this server at ${checkedAt}; three spaced probes, redirects not followed` });
 }
