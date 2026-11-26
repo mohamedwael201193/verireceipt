@@ -139,5 +139,66 @@
     "url": "https://frame.work/terms-of-sale",
     "sectionHash": "f082aa174242e21a970b190538454ce828e713976d2d441759c2b667be86dac9",
     "accept": "text/html"
+  },
+  {
+    "key": "samsung",
+    "file": "samsung",
+    "name": "Samsung US",
+    "days": 15,
+    "start": "Most items bought from Samsung.com",
+    "end": "General Return Requirements",
+    "quotes": [
+      "Most items bought from Samsung.com or through the Shop Samsung App can be returned within 15 days of delivery",
+      "After you request a return, you have another 15 days to ship the product back",
+      "some products carry a restocking fee of up to 15%"
+    ],
+    "conditions": [
+      "Standard window: 15 days from delivery for most items bought from Samsung.com or the Shop Samsung App, then 15 days from the return request to ship the product back.",
+      "Restocking fee varies by category: 5% mobile and wearables (S Series and A Series phones exempt), 15% home appliances, 5% TVs, monitors and audio; waived if damaged or defective. Damage or defects must be reported within 5 days of delivery (home appliances, TVs, monitors and audio: or 2 days after installation, whichever is later).",
+      "Products bought from other retailers or picked up at a partner retailer follow those retailers' policies. See the quoted policy section."
+    ],
+    "window_basis": "most items from delivery (15 days), then 15 days to ship back; restocking fee and category rules not calculated",
+    "url": "https://order-help.us.samsung.com/articles/returns-refunds/what-is-samsungs-return-policy/669e3173cd7d5a05a5318406",
+    "sectionHash": "1a1438e8dd3a055d69bcf318c4710c65f4e24f1cad352dc141bc6d9ce2248b7f"
+  },
+  {
+    "key": "gamestop",
+    "file": "gamestop",
+    "name": "GameStop US",
+    "days": 15,
+    "start": "Return Timeframes",
+    "end": "GameStop Collectibles Vending Machine Purchases",
+    "quotes": [
+      "New Products (Unopened): Return within 15 days of purchase.",
+      "Pre-Owned Products: Full refund within 7 days",
+      "PCs, PC Components and Accessories, Laptops, TVs, and Monitors: Return within 7 days"
+    ],
+    "conditions": [
+      "Standard window: 15 days from purchase for new unopened products (software, hardware, accessories, collectibles, unworn apparel with tags).",
+      "Shorter windows: 7 days for Special or Collector editions of video game software and hardware, pre-owned products, and PCs, PC components and accessories, laptops, TVs and monitors.",
+      "Final sale items (markdown, clearance, trading cards, digital products, opened new hardware and software and others) cannot be returned; items over $500 bought online cannot be returned in store. See the quoted policy section."
+    ],
+    "window_basis": "new unopened products from purchase; collector, pre-owned and PC/TV items are 7 days; Pro membership terms not calculated",
+    "url": "https://www.gamestop.com/fullreturnpolicy/",
+    "sectionHash": "e8595fe6cded36514d5d37bebd45a709352283990ed963a43145ad9c10f5f015"
+  },
+  {
+    "key": "walgreens",
+    "file": "walgreens",
+    "name": "Walgreens US",
+    "days": 30,
+    "start": "Eligible items purchased at Walgreens or on Walgreens.com may be returned",
+    "end": "Restricted Items",
+    "quotes": [
+      "Eligible items purchased at Walgreens or on Walgreens.com may be returned or exchanged at any Walgreens store within 30 days of purchase date and must be accompanied by the original receipt or Order number.",
+      "Refunds will be issued to the original form of payment."
+    ],
+    "conditions": [
+      "Standard window: 30 days from purchase date for eligible items, at any Walgreens store, with the original receipt or order number.",
+      "Walgreens brand products carry a 100% satisfaction guarantee (return the unused portion for a full refund including shipping). Returns are subject to verification, and Walgreens may limit or refuse returns; see the quoted policy section."
+    ],
+    "window_basis": "eligible items from purchase date with receipt or order number; restricted items not calculated",
+    "url": "https://www.walgreens.com/topic/help/shophelp/returns_help_main.jsp",
+    "sectionHash": "596cfeedee6c6d74bd5c309177f7ad21d05a3d4e9b27241bc35d9ca401c3fc90"
   }
 ]

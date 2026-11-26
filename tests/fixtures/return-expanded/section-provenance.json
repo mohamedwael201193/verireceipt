@@ -47,5 +47,26 @@
     "original_raw_sha256": "00f9ca34c04099a9ef2769b212c7773ff65c3812fcb648e79d1e37e9aa014072",
     "reviewed_section_sha256": "f082aa174242e21a970b190538454ce828e713976d2d441759c2b667be86dac9",
     "fixture_kind": "EXTRACTED REVIEWED POLICY SECTION ONLY. Not a full raw HTTP response."
+  },
+  {
+    "retailer": "samsung",
+    "source_url": "https://order-help.us.samsung.com/articles/returns-refunds/what-is-samsungs-return-policy/669e3173cd7d5a05a5318406",
+    "original_raw_sha256": "628475ce3d72b2ce880ca1bb0993e06d501b0b49b546a5d77272ec23986ce10d",
+    "reviewed_section_sha256": "1a1438e8dd3a055d69bcf318c4710c65f4e24f1cad352dc141bc6d9ce2248b7f",
+    "fixture_kind": "EXTRACTED REVIEWED POLICY SECTION ONLY. Not a full raw HTTP response."
+  },
+  {
+    "retailer": "gamestop",
+    "source_url": "https://www.gamestop.com/fullreturnpolicy/",
+    "original_raw_sha256": "2cc37a8f5bba50fe8e2881330f044f640102aa6b14d40f288220a28c928623cf",
+    "reviewed_section_sha256": "e8595fe6cded36514d5d37bebd45a709352283990ed963a43145ad9c10f5f015",
+    "fixture_kind": "EXTRACTED REVIEWED POLICY SECTION ONLY. Not a full raw HTTP response."
+  },
+  {
+    "retailer": "walgreens",
+    "source_url": "https://www.walgreens.com/topic/help/shophelp/returns_help_main.jsp",
+    "original_raw_sha256": "a0bb19776637a7b0e6e55ba4a89ae762a68e9c257c72e9dff420be2e316d8d16",
+    "reviewed_section_sha256": "596cfeedee6c6d74bd5c309177f7ad21d05a3d4e9b27241bc35d9ca401c3fc90",
+    "fixture_kind": "EXTRACTED REVIEWED POLICY SECTION ONLY. Not a full raw HTTP response."
   }
 ]
