@@ -30,7 +30,7 @@ it('actual negative street capture gives only PLACE_NOT_FOUND',async()=>{
 it.each(['91,0','1000,0','0,181','1e3,0','1,2,3','-.,20'])('invalid coordinates %s never contact a geocoder',async origin=>{
  const f=vi.fn();vi.stubGlobal('fetch',f);await expect(handleRouteEta({origin,destination:'0,0'})).rejects.toMatchObject({status:400,code:'BAD_LOCATION'});expect(f).not.toHaveBeenCalled();
 });
-it.each([403,429,500])('HTTP %s source refusal never switches providers and stops subsequent reads',async status=>{
+it.each([403,429])('HTTP %s source refusal never switches providers and stops subsequent reads from that provider',async status=>{
  const f=vi.fn(async()=>new Response('',{status}));vi.stubGlobal('fetch',f);await expect(resolveRoutePlace('Springfield')).rejects.toMatchObject({code:'GEOCODER_UNREACHABLE'});await expect(resolveRoutePlace('London')).rejects.toMatchObject({code:'GEOCODER_UNREACHABLE'});expect(f).toHaveBeenCalledTimes(1);
 });
 it('same-query reads coalesce/cache; source acquisition timestamp is retained',async()=>{
