@@ -19,7 +19,7 @@ describe('exact native units, presentation only', () => {
   });
   const result = await handleOnchainMetric({ address: fixture.address, block: '100', chain });
   expect(result.answer).toContain(`held exactly 0.000000000000000001 ${symbol} (1e-9 Gwei)`);
-  expect(result.balance_wei).toBe('1');
+  expect(result.balance_wei).toBe('1');expect(result.balance_eth).toBe('0.000000000000000001');expect(result.balance_eth_unit).toBe(symbol);
   expect(result.balance_gwei).toBe(1e-9);
  });
  it.each(['balance', 'tx_count'])('replays unchanged actual evidence for %s', async metric => {
@@ -31,7 +31,7 @@ describe('exact native units, presentation only', () => {
    return new Response(source.raw[index]);
   });
   const result = await handleOnchainMetric({ address: fixture.address, block: fixture.block, metric });
-  expect(result.balance_wei).toBe(fixture.balance_wei);
+  expect(result.balance_wei).toBe(fixture.balance_wei);expect(result.balance_eth).toBe('14156.889212130289945019');expect(result.balance_eth_unit).toBe('ETH');expect(result.balance_eth_semantics).toContain('Exact decimal native-token');
   expect(result.balance_gwei).toBe(14156889212130.29);
   expect(result.tx_count).toBe(0);
   expect(result.block_hash).toBe(fixture.block_hash);
@@ -43,3 +43,4 @@ describe('exact native units, presentation only', () => {
   expect(JSON.parse(written as string)).toEqual(fixture);
  });
 });
+it.each([[0n,'0'],[1n,'0.000000000000000001'],[1000000000000000000n,'1'],[1000000000000000001n,'1.000000000000000001'],[10n**29n,'100000000000']])('balance_eth handler preserves exact %s wei',async(wei,text)=>{vi.stubGlobal('fetch',async(_u:string,o:any)=>{const q=JSON.parse(o.body);const result=q.method==='eth_chainId'?'0x1':q.method==='eth_getBlockByNumber'?{number:'0x64',hash:fixture.block_hash}:q.method==='eth_getBalance'?'0x'+wei.toString(16):'0x0';return new Response(JSON.stringify({jsonrpc:'2.0',id:1,result}));});const r=await handleOnchainMetric({address:fixture.address,block:'100',chain:'ethereum',metric:'balance'});expect(r.balance_eth).toBe(text);expect(r.balance_wei).toBe(wei.toString());expect(r.balance_eth_unit).toBe('ETH');});
