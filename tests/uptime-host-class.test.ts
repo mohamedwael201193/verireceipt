@@ -7,7 +7,7 @@ afterEach(() => { vi.restoreAllMocks(); resetRequestMetricsForTests(); });
 it.each([
   ["example.com", "public_hostname"], ["https://Example.com:443/path?x=1", "public_hostname"], ["example.com.", "public_hostname"],
   ["8.8.8.8", "ip"], ["http://1.1.1.1", "ip"], ["[2606:4700:4700::1111]", "ip"],
-  ["localhost", "private_or_blocked"], ["db.internal", "private_or_blocked"], ["printer.local", "private_or_blocked"],
+  ["localhost", "private_or_blocked"], ["a.localhost", "private_or_blocked"], ["localhost.", "private_or_blocked"], ["db.internal.", "private_or_blocked"], ["printer.local.", "private_or_blocked"], ["db.internal", "private_or_blocked"], ["printer.local", "private_or_blocked"],
   ["127.0.0.1", "private_or_blocked"], ["10.0.0.5", "private_or_blocked"], ["169.254.169.254", "private_or_blocked"], ["[::1]", "private_or_blocked"], ["[fe80::1]", "private_or_blocked"], ["[64:ff9b::808:808]", "private_or_blocked"], ["[2002:808:808::1]", "private_or_blocked"], ["[2001:0:4136:e378::1]", "private_or_blocked"],
   ["", "other"], ["ftp://example.com", "other"], ["user:pw@example.com", "other"], ["http://", "other"], ["a".repeat(301), "other"],
 ])("classifies %s", (raw, cls) => { expect(hostClassOf(raw)).toBe(cls); });
@@ -46,4 +46,13 @@ it("other routes get no host_class", () => {
   recordRequestCompletion("/v1/dns", 200, 1, { query: { host: "example.com" } });
   recordRequestArrival("/v1/dns", { host: "example.com" });
   for (const x of rows(log)) expect(x).not.toHaveProperty("host_class");
+});
+it("a throwing host getter on request_start is never read and classifies as other", () => {
+  const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+  const q = Object.defineProperty({}, "host", { enumerable: true, get() { throw Error("GETTER_RAN"); } });
+  recordRequestArrival("/v1/server-uptime", q);
+  const r = rows(log);
+  expect(r).toHaveLength(1);
+  expect(r[0]).toMatchObject({ event: "request_start", host_class: "other" });
+  expect(JSON.stringify(r)).not.toContain("GETTER_RAN");
 });
