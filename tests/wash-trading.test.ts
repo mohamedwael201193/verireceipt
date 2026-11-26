@@ -271,7 +271,7 @@ describe("source failure classes through the real public-source reader", () => {
       vi.stubGlobal("fetch", async () => impl());
       await err(handleWashTrading({ subject: POOL }), 502, code);
       const lines = classLines(info);
-      expect(lines).toEqual([{ event: "wash_source_failure", class: cls }]);
+      expect(lines).toEqual([{ event: "wash_source_failure", step: "search", class: cls }]);
       expect(JSON.stringify(info.mock.calls)).not.toContain(POOL);
       expect(getUpstreamsSnapshot().geckoterminal?.last_error).toBe(code === "UPSTREAM_RATE_LIMITED" ? "UPSTREAM_RATE_LIMITED" : "INDEXER_UNREACHABLE");
       vi.unstubAllGlobals();
@@ -287,27 +287,50 @@ describe("source failure classes through the real public-source reader", () => {
       await vi.advanceTimersByTimeAsync(2600);
       const e: any = await p;
       expect(e).toBeInstanceOf(ApiError); expect(e.code).toBe("TRADE_SOURCE_UNREACHABLE");
-      expect(classLines(info)).toEqual([{ event: "wash_source_failure", class: "timeout" }]);
+      expect(classLines(info)).toEqual([{ event: "wash_source_failure", step: "search", class: "timeout" }]);
     } finally { vi.useRealTimers(); vi.unstubAllGlobals(); }
   });
   it("our own start budget exhaustion is labelled budget and stays rate limited", async () => {
     setWashFetchForTests(async () => { throw Object.assign(new Error("x"), { status: 429 }); });
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     await err(handleWashTrading({ subject: POOL }), 502, "UPSTREAM_RATE_LIMITED");
-    expect(classLines(info)).toEqual([{ event: "wash_source_failure", class: "budget" }]);
+    expect(classLines(info)).toEqual([{ event: "wash_source_failure", step: "search", class: "budget" }]);
   });
   it("an out-of-set reader label (body_read) is logged as class other, never the raw label", async () => {
     setWashFetchForTests(null); resetUpstreamsForTests();
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     vi.stubGlobal("fetch", async () => new Response(new ReadableStream({ pull(c) { c.error(new Error("broken body")); } }), { status: 200 }));
     await err(handleWashTrading({ subject: POOL }), 502, "TRADE_SOURCE_UNREACHABLE");
-    expect(classLines(info)).toEqual([{ event: "wash_source_failure", class: "other" }]);
+    expect(classLines(info)).toEqual([{ event: "wash_source_failure", step: "search", class: "other" }]);
     vi.unstubAllGlobals();
   });
   it("an unlabelled failure is class other", async () => {
     setWashFetchForTests(async () => { throw new Error("weird"); });
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     await err(handleWashTrading({ subject: POOL }), 502, "TRADE_SOURCE_UNREACHABLE");
-    expect(classLines(info)).toEqual([{ event: "wash_source_failure", class: "other" }]);
+    expect(classLines(info)).toEqual([{ event: "wash_source_failure", step: "search", class: "other" }]);
+  });
+});
+
+describe("wash_source_failure step label", () => {
+  const lines = (spy: any) => spy.mock.calls.map((c: any[]) => { try { return JSON.parse(String(c[0])); } catch { return {}; } }).filter((o: any) => o.event === "wash_source_failure");
+  it("a failing /search/pools call is step search; a failing /trades call after a good search is step trades", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    setWashFetchForTests(async (url) => { if (url.includes("/search/pools")) throw new Error("x"); return T_ORGANIC; });
+    await err(handleWashTrading({ subject: POOL }), 502, "TRADE_SOURCE_UNREACHABLE");
+    expect(lines(info)).toEqual([{ event: "wash_source_failure", step: "search", class: "other" }]);
+    info.mockClear();
+    setWashFetchForTests(async (url) => { if (url.endsWith("/trades")) throw new Error("y"); return S_POOL; });
+    await err(handleWashTrading({ subject: POOL }), 502, "TRADE_SOURCE_UNREACHABLE");
+    expect(lines(info)).toEqual([{ event: "wash_source_failure", step: "trades", class: "other" }]);
+    expect(JSON.stringify(info.mock.calls)).not.toContain(POOL);
+  });
+  it("through the real reader: 429 only on /trades is step trades with class http_429", async () => {
+    setWashFetchForTests(null);
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubGlobal("fetch", async (u: string) => (String(u).includes("/search/pools") ? new Response(S_POOL) : new Response("slow", { status: 429 })));
+    await err(handleWashTrading({ subject: POOL }), 502, "UPSTREAM_RATE_LIMITED");
+    expect(lines(info)).toEqual([{ event: "wash_source_failure", step: "trades", class: "http_429" }]);
+    vi.unstubAllGlobals();
   });
 });

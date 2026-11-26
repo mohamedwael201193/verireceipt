@@ -85,7 +85,7 @@ async function compute(subject: string, deadlineAt: number): Promise<Computed> {
   const searchUrl = `${GECKO}/search/pools?query=${addr}`;
   let searchRaw: string;
   try { searchRaw = await get(searchUrl, Math.max(1, Math.min(2500, deadlineAt - Date.now()))); }
-  catch (e) { throw sourceFailure(e); }
+  catch (e) { throw sourceFailure(e, "search"); }
   const pools: any[] = parseJson(searchRaw)?.data;
   if (!Array.isArray(pools)) throw upstreamUnavailable("INVALID_SOURCE_BODY", "pool search returned no data array; no answer is guessed");
   const id = (p: any) => (typeof p?.id === "string" ? p.id.toLowerCase() : "");
@@ -108,7 +108,7 @@ async function compute(subject: string, deadlineAt: number): Promise<Computed> {
   const tradesUrl = `${GECKO}/networks/${network}/pools/${pool}/trades`;
   let tradesRaw: string;
   try { tradesRaw = await get(tradesUrl, Math.max(1, Math.min(3500, deadlineAt - Date.now()))); }
-  catch (e) { throw sourceFailure(e); }
+  catch (e) { throw sourceFailure(e, "trades"); }
   const rows: any[] = parseJson(tradesRaw)?.data;
   if (!Array.isArray(rows)) throw upstreamUnavailable("INVALID_SOURCE_BODY", "trades source returned no data array; no answer is guessed");
   let unpriced = 0;
@@ -130,12 +130,12 @@ async function compute(subject: string, deadlineAt: number): Promise<Computed> {
 }
 
 const FAILURE_CLASSES = new Set(["http_403", "http_429", "http_4xx", "http_5xx", "transport", "timeout"]);
-function sourceFailure(e: unknown): Error {
+function sourceFailure(e: unknown, step: "search" | "trades"): Error {
   const budget = (e as any)?.status === 429; // this process's own start budget, not the source
   const label = publicSourceFailure(e);
   const cls = budget ? "budget" : FAILURE_CLASSES.has(label) ? label : "other";
   const limited = budget || cls === "http_429";
-  console.info(JSON.stringify({ event: "wash_source_failure", class: cls }));
+  console.info(JSON.stringify({ event: "wash_source_failure", step, class: cls }));
   recordUpstreamError("geckoterminal", limited ? "UPSTREAM_RATE_LIMITED" : "INDEXER_UNREACHABLE");
   return upstreamUnavailable(limited ? "UPSTREAM_RATE_LIMITED" : "TRADE_SOURCE_UNREACHABLE", "GeckoTerminal trade source unavailable; no answer is guessed");
 }
