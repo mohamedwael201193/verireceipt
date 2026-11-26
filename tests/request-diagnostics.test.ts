@@ -99,7 +99,7 @@ it.each([['/v1/sla-compliance?service=PRIVATE_SERVICE&period=PRIVATE_PERIOD',200
 });
 
 it.each([
- ['/v1/vendor-verify?vendor=PRIVATE_VENDOR&vat_number=PRIVATE_VAT',400,'INVALID_VAT','VENDOR_VERIFY_GENERAL',['vendor','vat_number']],
+ ['/v1/vendor-verify?vat_number=PRIVATE_VAT',400,'INVALID_VAT','VENDOR_VERIFY_GENERAL',['vat_number']],
  ['/v1/weather-history?location=PRIVATE_LOCATION&date=PRIVATE_DATE',400,'INVALID_DATE','WEATHER_FORECAST_VERIFY_GENERAL',['date','location']],
 ])('actual priority HTTP route emits private-safe diagnostics %s',async(url,status,code,intent,param_keys)=>{
  const log=vi.spyOn(console,'info').mockImplementation(()=>{}),app=buildServer();

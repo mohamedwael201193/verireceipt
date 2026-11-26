@@ -1,3 +1,4 @@
+import {withAnswerClass} from '../core/answerClass';
 import {vendorNameChecks} from './vendorNameChecks';
 import {queryFallback} from '../core/queryFallback';
 // VENDOR_VERIFY_GENERAL — GET /v1/vendor-verify?vendor=<name>&vat_number=<EU VAT>
@@ -13,8 +14,9 @@ import {queryFallback} from '../core/queryFallback';
 //
 // SOURCE: VIES REST API (ec.europa.eu/taxation_customs/vies/rest-api),
 // keyless, probed live 2026-11-23. VIES covers EU member-state VAT
-// numbers only; any other tax identifier is REFUSED (422 SCOPE), never
-// guessed against another registry.
+// numbers only; parsed nonmember prefixes are REFUSED (422 SCOPE), never
+// guessed against another registry. Malformed identifiers with a vendor trigger
+// disclosed name-only research, never VAT verification.
 //
 // SCOPE OF THE ANSWER: VIES confirms the VAT NUMBER is allocated and
 // currently valid in its member state, and returns the registered legal
@@ -61,13 +63,17 @@ export function extractVat(raw: string): { cc: string; num: string } | null {
   return [...unique.values()][0] ?? null;
 }
 
+export function vendorVatInputClass(raw:string){const normalized=raw.trim().toUpperCase().replace(/[\s.\-]/g,'');return{vat_has_country_prefix:/^[A-Z]{2}/.test(normalized),vat_length_bucket:normalized.length===0?'empty':normalized.length<4?'short':normalized.length<=16?'normal':'long'};}
+
 export async function handleVendorVerify(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   query=queryFallback(query,"vendor",text=>text);
   const vendor = query.vendor?.trim();
   if (vendor && vendor.length > 300) throw badRequest("INVALID_VENDOR", "vendor is over 300 characters");
   const vatRaw = query.vat_number?.trim();
   let parsed = vatRaw ? parseVatNumber(vatRaw) : null;
-  if (vatRaw && !parsed) throw badRequest("INVALID_VAT", "vat_number must contain a country prefix and national number");
+  const invalidVat=!!vatRaw&&!parsed;
+  const inputClass=vendorVatInputClass(vatRaw??'');
+  if (invalidVat && !vendor) throw withAnswerClass(badRequest("INVALID_VAT", "vat_number must contain a country prefix and national number"),INTENT,inputClass);
   if (!parsed) {
     const found = Object.values(query).filter((v): v is string => typeof v === "string")
       .map(extractVat).filter((v): v is { cc: string; num: string } => v !== null);
@@ -75,6 +81,7 @@ export async function handleVendorVerify(query: Record<string, string | undefine
     if (unique.size > 1) throw badRequest("AMBIGUOUS_VAT", "multiple VAT-shaped numbers found; supply vat_number explicitly");
     parsed = [...unique.values()][0] ?? null;
   }
+  if(invalidVat&&vendor)return withAnswerClass(await vendorNameChecks(vendor,inputClass.vat_has_country_prefix?'malformed':'missing_country_prefix'),INTENT,inputClass);
   if (!parsed && vendor) return vendorNameChecks(vendor);
   if (!parsed) return {
     intent:INTENT,vendor:vendor||null,vat_number:null,valid:null,receipt:null,
