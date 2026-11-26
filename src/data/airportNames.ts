@@ -19,12 +19,12 @@ function entry(code: string, label: string, ...forms: string[]): AirportNameEntr
 
 export const AIRPORT_NAMES: AirportNameEntry[] = [
   entry("ATL", "Hartsfield-Jackson Atlanta Intl", "atlanta", "hartsfield", "hartsfield jackson"),
-  entry("LAX", "Los Angeles Intl", "los angeles", "los angeles international"),
+  entry("LAX", "Los Angeles Intl", "los angeles", "los angeles international", "los angeles lax"),
   entry("ORD", "Chicago O'Hare Intl", "ohare", "o hare", "chicago ohare", "chicago o hare", "chicago"),
   entry("MDW", "Chicago Midway", "midway", "chicago midway", "chicago"),
   entry("DFW", "Dallas/Fort Worth Intl", "dallas fort worth", "fort worth", "dallas"),
   entry("DAL", "Dallas Love Field", "love field", "dallas love field", "dallas"),
-  entry("DEN", "Denver Intl", "denver"),
+  entry("DEN", "Denver Intl", "denver", "denver international"),
   entry("JFK", "New York JFK", "kennedy", "john f kennedy", "new york jfk", "new york"),
   entry("LGA", "New York LaGuardia", "laguardia", "new york laguardia", "new york"),
   entry("EWR", "Newark Liberty Intl", "newark"),

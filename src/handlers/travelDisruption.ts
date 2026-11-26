@@ -114,7 +114,14 @@ async function handleTravelDisruptionInternal(query: Record<string, string | und
   const routeInput = suppliedFlight ? suppliedFlight[2].trim() : rawInput;
   const route = /^(.+?)\s+to\s+(.+)$/i.exec(routeInput) ?? /^([a-z]{3})\s*[-/]\s*([a-z]{3})$/i.exec(routeInput);
   if(suppliedFlight&&!route)return travelUnknown(rawInput,'flight_status_unavailable');
-  const names = route ? [route[1].trim(),route[2].trim()] : [routeInput];
+  const names = route ? [route[1].trim().replace(/^from\s+/i,''),route[2].trim()] : [routeInput.replace(/^from\s+/i,'')];
+  if(suppliedFlight&&route){
+    // Compare the supplied route with a verified flight record before anything else. Without one, the airport-route path below runs as before.
+    const set=(n:string):string[]|null=>{const g=travelEndpoint(n);if(g.length)return g.map(x=>x.airport);return /^[A-Za-z]{3}$/.test(n)?[n.toUpperCase()]:null;};
+    const o=set(names[0]),d=set(names[1]);
+    const checked=await observeFlight(suppliedFlight[1],airport=>handleTravelDisruptionInternal({route_or_flight:airport}),{text:names[0]+' to '+names[1],originSet:o,destinationSet:d,airportRoute:o&&d?names[0]+' to '+names[1]:null});
+    if(checked)return checked;
+  }
   const endpointGroups=names.map(travelEndpoint);
   if(endpointGroups.some(group=>!group.length))return travelUnknown(rawInput,'coverage_unavailable');
   const resolutions=[...new Map(endpointGroups.flat().map(r=>[r.airport,r])).values()];

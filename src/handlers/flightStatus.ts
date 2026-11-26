@@ -42,7 +42,11 @@ async function persist(input:string,fields:Record<string,unknown>,evidence:Recor
  try{await saveReceipt(receipt,raw);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','flight receipt evidence could not be stored');}
  return envelope('TRAVEL_DISRUPTION_GENERAL',{route_or_flight:input,...fields},receipt,{answer,verdict:typeof fields.disrupted==='boolean'?'verified':'unverified',confidence:typeof fields.disrupted==='boolean'?0.85:0,source:typeof fields.disrupted==='boolean'?url:'No verified flight-level status; separately labeled route/airport evidence only'});
 }
-export async function observeFlight(input:string,airportStatus:(airport:string)=>Promise<Record<string,unknown>>){
+/** A caller-supplied route to compare with the provider's record. With a supplied route, observeFlight returns null when no verified provider record exists, so the caller keeps the airport-route path. */
+export interface SuppliedRoute{text:string;originSet:string[]|null;destinationSet:string[]|null;airportRoute:string|null}
+export async function observeFlight(input:string,airportStatus:(airport:string)=>Promise<Record<string,unknown>>):Promise<Record<string,unknown>>;
+export async function observeFlight(input:string,airportStatus:(airport:string)=>Promise<Record<string,unknown>>,supplied:SuppliedRoute):Promise<Record<string,unknown>|null>;
+export async function observeFlight(input:string,airportStatus:(airport:string)=>Promise<Record<string,unknown>>,supplied?:SuppliedRoute):Promise<Record<string,unknown>|null>{
  const normalized=input.replace(/\s/g,'').toUpperCase(),parts=/^([A-Z]{2,3})(\d{1,4}[A-Z]?)$/.exec(normalized)!;
  let carrier=parts[1],number=parts[2],route:any=null,routeBody:string|null=null,routeUrl:string|null=null;let routeAttempted=false;
  const attempted:string[]=[];let sourceFailure='no_verified_flight_record';
@@ -54,9 +58,24 @@ export async function observeFlight(input:string,airportStatus:(airport:string)=
    const day=new Date().toISOString().slice(0,10),got=await cache.get(url+':'+day,async()=>{const page=await read(url);parseFlightStats(page.raw,carrier,number);return page;});
    const parsed=parseFlightStats(got.raw,carrier,number);
    if(Date.now()-Date.parse(got.fetchedAt)<0||Date.now()-Date.parse(got.fetchedAt)>=60000)throw Error('flight observation expired');
-   return persist(input,{...parsed.fields,disruption_scope:'flight-level provider status',as_of:got.fetchedAt},{requested_flight:input,source_url:url,extracted_json:parsed.embedded,page_sha256:sha256Hex(got.raw),extraction:'literal __NEXT_DATA__ JSON substring, not reserialized; whole page hash retained',fetched_at:got.fetchedAt,...parsed.fields},url,got.fetchedAt,`${normalized}: ${parsed.fields.status}; departure ${parsed.fields.schedule.scheduledDepartureUTC}, ${parsed.fields.origin}-${parsed.fields.destination}. Flight-level status reported by FlightStats, not airport inference. ${parsed.fields.delay_minutes===null?'No delay minutes asserted.':`Provider delay ${parsed.fields.delay_minutes} minutes.`} Source-selected occurrence because no date was supplied. Retrieved ${got.fetchedAt}.`);
+   let matchFields:Record<string,unknown>={},matchEvidence:Record<string,unknown>={};
+   if(supplied){
+    const o=parsed.fields.origin as string,d=parsed.fields.destination as string;
+    const state:'match'|'mismatch'|'unresolved'=!supplied.originSet||!supplied.destinationSet?'unresolved':(supplied.originSet.includes(o)&&supplied.destinationSet.includes(d))?'match':'mismatch';
+    const comparison={supplied_route:supplied.text,provider_route:o+'-'+d,supplied_origin_airports:supplied.originSet,supplied_destination_airports:supplied.destinationSet,result:state};
+    if(state==='match'){matchFields={route_match:true,supplied_route:supplied.text};matchEvidence={route_comparison:comparison};}
+    if(state!=='match'){
+    let airportEvidence:Record<string,unknown>|null=null;
+    if(state==='mismatch'&&supplied.airportRoute){try{airportEvidence=await airportStatus(supplied.airportRoute);}catch(error){if((error as any)?.code==='RECEIPT_PERSIST_FAILED')throw error;}}
+    const why=state==='mismatch'?`The provider reports ${normalized} flying ${o}-${d}, which does not match the supplied route "${supplied.text}".`:`The supplied route "${supplied.text}" could not be resolved to airports, so it cannot be compared with the provider route ${o}-${d}.`;
+    const fields={disrupted:null,status:'unverified',delay_minutes:null,reason:null,reason_code:state==='mismatch'?'flight_route_mismatch':'flight_route_unresolved',disruption_scope:'flight-level unknown for the supplied route; provider record is for '+o+'-'+d+' only',airport_disrupted:airportEvidence?.disrupted??null,airport_delay_minutes:airportEvidence?.delay_minutes??null,airport_reason:airportEvidence?.reason??null,airport_statuses:airportEvidence?.airport_statuses??null,provider_route:{origin:o,destination:d,flight_date:parsed.fields.flight_date,flight_status:parsed.fields.status,flight_disrupted_for_provider_route:parsed.fields.disrupted,note:'status of the provider-matched flight on its own route, not an answer for the supplied route'},supplied_route:supplied.text,route_match:false,as_of:got.fetchedAt};
+    return persist(input,fields,{requested_flight:input,source_url:url,extracted_json:parsed.embedded,page_sha256:sha256Hex(got.raw),extraction:'literal __NEXT_DATA__ JSON substring, not reserialized; whole page hash retained',fetched_at:got.fetchedAt,route_comparison:comparison,provider_fields:parsed.fields,airport_result:airportEvidence,...fields},url,got.fetchedAt,`${normalized}: flight disruption for the supplied route is unknown, not false. ${why} The provider's own status for ${o}-${d} (${parsed.fields.status}) is kept in the evidence under provider_route and is not applied to the supplied route. ${airportEvidence?'FAA airport conditions for the supplied airports are reported separately in airport_disrupted and airport_statuses, not the flight status.':'No airport status is reported.'}`);
+    }
+   }
+   return persist(input,{...parsed.fields,disruption_scope:'flight-level provider status',as_of:got.fetchedAt,...matchFields},{...matchEvidence,requested_flight:input,source_url:url,extracted_json:parsed.embedded,page_sha256:sha256Hex(got.raw),extraction:'literal __NEXT_DATA__ JSON substring, not reserialized; whole page hash retained',fetched_at:got.fetchedAt,...parsed.fields},url,got.fetchedAt,`${normalized}: ${parsed.fields.status}; departure ${parsed.fields.schedule.scheduledDepartureUTC}, ${parsed.fields.origin}-${parsed.fields.destination}. Flight-level status reported by FlightStats, not airport inference. ${parsed.fields.delay_minutes===null?'No delay minutes asserted.':`Provider delay ${parsed.fields.delay_minutes} minutes.`} Source-selected occurrence because no date was supplied. Retrieved ${got.fetchedAt}.`);
   }catch(error){sourceFailure=publicSourceFailure(error);if(['http_403','http_429'].includes(sourceFailure)){blockedUntil=Date.now()+300000;sourceFailure='flight_source_blocked_no_bypass';}}
  }
+ if(supplied)return null;
  await getRoute();let airportEvidence:Record<string,unknown>|null=null;
  const usEndpoint=route?[route.origin,route.destination].filter((a:any)=>a.country_iso_name==='US'&&/^[A-Z]{3}$/.test(a.iata_code)):[];
  if(usEndpoint.length){try{const codes=usEndpoint.map((a:any)=>a.iata_code).join('-');airportEvidence=await airportStatus(codes);}catch(error){if((error as any)?.code==='RECEIPT_PERSIST_FAILED')throw error;}}
