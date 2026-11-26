@@ -50,6 +50,15 @@ describe("added gas chains", () => {
     expect((r.receipt as any).gas_token_spot).toBeUndefined();
     expect(req.some(u => u.includes("coinbase"))).toBe(false);
   });
+  it.each(Object.keys(RPCS))("%s: its three RPC URLs are distinct, so a 3-source quorum is three sources", async chain => {
+    expect(new Set(RPCS[chain]).size).toBe(3);
+    expect(new Set(RPCS[chain].map(u => new URL(u).hostname)).size).toBe(3);
+    const req: string[] = []; stub(same(chain, "0x3b9aca00"), req);
+    await handleGasPrice({ chain });
+    const rpcReq = req.filter(u => !u.includes("coinbase") && RPCS[chain].includes(u));
+    expect(new Set(rpcReq).size).toBe(3);
+    expect(new Set(req.filter(u => !u.includes("coinbase")).map(u => new URL(u).hostname)).size).toBe(3);
+  });
   it("mantle serves gas_price_gwei but no USD fee and says so", async () => {
     stub(same("mantle", "0x3b9aca00"));
     const r = await handleGasPrice({ chain: "mantle" });
