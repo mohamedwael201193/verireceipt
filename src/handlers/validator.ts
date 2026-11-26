@@ -315,6 +315,8 @@ export interface ValidatorDeps {
   fetchImpl?: typeof fetch;
   /** Optional enrichment budget override for decision-neutrality tests only. */
   performanceBudgetMs?:number;
+  /** Attestation-rewards optional-read budget override (test only). */
+  attestationBudgetMs?:number;
   /**
    * Request budget override in ms (test only, default 4500): bounds each
    * fetch attempt AND the whole request, retries included. Tests may
@@ -1094,7 +1096,7 @@ interface EpochBalanceDelta {
 const activePerformanceSources = new Set<string>();
 export function resetValidatorPerformanceReadsForTests() { activePerformanceSources.clear(); }
 /** Optional reads share one400ms budget. Ownership outlives a caller timeout. */
-async function readPerformanceBody(url: string, fetchImpl: typeof fetch, deadline: number, nowMs: () => number): Promise<string | undefined> {
+async function readPerformanceBody(url: string, fetchImpl: typeof fetch, deadline: number, nowMs: () => number, init?: { method: string; body: string }, maxBytes = 65536): Promise<string | undefined> {
   const host = new URL(url).origin;
   if (Date.now() >= deadline || activePerformanceSources.has(host)) return undefined;
   activePerformanceSources.add(host);
@@ -1102,7 +1104,7 @@ async function readPerformanceBody(url: string, fetchImpl: typeof fetch, deadlin
   let timer: ReturnType<typeof setTimeout> | undefined;
   const io = (async () => {
     try {
-      const res = await fetchImpl(url, {headers:{accept:"application/json"},redirect:"error",signal:controller.signal});
+      const res = await fetchImpl(url, {...(init ?? {}),headers:{accept:"application/json",...(init ? {"content-type":"application/json"} : {})},redirect:"error",signal:controller.signal});
       if (!res.ok) {
         if (res.status === 429) noteSource429(host, parseRetryAfterMs(retryAfterHeader(res)), nowMs());
         return undefined;
@@ -1114,14 +1116,14 @@ async function readPerformanceBody(url: string, fetchImpl: typeof fetch, deadlin
         while (true) {
           const part = await reader.read(); if (part.done) break;
           size += part.value.byteLength;
-          if (size > 65536) { void reader.cancel().catch(() => {}); return undefined; }
+          if (size > maxBytes) { void reader.cancel().catch(() => {}); return undefined; }
           parts.push(part.value);
         }
         body = Buffer.concat(parts).toString("utf8");
       } else {
         // Dependency-injected response doubles may expose only text().
         body = await res.text();
-        if (Buffer.byteLength(body) > 65536) return undefined;
+        if (Buffer.byteLength(body) > maxBytes) return undefined;
       }
       return Date.now() >= deadline ? undefined : body;
     } catch { return undefined; }
@@ -1140,6 +1142,7 @@ async function fetchEpochBalanceDelta(
   fetchImpl: typeof fetch,
   nowMs: () => number = Date.now,
   budgetMs=400,
+  headMemo?: { raw?: Promise<string | undefined> },
 ): Promise<EpochBalanceDelta | undefined> {
   const eligible = bases.filter((base) => {
     const cap = BEACON_SOURCE_CAPS.find((c) => c.base === base);
@@ -1156,7 +1159,8 @@ async function fetchEpochBalanceDelta(
       return raw === undefined ? undefined : JSON.parse(raw);
     } catch { return undefined; }
   };
-  const head = await getJson(`${probeBases[0]}/eth/v1/beacon/headers/finalized`);
+  const headRawText = memoHead(headMemo, `${probeBases[0]}/eth/v1/beacon/headers/finalized`, fetchImpl, deadline, nowMs);
+  const head = await (async () => { try { const r = await headRawText; return r === undefined ? undefined : JSON.parse(r) as Record<string, unknown>; } catch { return undefined; } })();
   const finalizedSlotRaw =
     (head?.data as Record<string, unknown> | undefined)?.header as Record<string, unknown> | undefined;
   const slotStr = (finalizedSlotRaw?.message as Record<string, unknown> | undefined)?.slot;
@@ -1227,10 +1231,97 @@ async function fetchEpochBalanceDelta(
   };
 }
 
+/** Shared finalized-head read; a failed read is not memoized so a later optional read may retry it. */
+async function memoHead(memo: { raw?: Promise<string | undefined> } | undefined, url: string, fetchImpl: typeof fetch, deadline: number, nowMs: () => number): Promise<string | undefined> {
+  if (!memo) return readPerformanceBody(url, fetchImpl, deadline, nowMs);
+  const pending = (memo.raw ??= readPerformanceBody(url, fetchImpl, deadline, nowMs));
+  const raw = await pending;
+  if (raw === undefined && memo.raw === pending) memo.raw = undefined;
+  return raw;
+}
+const FAR_FUTURE_EPOCH = "18446744073709551615";
+export const ATTESTATION_PERF_BUDGET_MS = 1700;
+/** The rewards reply carries the whole ideal-reward table (about 215-260 KB observed 2026-11-26), so it needs a larger cap than other optional reads. */
+export const ATTESTATION_BODY_MAX_BYTES = 320 * 1024;
+/** Skip the rewards read when the verified path already used this much of the request, bounding total latency. */
+export const ATTESTATION_START_BY_MS = 1500;
+export interface AttestationPerf {
+  epoch: string; finalizedFlag: boolean | null; head: string; target: string; source: string; inactivity: string;
+  total: string; ideal: string | null; crossChecked: boolean; sources: string[]; sourceUrls: string; evidence: string;
+}
+/**
+ * Last completed epoch's attestation rewards for one active validator, from the beacon
+ * rewards endpoint on two independent sources that must agree on the validator's own
+ * row. Keyless hosts keep rewards state only for the newest epochs, so this is the latest
+ * completed epoch the sources still serve, normally one epoch behind the finalized
+ * checkpoint, and may carry finalized=false; the flag is reported, never upgraded.
+ * Shares the optional-read ownership, cooldown, bucket and size rules of the balance probe.
+ */
+export async function fetchAttestationPerformance(
+  index: string, effectiveBalance: string, bases: string[], fetchImpl: typeof fetch,
+  nowMs: () => number = Date.now, budgetMs = ATTESTATION_PERF_BUDGET_MS, headMemo?: { raw?: Promise<string | undefined> },
+): Promise<AttestationPerf | undefined> {
+  const eligible = bases.filter((base) => {
+    const cap = BEACON_SOURCE_CAPS.find((c) => c.base === base);
+    if (cap === undefined || activeValidatorHosts.has(base) || nowMs() < (slowCooldownUntil.get(base) ?? 0) || !canStartSource(cap, nowMs())) return false;
+    if (cap.paced && !chainsafeTakeToken(nowMs())) return false;
+    return true;
+  });
+  if (eligible.length < 2) return undefined;
+  const probeBases = eligible.slice(0, 2);
+  const deadline = Date.now() + budgetMs;
+  const headRaw = await memoHead(headMemo, `${probeBases[0]}/eth/v1/beacon/headers/finalized`, fetchImpl, deadline, nowMs);
+  let slot: number;
+  try {
+    const head = JSON.parse(headRaw ?? "") as Record<string, any>;
+    const slotStr = head?.data?.header?.message?.slot;
+    if (head.execution_optimistic !== false || head.finalized !== true || typeof slotStr !== "string" || !/^\d+$/.test(slotStr)) return undefined;
+    slot = Number(slotStr);
+  } catch { return undefined; }
+  if (!Number.isSafeInteger(slot) || slot < 64) return undefined;
+  const epoch = String(Math.floor(slot / 32) - 1);
+  const read = async (base: string) => {
+    const url = `${base}/eth/v1/beacon/rewards/attestations/${epoch}`;
+    try {
+      const body = await readPerformanceBody(url, fetchImpl, deadline, nowMs, { method: "POST", body: JSON.stringify([String(index)]) }, ATTESTATION_BODY_MAX_BYTES);
+      if (body === undefined) return undefined;
+      const d = JSON.parse(body) as Record<string, any>;
+      if (d.execution_optimistic === true) return undefined;
+      const rows = d.data?.total_rewards, ideal = d.data?.ideal_rewards;
+      if (!Array.isArray(rows) || rows.length !== 1 || !Array.isArray(ideal)) return undefined;
+      const r = rows[0];
+      if (r?.validator_index !== String(index)) return undefined;
+      const num = (v: unknown) => { if (typeof v !== "string" || !/^-?\d{1,20}$/.test(v)) throw new Error("bad reward"); return BigInt(v).toString(); };
+      const row = { head: num(r.head), target: num(r.target), source: num(r.source), inactivity: num(r.inactivity) };
+      const bucket = ideal.find((x: any) => x?.effective_balance === effectiveBalance);
+      const idealTotal = bucket ? (BigInt(num(bucket.head)) + BigInt(num(bucket.target)) + BigInt(num(bucket.source))).toString() : null;
+      return { base, url, body, row, idealTotal, finalizedFlag: typeof d.finalized === "boolean" ? d.finalized as boolean : null };
+    } catch { return undefined; }
+  };
+  const got = (await Promise.all(probeBases.map(read))).filter((g): g is NonNullable<typeof g> => g !== undefined);
+  if (got.length === 0) return undefined;
+  const [a, b] = [got[0], got[got.length - 1]];
+  if (got.length === 2 && (a.row.head !== b.row.head || a.row.target !== b.row.target || a.row.source !== b.row.source || a.row.inactivity !== b.row.inactivity)) return undefined;
+  const ideal = a.idealTotal !== null && a.idealTotal === b.idealTotal ? a.idealTotal : null;
+  const crossChecked = got.length === 2;
+  const total = (BigInt(a.row.head) + BigInt(a.row.target) + BigInt(a.row.source) + BigInt(a.row.inactivity)).toString();
+  return {
+    epoch, finalizedFlag: a.finalizedFlag !== null && a.finalizedFlag === b.finalizedFlag ? a.finalizedFlag : null,
+    ...a.row, total, ideal, crossChecked, sources: got.map((g) => g.base), sourceUrls: got.map((g) => g.url).join(" "),
+    evidence: JSON.stringify({ kind: "validator_attestation_rewards", validator_index: String(index), epoch,
+      cross_checked: crossChecked, samples: got.map((g) => ({ source: g.base, url: g.url, request_body: [String(index)], raw_body: g.body })) }),
+  };
+}
+
+const NOT_MEASURED =
+  "Not measured: proposer duties and block proposals (no keyless beacon source serves proposer duties; observed 403, 404 and 501), " +
+  "sync-committee duties, attestation inclusion delay, and any history beyond two finalized epochs of balance.";
+
 async function handleValidatorObserved(
   query: Record<string, string | undefined>,
   deps: ValidatorDeps = {},
 ): Promise<Record<string, unknown>> {
+  const requestStartedAt = Date.now();
   // Official VALIDATOR_PERFORMANCE_VERIFY_GENERAL request max (live
   // devnode schema 2026-11-21: param min 0, max 1000000000).
   // miner.yaml declares this as MAX_PARAM_VALUE (machine-enforced).
@@ -1496,6 +1587,7 @@ async function handleValidatorObserved(
   // turns negative under inactivity penalties. Both samples must agree
   // across two independent state-capable sources or the section is
   // omitted; it never blocks or degrades the verified balance answer.
+  const headMemo: { raw?: Promise<string | undefined> } = {};
   let perfFields: Record<string, unknown> = {};
   let perfSentence = "";
   try {
@@ -1509,6 +1601,7 @@ async function handleValidatorObserved(
         fetchImpl,
         nowFn,
         deps.performanceBudgetMs??400,
+        headMemo,
       );
       if (perf !== undefined) {
         const perfReceipt = makeReceipt(
@@ -1556,6 +1649,63 @@ async function handleValidatorObserved(
     perfFields = {};
     perfSentence = "";
   }
+  // Performance section (additive). Exited, withdrawn, slashed and not-yet-active validators
+  // have no live attestation performance: say so and give the epochs we know. Active
+  // validators get the last completed epoch's attestation rewards when two sources agree.
+  let liveFields: Record<string, unknown> = {};
+  let liveSentence = "";
+  const measured: string[] = ["status", "slashed", "activation and exit epochs", "balance"];
+  const lastActiveEpoch = leg.exitEpoch !== FAR_FUTURE_EPOCH && leg.activationEpoch !== FAR_FUTURE_EPOCH && BigInt(leg.exitEpoch) > BigInt(leg.activationEpoch)
+    ? (BigInt(leg.exitEpoch) - 1n).toString() : null;
+  const exitedStatus = leg.status.startsWith("exited_") || leg.status.startsWith("withdrawal_");
+  if (leg.slashed || exitedStatus || leg.status.startsWith("pending_")) {
+    const why = leg.status.startsWith("pending_") && !leg.slashed
+      ? `Validator ${leg.index} is not active yet (${leg.status}), so no live performance exists; activation epoch is ${leg.activationEpoch}.`
+      : `Validator ${leg.index} is ${leg.slashed ? "slashed" : leg.status}, so no live performance exists for it` +
+        `${lastActiveEpoch !== null ? `; its last active epoch is ${lastActiveEpoch} and its exit epoch is ${leg.exitEpoch}` : leg.exitEpoch !== FAR_FUTURE_EPOCH ? `; its exit epoch is ${leg.exitEpoch}` : ""}.`;
+    liveFields = { performance_status: "no_live_performance", performance_note: why, last_active_epoch: lastActiveEpoch, exit_epoch: leg.exitEpoch };
+    liveSentence = ` ${why}`;
+  } else if (leg.status === "active_ongoing" || leg.status === "active_exiting") {
+    let att: AttestationPerf | undefined;
+    try {
+      const stateSources = agreeingSources.filter((base) => !base.includes("blockreq"));
+      if (stateSources.length >= 2 && Date.now() - requestStartedAt < ATTESTATION_START_BY_MS) att = await fetchAttestationPerformance(String(leg.index), String(leg.effectiveBalance), stateSources, fetchImpl, nowFn, deps.attestationBudgetMs ?? ATTESTATION_PERF_BUDGET_MS, headMemo);
+      if (att !== undefined) {
+        const attReceipt = makeReceipt(INTENT, att.sourceUrls, att.evidence, att.crossChecked ? "2/2 sources agreed on the validator's attestation reward row" : "1 source only, attestation reward row not cross-checked");
+        try { await saveReceipt(attReceipt, att.evidence); } catch { throw new Error("attestation receipt could not be stored"); }
+        const pos = (v: string) => BigInt(v) > 0n;
+        const eff = att.ideal !== null && BigInt(att.ideal) > 0n ? Number((BigInt(att.total) * 10000n) / BigInt(att.ideal)) / 100 : null;
+        liveFields = {
+          performance_status: "measured",
+          attestation_performance: {
+            epoch: att.epoch, epoch_finalized: att.finalizedFlag, cross_checked: att.crossChecked, sources_agreeing: att.sources.length,
+            head_reward_gwei: att.head, target_reward_gwei: att.target, source_reward_gwei: att.source, inactivity_gwei: att.inactivity,
+            head_correct: pos(att.head), target_correct: pos(att.target), source_correct: pos(att.source),
+            total_reward_gwei: att.total, ideal_reward_gwei: att.ideal, reward_efficiency_pct: eff,
+            basis: "beacon attestation-rewards endpoint, row for this validator, " + (att.crossChecked ? "identical on two sources." : "from ONE source only, not cross-checked.") + " A vote is marked correct when its reward is positive; zero or negative means wrong, late or missing, and the reward alone cannot say which. Ideal is the head+target+source reward for this effective balance.",
+          },
+          attestation_receipt: attReceipt,
+        };
+        measured.push("attestation head/target/source rewards for one epoch");
+        liveSentence = ` For attestation epoch ${att.epoch}${att.finalizedFlag === false ? " (the newest epoch the keyless sources still serve; not yet finalized)" : ""}, head was ${pos(att.head) ? "correct" : "not rewarded"} (${att.head} gwei), target ${pos(att.target) ? "correct" : "not rewarded"} (${att.target}), source ${pos(att.source) ? "correct" : "not rewarded"} (${att.source}); total ${att.total} gwei${eff !== null ? `, ${eff}% of the ideal ${att.ideal}` : ""}${att.crossChecked ? "" : ". This reward row came from a single source and was not cross-checked"}.`;
+      }
+    } catch { liveFields = {}; liveSentence = ""; att = undefined; }
+    if (att === undefined) {
+      liveFields = { performance_status: "attestation_rewards_unavailable",
+        performance_note: "Attestation rewards were not obtained: no source served this validator's row inside the optional budget, the verified path had already used too much of the request, or two sources disagreed." };
+      liveSentence = " Attestation rewards were not obtained this call (no source answered inside the optional-read budget, the request had little time left, or two sources disagreed).";
+    }
+  }
+  const delta = perfFields.recent_epoch_balance_delta as Record<string, string> | undefined;
+  if (delta !== undefined) {
+    liveFields = { ...liveFields, balance_history: [
+      { slot: delta.from_slot, epoch: String(Math.floor(Number(delta.from_slot) / 32)), balance_gwei: delta.balance_from_gwei },
+      { slot: delta.to_slot, epoch: String(Math.floor(Number(delta.to_slot) / 32)), balance_gwei: delta.balance_to_gwei },
+    ] };
+    measured.push("balance at two finalized epochs");
+  }
+  liveFields = { ...liveFields, performance_measured: measured, performance_not_measured: NOT_MEASURED };
+  liveSentence += ` ${NOT_MEASURED}`;
   const hasFarFutureEpoch = [
     leg.activationEligibilityEpoch,
     leg.activationEpoch,
@@ -1573,7 +1723,7 @@ async function handleValidatorObserved(
     `${leg.exitEpoch === "18446744073709551615" ? "no exit scheduled" : `exit scheduled at epoch ${leg.exitEpoch}, withdrawable epoch ${leg.withdrawableEpoch}`}. ` +
     sentinelNote +
     `Finalized beacon state verified by ${votes} at state root ${agreedRoot}; pubkey ${shortenPubkey(leg.pubkey)}.` +
-    perfSentence;
+    liveSentence + perfSentence;
   const result = envelope(
     INTENT,
     {
@@ -1590,6 +1740,7 @@ async function handleValidatorObserved(
       status: leg.status,
       finalized_state_root: agreedRoot,
       ...perfFields,
+      ...liveFields,
     },
     receipt,
     { answer, verdict: "verified", confidence: 1.0, source: agreeingSources.join(" + ") },
