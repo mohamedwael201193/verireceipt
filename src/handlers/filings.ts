@@ -85,6 +85,18 @@ export function filingTitle(f: Filing): string {
   return `Form ${f.form} filed ${f.filing_date}`;
 }
 
+/** One filings_detail row carries ONLY the identifiers that bind to an SEC primary row (form, accession,
+ *  filing date, URL). EDGAR's optional extras (acceptance time, primary-document description, 8-K items) are
+ *  listed separately in filings_disclosure, keyed by accession, so a per-filing consumer never sees
+ *  unrecognized keys on a row it verifies. */
+export function filingBindingRow(f: Filing): Pick<Filing, 'form' | 'accession' | 'filing_date' | 'url'> {
+  return { form: f.form, accession: f.accession, filing_date: f.filing_date, url: f.url };
+}
+function hasDisclosure(f: Filing): boolean { return f.accepted !== undefined || f.description !== undefined || f.items !== undefined; }
+function disclosureRow(f: Filing): Record<string, string> {
+  return { accession: f.accession, ...(f.accepted !== undefined ? { accepted: f.accepted } : {}), ...(f.description !== undefined ? { description: f.description } : {}), ...(f.items !== undefined ? { items: f.items } : {}) };
+}
+
 export interface Period {
   /** Inclusive start, YYYY-MM-DD. */
   start: string;
@@ -2502,7 +2514,8 @@ export async function handleFilings(
     by_type: reason.by_type,
     latest_filing: reason.latest,
     filings: listed.map(filingTitle),
-    filings_detail: listed,
+    filings_detail: listed.map(filingBindingRow),
+    ...(listed.some(hasDisclosure) ? { filings_disclosure: listed.filter(hasDisclosure).map(disclosureRow) } : {}),
     urls: listed.map((f) => f.url),
   };
   if (formLabel) {
