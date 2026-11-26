@@ -147,9 +147,10 @@ describe("handleGasPrice validation (stubbed fetch, no network)", () => {
     expect(String(res.answer)).not.toContain("defaulted");
   });
 
-  it("defaults unsupported chain to disclosed Ethereum quorum", async () => {
-    stubGasFetch("ethereum", Object.fromEntries(ETH.map(url=>[url,{kind:"ok",value:"0x3b9aca00"}])));
-    const r=await handleGasPrice({chain:"solana"});expect(r.chain).toBe("ethereum");expect(String(r.answer)).toContain("Requested chain was not served");
+  it("an unserved named chain is refused 422, never answered with Ethereum data", async () => {
+    const calls=stubGasFetch("ethereum", Object.fromEntries(ETH.map(url=>[url,{kind:"ok",value:"0x3b9aca00"}])));
+    await expect(handleGasPrice({chain:"solana"})).rejects.toMatchObject({status:422,code:"CHAIN_NOT_SERVED"});
+    expect(calls()).toBe(0);
   });
 
   it("never calls an upstream for a validation failure", async () => {

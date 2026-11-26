@@ -35,7 +35,7 @@ import {feeContext} from './gasFeeContext';
 // fee answer even where it is the true eth_gasPrice state (testnets
 // with no fee market). A partial-zero split still serves the non-zero
 // agreement.
-import { badRequest, upstreamUnavailable } from "../core/errors";
+import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, sha256Hex, type Receipt } from "../core/receipt";
 import { CHAIN_RPCS } from "../config/chains";
 import { saveReceipt } from "../core/storage";
@@ -57,7 +57,36 @@ const SUPPORTED_CHAINS = [
   "base-sepolia",
   "avalanche",
   "bsc",
+  "linea",
+  "scroll",
+  "zksync-era",
+  "mantle",
 ];
+
+/** Gas-only chains. Kept local: CHAIN_RPCS is shared with other handlers, and a chain
+ * added there would silently become a served chain for them. Each chain's three keyless
+ * RPCs were confirmed to agree on eth_gasPrice by the zero-score worker (3-source quorum),
+ * and a spot-check on 2026-11-26 returned values from all of them. Celo (no 3-way
+ * agreement), gnosis (noisy values) and blast (no RPC answers) are deliberately not served. */
+const GAS_ONLY_RPCS: Record<string, string[]> = {
+  linea: ["https://rpc.linea.build", "https://1rpc.io/linea", "https://linea-rpc.publicnode.com"],
+  scroll: ["https://rpc.scroll.io", "https://scroll.drpc.org", "https://1rpc.io/scroll"],
+  "zksync-era": ["https://mainnet.era.zksync.io", "https://zksync.drpc.org", "https://1rpc.io/zksync2-era"],
+  mantle: ["https://rpc.mantle.xyz", "https://mantle.drpc.org", "https://mantle-rpc.publicnode.com"],
+};
+
+/** Extra names for gas requests only (txLookup's alias table is unchanged). */
+const GAS_ALIASES: Record<string, string> = {
+  "optimism mainnet": "optimism", op: "optimism", "base mainnet": "base", bnb: "bsc",
+  "linea mainnet": "linea", "scroll mainnet": "scroll",
+  zksync: "zksync-era", "zksync era": "zksync-era", "zksync-era": "zksync-era", "zksync era mainnet": "zksync-era",
+  "mantle mainnet": "mantle",
+};
+
+function gasRpcs(chain: string): string[] | undefined { return GAS_ONLY_RPCS[chain] ?? CHAIN_RPCS[chain]; }
+
+/** Chains whose gas token has no USD spot this handler can verify: transfer_fee_usd is null and disclosed. */
+const NO_USD_SPOT = new Set(["mantle"]);
 
 /** Intent contract upper range bound for gas_price_gwei. */
 const MAX_GAS_GWEI = 100000;
@@ -75,6 +104,10 @@ const GAS_TOKEN: Record<string, string> = {
   polygon: "POL",
   avalanche: "AVAX",
   bsc: "BNB",
+  linea: "ETH",
+  scroll: "ETH",
+  "zksync-era": "ETH",
+  mantle: "MNT",
   sepolia: "ETH",
   "base-sepolia": "ETH",
 };
@@ -205,11 +238,15 @@ export async function handleGasPrice(
   const normalized = normalizeChain(chainRaw);
   // Explicit identifiers for networks already backed by the existing verified RPC set.
   const ids: Record<string,string> = { "1":"ethereum", "8453":"base", "42161":"arbitrum", "10":"optimism", "137":"polygon", "11155111":"sepolia", "84532":"base-sepolia", "43114":"avalanche", "56":"bsc" };
-  const requested = ids[normalized?.replace(/^eip155:/, "") ?? ""] ?? normalized;
-  const unsupported = Boolean(chainRaw) && (!requested || !SUPPORTED_CHAINS.includes(requested) || !CHAIN_RPCS[requested]);
-  const defaulted = !chainRaw || unsupported;
+  const requested = ids[normalized?.replace(/^eip155:/, "") ?? ""] ?? GAS_ALIASES[normalized ?? ""] ?? normalized;
+  // A named chain that is not served is refused. It is never answered with another chain's data.
+  if (chainRaw && (!requested || !SUPPORTED_CHAINS.includes(requested) || !gasRpcs(requested))) {
+    const label = /^[a-z0-9 :._-]{1,40}$/i.test(chainRaw) ? `'${chainRaw}'` : "the requested chain";
+    throw unprocessable("CHAIN_NOT_SERVED", `gas price for ${label} is not served; no quote was made and no other chain's value is substituted. Served chains: ${SUPPORTED_CHAINS.join(", ")}. Leave chain empty for the disclosed ethereum default.`);
+  }
+  const defaulted = !chainRaw;
   const chain = defaulted ? "ethereum" : requested!;
-  const rpcs = CHAIN_RPCS[chain];
+  const rpcs = gasRpcs(chain)!;
   const total = rpcs.length;
 
   let round = await fetchRound(rpcs);
@@ -252,7 +289,8 @@ export async function handleGasPrice(
   // the answer and the receipt; an unavailable spot refuses the answer.
   const tokenSymbol = GAS_TOKEN[chain] ?? "ETH";
   const spotBodies: string[] = [];
-  const tokenUsd = testnet ? null : await fetchGasTokenUsd(tokenSymbol, spotBodies);
+  const noUsd = testnet || NO_USD_SPOT.has(chain);
+  const tokenUsd = noUsd ? null : await fetchGasTokenUsd(tokenSymbol, spotBodies);
   const usdFee = tokenUsd === null ? null : Math.round(transferFeeUsd(gasPriceGwei, tokenUsd) * 1e6) / 1e6;
   // G4b: a computed fee outside [0, 10000] USD for a plain transfer is
   // implausible on every supported chain — refuse, never serve it.
@@ -271,14 +309,15 @@ export async function handleGasPrice(
     chain,
     gas_price_gwei: gasPriceGwei,
     ...(testnet ? {gas_price_wei:winner.wei.toString(),transfer_fee_usd_reason:"Testnet gas token has no mainnet USD valuation; no USD fee computed"}:{}),
+    ...(!testnet && noUsd ? {transfer_fee_usd_reason:`No verified USD spot for ${tokenSymbol} is used; no USD fee computed, nothing estimated`}:{}),
     transfer_fee_usd: usdFee,
     as_of: asOf,
   };
 
-  const defaultDisclosure = unsupported ? "Requested chain was not served; defaulted to ethereum; Ethereum quorum only" : !chainRaw ? "No chain given; defaulted to ethereum" : "";
+  const defaultDisclosure = !chainRaw ? "No chain given; defaulted to ethereum" : "";
   const evidence = context ? JSON.stringify({gas_price_raw:winner.rawText,fee_context:context.evidence}) : winner.rawText;
   const receiptDoc: Receipt = makeReceipt(INTENT, winner.rpcUrl, evidence, votes + (defaultDisclosure ? `; ${defaultDisclosure}` : ""));
-  if (!testnet) receiptDoc.gas_token_spot = {
+  if (!noUsd) receiptDoc.gas_token_spot = {
     source: `Coinbase ${tokenSymbol}-USD spot`,
     token_usd: tokenUsd,
     formula: `transfer_fee_usd = ${formula}`,
@@ -295,7 +334,8 @@ export async function handleGasPrice(
 
   return envelope(INTENT, fields, receiptDoc, {
     answer: testnet ? `${chain==='sepolia'?'Sepolia':'Base Sepolia'} testnet gas price is ${winner.wei} wei (${gasPriceGwei.toFixed(9).replace(/\.?0+$/,'')} gwei), ${votes}. Testnet gas is near zero; this is the real quorum value. USD transfer fee unavailable: testnet gas token has no mainnet USD valuation.` : (context ? `Fee context: block ${fields.block_number}, base fee ${fields.base_fee_gwei} gwei, suggested priority ${fields.priority_fee_gwei===null?'unavailable (no agreeing suggestion)':fields.priority_fee_gwei+' gwei'} (${fields.fee_context_quorum}). Priority is a contemporaneous node suggestion, not a block-bound or future quote. ` : "Base fee, priority fee and block context unavailable; not estimated. ") + (defaulted
-      ? `Current gas price on ethereum: ${gasPriceGwei} gwei (${unsupported ? "Requested chain was not served; defaulted to ethereum, not a quote for the requested chain" : "no chain given; defaulted to ethereum"}. ${votes}). 21,000-gas transfer ≈ $${usdFee} = ${formula}. Not a quote for a future transaction; the price moves block to block.`
+      ? `Current gas price on ethereum: ${gasPriceGwei} gwei (no chain given; defaulted to ethereum. ${votes}). 21,000-gas transfer ≈ $${usdFee} = ${formula}. Not a quote for a future transaction; the price moves block to block.`
+      : !testnet && noUsd ? `Current gas price on ${chain}: ${gasPriceGwei} gwei (${votes}). USD transfer fee not given: no verified USD spot for ${tokenSymbol} is used and nothing is estimated. Not a quote for a future transaction; the price moves block to block.`
       : `Current gas price on ${chain}: ${gasPriceGwei} gwei (${votes}). 21,000-gas transfer ≈ $${usdFee} = ${formula}. Not a quote for a future transaction; the price moves block to block.`),
     verdict: "verified",
     confidence: pair.count === total ? 1.0 : 0.9,
