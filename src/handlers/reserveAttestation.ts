@@ -46,8 +46,12 @@ const DEFAULT_HEARTBEAT_S = 86400;
 export const INTENT = "ASSET_RESERVE_ATTESTATION_GENERAL";
 
 export interface PorFeed { asset: string; proxy: string; feedName: string; issuer?: string; heartbeat?: number; reserveUnit?: string; refuseStale?: boolean; note?: string }
-/** Feeds probed live 2026-11-23 from the official Chainlink reference data directory.
- *  issuer is named only where the feed's own documentation supports it. */
+/** The 18 served Proof of Reserve feeds. WBTC, cbBTC and TUSD were probed live 2026-11-23, eight more 2026-11-25
+ *  and seven more 2026-11-26 (stETH, eETH, BGBTC, HBTC, swETH, rswETH, C1USD), each from the reference data directory
+ *  at reference-data-directory.vercel.app (a vercel.app host, not a Chainlink domain) plus 3-leg Ethereum RPC reads.
+ *  issuer is named only where an issuer or feed page supports it (sources in the comment above the 2026-11-26 entries).
+ *  heartbeat: seconds before the attestation is stale (default 86400). refuseStale: refuse with 502 STALE_ATTESTATION
+ *  instead of serving it flagged (set on the 2026-11-26 entries only). note: extra answer sentence (BGBTC only). */
 export const POR_FEEDS: Record<string, PorFeed> = {
   // Issuer names (2026-11-26) are the issuer of the asset, sourced from issuer pages: Lido help.lido.fi/en/articles/5230610-what-is-steth;
   // ether.fi etherfi.gitbook.io/etherfi/products/staking/eeth; Bitget bitget.com/blog/articles/bitget-chainlink-proof-of-reserve-bgbtc-2025;
