@@ -35,7 +35,7 @@ const inflight = new Map<string, Promise<Computed>>();
 export function setWashFetchForTests(impl: Fetch | null): void { fetchImpl = impl; cache.clear(); inflight.clear(); starts = new StartBudget(20, 60_000); }
 
 interface Trade { kind: "buy" | "sell"; sender: string; usd: number; block: number; tx: string; ts: string; anomalous: boolean | null }
-export interface WashStats { trades: number; senders: number; total_usd: number; wash_usd: number; wash_volume_pct: number; pairs: number; top3_sender_pct: number; anomalous: number | null; oldest: string; newest: string }
+export interface WashStats { trades: number; senders: number; total_usd: number; wash_usd: number; wash_volume_pct: number; pairs: number; top3_sender_pct: number; zero_volume: number; anomalous: number | null; oldest: string; newest: string }
 
 /** Pure metric: matched same-sender round trips within a 2% USD tolerance. Deterministic order. */
 export function washStats(input: Trade[]): WashStats {
@@ -59,7 +59,7 @@ export function washStats(input: Trade[]): WashStats {
   const top3 = [...by.values()].map(e => e.usd).sort((a, b) => b - a).slice(0, 3).reduce((a, b) => a + b, 0);
   const stamps = trades.map(t => t.ts).sort();
   const pct = total > 0 ? Math.min(100, (wash / total) * 100) : 0;
-  return { trades: trades.length, senders: by.size, total_usd: total, wash_usd: wash, wash_volume_pct: Number(pct.toFixed(6)), pairs, top3_sender_pct: total > 0 ? Number(((top3 / total) * 100).toFixed(2)) : 0, anomalous: trades.some(t => t.anomalous !== null) ? trades.filter(t => t.anomalous === true).length : null, oldest: stamps[0] ?? "", newest: stamps[stamps.length - 1] ?? "" };
+  return { trades: trades.length, senders: by.size, total_usd: total, wash_usd: wash, wash_volume_pct: Number(pct.toFixed(6)), pairs, top3_sender_pct: total > 0 ? Number(((top3 / total) * 100).toFixed(2)) : 0, zero_volume: trades.filter(t => t.usd === 0).length, anomalous: trades.some(t => t.anomalous !== null) ? trades.filter(t => t.anomalous === true).length : null, oldest: stamps[0] ?? "", newest: stamps[stamps.length - 1] ?? "" };
 }
 
 export function washVerdict(s: WashStats): "wash_trading" | "likely_wash_trading" | "inconclusive" | "organic" {
@@ -157,7 +157,7 @@ export async function handleWashTrading(query: Record<string, string | undefined
   }
   const s = computed.stats, verdict = washVerdict(s);
   const signals = [
-    `matched_round_trip_volume_pct=${s.wash_volume_pct}`, `matched_round_trip_pairs=${s.pairs}`, `trades_sampled=${s.trades}`, `unpriced_trades_excluded=${computed.unpriced}`, `distinct_senders=${s.senders}`,
+    `matched_round_trip_volume_pct=${s.wash_volume_pct}`, `matched_round_trip_pairs=${s.pairs}`, `trades_sampled=${s.trades}`, `unpriced_trades_excluded=${computed.unpriced}`, `zero_volume_trades_counted=${s.zero_volume}`, `distinct_senders=${s.senders}`,
     `top3_sender_volume_pct=${s.top3_sender_pct}`, `source_anomalous_flags=${s.anomalous ?? "n/a"}`, `window=${s.oldest}..${s.newest}`, `network=${computed.network}`, `pool=${computed.pool}`,
   ];
   const summary = `${verdict === "inconclusive" ? "Inconclusive" : verdict}: ${s.wash_volume_pct}% of the USD volume in the latest-300-trade window at most (${s.trades} priced trades used${computed.unpriced ? `, ${computed.unpriced} unpriced excluded` : ""}) of ${computed.poolName || computed.pool} on ${computed.network} is a matched round trip (same sender bought and sold within 2% of the same USD value). Proxy over a recent sample only; arbitrage and market-maker bots that round-trip similar sizes count as matched volume; sender is the transaction sender, so multi-wallet wash trading is not visible; not a legal finding.`;

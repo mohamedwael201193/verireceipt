@@ -39,7 +39,7 @@ const synth = (rows: any[]) => JSON.stringify({ data: rows });
 const washRows = (senders: number) => Array.from({ length: senders * 4 }, (_, i) => trade(i, i % 2 === 0 ? "buy" : "sell", 1 + Math.floor(i / 4), 100 + Math.floor(i / 4)));
 
 describe("washVerdict thresholds (pure)", () => {
-  const st = (pct: number, trades = 300, senders = 100) => ({ trades, senders, total_usd: 1, wash_usd: 0, wash_volume_pct: pct, pairs: 0, top3_sender_pct: 0, anomalous: 0, oldest: "", newest: "" });
+  const st = (pct: number, trades = 300, senders = 100) => ({ trades, senders, total_usd: 1, wash_usd: 0, wash_volume_pct: pct, pairs: 0, top3_sender_pct: 0, zero_volume: 0, anomalous: 0, oldest: "", newest: "" });
   it("boundaries", () => {
     expect(washVerdict(st(50))).toBe("wash_trading"); expect(washVerdict(st(49.999999))).toBe("likely_wash_trading");
     expect(washVerdict(st(25))).toBe("likely_wash_trading"); expect(washVerdict(st(24.9))).toBe("inconclusive");
@@ -203,6 +203,19 @@ describe("unpriced, oversized and flagged rows (SYNTHETIC)", () => {
     route({ search: S_POOL, trades: synth(washRows(30)) });
     const r: any = await handleWashTrading({ subject: POOL });
     expect(r.summary).toMatch(/latest-300-trade window at most/); expect(r.summary).toMatch(/arbitrage and market-maker bots/); expect(r.summary).toMatch(/not a legal finding/);
+  });
+  it("explicit zero-volume trades count toward MIN_TRADES and are disclosed", async () => {
+    const zero = (i: number) => trade(i, i % 2 === 0 ? "buy" : "sell", 800 + (i % 20), 0);
+    const rows = [...washRows(15).slice(0, 60), ...Array.from({ length: 40 }, (_x, i) => zero(2000 + i))];
+    route({ search: S_POOL, trades: synth(rows) });
+    const r: any = await handleWashTrading({ subject: POOL });
+    expect(r.signals).toContain("zero_volume_trades_counted=40"); expect(r.signals).toContain("trades_sampled=100"); expect(r.signals).toContain("unpriced_trades_excluded=0");
+    route({ search: S_POOL, trades: synth(washRows(30)) });
+    expect(((await handleWashTrading({ subject: POOL })) as any).signals).toContain("zero_volume_trades_counted=0");
+    // a priced trade between 0 and 1 USD is not a zero-volume trade (pins exact zero)
+    const sub1 = Array.from({ length: 100 }, (_x, i) => trade(3000 + i, i % 2 === 0 ? "buy" : "sell", 900 + (i % 25), 0.5));
+    route({ search: S_POOL, trades: synth(sub1) });
+    expect(((await handleWashTrading({ subject: POOL })) as any).signals).toContain("zero_volume_trades_counted=0");
   });
   it("cache expires after 5 minutes", async () => {
     let now = 1_800_000_000_000;
