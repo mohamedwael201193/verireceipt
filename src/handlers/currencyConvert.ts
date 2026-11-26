@@ -1,6 +1,8 @@
 import {withAnswerClass} from "../core/answerClass";
 // CURRENCY_EXCHANGE_CONVERT and FX_NOW: deterministic reference-rate answers.
-// USD -> EUR/CAD/SEK and FX_NOW share three parallel keyless observations,
+// USD -> EUR/CAD/SEK and FX_NOW serve the ECB reference rate (the second ECB-based
+// source if the first is down), with the other keyless observations as a disclosed
+// cross-check, flagged above 1%, never blended into the value. They share parallel observations,
 // cached for 55 seconds with original acquisition times and a five-minute
 // observation-age ceiling. Source publication dates are disclosed separately;
 // a recent fetch is never a market-freshness claim. The largest complete-span
@@ -772,21 +774,31 @@ export async function handleFxNow(
   return observedFxAnswer('USD',currency,1,intent);
 }
 
+const ECB_PRIMARY="Frankfurter (ECB reference rates)";
+const ECB_FALLBACK="vatcomply";
+const FX_PANEL_NAMES=["frankfurter","vatcomply","open-er-api","fawaz"];
+/** Other observations differing from the served ECB rate by more than this are flagged in the answer. */
+export const FX_CROSS_CHECK_FLAG_PCT=1;
 async function observedFxAnswer(from:string,to:string,amount:number,intent:string):Promise<Record<string,unknown>>{
- const sources=SOURCES.slice(0,3).map(s=>({...s,quote:(f:string,t:string)=>observeFxSource(s.name,f,t,()=>s.quote(f,t))}));
+ const sources=SOURCES.filter(s=>FX_PANEL_NAMES.includes(s.name)).map(s=>({...s,quote:(f:string,t:string)=>observeFxSource(s.name,f,t,()=>s.quote(f,t))}));
  const panel=await observeRatePanel(from,to,sources);
  if(!panel.quotes.length){if(panel.uncovered.length)throw unprocessable('NO_DATA','keyless sources answered without this currency pair');throw upstreamUnavailable('FX_SOURCES_DOWN','no usable keyless rate observation; no rate guessed');}
  if(panel.quotes.some(q=>{const age=Date.now()-Date.parse(q.observedAt);return !Number.isFinite(age)||age<0||age>FX_MAX_OBSERVATION_AGE_MS;}))throw upstreamUnavailable('FX_OBSERVATION_STALE','rate observation exceeds 5 minutes; no stale value served');
- let selected;try{selected=selectObservedRates(panel.quotes);}catch{throw upstreamUnavailable('FX_SOURCES_DISAGREE','keyless rate panel lacks an agreeing majority within 0.5%; no blended rate served');}
- const {rate,serving,excluded}=selected;
+ const ecbPrimary=panel.quotes.find(q=>q.source===ECB_PRIMARY),ecbFallback=panel.quotes.find(q=>q.source===ECB_FALLBACK),ecbQuote=ecbPrimary??ecbFallback;
+ let serving:typeof panel.quotes,excluded:typeof panel.quotes,rate:number,basis:'ecb_primary'|'ecb_fallback'|'median_no_ecb';
+ if(ecbQuote){serving=[ecbQuote];excluded=[];rate=ecbQuote.rate;basis=ecbPrimary?'ecb_primary':'ecb_fallback';}
+ else{let selected;try{selected=selectObservedRates(panel.quotes);}catch{throw upstreamUnavailable('FX_SOURCES_DISAGREE','keyless rate panel lacks an agreeing majority within 0.5%; no blended rate served');}
+  serving=selected.serving;excluded=selected.excluded;rate=selected.rate;basis='median_no_ecb';}
+ const crossChecks=basis==='median_no_ecb'?[]:panel.quotes.filter(q=>q!==serving[0]).map(q=>{const pct=(q.rate-rate)/rate*100;return{source:q.source,rate:q.rate,rate_date:q.rateDate,diff_pct:Math.round(pct*10000)/10000,flagged:Math.abs(pct)>FX_CROSS_CHECK_FLAG_PCT};});
+ const flagged=crossChecks.filter(c=>c.flagged);
  if(!Number.isFinite(rate)||rate<=0||(intent!==INTENT&&(rate<FX_NOW_RATE_MIN||rate>FX_NOW_RATE_MAX)))throw upstreamUnavailable('FX_RATE_OUT_OF_RANGE','observed median outside contract bounds');
  const dates=serving.map(q=>({source:q.source,rate_date:q.rateDate})),converted=Math.round(amount*rate*1e6)/1e6;
  const observedAt=serving.map(q=>q.observedAt).sort()[0];
- const evidence=JSON.stringify({from_currency:from,to_currency:to,amount,rate_served:rate,selection_policy:'median of up to 3 keyless observations; drop outliers only with agreeing majority within 0.5 percent; no majority refuses',observation_cache_ms:55000,max_observation_age_ms:300000,observed_at:observedAt,sources:panel.quotes.map(q=>({source:q.source,url:q.url,raw_body:q.rawBody,rate:q.rate,rate_date:q.rateDate,observed_at:q.observedAt})),serving_sources:serving.map(q=>q.source),excluded_sources:excluded.map(q=>q.source),failed_sources:panel.failed,publication_dates:dates,market_freshness:'source publication dates retained; recently fetched does not imply current market pricing'});
- const receipt=makeReceipt(intent,serving.map(q=>q.url).join(' + '),evidence,'keyless reference-rate median with publication dates');receipt.fetched_at=observedAt;
+ const evidence=JSON.stringify({from_currency:from,to_currency:to,amount,rate_served:rate,selection_policy:basis==='median_no_ecb'?'no ECB reference quote available: median of the agreeing majority of the other observations within 0.5 percent; no majority refuses':'the ECB reference rate is the served value; other observations are a cross-check only, flagged above 1 percent, never blended',value_basis:basis,cross_checks:crossChecks,observation_cache_ms:55000,max_observation_age_ms:300000,observed_at:observedAt,sources:panel.quotes.map(q=>({source:q.source,url:q.url,raw_body:q.rawBody,rate:q.rate,rate_date:q.rateDate,observed_at:q.observedAt})),serving_sources:serving.map(q=>q.source),excluded_sources:excluded.map(q=>q.source),failed_sources:panel.failed,publication_dates:dates,market_freshness:'source publication dates retained; recently fetched does not imply current market pricing'});
+ const receipt=makeReceipt(intent,serving.map(q=>q.url).join(' + '),evidence,basis==='median_no_ecb'?'keyless reference-rate median with publication dates':'ECB reference rate with cross-check observations and publication dates');receipt.fetched_at=observedAt;
  try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
- const degraded=serving.length<3||excluded.length>0||panel.failed.length>0;
- const fields:Record<string,unknown>={rate,rate_date:dates.map(d=>d.rate_date).join('; '),rate_dates:dates,observed_at:observedAt,sources_used:serving.map(q=>q.source)};
+ const degraded=basis==='median_no_ecb'?(serving.length<3||excluded.length>0||panel.failed.length>0):(basis==='ecb_fallback'||crossChecks.length===0);
+ const fields:Record<string,unknown>={rate,rate_date:dates.map(d=>d.rate_date).join('; '),rate_dates:dates,observed_at:observedAt,sources_used:serving.map(q=>q.source),value_basis:basis,cross_checks:crossChecks};
  if(intent===INTENT)Object.assign(fields,{converted_amount:converted,from_currency:from,to_currency:to,amount});else fields.currency=to;
- return withAnswerClass(envelope(intent,fields,receipt,{answer:`${amount} ${from} = ${converted} ${to}; mid-market reference-rate median ${rate}, from ${serving.length} of 3 keyless observations. Observed ${observedAt}. Upstream rate dates: ${dates.map(d=>d.rate_date).join('; ')}. Sources publish reference snapshots; this is not a five-minute market-freshness claim.`+(excluded.length?` Dropped ${excluded.length} outlier outside the agreeing 0.5 percent majority.`:'')+(panel.failed.length?` ${panel.failed.length} source unavailable or without coverage.`:''),verdict:'verified',confidence:degraded?0.9:1,source:serving.map(q=>q.source+' '+q.url).join(' + ')+(degraded?' (degraded reference panel)':'')}),intent,{currency:to,from_currency:from,source_set:serving.map(q=>q.source),serving_rule:serving.length===1?'freshest_alone':'full_median'});
+ return withAnswerClass(envelope(intent,fields,receipt,{answer:basis==='median_no_ecb'?`${amount} ${from} = ${converted} ${to}; mid-market reference-rate median ${rate}, from ${serving.length} of 3 keyless observations. Observed ${observedAt}. Upstream rate dates: ${dates.map(d=>d.rate_date).join('; ')}. Sources publish reference snapshots; this is not a five-minute market-freshness claim.`+(excluded.length?` Dropped ${excluded.length} outlier outside the agreeing 0.5 percent majority.`:'')+(panel.failed.length?` ${panel.failed.length} source unavailable or without coverage.`:''):`${amount} ${from} = ${converted} ${to}; ECB reference rate ${rate} (${serving[0].source}), rate date ${serving[0].rateDate}. Observed ${observedAt}. `+(basis==='ecb_fallback'?`The primary ECB reference source did not answer, so the other ECB-based source is served. `:'')+(crossChecks.length?`Cross-check against other observations (never used as the value): ${crossChecks.map(c=>`${c.source} ${c.rate} (${c.diff_pct>=0?'+':''}${c.diff_pct}%, dated ${c.rate_date})`).join('; ')}.`+(flagged.length?` FLAGGED: ${flagged.map(c=>c.source).join(', ')} differ${flagged.length===1?'s':''} from the ECB rate by more than ${FX_CROSS_CHECK_FLAG_PCT}%.`:` All within ${FX_CROSS_CHECK_FLAG_PCT}%.`):' No other observation was available to cross-check.')+' The ECB publishes one reference rate per working day; this is not a five-minute market-freshness claim.',verdict:'verified',confidence:degraded?0.9:1,source:serving.map(q=>q.source+' '+q.url).join(' + ')+(degraded?' (degraded reference panel)':'')+(basis==='median_no_ecb'?'':' ; cross-check only: '+crossChecks.map(c=>c.source).join(', '))}),intent,{currency:to,from_currency:from,source_set:serving.map(q=>q.source),serving_rule:basis==='median_no_ecb'?(serving.length===1?'freshest_alone':'full_median'):'anchor_cluster'});
 }

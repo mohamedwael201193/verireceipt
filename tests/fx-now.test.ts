@@ -82,15 +82,15 @@ describe("handleFxNow validation", () => {
 });
 
 describe("handleFxNow answers (stubbed sources)", () => {
-  it("EUR: all three agree -> median served at confidence 1.0, contract direction", async () => {
+  it("EUR: the ECB rate is served at confidence 1.0, contract direction", async () => {
     stubFxSources(bodies("EUR", 0.85));
     const r = await handleFxNow({ currency: "EUR" });
     expect(r.rate).toBe(0.85);
     expect(r.currency).toBe("EUR");
     expect(r.confidence).toBe(1.0);
-    expect(r.rate_dates).toHaveLength(3);
+    expect(r.rate_dates).toHaveLength(1);
     expect(String(r.rate_date)).toContain("2026-11-21");
-    expect((r.sources_used as string[]).length).toBe(3);
+    expect(r.sources_used).toEqual(["Frankfurter (ECB reference rates)"]);
     expect((r.receipt as { intent: string }).intent).toBe("FX_NOW_EUR");
     expect(String(r.answer)).toContain("1 USD = 0.85 EUR");
   });
@@ -105,7 +105,7 @@ describe("handleFxNow answers (stubbed sources)", () => {
     expect(sek.rate).toBe(10.44);
     expect((sek.receipt as { intent: string }).intent).toBe("FX_NOW_SEK");
   });
-  it("same-date disagreement without any tight pair is refused", async () => {
+  it("a spread of other observations still serves the ECB rate, flagged", async () => {
     const b = bodies("EUR", 0.85);
     b.frankfurter = JSON.stringify({ amount: 1.0, base: "USD", date: "2026-11-21", rates: { EUR: 0.87 } });
     b.openEr = JSON.stringify({ result: "success", base_code: "USD", time_last_update_utc: "Sat, 21 Nov 2026 00:02:32 +0000", rates: { EUR: 0.85 } });
@@ -113,16 +113,20 @@ describe("handleFxNow answers (stubbed sources)", () => {
     b.fawaz = JSON.stringify({date:"2026-11-21",usd:{eur:0.81}});
     b.floatrates = JSON.stringify({eur:{code:"EUR",rate:"0.79",date:"Sat, 21 Nov 2026 23:59:00 GMT"}});
     stubFxSources(b);
-    await expectApiError(handleFxNow({ currency: "EUR" }), 502, "FX_SOURCES_DISAGREE");
+    const r = await handleFxNow({ currency: "EUR" });
+    expect(r.rate).toBe(0.87);
+    expect(String(r.answer)).toContain("FLAGGED");
+    expect(String(r.answer)).toContain("never used as the value");
   });
-  it("newer outlier cannot override the agreeing majority", async () => {
+  it("a newer-dated ECB value is the served value; other observations only cross-check", async () => {
     const b = bodies("EUR", 0.85, "2026-11-21");
     b.frankfurter = JSON.stringify({ amount: 1.0, base: "USD", date: "2026-11-22", rates: { EUR: 0.86 } });
     stubFxSources(b);
     const r = await handleFxNow({ currency: "EUR" });
-    expect(r.rate).toBe(0.85);
-    expect(r.confidence).toBe(0.9);
-    expect(String(r.answer)).toContain("Dropped 1");
+    expect(r.rate).toBe(0.86);
+    expect(r.confidence).toBe(1);
+    expect(String(r.answer)).toContain("rate date 2026-11-22");
+    expect(String(r.answer)).not.toContain("Dropped");
   });
   it("a single covering source answers at 0.9 with the source named", async () => {
     const b = bodies("EUR", 0.85);
@@ -140,7 +144,7 @@ describe("handleFxNow answers (stubbed sources)", () => {
     stubFxSources(bodies("EUR", 0.00001));
     await expectApiError(handleFxNow({ currency: "EUR" }), 502, "FX_RATE_OUT_OF_RANGE");
   });
-  it("shares the same three-source median as /v1/fx even across publication dates", async () => {
+  it("serves the same ECB rate as /v1/fx even across publication dates", async () => {
     const b = bodies("EUR", 0.91);
     b.frankfurter = JSON.stringify({ amount: 1.0, base: "USD", date: "2026-11-20", rates: { EUR: 0.90992 } });
     b.vatcomply = JSON.stringify({ date: "2026-11-20", base: "USD", rates: { EUR: 0.909918 } });
@@ -149,9 +153,9 @@ describe("handleFxNow answers (stubbed sources)", () => {
     b.fawaz = JSON.stringify({ date: "2026-11-22", usd: { eur: 0.91158 } });
     stubFxSources(b);
     const result = await handleFxNow({ currency: "EUR" });
-    expect(result.rate).toBe(0.911256);
+    expect(result.rate).toBe(0.90992);
     expect(result.confidence).toBe(1.0);
-    expect(result.sources_used).toHaveLength(3);
+    expect(result.sources_used).toHaveLength(1);
     expect(String(result.answer)).toContain('not a five-minute market-freshness claim');
 
   });

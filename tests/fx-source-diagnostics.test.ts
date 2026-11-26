@@ -39,6 +39,6 @@ describe("FX source diagnostic logging", () => {
     }));
     const request = handleFxNow({ currency: "EUR" }); const check = expect(request).rejects.toMatchObject({ code: "FX_SOURCES_DOWN", status: 502 });
     await vi.advanceTimersByTimeAsync(4000); await check;
-    expect(failureLogs(spy).filter(row => row.reason === "timeout")).toHaveLength(3);
+    expect(failureLogs(spy).filter(row => row.reason === "timeout")).toHaveLength(4);
   });
 });

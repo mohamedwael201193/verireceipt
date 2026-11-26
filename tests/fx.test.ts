@@ -215,7 +215,7 @@ describe("handleFx validation (stubbed, no network use)", () => {
 });
 
 describe("handleFx answers (stubbed sources)", () => {
-  it("all three sources agree -> median served at confidence 1.0 with a recomputable receipt", async () => {
+  it("all sources agree -> the ECB rate is served at confidence 1.0 with a recomputable receipt", async () => {
     stubFxSources({
       frankfurter: frankfurterBody(0.91),
       openEr: openErBody(0.9102),
@@ -228,7 +228,7 @@ describe("handleFx answers (stubbed sources)", () => {
     expect(result.rate).toBeCloseTo(0.91, 6);
     expect(result.verdict).toBe("verified");
     expect(result.confidence).toBe(1.0);
-    expect(result.sources_used).toHaveLength(3);
+    expect(result.sources_used).toHaveLength(1);
     const receipt = result.receipt as { receipt_id: string; raw_response_sha256: string; intent: string };
     expect(receipt.intent).toBe(INTENT);
     expect(receipt.raw_response_sha256).toMatch(SHA256_RE);
@@ -236,10 +236,10 @@ describe("handleFx answers (stubbed sources)", () => {
     expect(ev.found).toBe(true);
     expect(sha256Hex(ev.evidence!)).toBe(receipt.raw_response_sha256);
     const parsed = JSON.parse(ev.evidence!.toString("utf8")) as { sources: Array<{ raw_body: string }> };
-    expect(parsed.sources).toHaveLength(3);
+    expect(parsed.sources).toHaveLength(4);
   });
 
-  it("weekend snapshots use the median of the three declared observations", async () => {
+  it("weekend snapshots serve the ECB rate, the later-dated others only cross-check", async () => {
     stubFxSources({
       frankfurter: frankfurterBody(0.90992, "2026-11-20"),
       vatcomply: vatcomplyBody(0.909918, "2026-11-20"),
@@ -248,14 +248,14 @@ describe("handleFx answers (stubbed sources)", () => {
       fawaz: fawazBody(0.91158, "2026-11-22"),
     });
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
-    expect(result.rate).toBeCloseTo(0.911256, 6);
-    expect(result.converted_amount).toBeCloseTo(91.1256, 6);
+    expect(result.rate).toBeCloseTo(0.90992, 6);
+    expect(result.converted_amount).toBeCloseTo(90.992, 6);
     expect(result.verdict).toBe("verified");
     expect(result.confidence).toBe(1.0);
-    expect(result.sources_used).toHaveLength(3);
+    expect(result.sources_used).toHaveLength(1);
   });
 
-  it("weekend-shaped quotes retain all three publication labels", async () => {
+  it("weekend-shaped quotes keep the ECB date and the cross-check dates", async () => {
     stubFxSources({
       frankfurter: frankfurterBody(0.90992, "2026-11-20"),
       openEr: openErBody(0.911256, "Sun, 22 Nov 2026 00:02:32 +0000"),
@@ -265,16 +265,16 @@ describe("handleFx answers (stubbed sources)", () => {
     });
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
     expect(result.verdict).toBe("verified");
-    expect(result.rate).toBe(0.911256);
-    expect(result.converted_amount).toBeCloseTo(91.1256, 4);
-    expect(result.sources_used).toHaveLength(3);
+    expect(result.rate).toBe(0.90992);
+    expect(result.converted_amount).toBeCloseTo(90.992, 4);
+    expect(result.sources_used).toHaveLength(1);
     expect(result.confidence).toBe(1);
-    expect(String(result.answer)).toContain('Upstream rate dates:');
+    expect(String(result.answer)).toContain('rate date 2026-11-20');expect(String(result.answer)).toContain('dated 2026-11-22');
     expect(String(result.answer)).toContain('not a five-minute market-freshness claim');
 
   });
 
-  it("mixed-date quotes serve their three-source median", async () => {
+  it("mixed-date quotes serve the ECB rate", async () => {
     stubFxSources({
       frankfurter: frankfurterBody(0.90992, "2026-11-20"),
       openEr: openErBody(0.911134, "Mon, 23 Nov 2026 00:02:32 +0000"),
@@ -284,16 +284,16 @@ describe("handleFx answers (stubbed sources)", () => {
     });
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
     expect(result.verdict).toBe("verified");
-    expect(result.rate).toBe(0.911134);
-    expect(result.converted_amount).toBeCloseTo(91.1134, 4);
-    expect(result.sources_used).toHaveLength(3);
+    expect(result.rate).toBe(0.90992);
+    expect(result.converted_amount).toBeCloseTo(90.992, 4);
+    expect(result.sources_used).toHaveLength(1);
     expect(result.confidence).toBe(1);
-    expect(String(result.answer)).toContain('Upstream rate dates:');
+    expect(String(result.answer)).toContain('rate date 2026-11-20');
     expect(String(result.answer)).toContain('not a five-minute market-freshness claim');
 
   });
 
-  it("all-singleton pool (incl. a fix republication) -> no cluster anchors, pool median serves", async () => {
+  it("a spread-out pool still serves the ECB rate, not a pool median", async () => {
     stubFxSources({
       frankfurter: frankfurterBody(0.90992, "2026-11-20"),
       openEr: openErBody(0.911134, "Mon, 23 Nov 2026 00:02:32 +0000"),
@@ -303,7 +303,7 @@ describe("handleFx answers (stubbed sources)", () => {
     });
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
     expect(result.verdict).toBe("verified");
-    expect(result.rate).toBe(0.911134);
+    expect(result.rate).toBe(0.90992);
     expect(String(result.answer)).not.toContain("anchored on the tightest agreeing cluster");
     vi.unstubAllGlobals();
   });
@@ -322,7 +322,7 @@ describe("handleFx answers (stubbed sources)", () => {
     vi.unstubAllGlobals();
   });
 
-  it("kill-each-source failover: any declared source down -> the remaining two answer", async () => {
+  it("kill-each-source failover: the ECB rate holds unless its source is down, then the other ECB-based source serves", async () => {
     for (const killed of ["frankfurter", "openEr", "fawaz"] as const) {
       const opts: StubOpts = {
         frankfurter: frankfurterBody(0.91),
@@ -337,9 +337,9 @@ describe("handleFx answers (stubbed sources)", () => {
       const result = await handleFx({ from_currency: "USD", to_currency: "EUR" });
       const wall = Date.now() - start;
       expect(result.verdict).toBe("verified");
-      expect(result.converted_amount).toBeCloseTo(killed==='openEr'?0.91:0.91005, 6);
-      expect(result.confidence).toBe(0.9); // degraded: one source lost
-      expect(result.sources_used).toHaveLength(2);
+      expect(result.converted_amount).toBeCloseTo(0.91, 6);
+      expect(result.confidence).toBe(killed==='frankfurter'?0.9:1);
+      expect(result.sources_used).toEqual([killed==='frankfurter'?'vatcomply':'Frankfurter (ECB reference rates)']);
       expect(wall).toBeLessThan(1000); // sub-second failover (owner requirement)
       vi.unstubAllGlobals();
     }
@@ -356,11 +356,11 @@ describe("handleFx answers (stubbed sources)", () => {
     const start = Date.now();
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR" });
     const wall = Date.now() - start;
-    expect(result.converted_amount).toBeCloseTo(0.91005, 6);
+    expect(result.converted_amount).toBeCloseTo(0.91, 6);
     expect(result.confidence).toBe(0.9);
     expect(String(result.source)).toContain("degraded");
-    expect(String(result.answer)).toContain("1 source unavailable");
-    expect(result.sources_used).toHaveLength(2);
+    expect(String(result.answer)).toContain("other ECB-based source is served");
+    expect(result.sources_used).toEqual(["vatcomply"]);
     expect(wall).toBeLessThan(4500);
   });
 
@@ -395,7 +395,7 @@ describe("handleFx answers (stubbed sources)", () => {
     await expectApiError(handleFx({ from_currency: "USD", to_currency: "EUR" }), 422, "NO_DATA");
   });
 
-  it("sources disagree beyond 0.5% on the SAME date -> 502 FX_SOURCES_DISAGREE, never averaged", async () => {
+  it("other sources far from the ECB rate never move it, and are flagged", async () => {
     stubFxSources({
       frankfurter: frankfurterBody(0.91, "2026-11-21"),
       openEr: openErBody(0.85, "Sat, 21 Nov 2026 00:02:32 +0000"), // 6.6% split, same day
@@ -403,7 +403,9 @@ describe("handleFx answers (stubbed sources)", () => {
       vatcomply: vatcomplyBody(0.93, "2026-11-21"),
       floatrates: floatratesBody(0.94, "Sat, 21 Nov 2026 23:59:00 GMT"),
     });
-    await expectApiError(handleFx({ from_currency: "USD", to_currency: "EUR" }), 502, "FX_SOURCES_DISAGREE");
+    const r = await handleFx({ from_currency: "USD", to_currency: "EUR" });
+    expect(r.rate).toBe(0.91);
+    expect(String(r.answer)).toContain("FLAGGED");
   });
 
   it("publication-date straddle cannot bypass the disagreement guard", async () => {
@@ -418,7 +420,7 @@ describe("handleFx answers (stubbed sources)", () => {
     expect(out.sources_used).toHaveLength(2);
   });
 
-  it("agreement boundary: exactly 0.5% apart serves; just over refuses", async () => {
+  it("cross-check flag boundary: 1% is the line, and the served value never changes", async () => {
     const base = 0.91;
     const within = base * (1 + AGREEMENT_TOLERANCE * 0.99);
     stubFxSources({
@@ -427,15 +429,16 @@ describe("handleFx answers (stubbed sources)", () => {
       fawaz: "ERR",
     });
     const ok = await handleFx({ from_currency: "USD", to_currency: "EUR" });
-    expect(ok.verdict).toBe("verified");
+    expect(ok.verdict).toBe("verified");expect(String(ok.answer)).not.toContain("FLAGGED");
     vi.unstubAllGlobals();
-    const beyond = base * (1 + AGREEMENT_TOLERANCE * 1.01);
+    const beyond = base * 1.02;
     stubFxSources({
       frankfurter: frankfurterBody(base),
       openEr: openErBody(beyond, "Sat, 21 Nov 2026 00:02:32 +0000"), // same date as frankfurter's -> a real same-day disagreement
       fawaz: "ERR",
     });
-    await expectApiError(handleFx({ from_currency: "USD", to_currency: "EUR" }), 502, "FX_SOURCES_DISAGREE");
+    const far = await handleFx({ from_currency: "USD", to_currency: "EUR" });
+    expect(far.rate).toBe(base);expect(String(far.answer)).toContain("FLAGGED");
   });
 
   it("codes are case-insensitive (usd/eur resolve)", async () => {
@@ -498,9 +501,9 @@ describe("keyed ExchangeRate-API sixth leg (EGP panel + NO_DATA fallback only)",
       counts,
     );
     const result = await handleFx({ from_currency: "USD", to_currency: "EUR", amount: "100" });
-    expect(result.rate).toBeCloseTo(0.911256, 6);
+    expect(result.rate).toBeCloseTo(0.90992, 6);
     expect(result.confidence).toBe(1.0);
-    expect(result.sources_used).toHaveLength(3);
+    expect(result.sources_used).toHaveLength(1);
     expect(counts.exchangeRateApi ?? 0).toBe(0);
   });
 
