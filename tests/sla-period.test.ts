@@ -10,7 +10,7 @@ import {buildServer} from '../src/server';
 const summary=readFileSync(join(__dirname,'fixtures/sla-resolution/github-summary.json'),'utf8');
 const incidents=readFileSync(join(__dirname,'fixtures/sla-compliance/github-incidents.json'),'utf8');
 afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();vi.clearAllMocks();});
-it.each(['2026-10','2026-13','last month','nonsense','91d','0d','999999 days'])('free string %s is 200 with unknown nulls and no guessed fetch',async(period)=>{
+it.each(['2026-13','last month','nonsense','91d','0d','999999 days'])('free string %s is 200 with unknown nulls and no guessed fetch',async(period)=>{
  const f=vi.fn();vi.stubGlobal('fetch',f);const app=buildServer();
  try {
  const r=await app.inject({method:'GET',url:'/v1/sla-compliance?service=github&period='+encodeURIComponent(period)});

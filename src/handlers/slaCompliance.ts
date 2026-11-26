@@ -34,6 +34,7 @@ import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
 import {readSlaBody} from './slaSourceCache';
+import {parseCalendarMonth,monthStartMs,monthEndMs,historyPageFor,readHistoryPage,countedIncidents,type CalendarMonth} from './slaHistory';
 
 const SOURCE_TIMEOUT_MS = 10000;
 const UA = "VeriReceipt/2.0 sla-compliance observer (+https://verireceipt.vercel.app)";
@@ -165,6 +166,51 @@ function coveredMs(intervals: [number, number][], winStart: number, winEnd: numb
   return covered;
 }
 
+async function monthlyUptime(service:string,host:string,component:string|null,cal:CalendarMonth,aliasName:string,periodText:string):Promise<{envelope:Record<string,unknown>}|{reason:string}>{
+  const now=Date.now(),start=monthStartMs(cal),end=monthEndMs(cal);
+  if(end>now)return {reason:'the month is not complete yet (only full past UTC months are supported)'};
+  if(component)return {reason:'the vendor history lists no components per incident, so a component filter cannot be applied'};
+  const prev:CalendarMonth=cal.month===0?{year:cal.year-1,month:11}:{year:cal.year,month:cal.month-1};
+  const pages=[...new Set([historyPageFor(cal,now),historyPageFor(prev,now)])];
+  if(pages.some(p=>p<1||p>60))return {reason:'the month is outside the history range this endpoint reads'};
+  const groups:any[]=[],bodies:{url:string;fetched_at:string;body:string}[]=[];
+  for(const page of pages){
+   const url=`https://${host}/history.json?page=${page}`;
+   let got;try{got=await readSlaBody(url,host,UA,SOURCE_TIMEOUT_MS);}catch{return {reason:'the vendor history page could not be read'};}
+   const need=[cal,prev].filter(c=>historyPageFor(c,now)===page);
+   const parsed=readHistoryPage(got.raw,page,need);
+   if(!parsed.ok)return {reason:parsed.reason};
+   groups.push(...parsed.groups);bodies.push({url,fetched_at:got.fetchedAt,body:got.raw});
+  }
+  const found=countedIncidents(groups,[prev,cal]);
+  if(!found.ok)return {reason:found.reason};
+  const overlap=found.incidents.filter(i=>i.end>start&&i.start<end);
+  let liveness:string|null=null;
+  if(overlap.length===0){
+   // A quiet month is only believable on a maintained page: the fetched history must list some incident, and the incidents feed must show one dated after the month.
+   const quiet='cannot tell a quiet month from an unmaintained page';
+   if(!groups.some(g=>Array.isArray(g.incidents)&&g.incidents.length>0))return {reason:quiet+' (the fetched history lists no incident in any month)'};
+   const feedUrl=`https://${host}/api/v2/incidents.json`;
+   let later=false;
+   try{const got=await readSlaBody(feedUrl,host,UA,SOURCE_TIMEOUT_MS);const feed=JSON.parse(got.raw);
+    later=feed.incidents.some((i:any)=>typeof i?.started_at==='string'&&Date.parse(i.started_at)>=end);
+    bodies.push({url:feedUrl,fetched_at:got.fetchedAt,body:got.raw});
+   }catch{return {reason:quiet+' (the incidents feed could not be read)'};}
+   if(!later)return {reason:quiet+' (the incidents feed has no incident dated after the month)'};
+   liveness='liveness checked: the history lists incidents and the incidents feed has an incident dated after the month';
+  }
+  const downtimeMs=coveredMs(overlap.map(i=>[i.start,i.end] as [number,number]),start,end);
+  const uptime=Math.round(Math.max(0,Math.min(100,((end-start-downtimeMs)/(end-start))*100))*10000)/10000;
+  const asOf=new Date(now).toISOString(),days=(end-start)/86400000,downtimeMin=Math.round(downtimeMs/60000);
+  const monthName=new Date(start).toLocaleString('en-US',{month:'long',year:'numeric',timeZone:'UTC'});
+  const evidence=JSON.stringify({service,host,period:periodText,month:monthName,window_start:new Date(start).toISOString(),window_end:new Date(end).toISOString(),source:'public history.json pages',downtime_rule:'downtime = union of listed incident intervals with impact major|critical, clipped to the UTC calendar month; incidents listed under the previous month are read so an incident crossing into the month counts only its overlap; minor, none and maintenance excluded',previous_month_read_for_overlap:true,liveness,assumption:'an incident that started before the previous month is not read',counted_incidents:overlap.map(i=>({name:i.name,impact:i.impact,start:new Date(i.start).toISOString(),end:new Date(i.end).toISOString()})),excluded_listed_incidents:found.excluded,downtime_minutes:downtimeMin,window_minutes:days*1440,uptime_pct:uptime,upstream_pages:bodies,honesty:'uptime_pct derives only from the vendor published incident history under the disclosed rule at minute precision; sla_target_pct and compliant are null',fetched_at:asOf});
+  const upstreamDesc=`statuspage.io public history https://${host}/history.json (${bodies.length} page(s), fetched ${asOf})`;
+  const receipt=makeReceipt(INTENT,upstreamDesc.slice(0,500),evidence,'keyless public statuspage history JSON; exact pages embedded');receipt.fetched_at=asOf;
+  try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
+  const answer=`${service} has ${uptime}% incident-history estimated uptime for ${monthName} (UTC calendar month), under this disclosed rule: downtime counts only major/critical incidents from its public statuspage history (${overlap.length} overlapping the month, ~${downtimeMin} minutes); minor degradations and maintenance are excluded. Times are minute precision. An incident that started more than one month before the target month is not read. sla_target_pct and compliant are NOT provided: an SLA target was not established.`;
+  return {envelope:withAnswerClass(envelope(INTENT,{service,component_requested:null,component_filtered:false,period:periodText,period_days:days,uptime_pct:uptime,status:'found',uptime_semantics:'incident-history estimate, not measured availability or component uptime history',sla_target_pct:null,compliant:null,counted_incidents:overlap.length,downtime_minutes:downtimeMin,summary:`${service} ${uptime}% uptime over ${monthName} per the disclosed major/critical-only rule (${overlap.length} counted incidents); sla_target_pct/compliant not provided.`},receipt,{answer,verdict:'verified',confidence:0.85,source:upstreamDesc}),INTENT,{service_bound:true,alias_name:aliasName,window_covered:true})};
+}
+
 async function handleSlaComplianceInternal(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const service = query.service?.trim().toLowerCase();
   if (!service) throw badRequest("MISSING_PARAM", `service is required: one of ${Object.keys(STATUSPAGES).join(", ")}`);
@@ -173,13 +219,20 @@ async function handleSlaComplianceInternal(query: Record<string, string | undefi
   const days = resolvedPeriod?.days;
   const {host,component}=parseSlaService(service);
   const aliasName=Object.entries(STATUSPAGES).find(([,h])=>h===host)?.[0]??'none';
+  let monthRefusal:string|null=null;
+  const calMonth=host&&days===undefined?parseCalendarMonth(query.period):null;
+  if(host&&calMonth){
+    const monthly=await monthlyUptime(service,host,component,calMonth,aliasName,query.period!.trim());
+    if('envelope' in monthly)return monthly.envelope;
+    monthRefusal=monthly.reason;
+  }
   if (!host || days === undefined) {
     const calendarDays=slaCalendarDays(query.period);
     const periodDays=days??calendarDays;
     const at=new Date().toISOString();
     const status=!host?'not_found':'unknown';
     const reason=!host?'No verified statuspage binding; no guessed hostname or external lookup'+(calendarDays!==null?'; calendar period length only, not measured uptime':''):
-      'Period is not a supported rolling 1-90 day observation window. No complete calendar-period source window was established; no uptime arithmetic performed'+(calendarDays!==null?'; calendar period length only':'');
+      (monthRefusal?'Calendar month '+query.period!.trim()+' was not computed: '+monthRefusal+'. No uptime arithmetic performed':'Period is not a supported rolling 1-90 day observation window. No complete calendar-period source window was established; no uptime arithmetic performed')+(calendarDays!==null?'; calendar period length only':'');
     const period=days===undefined?query.period!.trim():`${days}d`;
     const evidence=JSON.stringify({service,period,period_days:periodDays??null,status,source_resolution:reason,checked_at:at});
     const receipt=makeReceipt(INTENT,'local:verified-statuspage-bindings',evidence,'No supported observation window; no uptime observation');receipt.fetched_at=at;
