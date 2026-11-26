@@ -61,3 +61,17 @@ it('a read refused because Photon is halted takes no start slot: the next city r
  const a=await run(resolveRoutePlace('Pike Place'),50);expect(a.ok).toBe(false);const b=await run(resolveRoutePlace('Qville'),3000);expect(b.ok).toBe(true);
  expect(t['Qville']-t['Pike Place']).toBe(1100);
 });
+it('the halt window is literally 5 minutes after the failed read: halted at +299.9 s, reads again at +300.1 s',async()=>{
+ expect(PROVIDER_HALT_MS).toBe(300000);
+ const calls=stub({photon:'500',om:'ok'});const inner=globalThis.fetch;let tf=0;
+ vi.stubGlobal('fetch',async(u:unknown,i?:any)=>{if(new URL(String(u)).hostname==='photon.komoot.io')tf=Date.now();return (inner as any)(u,i);});
+ await run(resolveRoutePlace('Space Needle'),5000);const ph=()=>calls.filter(c=>c.startsWith('PH')).length;expect(ph()).toBe(1);expect(tf).toBeGreaterThan(0);
+ await vi.advanceTimersByTimeAsync(tf+299900-Date.now()-100);await run(resolveRoutePlace('Pike Place'),100);expect(ph()).toBe(1);
+ await vi.advanceTimersByTimeAsync(tf+300100-Date.now());await run(resolveRoutePlace('Ferry Building'),3000);expect(ph()).toBe(2);
+});
+it('a Photon read already queued for its slot re-checks the halt after the wait and does not fetch',async()=>{
+ const calls=stub({photon:'500',om:'ok'});
+ const a=run(resolveRoutePlace('Space Needle'),9000);const b=run(resolveRoutePlace('Pike Place'),9000);
+ const [ra,rb]:any=await Promise.all([a,b]);expect(ra.ok).toBe(false);expect(rb.ok).toBe(false);
+ expect(calls.filter(c=>c.startsWith('PH'))).toEqual(['PH:Space Needle']);
+});
