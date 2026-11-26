@@ -1,4 +1,4 @@
-import {withAnswerClass} from "../core/answerClass";
+import {withAnswerClass,answerDiagnostics} from "../core/answerClass";
 // EVENT_OUTCOME_RESOLUTION_GENERAL — GET /v1/event-outcome?event=<market question>
 //
 // Zero-LLM. The resolved outcome of a prediction-market event, with a
@@ -101,11 +101,16 @@ export function resolveMarket(m: PmMarket): Resolution {
   return { outcome: winner.toLowerCase() as "yes" | "no", resolved_yes: winner.toLowerCase() === "yes", winner };
 }
 
+export function eventInputClass(input:string|undefined):'sport'|'election'|'price'|'other'{
+ const text=(input??'').toLowerCase();
+ const classes=[/\b(election|elected|presidential|president|senate|governor|ballot|vote|voting)\b/.test(text)?'election':null,/\b(price|market cap|trading|trade above|trade below|usd|dollars|bitcoin|ethereum|btc|eth)\b|\$\s*\d/.test(text)?'price':null,/\b(world cup|super bowl|nba|nfl|nhl|mlb|champions league|premier league|match|tournament|finals|touchdown|goals?|score)\b/.test(text)?'sport':null].filter(Boolean);
+ return classes.length===1?classes[0] as 'sport'|'election'|'price':'other';
+}
 export async function handleEventOutcome(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const deadlineAt=Date.now()+2700;
   let timer:ReturnType<typeof setTimeout>|undefined;
-  try{return await Promise.race([handleEvent(query,deadlineAt),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(upstreamUnavailable('EVENT_SOURCE_TIMEOUT','event request budget exceeded')),2900);})]);}
-  catch(error){throw error instanceof ApiError?error:upstreamUnavailable('EVENT_SOURCE_UNAVAILABLE','event source response could not be read');}
+  try{const result=await Promise.race([handleEvent(query,deadlineAt),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(upstreamUnavailable('EVENT_SOURCE_TIMEOUT','event request budget exceeded')),2900);})]);return withAnswerClass(result,INTENT,{...answerDiagnostics(INTENT,result).answerClass,event_class:eventInputClass(query.event)});}
+  catch(error){throw withAnswerClass(error instanceof ApiError?error:upstreamUnavailable('EVENT_SOURCE_UNAVAILABLE','event source response could not be read'),INTENT,{outcome:'refused',source:'none',event_class:eventInputClass(query.event)});}
   finally{clearTimeout(timer);}
 }
 async function handleEvent(query: Record<string, string | undefined>,deadlineAt:number): Promise<Record<string, unknown>> {
