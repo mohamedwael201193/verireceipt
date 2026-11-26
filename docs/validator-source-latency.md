@@ -15,3 +15,7 @@ This is process-local pacing, not a guarantee of a response under a particular l
 A root-bound leg ending with a retryable HTTP error after1500ms opens the same60second slow-host cooldown. Successful records retain the3000ms threshold. This affects later request eligibility only. A retryable HTTP attempt that has already consumed1000ms is not retried, including root-bind attempts. Existing quorum, root binding, dissent, absence and wait-for-all rules are unchanged.
 
 Optional epoch balance-delta reads share400ms, skip active or slow-marked required-source hosts, and can be omitted without changing the verified balance verdict, primary receipt evidence or balance answer. The900/400/timeout comparison is test-only; no HTTP query can override the production400ms enrichment budget.
+
+## Finalized-root single flight
+
+Concurrent requests that need a finalized root share one resolution; a joiner waits no longer than its own request deadline and receives only a root that two non-optimistic sources agreed on. A failed or conflicting resolution fails every joiner closed, and the next request starts a fresh one. A root agreed within the last 12 seconds is reused whatever the hosts' cooldown or ownership state; it is never reused at or after 12 seconds, and no last-known root is served as current. Leg-level source rate limits and ownership are unchanged, so a burst of different validators can still lose legs to per-source budgets.

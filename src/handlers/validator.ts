@@ -361,6 +361,8 @@ interface FinalizedRootCacheEntry {
 
 const verifiedCache = new Map<string, VerifiedCacheEntry>();
 let finalizedRootCache: FinalizedRootCacheEntry | undefined;
+/** One in-flight finalized-root resolution shared by concurrent requests, so a burst cannot make later callers find the hosts owned and fail. */
+let finalizedRootInflight: Promise<string | undefined> | undefined;
 
 interface TokenBucket {
   tokens: number;
@@ -447,6 +449,7 @@ export async function ownValidatorHost<T>(base:string,work:()=>Promise<T>):Promi
 export function resetValidatorCachesForTests(nowMs: number = Date.now()): void {
   verifiedCache.clear();
   finalizedRootCache = undefined;
+  finalizedRootInflight = undefined;
   hostCooldownUntilMs.clear();
   activeValidatorHosts.clear();slowCooldownUntil.clear();
   chainsafeBucket = {
@@ -833,9 +836,31 @@ async function resolveFinalizedRoot(
   deadlineAt: number,
   nowMs: number,
 ): Promise<string | undefined> {
+  // A root that two non-optimistic sources agreed on inside the TTL is reused as is,
+  // whatever the hosts' cooldown or ownership state now. Never stale beyond the TTL.
   if (finalizedRootCache && nowMs - finalizedRootCache.atMs < FINALIZED_ROOT_CACHE_TTL_MS) {
     return finalizedRootCache.root;
   }
+  // Single flight: concurrent callers share one resolution. A joiner waits no longer than
+  // its own request deadline, and gets only a root that was actually quorum-agreed.
+  if (finalizedRootInflight !== undefined) {
+    const shared = finalizedRootInflight;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([shared, new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), Math.max(0, deadlineAt - Date.now())); })]);
+    } finally { if (timer !== undefined) clearTimeout(timer); }
+  }
+  const run = resolveFinalizedRootFresh(fetchImpl, timeoutMs, deadlineAt, nowMs);
+  finalizedRootInflight = run;
+  try { return await run; } finally { if (finalizedRootInflight === run) finalizedRootInflight = undefined; }
+}
+
+async function resolveFinalizedRootFresh(
+  fetchImpl: typeof fetch,
+  timeoutMs: number,
+  deadlineAt: number,
+  nowMs: number,
+): Promise<string | undefined> {
   const reservedForLegs = Math.min(1_000, Math.max(200, Math.floor(timeoutMs / 2)));
   const rootBudget = Math.min(ROOT_RESOLVE_BUDGET_MS, Math.max(50, timeoutMs - reservedForLegs));
   const rootDeadlineAt = Math.min(deadlineAt, Date.now() + rootBudget);
