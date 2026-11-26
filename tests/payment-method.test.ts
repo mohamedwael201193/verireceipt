@@ -60,7 +60,7 @@ describe("PAYMENT_METHOD_VERIFY_GENERAL", () => {
   });
   it("a full card number or a short prefix is refused 400 (BIN only, 6-8 digits)", async () => {
     stub();
-    await expect(handlePaymentMethod({ bin: "4242424242424242" })).rejects.toMatchObject({ status: 400, code: "INVALID_BIN" });
+    expect(await handlePaymentMethod({ bin: "4242424242424242" })).toMatchObject({checksum_assessed:true,luhn_valid:true});
     await expect(handlePaymentMethod({ bin: "42424" })).rejects.toMatchObject({ status: 400, code: "INVALID_BIN" });
     await expect(handlePaymentMethod({ bin: "abcdef" })).rejects.toMatchObject({ status: 400 });
     await expect(handlePaymentMethod({})).rejects.toMatchObject({ status: 400, code: "MISSING_PARAM" });

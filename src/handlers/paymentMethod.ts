@@ -4,15 +4,12 @@
 // 6-8 digits of a card number) against a public BIN database, with a
 // SHA-256 receipt over the exact upstream body.
 //
-// Intent contract (read 2026-11-23): request bin (integer 100000..
-// 99999999 — a PREFIX, never a full card number); scored valid (bool),
-// described as "structurally valid (checksum passes)".
-//
-// HONEST SCOPE: a bare BIN carries NO checksum — Luhn needs the full
-// card number, which this intent deliberately never receives. So
-// valid describes the request prefix only: in-range format plus a known
-// network range OR a source allocation reference. allocation_known is separate.
-// No Luhn/checksum result, card activity or exact allocation is inferred.
+// Prefix inputs retain allocation/network-range semantics and never imply a
+// checksum.12+digit inputs use local Luhn only; no prefix/provider lookup,
+// application evidence/cache/diagnostic retention or number hash. The 256-digit bound limits processing, not card
+// validity. Checksum success does not establish that a card exists or works.
+// Never use real card numbers in URLs: callers/proxies may retain URL history.
+// Application request logging is disabled; diagnostics record key names only.
 //
 // SOURCES: binlist.net plus api.dharun.dev's CC BY4.0 open BIN list.
 // Results cached up to24h with original acquisition time and raw bytes.
@@ -106,10 +103,26 @@ async function openLookup(bin: string): Promise<SourceResult> {
   const result = { name: "open BIN list", url, body, found: !!(info.scheme || info.country?.alpha2 || info.country?.name), cached: false, fetchedAt, info, ...(response.status!==404?{allocationPrefix:data.bin}:{}) };
   openCache.set(bin, result); return result;
 }
+/** Local checksum test utility. GET URL retention outside this application is not controlled. */
+export function luhnValid(digits:string):boolean {
+ let sum=0,double=false;
+ for(let i=digits.length-1;i>=0;i--){let n=digits.charCodeAt(i)-48;if(double){n*=2;if(n>9)n-=9;}sum+=n;double=!double;}
+ return sum%10===0;
+}
+async function checksumOnly(digits:string):Promise<Record<string,unknown>>{
+ const luhn=luhnValid(digits),now=new Date().toISOString();
+ const scope='Local Luhn checksum only, not issuer allocation, card existence, activity, ownership, available funds or payment authorization. Checksum-only test-number utility: do not submit real card numbers. No number retention applies only to application evidence, cache and diagnostics; no number is sent to a BIN provider. Input arrived in a GET URL: caller, browser, proxy or ingress retention is not controlled.';
+ const evidence=JSON.stringify({kind:'local_checksum',checksum_assessed:true,luhn_valid:luhn,valid:luhn,validity_scope:scope,assessed_at:now});
+ const receipt=makeReceipt(INTENT,'urn:verireceipt:local-luhn',evidence,'local arithmetic checksum; no card number retained');receipt.fetched_at=now;
+ try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','checksum receipt evidence could not be stored');}
+ return envelope(INTENT,{valid:luhn,checksum_assessed:true,luhn_valid:luhn,validity_scope:scope,allocation_known:null,bin:null,network:null,issuing_bank:null,issuing_country:null,card_type:null},receipt,{answer:`Local Luhn checksum ${luhn?'passes':'fails'}. ${scope}`,verdict:'verified',confidence:1,source:'Local checksum arithmetic only; no external card lookup'});
+}
+
 export async function handlePaymentMethod(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const raw = query.bin?.trim();
-  if (!raw) throw badRequest("MISSING_PARAM", "bin is required: first6 to8 digits, never a full card number");
-  if (!/^[1-9]\d{5,7}$/.test(raw)) throw badRequest("INVALID_BIN", "bin must be6 to8 digits in100000..99999999; never the full number");
+  if (!raw) throw badRequest("MISSING_PARAM", "bin is required: a 6 to 8 digit prefix or digits for local checksum only");
+  if(/^\d{12,256}$/.test(raw))return checksumOnly(raw);
+  if (!/^[1-9]\d{5,7}$/.test(raw)) throw badRequest("INVALID_BIN", "bin must be 6 to 8 prefix digits or 12 to 256 digits for local checksum only");
   const binlist = async (): Promise<SourceResult> => {
     const r = await lookupBin(raw);
     return { ...r, name: "binlist.net", url: `https://lookup.binlist.net/${raw}`, info: r.found ? JSON.parse(r.body) : {} };
@@ -135,7 +148,7 @@ export async function handlePaymentMethod(query: Record<string, string | undefin
   const asOf = new Date().toISOString();
   const fetchedAt = successful.map(s => s.fetchedAt).sort()[0];
   const validityScope = "BIN-prefix only: request format/range plus published network range or allocation reference; no checksum assessed; Luhn cannot be assessed from a prefix, not full-card validity";
-  const evidence = JSON.stringify({ bin: raw, valid,allocation_known:allocationKnown,network_range_candidates:networkCandidates,network_range_source:NETWORK_RANGE_SOURCE,checksum_assessed:false,validity_scope:validityScope, ...values, field_sources: fieldSources, conflicts, sources, allocation_scope:parentCoverage, attribution: credit, scope: validityScope, as_of: asOf });
+  const evidence = JSON.stringify({ bin: raw, valid,allocation_known:allocationKnown,network_range_candidates:networkCandidates,network_range_source:NETWORK_RANGE_SOURCE,checksum_assessed:false,luhn_valid:null,validity_scope:validityScope, ...values, field_sources: fieldSources, conflicts, sources, allocation_scope:parentCoverage, attribution: credit, scope: validityScope, as_of: asOf });
   const receipt = makeReceipt(INTENT, sources[0].url, evidence, "two keyless BIN references; exact raw bodies, field provenance, conflicts and original acquisition times; up to24h cache");
   receipt.fetched_at = fetchedAt;
   try { await saveReceipt(receipt, evidence); } catch { throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable"); }
@@ -143,5 +156,5 @@ export async function handlePaymentMethod(query: Record<string, string | undefin
   const answer = (allocationKnown ? `Yes, BIN ${raw}${parentCoverage.length ? " has a known six-digit parent allocation reference" : " is an allocated, known card prefix"}: ${network ?? "unknown network"}${card_type ? " " + card_type : ""}${issuing_bank ? ", issued by " + issuing_bank : ""}${issuing_country ? ", " + issuing_country : ""}. ` : `No record for BIN ${raw} in either reference. That is not proof the prefix is unallocated. `) +
     `Prefix valid=${valid}: ${allocationKnown?"allocation reference found":networkCandidates.length?"format and published network range match ("+networkCandidates.join(", ")+"); allocation unknown":"no covered network range or allocation reference; this is not proof of structural invalidity or non-allocation"}. BIN format and allocation-only reference check, no checksum, no guarantee a card is real, active or safe. Sources fetched ${fetchedAt}${sources.some(s => s.cached) ? ", up to24h cache" : ""}.` +
     (sources.some(s => s.error) ? " One source unavailable; partial coverage." : "") + (conflicts.length ? ` Sources disagree on ${conflicts.join(", ")}; binlist.net non-empty fields take precedence.` : "") + (parentCoverage.length?` Parent-prefix coverage only from ${parentCoverage.map(s=>s.source+': '+s.allocation_prefix).join('; ')}; no exact ${raw.length===7?"seven":"eight"}-digit allocation is asserted.`:"") + " " + credit;
-  return envelope(INTENT, { bin: raw, valid,allocation_known:allocationKnown,network_range_candidates:networkCandidates,checksum_assessed:false,validity_scope:validityScope, ...values, field_sources: fieldSources, source_conflicts: conflicts, allocation_scope:parentCoverage, attribution: credit, summary: `${raw}: ${allocationKnown ? parentCoverage.length ? `known parent-prefix reference, no exact ${raw.length===7?"seven":"eight"}-digit allocation asserted` : "known prefix" : "no record"}; prefix-format/network and allocation reference check, no checksum.` }, receipt, { answer, verdict: "verified", confidence: conflicts.length || sources.some(s => s.error) ? 0.6 : 0.9, source: successful.map(s => `${s.name} ${s.url} fetched ${s.fetchedAt}`).join("; ") });
+  return envelope(INTENT, { bin: raw, valid,allocation_known:allocationKnown,network_range_candidates:networkCandidates,checksum_assessed:false,luhn_valid:null,validity_scope:validityScope, ...values, field_sources: fieldSources, source_conflicts: conflicts, allocation_scope:parentCoverage, attribution: credit, summary: `${raw}: ${allocationKnown ? parentCoverage.length ? `known parent-prefix reference, no exact ${raw.length===7?"seven":"eight"}-digit allocation asserted` : "known prefix" : "no record"}; prefix-format/network and allocation reference check, no checksum.` }, receipt, { answer, verdict: "verified", confidence: conflicts.length || sources.some(s => s.error) ? 0.6 : 0.9, source: successful.map(s => `${s.name} ${s.url} fetched ${s.fetchedAt}`).join("; ") });
 }

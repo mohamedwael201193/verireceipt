@@ -204,7 +204,7 @@ export function recordRequestCompletion(route: string | undefined, status: numbe
       const refused=status>=400 ? intent==='EVENT_OUTCOME_RESOLUTION_GENERAL'?{outcome:'refused',source:'none'}:intent==='ONCHAIN_METRIC_VERIFY_GENERAL'?{metric_kind:ownString(details.query,'metric')??'balance',leg:'none',result:'refused',refusal_reason:status===400?'invalid_input':'other'}:undefined:undefined;
       // Fixed input shape only. Never log the prefix itself, its length or unknown keys.
       const paymentBin=intent==='PAYMENT_METHOD_VERIFY_GENERAL'?ownString(details.query,'bin'):undefined;
-      const paymentClass=intent==='PAYMENT_METHOD_VERIFY_GENERAL'?{input_class:paymentBin===undefined||paymentBin.trim()===''?'missing':/^\d{6,8}$/.test(paymentBin.trim())?'prefix':'invalid'}:undefined;
+      const paymentClass=intent==='PAYMENT_METHOD_VERIFY_GENERAL'?{input_class:paymentBin===undefined||paymentBin.trim()===''?'missing':/^\d{6,8}$/.test(paymentBin.trim())?'prefix':/^\d{12,256}$/.test(paymentBin.trim())?'checksum':'invalid'}:undefined;
       // Error-code constants only; no resolver messages or DNS input values inspected.
       const dnsReasons:Record<string,string>={DNS_RESOLVERS_DISAGREE:'resolver_disagreement',DNS_RESOLVERS_DOWN:'inconclusive',INVALID_RECORD_TYPE:'bad_type',MISSING_PARAM:'missing_param',INVALID_NAME:'invalid_name',RECEIPT_PERSIST_FAILED:'persistence_failed',INTERNAL:'internal'};
       const dnsClass=intent==='DNS_RECORD_LOOKUP_GENERAL'&&status>=400?{dns_refusal_reason:typeof details.errorCode==='string'&&Object.hasOwn(dnsReasons,details.errorCode)?dnsReasons[details.errorCode]:'other'}:undefined;
