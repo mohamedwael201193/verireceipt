@@ -112,3 +112,27 @@ describe('review fixes',()=>{
   const r:any=await handleValidator({validator_index:'1'},{fetchImpl:transport(t)});expect(r).not.toHaveProperty('attestation_performance');
  });
 });
+describe('bounded cancel pin',()=>{
+ it('holds ownership through 220 ms and aborts the request signal at the 250 ms cancel bound',async()=>{
+  vi.useFakeTimers();const enc=new TextEncoder();const signals:AbortSignal[]=[];
+  const mk=()=>{let sent=false;const reader={read:async()=>{if(sent)return{done:true,value:undefined};sent=true;return{done:false,value:enc.encode('x'.repeat(330*1024))};},cancel:()=>new Promise<void>(()=>{})};
+   return {ok:true,status:200,headers:new Headers(),body:{getReader:()=>reader},text:async()=>''} as unknown as Response;};
+  const t:T={calls:[],rewardsFor:()=>mk()};const base=transport(t);
+  const f=(async(u:any,i:any)=>{if(String(u).includes('/rewards/'))signals.push(i.signal);return base(u,i);}) as typeof fetch;
+  const p1=handleValidator({validator_index:'1'},{fetchImpl:f});await vi.advanceTimersByTimeAsync(200);
+  const n=rewardCalls(t).length;expect(n).toBeGreaterThan(0);expect(signals.every(s=>!s.aborted)).toBe(true);
+  curIdx='2';const early=handleValidator({validator_index:'2'},{fetchImpl:f});await vi.advanceTimersByTimeAsync(20);expect(rewardCalls(t).length).toBe(n);
+  await vi.advanceTimersByTimeAsync(60);expect(signals.slice(0,n).every(s=>s.aborted)).toBe(true);
+  await vi.advanceTimersByTimeAsync(4000);await p1;await early;
+ });
+ it.each([500,429])('a %i body whose cancel never settles keeps its signal live at 220 ms and aborts it by 280 ms',async(status)=>{
+  vi.useFakeTimers();const signals:AbortSignal[]=[];
+  const mk=()=>({ok:false,status,headers:new Headers(),body:{cancel:()=>new Promise<void>(()=>{})},text:async()=>''}) as unknown as Response;
+  const t:T={calls:[],rewardsFor:()=>mk()};const base=transport(t);
+  const f=(async(u:any,i:any)=>{if(String(u).includes('/rewards/'))signals.push(i.signal);return base(u,i);}) as typeof fetch;
+  const p=handleValidator({validator_index:'1'},{fetchImpl:f});await vi.advanceTimersByTimeAsync(220);
+  expect(signals.length).toBeGreaterThan(0);expect(signals.every(s=>!s.aborted)).toBe(true);
+  await vi.advanceTimersByTimeAsync(60);expect(signals.every(s=>s.aborted)).toBe(true);
+  await vi.advanceTimersByTimeAsync(4000);await p;
+ });
+});

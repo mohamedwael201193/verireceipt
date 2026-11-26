@@ -1116,6 +1116,7 @@ async function readPerformanceBody(url: string, fetchImpl: typeof fetch, deadlin
       if (!res.ok) {
         if (res.status === 429) noteSource429(host, parseRetryAfterMs(retryAfterHeader(res)), nowMs());
         await cancelBodyBounded(res.body);
+        controller.abort();
         return undefined;
       }
       let body: string;
@@ -1125,7 +1126,7 @@ async function readPerformanceBody(url: string, fetchImpl: typeof fetch, deadlin
         while (true) {
           const part = await reader.read(); if (part.done) break;
           size += part.value.byteLength;
-          if (size > maxBytes) { await cancelBodyBounded(reader); return undefined; }
+          if (size > maxBytes) { await cancelBodyBounded(reader); controller.abort(); return undefined; }
           parts.push(part.value);
         }
         body = Buffer.concat(parts).toString("utf8");
