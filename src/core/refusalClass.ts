@@ -1,6 +1,7 @@
 import {isIP} from 'node:net';
 import {gridRefusalClass} from '../handlers/gridPrice';
 import {TOKEN_CONTRACTS,ADDRESS_RE} from '../handlers/tokenContracts';
+import {liquidityChain,liquidityPair} from './liquiditySelectors';
 // Coarse, fixed-label classes of a rejected input for the refusal_param_class log line.
 // Only labels from fixed lists are returned. The raw value, or any part of it outside the lists, is never logged.
 const CHAINS=new Set(['gnosis','celo','blast','fantom','linea','scroll','zksync','mantle','metis','moonbeam','moonriver','cronos','aurora','harmony','kava','klaytn','sei','sui','aptos','near','cosmos','tron','ton','cardano','polkadot','tezos','stellar','xrp','ripple','litecoin','dogecoin','bitcoin','solana','avalanche','bsc','bnb','polygon','arbitrum','optimism','base','ethereum','zora','mode','taiko','manta','berachain','sonic','unichain','ink','abstract','hyperliquid','monad']);
@@ -29,6 +30,14 @@ export function tokenClass(raw:string|undefined):string{
  if(/^[A-Za-z][A-Za-z0-9.' -]*$/.test(v)&&(v.includes(' ')||(v.length>=6&&/[a-z]/.test(v))))return 'name_like';
  return 'other';
 }
+/** Fixed-label class of a liquidity `pool` value: address, pair_alias, name or other. Never the value. */
+export function poolClass(raw:string|undefined):string{
+ const v=(raw??'').trim();
+ if(/^0x[0-9a-fA-F]{40}$/.test(v))return 'address';
+ if(liquidityPair(v)!==null)return 'pair_alias';
+ if(/^[A-Za-z][A-Za-z0-9.' %/-]*$/.test(v)&&/[A-Za-z]{3}/.test(v)&&/[ ]/.test(v))return 'name';
+ return 'other';
+}
 function ownString(query:unknown,key:string):string|undefined{
  if(!query||typeof query!=='object')return undefined;
  const d=Object.getOwnPropertyDescriptor(query,key);
@@ -40,7 +49,8 @@ export function refusalParamClass(route:string|undefined,errorCode:string,query:
  if(route==='/v1/threat-indicator'||route==='/v1/malware-hash')return {indicator_type:indicatorType(ownString(query,'indicator'))};
  if(route==='/v1/macro'&&errorCode==='UNSUPPORTED_INDICATOR')return macroTokens(ownString(query,'indicator'));
  if(route==='/v1/grid-price')return gridRefusalClass(ownString(query,'node_or_zone'));
+ if(route==='/v1/liquidity')return {pool_class:poolClass(ownString(query,'pool')),chain_class:chainClass(liquidityChain(ownString(query,'chain')??''))};
  if(route==='/v1/token-holders')return {token_class:tokenClass(ownString(query,'token'))};
  return null;
 }
-export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL'};
+export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/liquidity':'LIQUIDITY_DEPTH_VERIFY_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL'};
