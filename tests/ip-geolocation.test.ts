@@ -63,12 +63,44 @@ describe("IP_GEOLOCATION_GENERAL", () => {
     expect(ans).toContain("Ashburn");
     expect(ans).toContain("approximate");
   });
-  it("a country disagreement between the databases is refused, never averaged", async () => {
-    const edited = JSON.parse(api1111);
-    edited.country = "United States";
+  it.each([["Netherlands","The Netherlands","NL"],["Czechia","Czech Republic","CZ"],["Türkiye","Turkey","TR"],["Bahamas","The Bahamas","BS"]])("spelling pair %s / %s with code %s is agreement", async (a, b, code) => {
+    const w = JSON.parse(who1111); w.country = a; w.country_code = code;
+    const p = JSON.parse(api1111); p.country = b; p.countryCode = code;
+    stub({ who: JSON.stringify(w), api: JSON.stringify(p) });
+    const r = await handleIpGeolocation({ ip: "1.1.1.1" });
+    expect(r.country).toBe(a); expect(r.country_cross_check).toBe("agree"); expect(r.confidence).toBe(0.9);
+    expect(String(r.answer)).toContain("Country cross-checked"); expect(String(r.answer)).not.toContain("DISAGREEMENT");
+  });
+  it("a real ISO code mismatch serves ipwho.is alone with a disclosed disagreement, never averaged", async () => {
+    const edited = JSON.parse(api1111); edited.country = "United States"; edited.countryCode = "US"; edited.lat = 10; edited.lon = 20;
     stub({ who: who1111, api: JSON.stringify(edited) });
-    await expect(handleIpGeolocation({ ip: "1.1.1.1" }))
-      .rejects.toMatchObject({ status: 502, code: "GEO_SOURCES_DISAGREE" });
+    const r = await handleIpGeolocation({ ip: "1.1.1.1" });
+    expect(r.country).toBe("Australia"); expect(r.latitude).toBe(JSON.parse(who1111).latitude); expect(r.longitude).toBe(JSON.parse(who1111).longitude);
+    expect(r.country_cross_check).toBe("disagree"); expect(r.confidence).toBe(0.5);
+    const ans = String(r.answer); expect(ans).toContain("Country DISAGREEMENT"); expect(ans).toContain("AU"); expect(ans).toContain("US"); expect(ans).not.toContain("Country cross-checked");
+  });
+  it("codes sharing a first letter are different countries (AU vs AT)", async () => {
+    const w = JSON.parse(who1111); w.country_code = "AU";
+    const p = JSON.parse(api1111); p.country = "Austria"; p.countryCode = "AT";
+    stub({ who: JSON.stringify(w), api: JSON.stringify(p) });
+    const r = await handleIpGeolocation({ ip: "1.1.1.1" });
+    expect(r.country_cross_check).toBe("disagree"); expect(String(r.answer)).toContain("(AT)");
+  });
+  it("the source string says DISAGREED on a mismatch and cross-checked on agreement", async () => {
+    const p = JSON.parse(api1111); p.country = "Austria"; p.countryCode = "AT";
+    stub({ who: who1111, api: JSON.stringify(p) });
+    expect(String((await handleIpGeolocation({ ip: "1.1.1.1" })).source)).toContain("country DISAGREED between the two");
+    stub({ who: who1111, api: api1111 });
+    const ok = String((await handleIpGeolocation({ ip: "1.1.1.1" })).source);
+    expect(ok).toContain("country cross-checked across both"); expect(ok).not.toContain("DISAGREED");
+  });
+  it("without ISO codes the names decide, dropping a leading 'the'", async () => {
+    const w = JSON.parse(who1111); delete w.country_code; w.country = "The Netherlands";
+    const p = JSON.parse(api1111); delete p.countryCode; p.country = "Netherlands";
+    stub({ who: JSON.stringify(w), api: JSON.stringify(p) });
+    expect((await handleIpGeolocation({ ip: "1.1.1.1" })).country_cross_check).toBe("agree");
+    p.country = "Chile"; stub({ who: JSON.stringify(w), api: JSON.stringify(p) });
+    expect((await handleIpGeolocation({ ip: "1.1.1.1" })).country_cross_check).toBe("disagree");
   });
   it("one source down serves the other alone with the degradation named", async () => {
     stub({ api: api1111 }); // ipwho.is out
