@@ -11,7 +11,7 @@ afterEach(()=>{vi.unstubAllGlobals();vi.clearAllMocks();resetGeckoPoolBudgetForT
 it('real exact-pool source returns numeric reserves and preserves exact raw bytes',async()=>{
  const f=vi.fn(async()=>new Response(raw));vi.stubGlobal('fetch',f);
  const s=geckoPoolLiquiditySource([],GECKOTERMINAL_APPROVAL);const r=await s.read(query,new AbortController().signal);
- expect(r.value.liquidityUsd).toBe(68820142.6838);expect(typeof r.value.liquidityUsd).toBe('number');expect(JSON.parse(r.rawBody).source_raw_body).toBe(raw);expect(r.rawBody).toContain('retrieval time');expect(r.observedAt).toBe(r.fetchedAt);
+ expect(r.value.liquidityUsd).toBe(68820142.6838);expect(typeof r.value.liquidityUsd).toBe('number');expect(JSON.parse(r.rawBody).source_raw_body).toBe(raw);expect(r.rawBody).toContain('retrieval time');expect(JSON.parse(r.rawBody).terms_basis).toBe('Public keyless endpoint; no provider licence or commercial redistribution permission asserted; no block bypass');expect(r.observedAt).toBe(r.fetchedAt);
  expect(String(f.mock.calls[0][0])).toBe('https://api.geckoterminal.com/api/v2/networks/eth/pools/'+address);
 });
 it.each(['id','address','type','network','negative','huge','null','nan'])('rejects mutated %s without claiming observation',async mode=>{
