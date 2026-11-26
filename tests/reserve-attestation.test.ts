@@ -242,4 +242,21 @@ describe('verified additional reserve feeds',()=>{
     const f = vi.fn(); vi.stubGlobal("fetch", f);
     expect((await handleReserveAttestation({ asset })).attested_reserve).toBeNull();
   });
+  it("STALE_ATTESTATION stays in the diagnostics allow-list while unknown codes collapse", async () => {
+    const { diagnosticErrorCode } = await import("../src/core/requestMetrics");
+    expect(diagnosticErrorCode("STALE_ATTESTATION")).toBe("STALE_ATTESTATION");
+    expect(diagnosticErrorCode("NOT_A_REAL_CODE")).toBe("OTHER_ERROR");
+  });
+  it("BGBTC answer says the reserve is across chains and the feed is read on Ethereum; scored field unchanged; others carry no note", async () => {
+    const f = fx26.feeds.find((x: any) => x.asset === "BGBTC"); vi.useFakeTimers();
+    try {
+      vi.setSystemTime((roundOf(f).updatedAt + 60) * 1000); legStub(f);
+      const out = await handleReserveAttestation({ asset: "BGBTC" });
+      expect(out.attested_reserve).toBe(1419999837);
+      expect(String(out.answer)).toContain("Bitget BGBTC asset across chains");
+      expect(String(out.answer)).toContain("read on Ethereum mainnet");
+      const other = fx26.feeds.find((x: any) => x.asset === "swETH"); vi.setSystemTime((roundOf(other).updatedAt + 60) * 1000); legStub(other);
+      expect(String((await handleReserveAttestation({ asset: "swETH" })).answer)).not.toContain("across chains");
+    } finally { vi.useRealTimers(); }
+  });
 });

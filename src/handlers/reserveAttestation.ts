@@ -45,14 +45,14 @@ const DEFAULT_HEARTBEAT_S = 86400;
 
 export const INTENT = "ASSET_RESERVE_ATTESTATION_GENERAL";
 
-export interface PorFeed { asset: string; proxy: string; feedName: string; issuer?: string; heartbeat?: number; reserveUnit?: string; refuseStale?: boolean }
+export interface PorFeed { asset: string; proxy: string; feedName: string; issuer?: string; heartbeat?: number; reserveUnit?: string; refuseStale?: boolean; note?: string }
 /** Feeds probed live 2026-11-23 from the official Chainlink reference data directory.
  *  issuer is named only where the feed's own documentation supports it. */
 export const POR_FEEDS: Record<string, PorFeed> = {
   // Additional feeds: directory and 3-of-3 RPC reads verified 2026-11-26. refuseStale: older than the heartbeat is refused, never served.
   STETH: {"asset": "stETH", "proxy": "0xAd410E655C0fE4741F573152592eeb766e686CE7", "feedName": "stETH Proof of Reserves", "issuer": "Lido", "heartbeat": 21600, "reserveUnit": "ETH", "refuseStale": true},
   EETH: {"asset": "eETH", "proxy": "0xC8cd82067eA907EA4af81b625d2bB653E21b5156", "feedName": "eETH Proof of Reserves", "issuer": "ether.fi", "heartbeat": 86400, "reserveUnit": "ETH", "refuseStale": true},
-  BGBTC: {"asset": "BGBTC", "proxy": "0xADcc914F882965Ef1B2f1043522b3B81ED081491", "feedName": "BGBTC Proof of Reserves", "issuer": "Bitget", "heartbeat": 86400, "reserveUnit": "BTC", "refuseStale": true},
+  BGBTC: {"asset": "BGBTC", "proxy": "0xADcc914F882965Ef1B2f1043522b3B81ED081491", "feedName": "BGBTC Proof of Reserves", "issuer": "Bitget", "heartbeat": 86400, "reserveUnit": "BTC", "refuseStale": true, "note": "The reserve is for the Bitget BGBTC asset across chains; this feed is read on Ethereum mainnet."},
   HBTC: {"asset": "HBTC", "proxy": "0x0A8cD0115B1EE87EbA5b8E06A9a15ED93e230f7a", "feedName": "HBTC Proof of Reserves", "issuer": "Huobi", "heartbeat": 259200, "reserveUnit": "BTC", "refuseStale": true},
   SWETH: {"asset": "swETH", "proxy": "0x60cbE8D88EF519cF3C62414D76f50818D211fea1", "feedName": "Swell ETH Proof of Reserves", "issuer": "Swell Network", "heartbeat": 86400, "reserveUnit": "ETH", "refuseStale": true},
   RSWETH: {"asset": "rswETH", "proxy": "0x0c89c488e763AC2d69cB058CCAC7A8B283EE3DbA", "feedName": "Swell Restaked ETH Proof of Reserves", "issuer": "Swell Network", "heartbeat": 86400, "reserveUnit": "ETH", "refuseStale": true},
@@ -272,7 +272,7 @@ export async function handleReserveAttestation(query: Record<string, string | un
   }
   const answer = `${feed.asset} attested reserve: ${human.toLocaleString("en-US", { maximumFractionDigits: decimals })} ${reserveUnit} (${micro.toString()} micro-units) per the Chainlink ${feed.feedName} feed${feed.issuer ? ` (issuer ${feed.issuer})` : ""}, round ${data.roundId}, attested ${updatedIso} (${Math.floor(ageS / 3600)}h ago${stale ? `, OLDER than the ${heartbeat / 3600}h heartbeat` : ""}). ` +
     `${ethereumSupply === null ? "Ethereum total supply unavailable; no ratio asserted. " : `Ethereum total supply ${ethereumSupply} ${feed.asset}; reserve versus Ethereum-only supply ${ethereumRatio}%. `}This is not a global collateral ratio; collateral_ratio_pct is null. ${token ? "The reserve feed covers wider issuance and other native chains are excluded from the supply denominator. " : "No verified Ethereum issuance token binding is configured for this asset. "} Supply is read at latest while the reserve is the timestamped feed attestation, not a time-matched solvency audit. ` +
-    `Read on ethereum mainnet through the RPC quorum; this is the feed's own attestation, not an independent audit.${remainder ? ` Micro-unit remainder floored: ${remainder}.` : ""}`;
+    `Read on ethereum mainnet through the RPC quorum; this is the feed's own attestation, not an independent audit.${remainder ? ` Micro-unit remainder floored: ${remainder}.` : ""}${feed.note ? ` ${feed.note}` : ""}`;
   return withAnswerClass(envelope(INTENT, {
     attested_reserve: Number(micro),
     asset: feed.asset,
