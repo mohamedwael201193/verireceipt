@@ -35,6 +35,21 @@ describe("added gas chains", () => {
     expect(req.filter(u => !u.includes("coinbase")).every(u => RPCS[chain].includes(u))).toBe(true);
     expect(req.some(u => RPCS[chain].includes(u))).toBe(true);
   });
+  it.each(["linea", "scroll", "zksync-era"])("%s prices the fee in ETH: the receipt names the Coinbase ETH-USD spot and only that spot is fetched", async chain => {
+    const req: string[] = []; stub(same(chain, "0x3b9aca00"), req);
+    const r = await handleGasPrice({ chain });
+    const spot = (r.receipt as any).gas_token_spot;
+    expect(spot.source).toBe("Coinbase ETH-USD spot"); expect(spot.token_usd).toBe(3000);
+    expect(String(spot.formula)).toContain("ETH $3000");
+    expect(req.filter(u => u.includes("api.coinbase.com"))).toEqual(["https://api.coinbase.com/v2/prices/ETH-USD/spot"]);
+    expect(String(r.answer)).toContain("ETH $3000");
+  });
+  it("mantle fetches no spot at all and its receipt carries no gas_token_spot", async () => {
+    const req: string[] = []; stub(same("mantle", "0x3b9aca00"), req);
+    const r = await handleGasPrice({ chain: "mantle" });
+    expect((r.receipt as any).gas_token_spot).toBeUndefined();
+    expect(req.some(u => u.includes("coinbase"))).toBe(false);
+  });
   it("mantle serves gas_price_gwei but no USD fee and says so", async () => {
     stub(same("mantle", "0x3b9aca00"));
     const r = await handleGasPrice({ chain: "mantle" });
