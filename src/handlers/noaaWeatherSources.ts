@@ -11,7 +11,7 @@ export interface WeatherStationBinding {
     metadataUrl: string;
     scope: string;
 }
-async function body(url: string, signal: AbortSignal): Promise<string> {
+export async function weatherSourceBody(url: string, signal: AbortSignal): Promise<string> {
     const r = await fetch(url, { signal, redirect: 'error', headers: { accept: 'application/json', 'user-agent': 'VeriReceipt/2.0 measured-weather observer' } });
     if (!r.ok)
         throw new Error(`weather source HTTP ${r.status}`);
@@ -62,8 +62,8 @@ export function noaaWeatherSources(bindings: readonly WeatherStationBinding[], a
     past: ObservationSource<PastWeatherQuery, DailyArchiveResult>;
 } {
     return {
-        current: { name: 'NOAA AviationWeather measured METAR', approval: approvals.current, read: async (q, signal) => { const b = bindingFor(bindings, q.location); const url = 'https://aviationweather.gov/api/data/metar?' + new URLSearchParams({ ids: b.icao, format: 'json' }); const raw = await body(url, signal); const value = parseMetar(raw, b.icao); const fetchedAt = new Date().toISOString(); return { identity: weatherIdentity(q), sourceUrl: url, rawBody: JSON.stringify({ source_raw_body: raw, station_binding: b }), observedAt: value.observedAt, fetchedAt, value }; } },
-        past: { name: 'NOAA NCEI measured daily station archive', approval: approvals.past, read: async (q, signal) => { const b = bindingFor(bindings, q.location); const url = 'https://www.ncei.noaa.gov/access/services/data/v1?' + new URLSearchParams({ dataset: 'daily-summaries', stations: b.ghcn, startDate: q.date, endDate: q.date, dataTypes: 'TMAX,TMIN,PRCP', format: 'json', units: 'metric', includeAttributes: 'true', includeStationName: 'true', includeStationLocation: 'true' }); const raw = await body(url, signal); const parsed:unknown=JSON.parse(raw);
+        current: { name: 'NOAA AviationWeather measured METAR', approval: approvals.current, read: async (q, signal) => { const b = bindingFor(bindings, q.location); const url = 'https://aviationweather.gov/api/data/metar?' + new URLSearchParams({ ids: b.icao, format: 'json' }); const raw = await weatherSourceBody(url, signal); const value = parseMetar(raw, b.icao); const fetchedAt = new Date().toISOString(); return { identity: weatherIdentity(q), sourceUrl: url, rawBody: JSON.stringify({ source_raw_body: raw, station_binding: b }), observedAt: value.observedAt, fetchedAt, value }; } },
+        past: { name: 'NOAA NCEI measured daily station archive', approval: approvals.past, read: async (q, signal) => { const b = bindingFor(bindings, q.location); const url = 'https://www.ncei.noaa.gov/access/services/data/v1?' + new URLSearchParams({ dataset: 'daily-summaries', stations: b.ghcn, startDate: q.date, endDate: q.date, dataTypes: 'TMAX,TMIN,PRCP', format: 'json', units: 'metric', includeAttributes: 'true', includeStationName: 'true', includeStationLocation: 'true' }); const raw = await weatherSourceBody(url, signal); const parsed:unknown=JSON.parse(raw);
         // Only an actual successful empty array proves this narrow archive lookup empty.
         const value:DailyArchiveResult=Array.isArray(parsed)&&parsed.length===0?{noRecord:true,station:b.ghcn,date:q.date}:parseNoaaDaily(raw, b.ghcn, q.date); const fetchedAt = new Date().toISOString(); return { identity: weatherIdentity(q), sourceUrl: url, rawBody: JSON.stringify({ source_raw_body: raw, station_binding: b, archive_observed_at_semantics: 'retrieval time, not time of past weather', requested_day: q.date }), observedAt: fetchedAt, fetchedAt, value }; } }
     };

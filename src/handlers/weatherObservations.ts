@@ -41,7 +41,8 @@ export interface DailyObservation {
     precipitationMm: number;
     tracePrecipitation: boolean;
     attributes: Record<string, string>;
-    reportingPeriod: 'station-labelled climate day, not necessarily local midnight';
+    reportingPeriod: 'station-labelled climate day, not necessarily local midnight'|'UTC calendar day';
+    method?:'era5_reanalysis';
 }
 export interface DailyNoRecord {
     noRecord: true;

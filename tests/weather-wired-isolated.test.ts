@@ -40,7 +40,7 @@ it('partial location spellings fail closed, no fuzzy match', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
     try {
-        const h = createWiredWeatherHandlers();
+        const h = createWiredWeatherHandlers({archiveFallback:false});
         await expect(h.current({ location: 'New York' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });
         await expect(h.past({ location: 'New', date: '2026-11-20' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });
         expect(fetchSpy).not.toHaveBeenCalled();
@@ -65,7 +65,7 @@ it('unbound locations fail closed for current and past without touching the netw
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
     try {
-        const h = createWiredWeatherHandlers();
+        const h = createWiredWeatherHandlers({archiveFallback:false});
         expect(h.currentSourceNames).toEqual(['NOAA AviationWeather measured METAR']);
         expect(h.pastSourceNames).toEqual(['NOAA NCEI measured daily station archive']);
         await expect(h.current({ location: 'Atlantis' })).rejects.toMatchObject({ status: 502, code: 'APPROVED_SOURCES_UNAVAILABLE' });

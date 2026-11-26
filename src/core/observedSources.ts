@@ -34,6 +34,7 @@ export interface ObservationPolicy<Q, T> {
     answer(value: T): string;
     /** Explicit empty-source result, never inferred from an error. */
     noData?(value:T): boolean;
+    deferNoData?:boolean;
     maxAgeMs: number;
     sourceTimeoutMs: number;
     /** Optional shared network budget across primary and fallback legs. */
@@ -59,10 +60,13 @@ export async function observeFromSources<Q, T>(query: Q, sources: readonly Obser
     const identity = policy.identity(query);
     const failed: string[] = [];
     const deadline = policy.totalTimeoutMs === undefined ? Infinity : Date.now() + policy.totalTimeoutMs;
+    const noRecords:unknown[]=[];let deferred:(()=>Promise<Record<string,unknown>>)|undefined;let attempts=0,gated=0;
+    const weather=policy.intent==='WEATHER_FORECAST_VERIFY_GENERAL';
+    const tag=(o:Record<string,unknown>,result:string)=>weather?withAnswerClass(o,policy.intent,{weather_sources_tried:attempts,weather_gate:gated?'some_ineligible':'eligible',weather_result:result}):o;
     let liquidityClass:Record<string,unknown>|undefined;
     for (const source of sources) {
         if (!approved(source.approval)) {
-            failed.push(source.name + ':unapproved');
+            gated++;failed.push(source.name + ':unapproved');
             continue;
         }
         const remainingMs = Math.min(policy.sourceTimeoutMs, deadline - Date.now());
@@ -71,7 +75,7 @@ export async function observeFromSources<Q, T>(query: Q, sources: readonly Obser
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
             const timeout = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => { controller.abort(); const deadlineError=new Error('source deadline');if(policy.intent==='LIQUIDITY_DEPTH_VERIFY_GENERAL'&&source.name==='DEX Screener named pool reserve liquidity')withAnswerClass(deadlineError,policy.intent,{dexscreener_failure:'timeout'});reject(deadlineError); }, remainingMs); });
-            const observation = await Promise.race([source.read(query, controller.signal), timeout]);
+            attempts++;const observation = await Promise.race([source.read(query, controller.signal), timeout]);
             if (controller.signal.aborted)
                 throw new Error('source deadline');
             if (observation.identity !== identity)
@@ -88,13 +92,15 @@ export async function observeFromSources<Q, T>(query: Q, sources: readonly Obser
             // ignores AbortSignal may finish late, but cannot save a late receipt here.
             clearTimeout(timer);
             timer = undefined;
-            const evidence = JSON.stringify({ identity, provider: source.name, source_url: observation.sourceUrl, observed_at: observation.observedAt, fetched_at: observation.fetchedAt, raw_body: observation.rawBody, value: observation.value, source_scope: policy.scope, prior_sources: failed, terms: { url: source.approval.termsUrl, checked_at: source.approval.checkedAt, commercial_use_confirmed:source.approval.commercialUse, redistribution_confirmed:source.approval.redistribution, owner_terms_risk_accepted:!!source.approval.ownerRiskAcceptance } });
+            const finish=async()=>{const evidence = JSON.stringify({ identity, provider: source.name, source_url: observation.sourceUrl, observed_at: observation.observedAt, fetched_at: observation.fetchedAt, raw_body: observation.rawBody, value: observation.value, source_scope: policy.scope, prior_sources: failed, prior_no_records:noRecords, terms: { url: source.approval.termsUrl, checked_at: source.approval.checkedAt, commercial_use_confirmed:source.approval.commercialUse, redistribution_confirmed:source.approval.redistribution, owner_terms_risk_accepted:!!source.approval.ownerRiskAcceptance } });
             const receipt = makeReceipt(policy.intent, observation.sourceUrl, evidence, policy.noData?.(observation.value) ? '1/1 named source returned no record; not an observed weather value' : '1/1 named observation; primary/fallback, not cross-source consensus');
             receipt.fetched_at = observation.fetchedAt;
             // Once persistence starts, errors propagate. Do not retry another source
             // after an uncertain/failed save, which could create a second receipt.
             await saveReceipt(receipt, evidence);
-            return envelope(policy.intent, policy.fields(observation.value), receipt, { answer: policy.answer(observation.value) + ` Source observed ${observation.observedAt}. ${policy.scope}`, verdict: policy.noData?.(observation.value) ? 'no_data' : 'verified', confidence: policy.noData?.(observation.value) ? 0 : failed.length ? .85 : .95, source: `${source.name}: ${observation.sourceUrl}; observed ${observation.observedAt}; fetched ${observation.fetchedAt}; ${failed.length ? 'fallback' : 'primary'}; no averaging.` });
+            return tag(envelope(policy.intent, policy.fields(observation.value), receipt, { answer: policy.answer(observation.value) + ` Source observed ${observation.observedAt}. ${policy.scope}`, verdict: policy.noData?.(observation.value) ? 'no_data' : 'verified', confidence: policy.noData?.(observation.value) ? 0 : failed.length ? .85 : .95, source: `${source.name}: ${observation.sourceUrl}; observed ${observation.observedAt}; fetched ${observation.fetchedAt}; ${failed.length ? 'fallback' : 'primary'}; no averaging.` }),policy.noData?.(observation.value)?'no_record':'value');};
+            if(policy.deferNoData&&policy.noData?.(observation.value)){noRecords.push({provider:source.name,raw_body:observation.rawBody,source_url:observation.sourceUrl});deferred=finish;failed.push(source.name+':no_record');continue;}
+            return await finish();
         }
         catch (error) {
             if (timer === undefined)
@@ -109,7 +115,8 @@ export async function observeFromSources<Q, T>(query: Q, sources: readonly Obser
             controller.abort();
         }
     }
+    if(deferred&&noRecords.length===sources.length)return await deferred();
     const error=upstreamUnavailable('APPROVED_SOURCES_UNAVAILABLE', 'no current identity-matching observation from a source with reviewed terms or scoped owner risk acceptance');
     if(liquidityClass)withAnswerClass(error,policy.intent,liquidityClass);
-    throw error;
+    tag(error as unknown as Record<string,unknown>,attempts===0?'gate':'unavailable');throw error;
 }

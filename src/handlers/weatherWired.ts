@@ -1,9 +1,10 @@
+import {openMeteoArchive} from './openMeteoArchive';
 // WIRED measured-weather configuration (expansion slice, 2026-11-23).
 //
 // Enables the measured-weather handlers with reviewed station bindings
-// and NOAA source terms. Doctrine (unchanged): measured station
-// observations only - no forecast, reanalysis or modelled substitute
-// (OpenWeatherMap was ruled out for exactly that reason); exact location
+// and NOAA source terms. Current observations remain measured-station only.
+// Past-day queries can use separately disclosed ERA5 reanalysis fallback.
+// No field-level blending or station-measurement claim for reanalysis; exact location
 // spellings only, no fuzzy city/station resolution; a location with no
 // reviewed binding fails closed.
 //
@@ -73,16 +74,15 @@ export interface WiredWeatherHandlers {
     pastSourceNames: readonly string[];
 }
 
-/** Composed measured-weather handlers: one NOAA leg for current METAR
- * observations and one NOAA leg for the past-day archive. */
-export function createWiredWeatherHandlers(): WiredWeatherHandlers {
+/** Current NOAA METAR; past NOAA daily archive with disclosed ERA5 fallback. */
+export function createWiredWeatherHandlers(options:{archiveFallback?:boolean}={}): WiredWeatherHandlers {
     const noaa = noaaWeatherSources(WEATHER_STATION_BINDINGS, { current: NOAA_METAR_APPROVAL, past: NOAA_NCEI_APPROVAL });
     const archive = noaaWeatherSources(PAST_WEATHER_BINDINGS, { current: NOAA_METAR_APPROVAL, past: NOAA_NCEI_APPROVAL });
-    const handlers = createWeatherObservationHandlers({ current: [noaa.current], past: [archive.past] });
+    const handlers = createWeatherObservationHandlers({ current: [noaa.current], past: options.archiveFallback===false?[archive.past]:[archive.past,openMeteoArchive] });
     return {
         current: handlers.current,
         past: handlers.past,
         currentSourceNames: [noaa.current.name],
-        pastSourceNames: [noaa.past.name],
+        pastSourceNames: options.archiveFallback===false?[archive.past.name]:[archive.past.name,openMeteoArchive.name],
     };
 }
