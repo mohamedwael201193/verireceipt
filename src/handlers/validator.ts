@@ -1095,6 +1095,14 @@ interface EpochBalanceDelta {
  */
 const activePerformanceSources = new Set<string>();
 export function resetValidatorPerformanceReadsForTests() { activePerformanceSources.clear(); }
+/** Cancel a response body, waiting at most PERF_CANCEL_WAIT_MS so ownership is released only after the cancel settles or the bound passes. */
+export const PERF_CANCEL_WAIT_MS = 250;
+async function cancelBodyBounded(target: { cancel?: () => Promise<unknown> } | null | undefined): Promise<void> {
+  if (!target || typeof target.cancel !== "function") return;
+  let t: ReturnType<typeof setTimeout> | undefined;
+  try { await Promise.race([Promise.resolve().then(() => target.cancel!()).catch(() => {}), new Promise<void>(r => { t = setTimeout(r, PERF_CANCEL_WAIT_MS); })]); }
+  finally { clearTimeout(t); }
+}
 /** Optional reads share one400ms budget. Ownership outlives a caller timeout. */
 async function readPerformanceBody(url: string, fetchImpl: typeof fetch, deadline: number, nowMs: () => number, init?: { method: string; body: string }, maxBytes = 65536): Promise<string | undefined> {
   const host = new URL(url).origin;
@@ -1107,6 +1115,7 @@ async function readPerformanceBody(url: string, fetchImpl: typeof fetch, deadlin
       const res = await fetchImpl(url, {...(init ?? {}),headers:{accept:"application/json",...(init ? {"content-type":"application/json"} : {})},redirect:"error",signal:controller.signal});
       if (!res.ok) {
         if (res.status === 429) noteSource429(host, parseRetryAfterMs(retryAfterHeader(res)), nowMs());
+        await cancelBodyBounded(res.body);
         return undefined;
       }
       let body: string;
@@ -1116,7 +1125,7 @@ async function readPerformanceBody(url: string, fetchImpl: typeof fetch, deadlin
         while (true) {
           const part = await reader.read(); if (part.done) break;
           size += part.value.byteLength;
-          if (size > maxBytes) { void reader.cancel().catch(() => {}); return undefined; }
+          if (size > maxBytes) { await cancelBodyBounded(reader); return undefined; }
           parts.push(part.value);
         }
         body = Buffer.concat(parts).toString("utf8");
@@ -1251,8 +1260,9 @@ export interface AttestationPerf {
 }
 /**
  * Last completed epoch's attestation rewards for one active validator, from the beacon
- * rewards endpoint on two independent sources that must agree on the validator's own
- * row. Keyless hosts keep rewards state only for the newest epochs, so this is the latest
+ * rewards endpoint on up to two independent sources. When two answer they must agree on
+ * the validator's own row; a single answering source is reported and disclosed as not
+ * cross-checked. Keyless hosts keep rewards state only for the newest epochs, so this is the latest
  * completed epoch the sources still serve, normally one epoch behind the finalized
  * checkpoint, and may carry finalized=false; the flag is reported, never upgraded.
  * Shares the optional-read ownership, cooldown, bucket and size rules of the balance probe.

@@ -4,9 +4,10 @@ vi.mock('../src/core/storage',()=>({saveReceipt:vi.fn(async()=>{})}));
 import {handleValidator,BEACON_SOURCES,resetValidatorCachesForTests,resetValidatorPerformanceReadsForTests} from '../src/handlers/validator';
 const raw=readFileSync('tests/fixtures/validator-effective/publicnode-0.json','utf8'),root=readFileSync('tests/fixtures/validator-effective/publicnode-root.json','utf8');
 const rewards=readFileSync('tests/fixtures/validator-effective/publicnode-attestation-rewards-491804-v1.json','utf8');
-afterEach(()=>{resetValidatorCachesForTests();resetValidatorPerformanceReadsForTests();vi.useRealTimers();vi.clearAllMocks();});
+afterEach(()=>{curIdx='1';resetValidatorCachesForTests();resetValidatorPerformanceReadsForTests();vi.useRealTimers();vi.clearAllMocks();});
 const HEAD=JSON.stringify({finalized:true,execution_optimistic:false,data:{header:{message:{slot:'15737760'}}}});
-function validatorBody(over:Record<string,any>={}){const b=JSON.parse(raw);b.data.index='1';Object.assign(b.data,over.data??{});Object.assign(b.data.validator,over.validator??{});return JSON.stringify(b);}
+let curIdx='1';
+function validatorBody(over:Record<string,any>={}){const b=JSON.parse(raw);b.data.index=curIdx;Object.assign(b.data,over.data??{});Object.assign(b.data.validator,over.validator??{});return JSON.stringify(b);}
 interface T{calls:{url:string;init:any}[];rewardsFor:(base:string)=>Response|Promise<Response>;over?:Record<string,any>;}
 function transport(t:T):typeof fetch{return (async(u:any,init:any)=>{const url=String(u);t.calls.push({url,init});
  if(url.includes('/headers/'))return new Response(HEAD);
@@ -75,5 +76,39 @@ describe('guards',()=>{
   let n=0;const t:T={calls:[],rewardsFor:()=>new Response(rewards)};const base=transport(t);
   const f=(async(u:any,i:any)=>{if(String(u).includes('/headers/')&&n++===0)throw Error('flap');return base(u,i);}) as typeof fetch;
   const r:any=await handleValidator({validator_index:'1'},{fetchImpl:f});expect(n).toBeGreaterThan(1);expect(r.performance_status).toBe('measured');
+ });
+});
+describe('review fixes',()=>{
+ const hang=()=>{const enc=new TextEncoder();let sent=false;const reader={read:async()=>{if(sent)return{done:true,value:undefined};sent=true;return{done:false,value:enc.encode('x'.repeat(330*1024))};},cancel:()=>new Promise<void>(()=>{})};
+  return {ok:true,status:200,headers:new Headers(),body:{getReader:()=>reader,cancel:()=>new Promise<void>(()=>{})},text:async()=>''} as unknown as Response;};
+ it('an oversize body whose cancel never settles keeps host ownership until the bounded cancel wait passes',async()=>{
+  vi.useFakeTimers();const t:T={calls:[],rewardsFor:()=>hang()};const f=transport(t);
+  const p1=handleValidator({validator_index:'1'},{fetchImpl:f});await vi.advanceTimersByTimeAsync(100);
+  const n1=rewardCalls(t).length;expect(n1).toBeGreaterThan(0);
+  curIdx='2';const p2=handleValidator({validator_index:'2'},{fetchImpl:f});await vi.advanceTimersByTimeAsync(50);
+  expect(rewardCalls(t).length).toBe(n1);
+  await vi.advanceTimersByTimeAsync(4000);await p1;await p2;
+ });
+ it('a non-OK response body is cancelled',async()=>{
+  let cancelled=0;const mk=()=>({ok:false,status:500,headers:new Headers(),body:{cancel:async()=>{cancelled++;}},text:async()=>''}) as unknown as Response;
+  const t:T={calls:[],rewardsFor:mk};await handleValidator({validator_index:'1'},{fetchImpl:transport(t)});expect(cancelled).toBeGreaterThan(0);
+ });
+ it('a non-finalized head yields no rewards read',async()=>{
+  const t:T={calls:[],rewardsFor:()=>new Response(rewards)};const base=transport(t);
+  const f=(async(u:any,i:any)=>String(u).includes('/headers/')?new Response(JSON.stringify({finalized:false,execution_optimistic:false,data:{header:{message:{slot:'15737760'}}}})):base(u,i)) as typeof fetch;
+  const r:any=await handleValidator({validator_index:'1'},{fetchImpl:f});expect(rewardCalls(t)).toHaveLength(0);expect(r.performance_status).toBe('attestation_rewards_unavailable');
+ });
+ it('only the ideal bucket matching the effective balance is used, and no match gives a null ideal',async()=>{
+  const d=JSON.parse(rewards);d.data.ideal_rewards=[{effective_balance:'1000000000',head:'1',target:'1',source:'1',inactivity:'0'},{effective_balance:'34000000000',head:'10',target:'20',source:'30',inactivity:'0'},{effective_balance:'35000000000',head:'7',target:'7',source:'7',inactivity:'0'}];
+  let t:T={calls:[],rewardsFor:()=>new Response(JSON.stringify(d))};let r:any=await handleValidator({validator_index:'1'},{fetchImpl:transport(t)});
+  expect(r.attestation_performance.ideal_reward_gwei).toBe('60');
+  resetValidatorCachesForTests();resetValidatorPerformanceReadsForTests();
+  d.data.ideal_rewards=[{effective_balance:'1000000000',head:'1',target:'1',source:'1',inactivity:'0'}];
+  t={calls:[],rewardsFor:()=>new Response(JSON.stringify(d))};r=await handleValidator({validator_index:'1'},{fetchImpl:transport(t)});
+  expect(r.attestation_performance.ideal_reward_gwei).toBeNull();expect(r.attestation_performance.reward_efficiency_pct).toBeNull();expect(r.effective_balance).toBe(34000000000);
+ });
+ it('a rewards reply with two rows is refused',async()=>{
+  const d=JSON.parse(rewards);d.data.total_rewards.push({...d.data.total_rewards[0]});const t:T={calls:[],rewardsFor:()=>new Response(JSON.stringify(d))};
+  const r:any=await handleValidator({validator_index:'1'},{fetchImpl:transport(t)});expect(r).not.toHaveProperty('attestation_performance');
  });
 });
