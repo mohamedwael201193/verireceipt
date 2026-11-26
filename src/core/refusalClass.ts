@@ -1,5 +1,6 @@
 import {isIP} from 'node:net';
 import {gridRefusalClass} from '../handlers/gridPrice';
+import {TOKEN_CONTRACTS,ADDRESS_RE} from '../handlers/tokenContracts';
 // Coarse, fixed-label classes of a rejected input for the refusal_param_class log line.
 // Only labels from fixed lists are returned. The raw value, or any part of it outside the lists, is never logged.
 const CHAINS=new Set(['gnosis','celo','blast','fantom','linea','scroll','zksync','mantle','metis','moonbeam','moonriver','cronos','aurora','harmony','kava','klaytn','sei','sui','aptos','near','cosmos','tron','ton','cardano','polkadot','tezos','stellar','xrp','ripple','litecoin','dogecoin','bitcoin','solana','avalanche','bsc','bnb','polygon','arbitrum','optimism','base','ethereum','zora','mode','taiko','manta','berachain','sonic','unichain','ink','abstract','hyperliquid','monad']);
@@ -17,6 +18,17 @@ export function macroTokens(raw:string|undefined):{indicator_tokens:string[];tok
  const words=(raw??'').toLowerCase().match(/[a-z]+/g)??[];
  return {indicator_tokens:[...new Set(words.filter(w=>MACRO_TOKENS.has(w)))],token_count:words.length};
 }
+const KNOWN_SYMBOLS=new Set(Object.values(TOKEN_CONTRACTS).flatMap(m=>Object.keys(m)));
+/** Fixed-label class of a token-holders `token` value: address, known_symbol, native, name_like or other. Never the value. */
+export function tokenClass(raw:string|undefined):string{
+ const v=(raw??'').trim();
+ if(ADDRESS_RE.test(v))return 'address';
+ const u=v.toUpperCase();
+ if(['ETH','POL','MATIC'].includes(u))return 'native';
+ if(KNOWN_SYMBOLS.has(u))return 'known_symbol';
+ if(/^[A-Za-z][A-Za-z0-9.' -]*$/.test(v)&&(v.includes(' ')||(v.length>=6&&/[a-z]/.test(v))))return 'name_like';
+ return 'other';
+}
 function ownString(query:unknown,key:string):string|undefined{
  if(!query||typeof query!=='object')return undefined;
  const d=Object.getOwnPropertyDescriptor(query,key);
@@ -28,6 +40,7 @@ export function refusalParamClass(route:string|undefined,errorCode:string,query:
  if(route==='/v1/threat-indicator'||route==='/v1/malware-hash')return {indicator_type:indicatorType(ownString(query,'indicator'))};
  if(route==='/v1/macro'&&errorCode==='UNSUPPORTED_INDICATOR')return macroTokens(ownString(query,'indicator'));
  if(route==='/v1/grid-price')return gridRefusalClass(ownString(query,'node_or_zone'));
+ if(route==='/v1/token-holders')return {token_class:tokenClass(ownString(query,'token'))};
  return null;
 }
-export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL'};
+export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL'};

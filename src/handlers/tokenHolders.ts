@@ -40,9 +40,22 @@ const INDEXERS: Record<string, string> = {
 const GECKO_NETWORKS: Record<string, string> = { bsc: "bsc", polygon: "polygon_pos", base: "base", arbitrum: "arbitrum" };
 // Verified against token-info address and symbol on 2026-11-23. These are
 // holder-index bindings only; they do not extend the RPC token registry.
+// MKR (ethereum) confirmed 2026-11-26 against two independent sources: the
+// Blockscout token record (eth.blockscout.com/api/v2/tokens/<addr>: symbol MKR,
+// decimals 18) and CoinGecko /coins/maker platforms.ethereum (same address).
+// Holder-index only: the RPC registry still excludes MKR (bytes32 symbol()).
 const HOLDER_CONTRACTS: Record<string, Record<string, string>> = {
+  ethereum: { MKR: "0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2" },
   bsc: { USDT: "0x55d398326f99059ff775485246999027b3197955", USDC: "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d" },
 };
+/** Exact lower-case display names of tokens already in the verified table, mapped to their registry symbol. */
+const TOKEN_NAME_ALIASES: Record<string, string> = {
+  "usd coin": "USDC", "tether": "USDT", "dai stablecoin": "DAI", "wrapped ether": "WETH", "chainlink": "LINK",
+  "uniswap": "UNI", "aave": "AAVE", "lido dao": "LDO", "shiba inu": "SHIB", "pepe": "PEPE",
+};
+export function tokenNameAlias(raw: string): string | undefined {
+  return Object.prototype.hasOwnProperty.call(TOKEN_NAME_ALIASES, raw.trim().replace(/\s+/g, " ").toLowerCase()) ? TOKEN_NAME_ALIASES[raw.trim().replace(/\s+/g, " ").toLowerCase()] : undefined;
+}
 const SUPPORTED_CHAINS = [...Object.keys(INDEXERS), ...Object.keys(GECKO_NETWORKS)];
 
 /** Test seam / runtime override for the HTTP fetch. */
@@ -235,7 +248,8 @@ async function holderLookup(
       `${tokenRaw} is the native coin on ${chain}; holder counts are served for ERC-20 tokens only`,
     );
   } else {
-    const lookedUp = HOLDER_CONTRACTS[chain]?.[tokenRaw.toUpperCase()] ?? tokenContractFor(chain, tokenRaw);
+    const symbolKey = tokenNameAlias(tokenRaw) ?? tokenRaw;
+    const lookedUp = HOLDER_CONTRACTS[chain]?.[symbolKey.toUpperCase()] ?? tokenContractFor(chain, symbolKey);
     if (!lookedUp) {
       throw unprocessable(
         "UNSUPPORTED_TOKEN",
@@ -245,7 +259,7 @@ async function holderLookup(
       );
     }
     contract = lookedUp;
-    requestedSymbol = tokenRaw.trim().toUpperCase();
+    requestedSymbol = symbolKey.trim().toUpperCase();
   }
 
   const resultKey=`${chain}:${contract.toLowerCase()}`;
