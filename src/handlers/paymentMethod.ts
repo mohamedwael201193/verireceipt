@@ -1,4 +1,4 @@
-// PAYMENT_METHOD_VERIFY_GENERAL — GET /v1/payment-method?bin=<6-8 digits>
+// PAYMENT_METHOD_VERIFY_GENERAL — GET /v1/payment-method?bin=<digits>
 //
 // Zero-LLM. Verifies a card BIN (bank identification number, the first
 // 6-8 digits of a card number) against a public BIN database, with a
@@ -118,11 +118,28 @@ async function checksumOnly(digits:string):Promise<Record<string,unknown>>{
  return envelope(INTENT,{valid:luhn,checksum_assessed:true,luhn_valid:luhn,validity_scope:scope,allocation_known:null,bin:null,network:null,issuing_bank:null,issuing_country:null,card_type:null},receipt,{answer:`Local Luhn checksum ${luhn?'passes':'fails'}. ${scope}`,verdict:'verified',confidence:1,source:'Local checksum arithmetic only; no external card lookup'});
 }
 
+/** A digit string with no usable prefix lookup: too short to identify an issuer, or a prefix starting with 0, which the card networks do not use as an issuer prefix.
+ * The digits are kept as typed (a leading zero lost to integer typing is not restored). Only a prefix of at most 8 digits is stored. */
+async function noLookup(prefix:string,reason:'too_short'|'leading_zero',inputDigits:number):Promise<Record<string,unknown>>{
+ const now=new Date().toISOString();
+ const note=reason==='too_short'?`${prefix.length} digit${prefix.length===1?'':'s'} is too short to identify an issuer: a card prefix needs at least 6 digits.`:`The prefix ${prefix} starts with 0, which the card networks do not use as an issuer prefix, so no issuer can be identified. If a leading zero was lost to integer typing, send the digits as text.`;
+ const scope='Digit-count and first-digit check only; no BIN reference was queried. No card validity, existence, issuer, activity or funds are assessed.';
+ const evidence=JSON.stringify({kind:'bin_no_lookup',reason,bin_prefix:prefix,input_digits:inputDigits,valid:false,checksum_assessed:false,luhn_valid:null,validity_scope:scope,assessed_at:now});
+ const receipt=makeReceipt(INTENT,'urn:verireceipt:bin-format',evidence,'local digit-count and first-digit check; no BIN reference queried');receipt.fetched_at=now;
+ try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
+ return envelope(INTENT,{valid:false,bin:prefix,allocation_known:null,network_range_candidates:[],checksum_assessed:false,luhn_valid:null,validity_scope:scope,network:null,issuing_bank:null,issuing_country:null,card_type:null,no_lookup_reason:reason,input_digits:inputDigits},receipt,{answer:`${note} valid=false: no issuer, network, bank, country or card type is reported, and nothing was looked up. ${scope}`,verdict:'verified',confidence:0.9,source:'local digit-count and first-digit check; no external source queried'});
+}
+
 export async function handlePaymentMethod(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
-  const raw = query.bin?.trim();
-  if (!raw) throw badRequest("MISSING_PARAM", "bin is required: a 6 to 8 digit prefix or digits for local checksum only");
-  if(/^\d{12,256}$/.test(raw))return checksumOnly(raw);
-  if (!/^[1-9]\d{5,7}$/.test(raw)) throw badRequest("INVALID_BIN", "bin must be 6 to 8 prefix digits or 12 to 256 digits for local checksum only");
+  const input = query.bin?.trim();
+  if (!input) throw badRequest("MISSING_PARAM", "bin is required: digits of a card prefix, or 12 or more digits for local checksum only");
+  if(/^\d{12,256}$/.test(input))return checksumOnly(input);
+  if (!/^\d{1,11}$/.test(input)) throw badRequest("INVALID_BIN", "bin must be digits only: 6 to 8 prefix digits, or 12 to 256 digits for local checksum only");
+  if (input.length <= 5) return noLookup(input, "too_short", input.length);
+  // 9 to 11 digits: only the first 8 are used, and the rest is discarded and never stored.
+  const truncated = input.length >= 9;
+  const raw = truncated ? input.slice(0, 8) : input;
+  if (raw.startsWith("0")) return noLookup(raw, "leading_zero", input.length);
   const binlist = async (): Promise<SourceResult> => {
     const r = await lookupBin(raw);
     return { ...r, name: "binlist.net", url: `https://lookup.binlist.net/${raw}`, info: r.found ? JSON.parse(r.body) : {} };
@@ -133,7 +150,8 @@ export async function handlePaymentMethod(query: Record<string, string | undefin
   if (!successful.length) throw upstreamUnavailable("BIN_SOURCES_UNAVAILABLE", "both BIN sources unavailable; refusing to guess");
   const allocationKnown = sources.some(s => s.found);
   const networkCandidates = binNetworkCandidates(raw);
-  const valid = allocationKnown || networkCandidates.length>0;
+  // A truncated input only counts as valid on a real reference hit, never on a structural network range.
+  const valid = truncated ? allocationKnown : (allocationKnown || networkCandidates.length>0);
   if (!allocationKnown && successful.length !== 2) throw upstreamUnavailable("BIN_COVERAGE_INCOMPLETE", "one source has no record and the other is unavailable; cannot confirm no-record");
   const fields = { network: (i: BinlistReply) => i.scheme, issuing_bank: (i: BinlistReply) => i.bank?.name, issuing_country: (i: BinlistReply) => i.country?.name ?? i.country?.alpha2, card_type: (i: BinlistReply) => i.type };
   const values: Record<string, string | null> = {};
@@ -146,16 +164,17 @@ export async function handlePaymentMethod(query: Record<string, string | undefin
   }
   const networkCoBrands=successful.flatMap(s=>{const label=text(s.info.scheme);return label?.includes('/')?[{source:s.name,label}]:[];});
   const parentCoverage=successful.filter(s=>s.found&&s.allocationPrefix&&s.allocationPrefix!==raw).map(s=>({source:s.name,requested_bin:raw,allocation_prefix:s.allocationPrefix,scope:raw.length===7?'six-digit parent only; not an exact seven-digit allocation':'six-digit parent only; not an exact eight-digit allocation'}));
+  const truncationNote = truncated ? ` The input had ${input.length} digits; only its first 8 were used for the lookup and the remaining digits were discarded, not stored. valid reflects a reference hit only, not a structural network range.` : "";
   const asOf = new Date().toISOString();
   const fetchedAt = successful.map(s => s.fetchedAt).sort()[0];
   const validityScope = "BIN-prefix only: request format/range plus published network range or allocation reference; no checksum assessed; Luhn cannot be assessed from a prefix, not full-card validity";
-  const evidence = JSON.stringify({ bin: raw, valid,allocation_known:allocationKnown,network_range_candidates:networkCandidates,network_range_source:NETWORK_RANGE_SOURCE,checksum_assessed:false,luhn_valid:null,validity_scope:validityScope, ...values, network_co_brand_labels:networkCoBrands, field_sources: fieldSources, conflicts, sources, allocation_scope:parentCoverage, attribution: credit, scope: validityScope, as_of: asOf });
+  const evidence = JSON.stringify({ bin: raw, input_digits: input.length, input_truncated_to_8: truncated, valid,allocation_known:allocationKnown,network_range_candidates:networkCandidates,network_range_source:NETWORK_RANGE_SOURCE,checksum_assessed:false,luhn_valid:null,validity_scope:validityScope, ...values, network_co_brand_labels:networkCoBrands, field_sources: fieldSources, conflicts, sources, allocation_scope:parentCoverage, attribution: credit, scope: validityScope, as_of: asOf });
   const receipt = makeReceipt(INTENT, sources[0].url, evidence, "two keyless BIN references; exact raw bodies, field provenance, conflicts and original acquisition times; up to24h cache");
   receipt.fetched_at = fetchedAt;
   try { await saveReceipt(receipt, evidence); } catch { throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable"); }
   const { network, issuing_bank, issuing_country, card_type } = values;
   const answer = (allocationKnown ? `Yes, BIN ${raw}${parentCoverage.length ? " has a known six-digit parent allocation reference" : " is an allocated, known card prefix"}: ${network ?? "unknown network"}${card_type ? " " + card_type : ""}${issuing_bank ? ", issued by " + issuing_bank : ""}${issuing_country ? ", " + issuing_country : ""}. ` : `No record for BIN ${raw} in either reference. That is not proof the prefix is unallocated. `) +
     `Prefix valid=${valid}: ${allocationKnown?"allocation reference found":networkCandidates.length?"format and published network range match ("+networkCandidates.join(", ")+"); allocation unknown":"no covered network range or allocation reference; this is not proof of structural invalidity or non-allocation"}. BIN format and allocation-only reference check, no checksum, no guarantee a card is real, active or safe. Sources fetched ${fetchedAt}${sources.some(s => s.cached) ? ", up to24h cache" : ""}.` +
-    (sources.some(s => s.error) ? " One source unavailable; partial coverage." : "") + (conflicts.length ? ` Sources disagree on ${conflicts.join(", ")}; binlist.net non-empty fields take precedence.` : "") + (parentCoverage.length?` Parent-prefix coverage only from ${parentCoverage.map(s=>s.source+': '+s.allocation_prefix).join('; ')}; no exact ${raw.length===7?"seven":"eight"}-digit allocation is asserted.`:"") + " " + credit;
-  return envelope(INTENT, { bin: raw, valid,allocation_known:allocationKnown,network_range_candidates:networkCandidates,checksum_assessed:false,luhn_valid:null,validity_scope:validityScope, ...values, network_co_brand_labels:networkCoBrands, field_sources: fieldSources, source_conflicts: conflicts, allocation_scope:parentCoverage, attribution: credit, summary: `${raw}: ${allocationKnown ? parentCoverage.length ? `known parent-prefix reference, no exact ${raw.length===7?"seven":"eight"}-digit allocation asserted` : "known prefix" : "no record"}; prefix-format/network and allocation reference check, no checksum.` }, receipt, { answer, verdict: "verified", confidence: conflicts.length || sources.some(s => s.error) ? 0.6 : 0.9, source: successful.map(s => `${s.name} ${s.url} fetched ${s.fetchedAt}`).join("; ") });
+    (sources.some(s => s.error) ? " One source unavailable; partial coverage." : "") + (conflicts.length ? ` Sources disagree on ${conflicts.join(", ")}; binlist.net non-empty fields take precedence.` : "") + truncationNote + (parentCoverage.length?` Parent-prefix coverage only from ${parentCoverage.map(s=>s.source+': '+s.allocation_prefix).join('; ')}; no exact ${raw.length===7?"seven":"eight"}-digit allocation is asserted.`:"") + " " + credit;
+  return envelope(INTENT, { bin: raw, input_digits: input.length, input_truncated_to_8: truncated, valid,allocation_known:allocationKnown,network_range_candidates:networkCandidates,checksum_assessed:false,luhn_valid:null,validity_scope:validityScope, ...values, network_co_brand_labels:networkCoBrands, field_sources: fieldSources, source_conflicts: conflicts, allocation_scope:parentCoverage, attribution: credit, summary: `${raw}: ${allocationKnown ? parentCoverage.length ? `known parent-prefix reference, no exact ${raw.length===7?"seven":"eight"}-digit allocation asserted` : "known prefix" : "no record"}; prefix-format/network and allocation reference check, no checksum.` }, receipt, { answer, verdict: "verified", confidence: conflicts.length || sources.some(s => s.error) ? 0.6 : 0.9, source: successful.map(s => `${s.name} ${s.url} fetched ${s.fetchedAt}`).join("; ") });
 }
