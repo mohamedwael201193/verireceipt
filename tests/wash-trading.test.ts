@@ -296,6 +296,14 @@ describe("source failure classes through the real public-source reader", () => {
     await err(handleWashTrading({ subject: POOL }), 502, "UPSTREAM_RATE_LIMITED");
     expect(classLines(info)).toEqual([{ event: "wash_source_failure", class: "budget" }]);
   });
+  it("an out-of-set reader label (body_read) is logged as class other, never the raw label", async () => {
+    setWashFetchForTests(null); resetUpstreamsForTests();
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubGlobal("fetch", async () => new Response(new ReadableStream({ pull(c) { c.error(new Error("broken body")); } }), { status: 200 }));
+    await err(handleWashTrading({ subject: POOL }), 502, "TRADE_SOURCE_UNREACHABLE");
+    expect(classLines(info)).toEqual([{ event: "wash_source_failure", class: "other" }]);
+    vi.unstubAllGlobals();
+  });
   it("an unlabelled failure is class other", async () => {
     setWashFetchForTests(async () => { throw new Error("weird"); });
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
