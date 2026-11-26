@@ -44,6 +44,7 @@ for (const name of ['macro_latest','macro_year']) {
   item.expected_fields.value=rows.find((row: {date:string})=>Number(row.date)===item.expected_fields.year).value;
   item.expected_fields.unit='% of total labour force';
 }
+fixture.scenarios.gas.expected_fields.fee_context_scope='fee context unavailable; no agreeing fixed-block hash/base fee quorum, capacity or source unavailable; nothing estimated';
 const responses = fixture.responses as RecordedResponse[];
 const key = (url: string, method: string, body: unknown) => JSON.stringify([url, method, body]);
 const responseMap = new Map<string, RecordedResponse[]>();
