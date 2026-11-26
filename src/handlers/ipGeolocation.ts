@@ -1,3 +1,4 @@
+import {readPublicBody} from "../core/publicSource";
 import {queryFallback,firstIp} from '../core/queryFallback';
 import {isIP} from 'node:net';
 // IP_GEOLOCATION_GENERAL — GET /v1/ip-geolocation?ip=8.8.8.8
@@ -33,17 +34,17 @@ import { saveReceipt } from "../core/storage";
 const SOURCE_TIMEOUT_MS = 5000;
 const UA = "VeriReceipt/2.0 ip-geolocation observer (+https://verireceipt.vercel.app)";
 
-async function fetchText(url: string): Promise<string> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: controller.signal, headers: { "User-Agent": UA, Accept: "application/json" } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.text();
-  } finally {
-    clearTimeout(timer);
-  }
+async function fetchText(url:string):Promise<string>{
+ let timer:ReturnType<typeof setTimeout>;
+ try{return await Promise.race([readPublicBody(url,64000,SOURCE_TIMEOUT_MS,UA).then(body=>body.raw),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(Error('geolocation source deadline')),5100);})]);}finally{clearTimeout(timer!);}
 }
+function canonicalIp(value:unknown):string|null{
+ if(typeof value!=='string'||!isIP(value))return null;
+ if(isIP(value)===4)return value;
+ return new URL(`http://[${value}]/`).hostname.toLowerCase();
+}
+function bindIp(observed:unknown,expected:string){if(!canonicalIp(observed)||canonicalIp(observed)!==canonicalIp(expected))throw upstreamUnavailable('GEO_IP_MISMATCH','source result does not identify requested IP');}
+const optionalText=(v:unknown):string|null=>typeof v==='string'&&v.trim()&&v.length<=256?v.trim():null;
 
 const V4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 const V6 = /^[0-9a-fA-F:]+$/;
@@ -82,9 +83,9 @@ export function validatePublicIp(ip: string): void {
   throw badRequest("INVALID_IP", "ip must be an IPv4 or IPv6 address");
 }
 
-export interface GeoResult { country: string; city: string; lat: number; lon: number; isp: string; source: string; raw: string }
+export interface GeoResult { country: string; city: string; lat: number; lon: number; isp: string; region:string|null;timezone:string|null;asn:number|null;operator:string|null;source: string; raw: string }
 
-export function parseIpwhois(raw: string): GeoResult {
+export function parseIpwhois(raw: string,expectedIp?:string): GeoResult {
   const d = JSON.parse(raw) as Record<string, unknown>;
   if (d.success !== true) throw unprocessable("GEO_NO_RESULT", typeof d.message === "string" ? String(d.message) : "ipwho.is has no result for this address");
   if (typeof d.country !== "string" || typeof d.latitude !== "number" || typeof d.longitude !== "number" ||
@@ -92,20 +93,25 @@ export function parseIpwhois(raw: string): GeoResult {
       Math.abs(d.latitude) > 90 || Math.abs(d.longitude) > 180) {
     throw upstreamUnavailable("GEO_BAD_BODY", "ipwho.is body lacks a usable country or coordinates");
   }
-  return { country: d.country, city: typeof d.city === "string" ? d.city : "",
+  if(expectedIp)bindIp(d.ip,expectedIp);
+  const connection=d.connection as Record<string,unknown>|undefined;
+  return {region:optionalText(d.region),timezone:optionalText((d.timezone as Record<string,unknown>|undefined)?.id),asn:typeof connection?.asn==='number'&&Number.isSafeInteger(connection.asn)&&connection.asn>0&&connection.asn<=4294967295?connection.asn:null,operator:optionalText(connection?.org), country: d.country, city: typeof d.city === "string" ? d.city : "",
     lat: d.latitude, lon: d.longitude,
     isp: typeof (d.connection as { isp?: unknown } | undefined)?.isp === "string" ? String((d.connection as { isp: unknown }).isp) : "",
     source: "ipwho.is", raw };
 }
 
-export function parseIpApi(raw: string): GeoResult {
+export function parseIpApi(raw: string,expectedIp?:string): GeoResult {
   const d = JSON.parse(raw) as Record<string, unknown>;
   if (d.status !== "success") throw unprocessable("GEO_NO_RESULT", typeof d.message === "string" ? String(d.message) : "ip-api.com has no result for this address");
   if (typeof d.country !== "string" || typeof d.lat !== "number" || typeof d.lon !== "number" ||
       !Number.isFinite(d.lat) || !Number.isFinite(d.lon) || Math.abs(d.lat) > 90 || Math.abs(d.lon) > 180) {
     throw upstreamUnavailable("GEO_BAD_BODY", "ip-api.com body lacks a usable country or coordinates");
   }
-  return { country: d.country, city: typeof d.city === "string" ? d.city : "",
+  if(expectedIp)bindIp(d.query,expectedIp);
+  const asnMatch=typeof d.as==='string'?/^AS([0-9]+)(?: |$)/.exec(d.as):null;
+  const asn=asnMatch?Number(asnMatch[1]):NaN;
+  return {region:optionalText(d.regionName),timezone:optionalText(d.timezone),asn:Number.isSafeInteger(asn)&&asn>0&&asn<=4294967295?asn:null,operator:optionalText(d.org), country: d.country, city: typeof d.city === "string" ? d.city : "",
     lat: d.lat, lon: d.lon, isp: typeof d.isp === "string" ? d.isp : "", source: "ip-api.com", raw };
 }
 
@@ -127,8 +133,8 @@ export async function handleIpGeolocation(query: Record<string, string | undefin
   const apiUrl = `http://ip-api.com/json/${encodeURIComponent(ip)}`;
   const fetchedAt = new Date().toISOString();
   const [whoR, apiR] = await Promise.allSettled([
-    fetchText(whoUrl).then(parseIpwhois),
-    fetchText(apiUrl).then(parseIpApi),
+    fetchText(whoUrl).then(raw=>parseIpwhois(raw,ip)),
+    fetchText(apiUrl).then(raw=>parseIpApi(raw,ip)),
   ]);
   const who = whoR.status === "fulfilled" ? whoR.value : null;
   const api = apiR.status === "fulfilled" ? apiR.value : null;
@@ -165,7 +171,7 @@ export async function handleIpGeolocation(query: Record<string, string | undefin
     throw upstreamUnavailable("RECEIPT_PERSIST_FAILED", "receipt evidence could not be stored; answer unavailable");
   }
   return envelope(INTENT, { ip, country: serving.country, city: serving.city,
-    latitude: serving.lat, longitude: serving.lon, isp: serving.isp }, receipt, {
+    latitude: serving.lat, longitude: serving.lon, isp: serving.isp,region:serving.region,timezone:serving.timezone,asn:serving.asn,operator:serving.operator,metadata_source:serving.source }, receipt, {
     answer: `${ip}: ${serving.city ? serving.city + ", " : ""}${serving.country} (${serving.lat}, ${serving.lon})` +
       `${serving.isp ? `, network ${serving.isp}` : ""}. Coordinates: ${serving.source}.` +
       (who && api ? " Country cross-checked across two independent geolocation databases." : "") +
