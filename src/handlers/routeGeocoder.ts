@@ -16,7 +16,7 @@ async function read(url:string) {
   if(halted)throw new Error('geocoder reads halted');const wait=Math.max(0,nextStart-Date.now());if(wait>1500||!budget.take())throw new Error('geocoder conservative budget exhausted');nextStart=Date.now()+wait+1100;
   if(wait)await new Promise(r=>setTimeout(r,wait));if(halted)throw new Error('geocoder reads halted');
   let timer:ReturnType<typeof setTimeout>;
-  try{return await Promise.race([readPublicBody(url,1000000,3000),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('geocoder deadline')),3100);})]).finally(()=>clearTimeout(timer!));}catch(e){halted=true;throw e;}
+  try{return await Promise.race([readPublicBody(url,1000000,1200),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('geocoder deadline')),1200);})]).finally(()=>clearTimeout(timer!));}catch(e){halted=true;throw e;}
  });
 }
 export async function resolveRoutePlace(query:string):Promise<{hit:RankedLocation;captures:{url:string;body:string;fetched_at:string}[]}> {

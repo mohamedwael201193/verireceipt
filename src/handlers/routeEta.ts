@@ -123,8 +123,7 @@ async function readRouteBody(url: string): Promise<string> {
 }
 
 export async function handleRouteEta(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
-  const o = await resolveEndpoint(query.origin, "origin");
-  const dst = await resolveEndpoint(query.destination, "destination");
+  const [o,dst] = await Promise.all([resolveEndpoint(query.origin, "origin"),resolveEndpoint(query.destination, "destination")]);
   // OSRM takes lon,lat order.
   const url = `https://router.project-osrm.org/route/v1/driving/${o.lon},${o.lat};${dst.lon},${dst.lat}?overview=false&steps=false`;
   const fetchedAt = new Date().toISOString();
@@ -161,7 +160,7 @@ export async function handleRouteEta(query: Record<string, string | undefined>):
     `OSRM snapped the origin to ${route.origin_snapped[1]}, ${route.origin_snapped[0]} (${Math.round(route.origin_snap_m)} m away) ` +
     `and the destination to ${route.destination_snapped[1]}, ${route.destination_snapped[0]} (${Math.round(route.destination_snap_m)} m away).`;
   return envelope(INTENT, {
-    duration: durationS,
+    duration: durationS, duration_seconds:durationS,duration_minutes:durationS/60,distance_km:route.distance_m/1000,
     distance_m: route.distance_m,
     origin: `${o.lat},${o.lon}`,
     destination: `${dst.lat},${dst.lon}`,

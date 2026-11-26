@@ -40,7 +40,7 @@ it('malformed highest-ranked match is not skipped or guessed',()=>{
  const j=JSON.parse(raw('springfield'));j.results[0].latitude=91;expect(()=>parseRankedLocation(JSON.stringify(j),'Open-Meteo')).toThrow();const p=JSON.parse(raw('street'));p.features[0].geometry.coordinates=[null,null];expect(()=>parseRankedLocation(JSON.stringify(p),'Photon')).toThrow();
 });
 it('hard deadline bounds a hung source without fallback',async()=>{
- vi.useFakeTimers();const f=vi.fn(()=>new Promise(()=>{}));vi.stubGlobal('fetch',f);const p=expect(resolveRoutePlace('Springfield')).rejects.toMatchObject({code:'GEOCODER_UNREACHABLE'});await vi.advanceTimersByTimeAsync(3100);await p;expect(f).toHaveBeenCalledTimes(1);
+ vi.useFakeTimers();const f=vi.fn(()=>new Promise(()=>{}));vi.stubGlobal('fetch',f);const p=expect(resolveRoutePlace('Springfield')).rejects.toMatchObject({code:'GEOCODER_UNREACHABLE'});await vi.advanceTimersByTimeAsync(1200);await p;expect(f).toHaveBeenCalledTimes(1);
 });
 it('start spacing and conservative per-day budget hold across distinct queries',async()=>{
  vi.useFakeTimers();vi.setSystemTime('2026-11-24T00:00:00Z');const starts:number[]=[];vi.stubGlobal('fetch',async()=>{starts.push(Date.now());return new Response(raw('springfield'));});
