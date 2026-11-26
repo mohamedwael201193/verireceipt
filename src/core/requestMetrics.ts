@@ -1,5 +1,6 @@
 import { targetShapeOf } from '../handlers/packageSecurity';
 import {sanitizeAnswerClass} from "./answerClass";
+import { hostClassOf } from "./hostClass";
 // Fixed-label observability. Only route-owned closed enums may expose canonical values.
 // Never retain free text, URL/query strings, bodies, headers, IPs or user ids.
 import { EDGAR_FORM_TYPES } from "../handlers/edgarFormTypes";
@@ -181,6 +182,7 @@ export function recordRequestArrival(route?: string, query?: unknown): void {
     if (intent !== "other") console.info(JSON.stringify({ event: "request_start", intent, path: route,
       param_keys: query && typeof query === "object" ? KNOWN_QUERY_KEYS.filter(key => Object.hasOwn(query, key)) : [],
       ...(route === "/v1/security-review" ? { target_shape: targetShapeOf(ownString(query, "target")) } : {}),
+      ...(route === "/v1/server-uptime" ? { host_class: hostClassOf(ownString(query, "host")) } : {}),
       input_enums: safeRequestEnums(route!, query) }));
   } catch { /* observability never changes a response */ }
 }
@@ -217,6 +219,7 @@ export function recordRequestCompletion(route: string | undefined, status: numbe
       const answerClass=sanitizeAnswerClass(intent,details.answerClass??dnsClass??paymentClass??refused);
       console.info(JSON.stringify({ event: "request_complete", intent, path: route, param_keys,
         ...(route === "/v1/security-review" ? { target_shape: targetShapeOf(ownString(details.query, "target")) } : {}),
+        ...(route === "/v1/server-uptime" ? { host_class: hostClassOf(ownString(details.query, "host")) } : {}),
         ...(input_shape ? { input_shape } : {}), ...(receiptId?{receipt_id:receiptId}:{}), ...(answerClass?{answer_class:answerClass}:{}),
         error_code: details.errorCode == null ? null : diagnosticErrorCode(details.errorCode), status: code, latency_ms: latency }));
     }
