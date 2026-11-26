@@ -5,12 +5,12 @@ const publicFailures=new WeakMap<object,string>();
 export function publicSourceFailure(error:unknown):string {try{return error!==null&&typeof error==='object'?publicFailures.get(error)??'unknown':'unknown';}catch{return 'unknown';}}
 /** Small bounded public-source reader. URLs are constructed by adapters, never user URLs. */
 export interface PublicBody { url: string; raw: string; fetchedAt: string }
-export async function readPublicBody(url: string, maxBytes = 1_000_000, timeoutMs = 4000, userAgent = 'VeriReceipt/2.0 public-source observer'): Promise<PublicBody> {
+export async function readPublicBody(url: string, maxBytes = 1_000_000, timeoutMs = 4000, userAgent = 'VeriReceipt/2.0 public-source observer', accept = 'application/json'): Promise<PublicBody> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let failure="transport";
   try {
-    const response = await fetch(url, { signal: controller.signal, redirect: 'error', headers: { accept: 'application/json', 'user-agent': userAgent } });
+    const response = await fetch(url, { signal: controller.signal, redirect: 'error', headers: { accept, 'user-agent': userAgent } });
     if (!response.ok) { failure=response.status===403?'http_403':response.status===429?'http_429':response.status>=400&&response.status<500?'http_4xx':response.status>=500?'http_5xx':'http_other'; throw upstreamUnavailable('PUBLIC_SOURCE_HTTP', `public source returned HTTP ${response.status}`); }
     failure="body_read";
     const size = response.headers.get('content-length');

@@ -117,5 +117,27 @@
     "window_basis": "RMA must be requested within 14 calendar days of initial delivery; return postmarked within 3 calendar days of RMA receipt; no region claim beyond the page",
     "url": "https://docs.puri.sm/about/policy.html",
     "sectionHash": "fc831955616cfb7fde63b56405047ee6eb6c50324f6f478d10e27eaa3dde3356"
+  },
+  {
+    "key": "framework",
+    "file": "framework",
+    "name": "Framework",
+    "days": 30,
+    "start": "10.1 30-Day Return Policy.",
+    "end": "10.4 Refunds.",
+    "quotes": [
+      "You may request to return an eligible Product for any or no reason within 30 days of the date the Product was delivered to you.",
+      "Framework reserves the right to reduce the refund amount or reject the return if the Product shows signs of wear, damage, or unauthorized modification.",
+      "you are responsible for the costs of shipping the Product back to our designated return center."
+    ],
+    "conditions": [
+      "Article 10.1 states Framework offers a voluntary 30-day return period from the date the Product was delivered, for any or no reason, for an eligible Product.",
+      "Eligible Products must be returned in original packaging with all accessories and components; Framework may reduce the refund or reject the return for wear, damage or unauthorized modification.",
+      "The customer pays return shipping unless the return is for a confirmed defect covered by the Limited Warranty (Article 12). The page text reviewed states no region-specific terms for this article."
+    ],
+    "window_basis": "30 days from the date the Product was delivered (Article 10.1), for any or no reason; eligible Products only; no region claim",
+    "url": "https://frame.work/terms-of-sale",
+    "sectionHash": "f082aa174242e21a970b190538454ce828e713976d2d441759c2b667be86dac9",
+    "accept": "text/html"
   }
 ]

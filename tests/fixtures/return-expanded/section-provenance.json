@@ -40,5 +40,12 @@
     "original_raw_sha256": "5be904b932192b0106d2a4b0e573022f5cb0d2e76a1480c30fc680bb3d7e85fd",
     "reviewed_section_sha256": "fc831955616cfb7fde63b56405047ee6eb6c50324f6f478d10e27eaa3dde3356",
     "fixture_kind": "EXTRACTED REVIEWED POLICY SECTION ONLY. Not a full raw HTTP response."
+  },
+  {
+    "retailer": "framework",
+    "source_url": "https://frame.work/terms-of-sale",
+    "original_raw_sha256": "00f9ca34c04099a9ef2769b212c7773ff65c3812fcb648e79d1e37e9aa014072",
+    "reviewed_section_sha256": "f082aa174242e21a970b190538454ce828e713976d2d441759c2b667be86dac9",
+    "fixture_kind": "EXTRACTED REVIEWED POLICY SECTION ONLY. Not a full raw HTTP response."
   }
 ]

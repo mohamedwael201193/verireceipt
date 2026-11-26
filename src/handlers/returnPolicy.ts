@@ -24,7 +24,7 @@ export function reviewedSection(retailer:Retailer,html:string):string{
  return text.slice(i,j).trim();
 }
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
-interface Binding {name:string;url:string;days:number|null;sectionHash:string;conditions:string[];quotes?:string[];window_basis?:string;start?:string;end?:string;}
+interface Binding {name:string;url:string;days:number|null;sectionHash:string;conditions:string[];quotes?:string[];window_basis?:string;start?:string;end?:string;accept?:string;}
 const BINDINGS:Record<Retailer,Binding>={
  apple:{name:'Apple US',url:'https://www.apple.com/shop/help/returns_refund',days:14,sectionHash:'6c87193be8f19a133e54356d3f1b6252ffc029f73a636a9f34ad9413c98272ee',conditions:[
  'US standard policy: 14 calendar days from receipt, only for items bought directly from Apple; other retailers have their own policies.',
@@ -73,7 +73,7 @@ export async function handleReturnPolicy(q:Record<string,string|undefined>):Prom
  if(!budget.take())throw upstreamUnavailable('POLICY_BUDGET','official policy request budget reached');
  const p=BINDINGS[key];let raw:string,fetchedAt:string;
  let timer:ReturnType<typeof setTimeout>|undefined;
- try{const b=await Promise.race([readPublicBody(p.url,1500000,3500),new Promise<never>((_r,reject)=>{timer=setTimeout(()=>reject(Error('policy deadline')),3500);})]);raw=b.raw;fetchedAt=b.fetchedAt;if(hash(reviewedSection(key,raw))!==p.sectionHash)throw Error('policy changed');}
+ try{const b=await Promise.race([readPublicBody(p.url,1500000,3500,undefined,p.accept),new Promise<never>((_r,reject)=>{timer=setTimeout(()=>reject(Error('policy deadline')),3500);})]);raw=b.raw;fetchedAt=b.fetchedAt;if(hash(reviewedSection(key,raw))!==p.sectionHash)throw Error('policy changed');}
  catch{throw upstreamUnavailable('POLICY_UNVERIFIED','current reviewed official policy could not be confirmed; no remembered policy substituted');}finally{clearTimeout(timer);}
  const receipt=makeReceipt(INTENT,p.url,raw!,'single official policy page; exact raw bytes; reviewed section fingerprint');receipt.fetched_at=fetchedAt!;
  try{await saveReceipt(receipt,raw!);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
