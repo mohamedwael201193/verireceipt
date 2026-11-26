@@ -87,7 +87,7 @@ const A_NX = dohBody(1, [], 3);
 describe("validation", () => {
   it("missing params -> 400 MISSING_PARAM", async () => {
     await expectApiError(handleDns({}), 400, "MISSING_PARAM");
-    await expectApiError(handleDns({ name: "example.com" }), 400, "MISSING_PARAM");
+
     await expectApiError(handleDns({ record_type: "A" }), 400, "MISSING_PARAM");
   });
 
@@ -306,3 +306,7 @@ describe("handleDns live (real keyless DoH resolvers, no mocks)", () => {
     expect(String(result.answer)).toMatch(/\d+ \S+/);
   }, 20000);
 });
+
+it.each([['a',1],['AAAA',28],['mx record',15],['txt',16],['NS',2],['cname',5],['soa',6],['CAA',257],['SRV',33],['PTR',12],['IPv4 address',1],['ipv6',28],['mail exchanger',15],['text',16],['name-server',2],['canonical name',5],['start of authority',6],['certification authority authorization',257],['service location',33],['reverse DNS',12]])('normalizes standard type or alias %s without changing quorum',async(type,code)=>{const body=dohBody(code as number,[code===5?'alias.example.net.':'control']);stubResolvers({google:body,cloudflare:body,adguard:body});const out=await handleDns({name:'example.com',record_type:type as string});expect(out.record_count).toBe(1);expect(out.resolvers_used).toHaveLength(3);expect(out.has_record).toBe(true);expect(out.summary).toContain('1 matching record(s)');expect(out.summary).toContain('3 resolver(s) answered');expect((out.resolvers as any[]).every(x=>x.records[0]===(code===5?'alias.example.net.':'control'))).toBe(true);});
+it('missing record type defaults to A and zero count remains explicit',async()=>{const body=dohBody(1,[]);stubResolvers({google:body,cloudflare:body,adguard:body});const out=await handleDns({name:'example.com'});expect(out.record_type).toBe('A');expect(out.record_count).toBe(0);expect(out.has_record).toBe(false);expect(out.summary).toContain('0 matching record(s)');});
+it.each(['','ANY','__proto__','constructor','A OR TXT'])('unknown/empty type stays an explicit400: %s',async type=>{const f=vi.fn();vi.stubGlobal('fetch',f);await expectApiError(handleDns({name:'example.com',record_type:type}),400,'INVALID_RECORD_TYPE');expect(f).not.toHaveBeenCalled();});

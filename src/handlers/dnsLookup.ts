@@ -63,6 +63,13 @@ const TYPE_CODES: Record<string, number> = {
 };
 export const RECORD_TYPES = Object.keys(TYPE_CODES);
 
+const TYPE_ALIASES:Record<string,string>={IPV4:'A','IPV4 ADDRESS':'A',ADDRESS:'A',HOST:'A',IPV6:'AAAA','IPV6 ADDRESS':'AAAA',MAIL:'MX','MAIL EXCHANGE':'MX','MAIL EXCHANGER':'MX',TEXT:'TXT',NAMESERVER:'NS','NAME SERVER':'NS','NAME SERVERS':'NS',ALIAS:'CNAME','CANONICAL NAME':'CNAME','START OF AUTHORITY':'SOA',AUTHORITY:'SOA','CERTIFICATION AUTHORITY AUTHORIZATION':'CAA',SERVICE:'SRV','SERVICE LOCATION':'SRV',POINTER:'PTR','REVERSE DNS':'PTR'};
+export function normalizeDnsType(raw:string|undefined):string{
+ if(raw===undefined)return 'A';
+ const value=raw.trim().toUpperCase().replace(/[-_]+/g,' ').replace(/\s+/g,' ').replace(/\s+RECORDS?$/,'').trim();
+ return Object.hasOwn(TYPE_CODES,value)?value:TYPE_ALIASES[value]??value;
+}
+
 /** Hostname validation: labels of 1-63 chars ([a-z0-9-], not leading/
  * trailing hyphen; a leading underscore is allowed for SRV-style
  * owner names), at least two labels, alphabetic final label, total
@@ -207,14 +214,14 @@ export async function handleDns(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
   const nameRaw = query.name?.trim();
-  const typeRaw = query.record_type?.trim().toUpperCase();
-  if (!nameRaw || !typeRaw) {
-    throw badRequest("MISSING_PARAM", "name and record_type are required query parameters");
+  const typeRaw = normalizeDnsType(query.record_type);
+  if (!nameRaw) {
+    throw badRequest("MISSING_PARAM", "name is required; record_type defaults to A");
   }
   if (!isValidDnsName(nameRaw)) {
     throw badRequest("INVALID_NAME", `name must be a valid domain name; got "${nameRaw}"`);
   }
-  if (!(typeRaw in TYPE_CODES)) {
+  if (!Object.hasOwn(TYPE_CODES,typeRaw)) {
     throw badRequest(
       "INVALID_RECORD_TYPE",
       `record_type must be one of ${RECORD_TYPES.join(", ")}; got "${typeRaw}"`,
@@ -296,6 +303,7 @@ export async function handleDns(
     name,
     record_type: typeRaw,
     has_record: hasRecord,
+    record_count:serving.records.length,
     record_values_agree: recordValuesAgree,
     dnssec_scope: "Resolver AD assertion only; no independent DNSSEC validation",
     resolvers: verdicts.map((v) => ({
@@ -329,6 +337,8 @@ export async function handleDns(
     name,
     record_type: typeRaw,
     records: serving.records,
+    record_count:serving.records.length,
+    summary:`${name} ${typeRaw}: ${serving.records.length} matching record(s) from ${serving.resolver}; ${verdicts.length} resolver(s) answered, values ${recordValuesAgree===true?"agree":recordValuesAgree===false?"differ":"not cross-checked"}.`,
     ttl: serving.ttl,
     cname_chain: serving.cnameChain,
     resolvers: resolverDetails,
