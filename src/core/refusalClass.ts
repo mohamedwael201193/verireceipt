@@ -4,7 +4,7 @@ import {gridRefusalClass} from '../handlers/gridPrice';
 // Only labels from fixed lists are returned. The raw value, or any part of it outside the lists, is never logged.
 const CHAINS=new Set(['gnosis','celo','blast','fantom','linea','scroll','zksync','mantle','metis','moonbeam','moonriver','cronos','aurora','harmony','kava','klaytn','sei','sui','aptos','near','cosmos','tron','ton','cardano','polkadot','tezos','stellar','xrp','ripple','litecoin','dogecoin','bitcoin','solana','avalanche','bsc','bnb','polygon','arbitrum','optimism','base','ethereum','zora','mode','taiko','manta','berachain','sonic','unichain','ink','abstract','hyperliquid','monad']);
 const MACRO_TOKENS=new Set(['gdp','growth','per','capita','real','nominal','inflation','unemployment','rate','cpi','population','trade','debt','interest','other']);
-function chainClass(raw:string|undefined):string{const k=(raw??'').trim().toLowerCase();return CHAINS.has(k)?k:'other';}
+export function chainClass(raw:string|undefined):string{const k=(raw??'').trim().toLowerCase();return CHAINS.has(k)?k:'other';}
 export function indicatorType(raw:string|undefined):string{
  const v=(raw??'').trim();
  if(/^[0-9a-f]{32}$/i.test(v))return 'md5';if(/^[0-9a-f]{40}$/i.test(v))return 'sha1';if(/^[0-9a-f]{64}$/i.test(v))return 'sha256';

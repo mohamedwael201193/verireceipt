@@ -1,3 +1,4 @@
+import { chainClass } from "../core/refusalClass";
 import {feeContext} from './gasFeeContext';
 // GAS_PRICE_GENERAL — GET /v1/gas-price?chain=
 //
@@ -233,7 +234,8 @@ export async function handleGasPrice(
 ): Promise<Record<string, unknown>> {
   for (const key of Object.keys(query)) if (key !== "chain") throw badRequest("UNKNOWN_PARAM", "Only chain is supported");
   const supplied = query.chain ?? "";
-  console.info(JSON.stringify({ event: "gas_chain_request", value: supplied.slice(0,80), truncated: supplied.length > 80 }));
+  // Class only: a fixed chain token or "other", "default" when no chain was given. The raw value is never logged.
+  console.info(JSON.stringify({ event: "gas_chain_request", chain_class: supplied.trim() === "" ? "default" : chainClass(supplied) }));
   const chainRaw = supplied.trim();
   const normalized = normalizeChain(chainRaw);
   // Explicit identifiers for networks already backed by the existing verified RPC set.
