@@ -1,3 +1,4 @@
+import{resetWalletBudgetForTests}from'../src/handlers/walletPinnedRpc';
 // Tests for src/handlers/walletBalance.ts (WALLET_BALANCE_CHECK_GENERAL).
 //
 // Stubbed tests drive global fetch (RPC + ENS resolvers); the LIVE tests
@@ -100,8 +101,9 @@ function stubBalanceFetch(
     }
     const queue = rpcQueues.get(u);
     if (!queue) throw new Error(`unexpected fetch to ${u}`);
-    const behavior = queue.length > 1 ? queue.shift()! : queue[0];
     const body = JSON.parse(String(init?.body ?? "{}")) as { method: string; params: unknown[] };
+    if(body.method==='eth_getBlockByNumber')return new Response(JSON.stringify({jsonrpc:'2.0',id:1,result:{number:body.params[0]==='finalized'?'0x100':body.params[0],hash:'0x'+'a'.repeat(64)}}));
+    const behavior = queue.length > 1 ? queue.shift()! : queue[0];
     let key = body.method;
     if (body.method === "eth_call") {
       const data = (body.params[0] as { data: string }).data;
@@ -109,12 +111,12 @@ function stubBalanceFetch(
     }
     const result = behavior.results[key];
     if (result === undefined || result === "ERR") throw new Error("leg failure");
-    return { ok: true, status: 200, text: async () => rpcResult(result) } as Response;
+    return new Response(rpcResult(result));
   };
   vi.stubGlobal("fetch", fetchStub);
 }
 
-afterEach(() => {
+afterEach(() => {resetWalletBudgetForTests();
   vi.unstubAllGlobals();
 });
 

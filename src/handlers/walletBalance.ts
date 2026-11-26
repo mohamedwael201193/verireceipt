@@ -1,9 +1,10 @@
+import {walletRpc as rpcCall,pinWalletBlock} from './walletPinnedRpc';
 // WALLET_BALANCE_CHECK_GENERAL — GET /v1/balance?address=&chain=&token=
 //
 // Zero-LLM. Answers the current native-coin or ERC-20 balance of one
 // address (or ENS name) on a named chain from the chain's verified
 // keyless RPC legs (CHAIN_RPCS[chain]), as a 2-of-N exact-value quorum
-// at the FINALIZED block tag, with a SHA-256 receipt over the canonical
+// at one fixed block below observed finalized heads, with a SHA-256 receipt over the canonical
 // evidence object. Fails closed: an RPC outage, a persistently split
 // vote or an ENS resolution conflict throws 502/422 and never guesses a
 // balance.
@@ -13,39 +14,15 @@
 // token (symbol or contract; empty = native coin); scored output
 // `balance` in WHOLE units (not wei), 6 decimals.
 //
-// FINALIZED-TAG CHOICE (measured live 2026-11-22 before this handler
-// was written): eth_getBalance / eth_call with the "finalized" tag
-// return IDENTICAL values across every chain's legs (vitalik's address
-// probed on all 15 configured legs: ethereum 3/3 agree, base 3/3,
-// optimism 3/3, polygon 2/2, sepolia + base-sepolia agree). Finalized
-// state is canonical, so the quorum is exact and re-polls are only
-// needed for transient leg failures — a "latest"-tag quorum would
-// split whenever a balance moves between sequential leg polls.
-// KNOWN GAP (documented, same spirit as chains.ts): arbitrum.drpc.org
-// answers "finalized" state lookups with -32000 "historical state …
-// unavailable" (its non-archive nodes prune the L1-finalized L2 state),
-// so arbitrum effectively runs 2-of-2 on arb1.arbitrum.io + Tenderly
-// for this handler. An errored leg is UNKNOWN, never a vote.
-//
-// ENS RESOLUTION: a dotted name (vitalik.eth) is resolved through TWO
-// independently operated keyless HTTP resolvers — api.ensideas.com
-// (/ens/resolve/{name}) and api.ensdata.net (/{name}) — and BOTH must
-// return the SAME 0x address (case-insensitive), else 502. The
-// resolution is recorded in the receipt evidence with both source
-// URLs; the balance itself is still read on-chain by the RPC quorum.
-//
-// TOKEN PATH: token empty / native symbol (ETH; POL or MATIC on
-// polygon) → eth_getBalance. A 0x contract address → eth_call
-// balanceOf + decimals + symbol at finalized. A symbol → the curated
-// TOKEN_CONTRACTS map (every entry verified on-chain 2026-11-22, see
-// tokenContracts.ts); an unmapped symbol is 422 UNSUPPORTED_TOKEN,
-// never a guessed contract.
+// Select one block three below the lowest observed finalized head from at
+// least two RPCs. Every balance and token metadata call uses that exact tag.
+// Retry one time at block-2 if the first exact-value quorum fails.
 import { walletContext } from "./walletContext";
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, stableStringify, type Receipt } from "../core/receipt";
 import { CHAIN_RPCS } from "../config/chains";
 import { saveReceipt } from "../core/storage";
-import { HEX_QTY_RE, rpcCall } from "../core/evmRpc";
+import { HEX_QTY_RE } from "../core/evmRpc";
 import { normalizeChain } from "./txLookup";
 import {
   ADDRESS_RE,
@@ -172,14 +149,15 @@ function decodeAbiString(result: unknown, rpcUrl: string): string {
   return bytes.toString("utf8");
 }
 
-/** Fetch one leg's balance at the finalized tag. Throws on any failure. */
+/** Fetch one leg's balance at the pinned numeric tag. Throws on any failure. */
 async function fetchBalanceLeg(
   rpcUrl: string,
   address: string,
   contract: string | null,
+  blockTag:string,
 ): Promise<BalanceLeg> {
   if (contract === null) {
-    const { result } = await rpcCall(rpcUrl, "eth_getBalance", [address, "finalized"]);
+    const { result } = await rpcCall(rpcUrl, "eth_getBalance", [address, blockTag]);
     const balance = decodeUint256(result, "eth_getBalance result", rpcUrl);
     return {
       rpcUrl,
@@ -193,12 +171,12 @@ async function fetchBalanceLeg(
     SELECTOR_BALANCE_OF + address.toLowerCase().slice(2).padStart(64, "0");
   const { result: balResult } = await rpcCall(rpcUrl, "eth_call", [
     { to: contract, data },
-    "finalized",
+    blockTag,
   ]);
   const balance = decodeUint256(balResult, "balanceOf result", rpcUrl);
   const { result: decResult } = await rpcCall(rpcUrl, "eth_call", [
     { to: contract, data: SELECTOR_DECIMALS },
-    "finalized",
+    blockTag,
   ]);
   const decimals = Number(decodeUint256(decResult, "decimals result", rpcUrl));
   if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 36) {
@@ -206,7 +184,7 @@ async function fetchBalanceLeg(
   }
   const { result: symResult } = await rpcCall(rpcUrl, "eth_call", [
     { to: contract, data: SELECTOR_SYMBOL },
-    "finalized",
+    blockTag,
   ]);
   const symbol = decodeAbiString(symResult, rpcUrl);
   return {
@@ -233,12 +211,13 @@ async function fetchRound(
   rpcs: string[],
   address: string,
   contract: string | null,
+  blockTag:string,
 ): Promise<Round> {
   const successes: BalanceLeg[] = [];
   let errored = 0;
   for (const rpcUrl of rpcs) {
     try {
-      successes.push(await fetchBalanceLeg(rpcUrl, address, contract));
+      successes.push(await fetchBalanceLeg(rpcUrl, address, contract,blockTag));
     } catch {
       errored++;
     }
@@ -331,11 +310,15 @@ export async function handleBalance(
   }
 
   const total = rpcs.length;
-  let round = await fetchRound(rpcs, address, contract);
+  let pin:Awaited<ReturnType<typeof pinWalletBlock>>;
+  try{pin=await pinWalletBlock(rpcs);}catch{throw upstreamUnavailable('QUORUM_UNREACHABLE','at least two finalized heads required to pin a source block');}
+  let blockNumber=pin.number,blockTag='0x'+blockNumber.toString(16);
+  let round = await fetchRound(rpcs, address, contract,blockTag);
   let pair = agreeingPair(round.successes);
   if (pair === null) {
     await sleep(REPOLL_DELAY_MS);
-    round = await fetchRound(rpcs, address, contract);
+    blockNumber-=2n;blockTag='0x'+blockNumber.toString(16);
+    round = await fetchRound(rpcs, address, contract,blockTag);
     pair = agreeingPair(round.successes);
   }
   if (pair === null) {
@@ -354,17 +337,19 @@ export async function handleBalance(
   const winner = pair.leg;
   const decimals = contract === null ? 18 : winner.decimals!;
   const symbol =
-    contract === null ? NATIVE_SYMBOL[chain] : (requestedSymbol ?? winner.symbol ?? "UNKNOWN");
+    contract === null ? NATIVE_SYMBOL[chain] : (winner.symbol ?? "UNKNOWN");
   const balance = toWholeUnits(winner.balance, decimals);
   const asOf = new Date().toISOString();
   const votes = `${pair.count}/${total} sources agreed`;
 
-  const context = await walletContext(rpcs, address);
-  const { context_evidence, ...accountContext } = context;
+  const context = await walletContext(rpcs, address,blockTag);
+  const { context_evidence,block_number:contextBlockNumber, ...accountContext } = context;
   const fields: Record<string, unknown> = {
     ...accountContext,
+    account_context_block_number:contextBlockNumber,
     balance_wei: contract === null ? winner.balance.toString() : null,
     balance_base_units: winner.balance.toString(),
+    block_number:Number(blockNumber),
     funded: winner.balance > 0n,
     funding_status: winner.balance > 0n ? "funded" : "zero_balance",
     address,
@@ -382,7 +367,7 @@ export async function handleBalance(
     as_of: asOf,
     balance_base_units_hex: winner.balanceHex,
     account_context: context,
-    block_tag: "finalized",
+    block_tag:blockTag,block_number:Number(blockNumber),block_selection:pin,
     chain,
     decimals,
     ens: ens ? { name: ens.name, resolved_address: ens.address, sources: ens.sources } : null,
@@ -402,9 +387,9 @@ export async function handleBalance(
   }
 
   return envelope(INTENT, fields, receiptDoc, {
-    answer: `${address} holds ${balance} ${symbol} on ${chain} (finalized block, ${votes}). ${winner.balance > 0n ? "Funded" : "Zero balance"}; ${context.account_type}; outgoing transaction count ${context.transaction_count ?? "unavailable"}. ${context.context_scope}.`,
+    answer: `${address} holds ${balance} ${symbol} on ${chain} (fixed block ${blockNumber}, selected below observed finalized heads, ${votes}). ${winner.balance > 0n ? "Funded" : "Zero balance"}; ${context.account_type}; outgoing transaction count ${context.transaction_count ?? "unavailable"}. ${context.context_scope}.`,
     verdict: "verified",
     confidence: pair.count === total ? 1.0 : 0.9,
-    source: `EVM RPC quorum (${chain}, 2-of-${total}, finalized)`,
+    source: `EVM RPC quorum (${chain}, 2-of-${total}, fixed block ${blockNumber} below finalized heads)`,
   });
 }

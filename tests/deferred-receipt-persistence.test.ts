@@ -1,3 +1,4 @@
+import{resetWalletBudgetForTests}from'../src/handlers/walletPinnedRpc';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -87,7 +88,7 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "info").mockImplementation(() => {});
 });
-afterEach(() => { resetMacroCachesForTests(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach(() => {resetWalletBudgetForTests(); resetMacroCachesForTests(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
 afterAll(async () => { await closeStorage(); for (const suffix of ["", "-wal", "-shm"]) rmSync(scratch + suffix, { force: true }); });
 for (const item of cases) describe(item.name, () => {
   beforeEach(() => vi.setSystemTime(new Date(item.captured.clock)));
