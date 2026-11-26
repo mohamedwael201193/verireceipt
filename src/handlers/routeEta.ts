@@ -27,6 +27,8 @@ import { saveReceipt } from "../core/storage";
 import {resolveRoutePlace,ROUTE_GEOCODER_ATTRIBUTION} from "./routeGeocoder";
 
 const SOURCE_TIMEOUT_MS = 6000;
+// Assumed response budget (the contract publishes none): geocoding may use up to ROUTE_GEOCODE_BUDGET_MS, the route read gets what is left (at least 1.5 s, because geocode reads end by 7.5 s), so the worst case is 9 s.
+export const ROUTE_TOTAL_BUDGET_MS = 9000;
 const UA = "VeriReceipt/2.0 route-eta observer (+https://verireceipt.vercel.app)";
 
 export interface OsrmRoute {
@@ -95,7 +97,7 @@ async function resolveEndpoint(raw:string|undefined,which:'origin'|'destination'
 // its slot until the underlying fetch/body settles. Healthy overlap is allowed.
 let routeSourceActive = 0;
 export function resetRouteSourceForTests() { routeSourceActive = 0; }
-async function readRouteBody(url: string): Promise<string> {
+async function readRouteBody(url: string, timeoutMs: number = SOURCE_TIMEOUT_MS): Promise<string> {
   if (routeSourceActive >= 4) throw Error("route source busy");
   routeSourceActive++;
   const controller = new AbortController();
@@ -117,19 +119,20 @@ async function readRouteBody(url: string): Promise<string> {
   })();
   try {
     return await Promise.race([io,new Promise<never>((_,reject)=>{
-      timer=setTimeout(()=>{controller.abort();reject(Error("route source deadline"));},SOURCE_TIMEOUT_MS);
+      timer=setTimeout(()=>{controller.abort();reject(Error("route source deadline"));},timeoutMs);
     })]);
   } finally {clearTimeout(timer);}
 }
 
 export async function handleRouteEta(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+  const startedAt = Date.now();
   const [o,dst] = await Promise.all([resolveEndpoint(query.origin, "origin"),resolveEndpoint(query.destination, "destination")]);
   // OSRM takes lon,lat order.
   const url = `https://router.project-osrm.org/route/v1/driving/${o.lon},${o.lat};${dst.lon},${dst.lat}?overview=false&steps=false`;
   const fetchedAt = new Date().toISOString();
   let body: string;
   try {
-    body = await readRouteBody(url);
+    body = await readRouteBody(url, Math.min(SOURCE_TIMEOUT_MS, ROUTE_TOTAL_BUDGET_MS - (Date.now() - startedAt)));
   } catch {
     throw upstreamUnavailable("OSRM_UNREACHABLE", "the OSRM demo server could not be reached");
   }
