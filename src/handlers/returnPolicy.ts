@@ -1,3 +1,4 @@
+import expandedBindings from '../data/returnPolicyBindings.json';
 // Live official US policy observer. Closed retailer bindings only. A reviewed
 // policy section must match exactly, otherwise no stale policy is substituted.
 import {createHash} from 'node:crypto';
@@ -11,18 +12,19 @@ export function resetReturnPolicyBudgetForTests():void{budget=new StartBudget(20
 export function policyText(html:string):string{
  return html.replace(/<!--[^]*?-->/g,' ').replace(/<(script|style)\b[^>]*>[^]*?<\/\1\s*>/gi,' ').replace(/<[^>]*>/g,' ').replace(/&#(\d+);/g,(_,n)=>{const v=Number(n);return v<=0x10ffff?String.fromCodePoint(v):' ';}).replace(/&#x([0-9a-f]+);/gi,(_,n)=>{const v=parseInt(n,16);return v<=0x10ffff?String.fromCodePoint(v):' ';}).replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/\s+/g,' ').trim();
 }
-type Retailer='apple'|'walmart'|'costco'|'target'|'ikea';
+type Retailer=string;
 const SECTIONS={"costco": ["Risk-Free 100% Satisfaction Guarantee", "How to Return an Item"], "ikea": ["IKEA offers a 365-day return policy", "In-store purchase"], "target": ["Return windows that give you plenty of time to decide", "Free returns, no matter how you do it"]};
 export function reviewedSection(retailer:Retailer,html:string):string{
  const text=policyText(html);
- const start=retailer in SECTIONS?SECTIONS[retailer as keyof typeof SECTIONS][0]:retailer==='apple'?'Holiday Return Policy Eligible products':'This policy applies to returns of products purchased in Walmart U.S. stores';
- const end=retailer in SECTIONS?SECTIONS[retailer as keyof typeof SECTIONS][1]:retailer==='apple'?'How to Return an Item Ship your item back to Apple':'Seafood Policy';
+ const expanded=expandedBindings.find(p=>p.key===retailer);
+ const start=expanded?expanded.start:retailer in SECTIONS?SECTIONS[retailer as keyof typeof SECTIONS][0]:retailer==='apple'?'Holiday Return Policy Eligible products':'This policy applies to returns of products purchased in Walmart U.S. stores';
+ const end=expanded?expanded.end:retailer in SECTIONS?SECTIONS[retailer as keyof typeof SECTIONS][1]:retailer==='apple'?'How to Return an Item Ship your item back to Apple':'Seafood Policy';
  const i=text.indexOf(start),j=text.indexOf(end,i+start.length);
  if(i<0||j<=i)throw Error('reviewed policy section missing');
  return text.slice(i,j).trim();
 }
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
-interface Binding {name:string;url:string;days:number|null;sectionHash:string;conditions:string[];}
+interface Binding {name:string;url:string;days:number|null;sectionHash:string;conditions:string[];quotes?:string[];window_basis?:string;start?:string;end?:string;}
 const BINDINGS:Record<Retailer,Binding>={
  apple:{name:'Apple US',url:'https://www.apple.com/shop/help/returns_refund',days:14,sectionHash:'6c87193be8f19a133e54356d3f1b6252ffc029f73a636a9f34ad9413c98272ee',conditions:[
  'US standard policy: 14 calendar days from receipt, only for items bought directly from Apple; other retailers have their own policies.',
@@ -40,12 +42,14 @@ const BINDINGS:Record<Retailer,Binding>={
  ikea:{"name": "IKEA US", "url": "https://www.ikea.com/us/en/customer-service/returns-claims/return-policy/", "days": 365, "sectionHash": "2e4523dd7937ca773a2fe63031c9e99f8b1535e8d3e89bb15df9d159fe9180e3", "conditions": ["365 days applies to unopened products. Open products have a 180-day window with proof of purchase. This summary is not a decision about item condition or eligibility; consult the full linked policy."]},
  target:{"name": "Target US", "url": "https://www.target.com/returns", "days": 90, "sectionHash": "2d2b0f7ae4838ba10d1f07a707b133b6267e170024deffded2023b4e1fb90b3c", "conditions": ["90 days applies to most items sold by Target. Target-brand items with a receipt have a 365-day window. Other products and sellers can have shorter windows.", "Electronics and limited-time collections have separate policies; consult the product page. Gift cards, trading cards, digital downloads and open breast pumps are among final-sale items. Membership or card extensions depend on eligibility. Holiday eligibility is not calculated."]}
 };
-const COVERAGE_PAGES:Record<string,[string,string]>={"amazon": ["Amazon US", "https://www.amazon.com/gp/help/customer/display.html?nodeId=GKM69DUUYKQWKWX7"], "best buy": ["Best Buy US", "https://www.bestbuy.com/site/help-topics/return-exchange-policy/pcmcat260800050014.c?id=pcmcat260800050014"], "home depot": ["Home Depot US", "https://www.homedepot.com/c/Return_Policy"], "lowe's": ["Lowes US", "https://www.lowes.com/l/help/returns-policy"], "nike": ["Nike US", "https://www.nike.com/us/en/help/a/returns-policy"], "macy's": ["Macys US", "https://www.macys.com/customer-service/articles/what-is-macys-return-policy"]};
+for(const p of expandedBindings)BINDINGS[p.key]=p;
+// Candidates returning blocks, redirects or JS-only bodies are not runtime bindings.
+const COVERAGE_PAGES:Record<string,[string,string]>={};
 export async function handleReturnPolicy(q:Record<string,string|undefined>):Promise<Record<string,unknown>>{
  const supplied=[q.retailer,q.store,q.merchant,q.brand].filter(v=>v?.trim()).map(v=>v!.trim().toLowerCase());
  if(!supplied.length)throw badRequest('MISSING_PARAM','retailer, store, merchant or brand is required');
  if(supplied.some(v=>v!==supplied[0]))throw badRequest('CONFLICTING_RETAILER','retailer aliases disagree');
- const input=supplied[0].replace(/^lowes(?= us| usa|$)/,"lowe's").replace(/^macys(?= us| usa|$)/,"macy's").replace(/^the home depot(?= us| usa|$)/,"home depot");if(input.length>256||/[\x00-\x1f]/.test(input))throw badRequest('INVALID_RETAILER','retailer must be at most256printablecharacters');
+ const input=supplied[0].replace(/^lowes(?= us| usa|$)/,"lowe's").replace(/^macys(?= us| usa|$)/,"macy's").replace(/^the home depot(?= us| usa|$)/,"home depot").replace(/^l\.?l\.?\s?bean(?= us| usa|$)/,'llbean');if(input.length>256||/[\x00-\x1f]/.test(input))throw badRequest('INVALID_RETAILER','retailer must be at most256printablecharacters');
  const key=(Object.keys(BINDINGS) as Retailer[]).find(k=>[k,k+' us',k+' usa'].includes(input));
  if(!key){
    const page=Object.entries(COVERAGE_PAGES).find(([k])=>[k,k+' us',k+' usa'].includes(input))?.[1];
@@ -74,6 +78,7 @@ export async function handleReturnPolicy(q:Record<string,string|undefined>):Prom
  const receipt=makeReceipt(INTENT,p.url,raw!,'single official policy page; exact raw bytes; reviewed section fingerprint');receipt.fetched_at=fetchedAt!;
  try{await saveReceipt(receipt,raw!);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
  const scope='Standard US retailer policy only, not a decision about a particular item, purchase, order, refund or holiday deadline.';
- const answer=`${p.name}: ${p.days===null?'no single general return window is stated in the reviewed guarantee':`standard return window ${p.days} days`}. ${p.conditions.join(' ')} ${scope}`;
- return envelope(INTENT,{retailer:p.name,return_window_days:p.days,window_basis:'standard US policy; exceptions in conditions',conditions:p.conditions,verified:true,sources:[p.url],scope,as_of:fetchedAt!},receipt,{answer,verdict:'verified',confidence:0.95,source:`${p.url}; live official page fetched ${fetchedAt!}`});
+ const quotes=p.quotes??[];const excerpt=quotes.length?` Official policy quotes: ${quotes.map(q=>'\"'+q+'\"').join(' ')}`:'';
+ const answer=`${p.name}: ${p.days===null?(key==='llbean'?'return window is one year from purchase; no fixed day conversion asserted':'no single general return day window asserted in the reviewed policy'):`standard return window ${p.days} days`}. ${p.conditions.join(' ')}${excerpt} ${scope}`;
+ return envelope(INTENT,{retailer:p.name,return_window_days:p.days,window_basis:p.window_basis??'standard US policy; exceptions in conditions',conditions:p.conditions,...(quotes.length?{policy_quotes:quotes,policy_section_quote:reviewedSection(key,raw!)}:{}),verified:true,sources:[p.url],scope,as_of:fetchedAt!},receipt,{answer,verdict:'verified',confidence:0.95,source:`${p.url}; live official page fetched ${fetchedAt!}`});
 }

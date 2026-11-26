@@ -1,0 +1,37 @@
+[
+  {
+    "retailer": "best buy",
+    "source_url": "https://www.bestbuy.com/site/help-topics/return-exchange-policy/pcmcat260800050014.c?id=pcmcat260800050014",
+    "original_raw_sha256": "0d95de54ac5adfb9eb7d762f2a4b39d359f626d2148aee53e021506e7ec0a2fc",
+    "reviewed_section_sha256": "5cf7526fcdf932b180ac5c7f6035b35d867d014d32cc9cb33f4e0861d7326267",
+    "fixture_kind": "EXTRACTED REVIEWED POLICY SECTION ONLY. Not a full raw HTTP response."
+  },
+  {
+    "retailer": "macy's",
+    "source_url": "https://www.macys.com/customer-service/articles/what-is-macys-return-policy",
+    "original_raw_sha256": "46c435d860d3212d2daf40d29c7aea44a8cccbf1fffb17f328663d12eb239c9b",
+    "reviewed_section_sha256": "1e557d31aff9fa005a443e3f8441ec77ad90243616e96b27d7625d761ca2a46a",
+    "fixture_kind": "EXTRACTED REVIEWED POLICY SECTION ONLY. Not a full raw HTTP response."
+  },
+  {
+    "retailer": "etsy",
+    "source_url": "https://help.etsy.com/hc/en-us/articles/7869401615255-How-do-I-Set-Return-Policies-on-My-Listings",
+    "original_raw_sha256": "98209c1e7cef5f14fea4827ce8f697a6421f6cf7b4efde41556305cb0fb6e3c4",
+    "reviewed_section_sha256": "15c2a5210b828fe70716429b52eb850a58d87b78e57b32babeee4ea2dec853ce",
+    "fixture_kind": "EXTRACTED REVIEWED POLICY SECTION ONLY. Not a full raw HTTP response."
+  },
+  {
+    "retailer": "ebay",
+    "source_url": "https://www.ebay.com/help/policies/member-behaviour-policies/return-policy?id=4041",
+    "original_raw_sha256": "b9b5d740768acaedd95d5190bff2af209985362dd006e1d356584bad7c8cb301",
+    "reviewed_section_sha256": "769a912b0d57bf86db05b1d35086aaec3d9c52bd01c08d8a14a1868374b6ae64",
+    "fixture_kind": "EXTRACTED REVIEWED POLICY SECTION ONLY. Not a full raw HTTP response."
+  },
+  {
+    "retailer": "llbean",
+    "source_url": "https://www.llbean.com/llb/shop/510624?page=returns-and-exchanges",
+    "original_raw_sha256": "f250f162968981686ff340a77f8b6173dfbc5fdd2f84ec9c9de492cb59d69f10",
+    "reviewed_section_sha256": "69e99105c21de1a715e54c2085e3b3a7a4130bde5e862253b7c66248883c9447",
+    "fixture_kind": "EXTRACTED REVIEWED POLICY SECTION ONLY. Not a full raw HTTP response."
+  }
+]

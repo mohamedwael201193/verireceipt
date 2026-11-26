@@ -1,0 +1,100 @@
+[
+  {
+    "key": "best buy",
+    "file": "best-buy",
+    "name": "Best Buy US",
+    "days": 15,
+    "start": "Member Status Standard",
+    "end": "How to return an item",
+    "quotes": [
+      "Most products 15 days 60 days",
+      "Verizon devices capable of being activated have a 30-day return period for all customers.",
+      "Items need to be returned in a like-new condition."
+    ],
+    "conditions": [
+      "Standard customers: most products15days; Plus/Total60days excludes Marketplace products. Activatable devices14days, Verizon30days.",
+      "Restocking fees, nonreturnable categories, condition rules and holiday exceptions apply; see quoted policy section."
+    ],
+    "window_basis": "standard most-products row, not membership/holiday or activatable-device exceptions",
+    "url": "https://www.bestbuy.com/site/help-topics/return-exchange-policy/pcmcat260800050014.c?id=pcmcat260800050014",
+    "sectionHash": "5cf7526fcdf932b180ac5c7f6035b35d867d014d32cc9cb33f4e0861d7326267"
+  },
+  {
+    "key": "macy's",
+    "file": "macys",
+    "name": "Macys US",
+    "days": 30,
+    "start": "How do I return an item? If",
+    "end": "Gifts & Registry Returns Returning",
+    "quotes": [
+      "most items can be returned within 30 days of delivery or purchase",
+      "Unworn and unaltered In original condition With original tags attached In original packaging (when applicable)",
+      "Non-members pay a $9.99 return shipping fee (plus tax), which will be deducted from the refund."
+    ],
+    "conditions": [
+      "Most items:30days from delivery or purchase; condition, tags and packaging requirements apply.",
+      "Mail-return fees depend on membership; free return shipping excludes listed product categories. Registry/gift and special-category or holiday rules are not evaluated; no item eligibility determined."
+    ],
+    "window_basis": "most items from delivery or purchase; category and holiday exceptions not calculated",
+    "url": "https://www.macys.com/customer-service/articles/what-is-macys-return-policy",
+    "sectionHash": "1e557d31aff9fa005a443e3f8441ec77ad90243616e96b27d7625d761ca2a46a"
+  },
+  {
+    "key": "etsy",
+    "file": "etsy",
+    "name": "Etsy US marketplace",
+    "days": null,
+    "start": "Do I need to accept returns or exchanges? If",
+    "end": "How can I accept returns for items",
+    "quotes": [
+      "However, whether you choose to accept returns or exchanges on your listings or not is completely optional and based on your individual business needs.",
+      "It\u2019s not possible to set return or exchange policies on your digital listings."
+    ],
+    "conditions": [
+      "Seller/listing-specific policy, no platform-wide standard day window asserted. The simple-policy30daytemplate and EU14daydiscussion are not a US platform-wide rule.",
+      "Physical listings outside the EU may opt out of returns; digital listings cannot set return/exchange policies. No individual seller or item policy is checked."
+    ],
+    "window_basis": "seller/listing-specific, no general day count",
+    "url": "https://help.etsy.com/hc/en-us/articles/7869401615255-How-do-I-Set-Return-Policies-on-My-Listings",
+    "sectionHash": "15c2a5210b828fe70716429b52eb850a58d87b78e57b32babeee4ea2dec853ce"
+  },
+  {
+    "key": "ebay",
+    "file": "ebay",
+    "name": "eBay US marketplace",
+    "days": null,
+    "start": "When can I return an item?",
+    "end": "How do I request a return through My eBay?",
+    "quotes": [
+      "Many sellers accept returns if you've changed your mind.",
+      "If the item doesn't match the listing, or arrived faulty or damaged, you may be eligible for eBay Money Back Guarantee even if the seller's policy says they don't accept returns."
+    ],
+    "conditions": [
+      "Changed-mind returns depend on the seller listing, no universal day window asserted.",
+      "Money Back Guarantee may apply to not-as-described/faulty/damaged items despite seller no-returns policy. This is not an eligibility decision."
+    ],
+    "window_basis": "seller listing and reason for return; no general day count",
+    "url": "https://www.ebay.com/help/policies/member-behaviour-policies/return-policy?id=4041",
+    "sectionHash": "769a912b0d57bf86db05b1d35086aaec3d9c52bd01c08d8a14a1868374b6ae64"
+  },
+  {
+    "key": "llbean",
+    "file": "llbean",
+    "name": "L.L.Bean US",
+    "days": null,
+    "start": "Easy Returns & Exchanges If",
+    "end": "Frequently Asked Questions Returns",
+    "quotes": [
+      "If you are not 100% satisfied with one of our products, you may return it within one year of your purchase for a refund (special conditions may apply).",
+      "After one year, we will consider any items for return that are defective due to materials or craftsmanship.",
+      "Proof of purchase required."
+    ],
+    "conditions": [
+      "Source says one year from purchase, not a fixed day count; no365dayconversion asserted. Proof of purchase required.",
+      "Exclusions include misuse, excessive wear, ammunition, contaminated products and third-party purchases. Older purchases and clearance centers have separate rules."
+    ],
+    "window_basis": "one year from purchase as stated; days:null because calendar year not fixed days",
+    "url": "https://www.llbean.com/llb/shop/510624?page=returns-and-exchanges",
+    "sectionHash": "69e99105c21de1a715e54c2085e3b3a7a4130bde5e862253b7c66248883c9447"
+  }
+]

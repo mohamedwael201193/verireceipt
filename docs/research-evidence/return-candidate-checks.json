@@ -1,0 +1,97 @@
+[
+  {
+    "retailer": "best buy",
+    "url": "https://www.bestbuy.com/site/help-topics/return-exchange-policy/pcmcat260800050014.c?id=pcmcat260800050014",
+    "status": 200,
+    "bytes": 320489
+  },
+  {
+    "retailer": "home depot",
+    "url": "https://www.homedepot.com/c/Return_Policy",
+    "status": 403
+  },
+  {
+    "retailer": "lowe's",
+    "url": "https://www.lowes.com/l/help/returns-policy",
+    "status": 403
+  },
+  {
+    "retailer": "nike",
+    "url": "https://www.nike.com/us/en/help/a/returns-policy",
+    "status": 200,
+    "bytes": 600435
+  },
+  {
+    "retailer": "adidas",
+    "url": "https://www.adidas.com/us/help/us-returns-refunds/what-is-the-return-policy",
+    "status": 403
+  },
+  {
+    "retailer": "etsy",
+    "url": "https://help.etsy.com/hc/en-us/articles/7869401615255-How-do-I-Set-Return-Policies-on-My-Listings",
+    "status": 200,
+    "bytes": 54994
+  },
+  {
+    "retailer": "ebay",
+    "url": "https://www.ebay.com/help/policies/member-behaviour-policies/return-policy?id=4041",
+    "status": 200,
+    "bytes": 101603
+  },
+  {
+    "retailer": "wayfair",
+    "url": "https://www.wayfair.com/help/article/how_do_i_return_an_item/309BD55E-A309-43A4-A4B1-4FD56AF14EE1",
+    "status": 429
+  },
+  {
+    "retailer": "macy's",
+    "url": "https://www.macys.com/customer-service/articles/what-is-macys-return-policy",
+    "status": 200,
+    "bytes": 74658
+  },
+  {
+    "retailer": "nordstrom",
+    "url": "https://www.nordstrom.com/browse/services/return-policy",
+    "status": 200,
+    "bytes": 259288
+  },
+  {
+    "retailer": "rei",
+    "url": "https://www.rei.com/help?a=Returns-and-Exchanges-FAQ---id--P5_b_51ZQwq0dxvEZ9MrMw",
+    "status": 200,
+    "bytes": 1190071
+  },
+  {
+    "retailer": "chewy",
+    "url": "https://www.chewy.com/app/content/return-policy",
+    "status": 308
+  },
+  {
+    "retailer": "newegg",
+    "url": "https://www.newegg.com/promotions/nepro/22-2075/index.html",
+    "status": 403
+  },
+  {
+    "retailer": "b&h",
+    "url": "https://www.bhphotovideo.com/find/HelpCenter/ReturnExchange.jsp",
+    "status": 403
+  },
+  {
+    "retailer": "gap",
+    "url": "https://www.gap.com/Asset_Archive/AllBrands/customerService/cms/cs_sidebar-left_gap.html",
+    "status": 200,
+    "bytes": 2082
+  },
+  {
+    "retailer": "llbean",
+    "url": "https://www.llbean.com/llb/shop/510624?page=returns-and-exchanges",
+    "status": 200,
+    "bytes": 732163
+  },
+  {
+    "retailer": "patagonia",
+    "url": "https://www.patagonia.com/returns.html",
+    "status": 200,
+    "bytes": 249521
+  }
+]
