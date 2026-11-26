@@ -779,6 +779,10 @@ function pickQuorum(
   throw new ApiError(502, "QUORUM_DISAGREEMENT", disagreementMessage);
 }
 
+export function rejectedTxInputClass(hash:string|undefined,chain:string|undefined){
+ const value=hash??'',bare=value.replace(/^0x/i,'');const normalized=normalizeChain(chain);
+ return{tx_hash_length:value.length===0?'missing':bare.length<64?'short':bare.length===64?'exact':'long',tx_hash_has_0x:/^0x/i.test(value),tx_hash_is_hex:bare.length>0&&/^[0-9a-f]+$/i.test(bare),tx_input_chain:normalized&&SUPPORTED_CHAINS.includes(normalized)?normalized:normalized?'unsupported':'missing'};
+}
 export async function handleTx(
   query: Record<string, string | undefined>,
 ): Promise<Record<string, unknown>> {
@@ -812,20 +816,20 @@ export async function handleTx(
   if(txHash&&/^(?:0x)?[0-9a-f]{64}$/i.test(txHash))txHash="0x"+txHash.replace(/^0x/i,"");
   const chain = normalizeChain(chainRaw);
   if (!txHash || !chain) {
-    throw badRequest("MISSING_PARAM", "tx_hash and chain are required query parameters");
+    throw withAnswerClass(badRequest("MISSING_PARAM", "tx_hash and chain are required query parameters"),INTENT,rejectedTxInputClass(query.tx_hash?.trim(),chain));
   }
   if (!TX_HASH_RE.test(txHash)) {
-    throw badRequest(
+    throw withAnswerClass(badRequest(
       "INVALID_TX_HASH",
       "tx_hash must be a 0x-prefixed 64-hex-character transaction hash",
-    );
+    ),INTENT,rejectedTxInputClass(query.tx_hash?.trim(),chain));
   }
   const rpcs = CHAIN_RPCS[chain];
   if (!rpcs || !SUPPORTED_CHAINS.includes(chain)) {
-    throw badRequest(
+    throw withAnswerClass(badRequest(
       "UNSUPPORTED_CHAIN",
       `unsupported chain: ${chain}; expected one of ${SUPPORTED_CHAINS.join(", ")}`,
-    );
+    ),INTENT,rejectedTxInputClass(query.tx_hash?.trim(),chain));
   }
   // N is the chain's ACTUAL configured RPC count (F10): "2-of-3" on 3-RPC
   // chains, "2-of-2" on 2-RPC chains. Never hardcoded.
