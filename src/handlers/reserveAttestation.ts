@@ -1,3 +1,4 @@
+import {handleReserveBacking} from './reserveBacking';
 import {handleTokenSupply} from './tokenSupply';
 import {TOKEN_CONTRACTS,ADDRESS_RE} from './tokenContracts';
 // ASSET_RESERVE_ATTESTATION_GENERAL: exact symbols in POR_FEEDS, plus verified issuance aliases.
@@ -170,6 +171,7 @@ export async function handleReserveAttestation(query: Record<string, string | un
   // Exact Ethereum issuance-address aliases only; never prefixes or cross-chain guesses.
   const addressKey = Object.entries(ETHEREUM_TOKENS).find(([,token]) => token.address === assetRaw.toLowerCase())?.[0];
   const key = addressKey ?? resolveReserveAsset(assetRaw);
+  if(key==='WETH'||key==='WSTETH')return handleReserveBacking(key);
   const feed = Object.hasOwn(POR_FEEDS, key) ? POR_FEEDS[key] : undefined;
   if (!feed) {
     console.info(JSON.stringify({event:"reserve_asset_unmapped",...reserveInputDiagnostic(assetRaw)}));
