@@ -5,7 +5,7 @@ const scratch = mkdtempSync("/tmp/reserve-attestation-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 afterEach(() => vi.unstubAllGlobals());
-import { handleReserveAttestation, parseRoundData } from "../src/handlers/reserveAttestation";
+import { handleReserveAttestation, parseRoundData, POR_FEEDS } from "../src/handlers/reserveAttestation";
 import { buildServer } from "../src/server";
 import { getReceiptEvidence } from "../src/core/storage";
 import { sha256Hex } from "../src/core/receipt";
@@ -258,5 +258,21 @@ describe('verified additional reserve feeds',()=>{
       const other = fx26.feeds.find((x: any) => x.asset === "swETH"); vi.setSystemTime((roundOf(other).updatedAt + 60) * 1000); legStub(other);
       expect(String((await handleReserveAttestation({ asset: "swETH" })).answer)).not.toContain("across chains");
     } finally { vi.useRealTimers(); }
+  });
+  it("only BGBTC carries a note: no other configured feed has one, and no other feed's answer has the BGBTC sentence", async () => {
+    expect(Object.entries(POR_FEEDS).filter(([, f]) => f.note !== undefined).map(([k]) => k)).toEqual(["BGBTC"]);
+    const others = [...fx26.feeds.filter((x: any) => x.asset !== "BGBTC"), ...fixture.feeds];
+    expect(others).toHaveLength(6 + fixture.feeds.length);
+    for (const f of others) {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime((roundOf(f).updatedAt + 60) * 1000); legStub(f);
+        const out = await handleReserveAttestation({ asset: f.asset });
+        expect(String(out.answer), f.asset).not.toContain("across chains");
+        expect(String(out.answer), f.asset).not.toContain("Bitget");
+      } finally { vi.useRealTimers(); }
+    }
+    stub();
+    for (const a of ["WBTC"]) expect(String((await handleReserveAttestation({ asset: a })).answer)).not.toContain("across chains");
   });
 });
