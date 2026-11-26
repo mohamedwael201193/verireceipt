@@ -19,7 +19,7 @@ it('exports now uses actual exports rather than total trade',async()=>{
 });
 it('unsupported HTTP diagnostics retain closed rejection only, no raw indicator or unknown keys',async()=>{
  const log=vi.spyOn(console,'info').mockImplementation(()=>{});const f=vi.fn();vi.stubGlobal('fetch',f);const app=buildServer();
- try{const res=await app.inject({method:'GET',url:'/v1/macro?indicator=PRIVATE_INDICATOR&country=US&PRIVATE_KEY=PRIVATE_VALUE'});expect(res.statusCode).toBe(422);expect(f).not.toHaveBeenCalled();const rows=log.mock.calls.map(c=>String(c[0]));const row=JSON.parse(rows.at(-1)!);expect(row.answer_class).toEqual({alias_known:false,indicator_selection:'rejected',indicator_rejection:'unsupported_or_qualified'});expect(rows.join(' ')).not.toContain('PRIVATE');}finally{await app.close();}
+ try{const res=await app.inject({method:'GET',url:'/v1/macro?indicator=PRIVATE_INDICATOR&country=US&PRIVATE_KEY=PRIVATE_VALUE'});expect(res.statusCode).toBe(422);expect(f).not.toHaveBeenCalled();const rows=log.mock.calls.map(c=>String(c[0]));const row=JSON.parse(rows.at(-1)!);expect(row.answer_class).toEqual({alias_known:false,indicator_selection:'rejected',indicator_rejection:'unsupported_or_qualified',candidate_series_1:'SH.XPD.PVTD.CH.ZS',candidate_series_2:'DT.NFL.NIFC.CD',candidate_series_3:'DT.NFL.PRVT.CD'});expect(rows.join(' ')).not.toContain('PRIVATE');}finally{await app.close();}
 });
 it('macro telemetry sanitizer rejects arbitrary values and getters',()=>{
  expect(sanitizeAnswerClass('MACRO_ECONOMIC_INDICATOR_GENERAL',{alias_known:true,matched_series:'PRIVATE',indicator_selection:'PRIVATE',indicator_rejection:'PRIVATE',indicator:'PRIVATE'})).toEqual({alias_known:true});

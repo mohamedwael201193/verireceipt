@@ -1,3 +1,4 @@
+import {macroCandidateIds} from './macroCandidates';
 // MACRO_ECONOMIC_INDICATOR_GENERAL — GET /v1/macro?indicator=&country=&year=
 //
 // Published World Bank annual observations with receipts over raw source bytes.
@@ -356,9 +357,9 @@ export async function handleMacro(
   }
   let indicator = indicatorRaw === SUPPORTED_INDICATOR ? SUPPORTED_INDICATOR : normalizeIndicator(indicatorRaw);
   // Unknown input diagnostics never write free-form request text to logs.
-  if (indicator === null) console.info(JSON.stringify({event:'macro_indicator_unmapped',...macroInputDiagnostic(indicatorInput!)}));
+  if (indicator === null) console.info(JSON.stringify({event:'macro_indicator_unmapped',...macroInputDiagnostic(indicatorInput!),...Object.fromEntries(macroCandidateIds(indicatorInput!).map((id,i)=>['candidate_series_'+(i+1),id]))}));
   if (indicator === null && !isMacroRequest(indicatorInput!)) {
-    throw withAnswerClass(unprocessable('UNSUPPORTED_INDICATOR','No supported macro indicator mapping; no default is substituted.'),INTENT,{alias_known:false,indicator_selection:'rejected',indicator_rejection:'unsupported_or_qualified'});
+    throw withAnswerClass(unprocessable('UNSUPPORTED_INDICATOR','No supported macro indicator mapping; no default is substituted.'),INTENT,{alias_known:false,indicator_selection:'rejected',indicator_rejection:'unsupported_or_qualified',...Object.fromEntries(macroCandidateIds(indicatorInput!).map((id,i)=>['candidate_series_'+(i+1),id]))});
   }
   let closest=normalizeIndicator(indicatorRaw,true)===null;
   let series = indicator === null ? undefined : SERIES[indicator];
@@ -392,7 +393,7 @@ export async function handleMacro(
   if (!series) {
     if (!isMacroRequest(indicatorInput!)) {
       throw withAnswerClass(unprocessable('UNSUPPORTED_INDICATOR', 'No supported macro indicator mapping; no default is substituted.'), INTENT,
-        {alias_known:false,indicator_selection:'rejected',indicator_rejection:'unsupported_or_qualified'});
+        {alias_known:false,indicator_selection:'rejected',indicator_rejection:'unsupported_or_qualified',...Object.fromEntries(macroCandidateIds(indicatorInput!).map((id,i)=>['candidate_series_'+(i+1),id]))});
     }
     const discovery = await discoverMacroSeries(indicatorInput!, deadline);
     if (!discovery.series) {
@@ -407,7 +408,7 @@ export async function handleMacro(
       }, receiptDoc, {
         answer:'No unique exact World Bank WDI series mapping was found for the requested indicator. No observation or rate is asserted. This is a coverage limitation, not evidence that the statistic does not exist elsewhere.',
         verdict:'no_data',confidence:0,source:'World Bank WDI indicator catalog (api.worldbank.org)',
-      }), INTENT,{alias_known:false,indicator_selection:'rejected',indicator_rejection:'unsupported_or_qualified'});
+      }), INTENT,{alias_known:false,indicator_selection:'rejected',indicator_rejection:'unsupported_or_qualified',...Object.fromEntries(macroCandidateIds(indicatorInput!).map((id,i)=>['candidate_series_'+(i+1),id]))});
     }
     series=discovery.series;indicator=discovery.series.name;closest=false;
   }
