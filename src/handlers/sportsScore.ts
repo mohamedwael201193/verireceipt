@@ -1,3 +1,4 @@
+import {sportsPair,sportsHistory} from './sportsHistory';
 import {readPublicBody} from "../core/publicSource";
 // SPORTS_SCORE_GENERAL — GET /v1/sports-score?game=<free text>
 //
@@ -167,8 +168,17 @@ export async function handleSportsScore(query: Record<string, string | undefined
     return true;
   });
   const bodies = [...nhl.bodies, ...mlb.bodies];
+  const pair=sportsPair(game);
   const matches=candidates.filter(c=>(!explicitDate||c.date===explicitDate)&&candidateMatches(c,game));
 
+  if(matches.length===0&&pair&&!explicitDate){
+    const history=await sportsHistory(pair,today),m=history.match;
+    const label=`Most recent completed game between the two named teams within the last ${history.days} days (${history.start} through ${history.end}), not live or today's score`;
+    const answer=m?`${label}: ${m.league}, ${m.date}, ${m.away_team} ${m.away_score} at ${m.home_team} ${m.home_score} (Final).`:`No completed game between the two named teams found in the official ${pair.league} schedule within ${history.start} through ${history.end}; scores null, not zero.`;
+    const evidence=JSON.stringify({matched:m??null,pair_ids:[pair.a,pair.b],league:pair.league,selection:'most_recent_completed',window_start:history.start,window_end:history.end,lookback_days:history.days,upstream_urls:history.urls,upstream_bodies:history.bodies,short_window_bodies:bodies,fetched_at:asOf,scope:label});
+    const receipt=makeReceipt(INTENT,history.urls[0],evidence,'official schedule, exact named pair, bounded most recent Final, not a live score');receipt.fetched_at=asOf;try{await saveReceipt(receipt,evidence);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
+    return envelope(INTENT,{...(m?{home_team:m.home_team,away_team:m.away_team,home_score:m.home_score,away_score:m.away_score,status:m.status,date:m.date,league:m.league}:{home_team:null,away_team:null,home_score:null,away_score:null,status:'not_found',date:null,league:pair.league}),found:!!m,data_status:m?'value':'no_match',reason_code:m?undefined:'no_match',selection:'most_recent_completed',lookback_days:history.days,summary:answer},receipt,{answer,verdict:m?'verified':'not_found',confidence:m?.85:0,source:'Official '+pair.league+' bounded team schedule; not live'});
+  }
   if (matches.length === 0) {
     let football: Awaited<ReturnType<typeof footballLookup>>;
     try { football = await footballLookup(game, today,explicitDate??undefined); } catch { throw upstreamUnavailable("FOOTBALL_UNAVAILABLE", "major-football reference unavailable or ambiguous; refusing to guess"); }
