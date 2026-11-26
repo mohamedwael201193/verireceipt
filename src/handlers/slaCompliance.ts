@@ -55,7 +55,7 @@ export const STATUSPAGES: Readonly<Record<string, string>> = Object.freeze({
   coinbase:"status.coinbase.com",shopify:"www.shopifystatus.com",sentry:"status.sentry.io",
   mongodb:"status.mongodb.com",circleci:"status.circleci.com",snowflake:"status.snowflake.com",
 });
-export function resolveSlaHost(input:string):string|null{
+function resolveBareSlaHost(input:string):string|null{
  const service=input.trim().toLowerCase().replace(/\s+/g,' ');
  const exactHost=Object.values(STATUSPAGES).find(host=>host===service);
  if(exactHost)return exactHost;
@@ -69,6 +69,26 @@ export function resolveSlaHost(input:string):string|null{
  candidate=candidate.replace(/ /g,'');
  if(Object.hasOwn(STATUSPAGES,candidate))return STATUSPAGES[candidate];
  return /^[a-z0-9][a-z0-9-]{1,60}\.statuspage\.io$/.test(service)?service:null;
+}
+
+/** Component syntax binds only an existing alias, never a caller-derived host. */
+export function parseSlaService(input:string):{host:string|null;component:string|null}{
+ const text=input.trim().toLowerCase().replace(/\s+/g,' ');
+ const direct=resolveBareSlaHost(text);if(direct)return {host:direct,component:null};
+ const wrapper=/^the (.+) service$/.exec(text);
+ if(wrapper){const host=resolveBareSlaHost(wrapper[1]);return {host:host&&Object.values(STATUSPAGES).includes(host)?host:null,component:null};}
+ const possessive=/^(.+?)['’]s ['"]([^'"]+)['"] component$/.exec(text);
+ if(possessive){if(!/^[a-z0-9][a-z0-9 -]{0,47}$/.test(possessive[2]))return {host:null,component:null};const host=resolveBareSlaHost(possessive[1]);return {host:host&&Object.values(STATUSPAGES).includes(host)?host:null,component:possessive[2]};}
+ for(const [alias,host] of Object.entries(STATUSPAGES)){
+  if(text.startsWith(alias+' ')){const component=text.slice(alias.length+1);if(/^[a-z0-9][a-z0-9 -]{0,47}$/.test(component))return {host,component};}
+ }
+ return {host:null,component:null};
+}
+export function resolveSlaHost(input:string):string|null{return parseSlaService(input).host;}
+function namesComponent(name:unknown,component:string):boolean{
+ if(typeof name!=='string')return false;
+ // Whole token phrase only. No match inferred from provider-wide incident impact.
+ return (' '+name.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()+' ').includes(' '+component.replace(/[^a-z0-9]+/g,' ').trim()+' ');
 }
 
 const MAX_PAGES = 5; // 500 incidents worst case; a full log can be longer, and then we fail closed.
@@ -151,7 +171,7 @@ async function handleSlaComplianceInternal(query: Record<string, string | undefi
   if (service.length > 64) throw badRequest("INVALID_SERVICE", "service is over 64 characters");
   const resolvedPeriod = parsePeriod(query.period);
   const days = resolvedPeriod?.days;
-  const host=resolveSlaHost(service);
+  const {host,component}=parseSlaService(service);
   const aliasName=Object.entries(STATUSPAGES).find(([,h])=>h===host)?.[0]??'none';
   if (!host || days === undefined) {
     const calendarDays=slaCalendarDays(query.period);
@@ -201,8 +221,10 @@ async function handleSlaComplianceInternal(query: Record<string, string | undefi
     );
   }
 
-  const counted = incidents.filter((i) => COUNTED_IMPACTS.has(i.impact) && Date.parse(i.started_at) < now && (i.resolved_at === null || Date.parse(i.resolved_at) > winStart));
-  const excluded = incidents.filter((i) => !COUNTED_IMPACTS.has(i.impact) && Date.parse(i.started_at) < now && (i.resolved_at === null || Date.parse(i.resolved_at) > winStart));
+  const componentIncidents=component?incidents.filter(i=>namesComponent(i.name,component)):incidents;
+  const componentDisclosure=component?`Component filter: only incident titles naming "${component}" as a whole phrase count; ${componentIncidents.length} matching log entries, zero counted incidents if none name it. This is not measured component availability. `:"Service-wide incident log; no component filter. ";
+  const counted = componentIncidents.filter((i) => COUNTED_IMPACTS.has(i.impact) && Date.parse(i.started_at) < now && (i.resolved_at === null || Date.parse(i.resolved_at) > winStart));
+  const excluded = componentIncidents.filter((i) => !COUNTED_IMPACTS.has(i.impact) && Date.parse(i.started_at) < now && (i.resolved_at === null || Date.parse(i.resolved_at) > winStart));
   const intervals = counted.map((i) => [Date.parse(i.started_at), i.resolved_at ? Date.parse(i.resolved_at) : now] as [number, number]);
   const downtimeMs = coveredMs(intervals, winStart, now);
   const windowMs = now - winStart;
@@ -213,7 +235,7 @@ async function handleSlaComplianceInternal(query: Record<string, string | undefi
     .filter((i) => Date.parse(i.started_at) >= winStart || (i.resolved_at && Date.parse(i.resolved_at) > winStart))
     .map((i) => ({ name: i.name, impact: i.impact, started_at: i.started_at, resolved_at: i.resolved_at }));
   const evidence = JSON.stringify({
-    service, host, summary_url:summaryUrl, summary_raw_body:summaryBody,summary_fetched_at:summaryFetchedAt,incident_pages_fetched_at:pageFetchedAt, components:summary.components, period_days: days, window_start: new Date(winStart).toISOString(), as_of: asOf,
+    service, host, component_requested:component,component_filtered:component!==null,component_filter_scope:componentDisclosure, summary_url:summaryUrl, summary_raw_body:summaryBody,summary_fetched_at:summaryFetchedAt,incident_pages_fetched_at:pageFetchedAt, components:summary.components, period_days: days, window_start: new Date(winStart).toISOString(), as_of: asOf,
     downtime_rule: "downtime = union of [started_at, resolved_at-or-now] for statuspage impact major|critical, clipped to the window; minor/none degradations excluded and counted separately",
     counted_incidents: countedList,
     excluded_degradations: excluded.length,
@@ -235,12 +257,13 @@ async function handleSlaComplianceInternal(query: Record<string, string | undefi
 
   const downtimeMin = Math.round(downtimeMs / 60000);
   const answer =
-    `${service} has ${uptimeRounded}% incident-log estimated uptime over the last ${days} days as of ${asOf}, under this disclosed rule (source bodies cached up to5minutes): ` +
+    componentDisclosure+`${service} has ${uptimeRounded}% incident-log estimated uptime over the last ${days} days as of ${asOf}, under this disclosed rule (source bodies cached up to5minutes): ` +
     `downtime counts only major/critical incidents from its statuspage.io log (${countedList.length} such incident(s), ~${downtimeMin} minutes); ` +
     `${excluded.length} minor/none degradation(s) are excluded from downtime. ` +
     `sla_target_pct and compliant are NOT provided: a machine-readable SLA target was not established by this endpoint, so a compliance verdict would be invented, not observed.`;
   return withAnswerClass(envelope(INTENT, {
     service,
+    component_requested:component,component_filtered:component!==null,component_filter_scope:componentDisclosure,
     period: `${days}d`,
     uptime_pct: uptimeRounded,
     status: "found",
