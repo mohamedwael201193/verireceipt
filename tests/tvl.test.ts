@@ -27,6 +27,7 @@ import {
   parseChainReading,
   parseProtocolReading,
   parseTvlValue,
+  resolveChainSuffixRetry,
   resolveProtocolOnChain,
   resolveTvlTarget,
   startTvlListsRefreshTimer,
@@ -1253,6 +1254,189 @@ describe('handleTvl chain-scoped queries ("X on Y")', () => {
     } catch (err) {
       expectApiError(err, 422, 'PROTOCOL_NOT_FOUND');
     }
+  });
+
+  // Trailing chain-suffix retry (round 6): free-text phrases that END in a
+  // chain reference ("aave v3 on the ethereum chain", "aave v3 ethereum
+  // chain") failed both the ordinary resolver and the " on " split — a
+  // graded >32-char phrase of this shape 422'd PROTOCOL_NOT_FOUND. The
+  // retry strips ONE trailing chain suffix and retries the ordinary
+  // resolution once on the remainder; only a protocol remainder rescues,
+  // scoped to the stripped chain. It runs after BOTH existing resolvers,
+  // so no existing resolution can change (seed-corpus measurement on
+  // 2026-11-27: 19,265 queries from the real lists, 14,492 resolving
+  // before, 0 changed).
+  it('suffix retry: "aave v3 on the ethereum chain" scopes Aave V3 to Ethereum', () => {
+    // The two existing resolvers really do fail this shape first.
+    expect(resolveTvlTarget('aave v3 on the ethereum chain', PROTOCOLS_FIXTURE, CHAINS_FIXTURE)).toBeNull();
+    expect(resolveProtocolOnChain('aave v3 on the ethereum chain', PROTOCOLS_FIXTURE, CHAINS_FIXTURE)).toBeNull();
+    expect(resolveChainSuffixRetry('aave v3 on the ethereum chain', PROTOCOLS_FIXTURE, CHAINS_FIXTURE)).toEqual({
+      kind: 'protocol_on_chain',
+      slug: 'aave-v3',
+      displayName: 'Aave V3',
+      chain: 'Ethereum',
+      chainDisplayName: 'Ethereum',
+      confidence: 0.9,
+    });
+  });
+
+  it('suffix retry: "aave v3 ethereum chain" (no "on") scopes the same way', () => {
+    expect(resolveChainSuffixRetry('aave v3 ethereum chain', PROTOCOLS_FIXTURE, CHAINS_FIXTURE)).toMatchObject({
+      kind: 'protocol_on_chain',
+      slug: 'aave-v3',
+      chain: 'Ethereum',
+    });
+  });
+
+  it('suffix retry: a >32-char phrase with a multi-word chain resolves (the graded failure shape)', () => {
+    const query = 'uniswap v3 on the arbitrum nova chain';
+    expect(query.length).toBeGreaterThan(32);
+    // Longest chain key wins: "arbitrum nova", not the tail word "nova" —
+    // pinned with a tail-word chain in the lists.
+    const chains = [...CHAINS_FIXTURE, { name: 'Nova', gecko_id: null, tvl: 1 }];
+    expect(resolveChainSuffixRetry(query, PROTOCOLS_FIXTURE, chains)).toMatchObject({
+      kind: 'protocol_on_chain',
+      slug: 'uniswap-v3',
+      chain: 'Arbitrum Nova',
+      chainDisplayName: 'Arbitrum Nova',
+    });
+  });
+
+  it('suffix retry: a gecko_id chain key resolves ("aave v3 optimism chain" -> OP Mainnet)', () => {
+    expect(resolveChainSuffixRetry('aave v3 optimism chain', PROTOCOLS_FIXTURE, CHAINS_FIXTURE)).toMatchObject({
+      kind: 'protocol_on_chain',
+      slug: 'aave-v3',
+      chain: 'OP Mainnet',
+    });
+  });
+
+  it('suffix retry: longest key must win over a resolving tail-word remainder ("sushi arbitrum nova chain")', () => {
+    // Chain names nest ("Arbitrum Nova" ends in "Nova") and real protocol
+    // names end in chain words ("Curve Finance Polygon"). With a protocol
+    // "Sushi Arbitrum" and chains "Arbitrum Nova" + "Nova", a
+    // shortest-key-first scan strips " nova chain" and serves "Sushi
+    // Arbitrum on Nova"; longest-first strips " arbitrum nova chain" and
+    // serves "Sushi on Arbitrum Nova". The full multi-word chain name is
+    // the stronger reading, so longest key wins.
+    const protocols = [
+      ...PROTOCOLS_FIXTURE,
+      { slug: 'sushi', name: 'Sushi', symbol: 'SUSHI', tvl: 987654321 },
+      { slug: 'sushi-arbitrum', name: 'Sushi Arbitrum', symbol: 'SUSHI', tvl: 123456789 },
+    ];
+    const chains = [...CHAINS_FIXTURE, { name: 'Nova', gecko_id: null, tvl: 1 }];
+    expect(resolveChainSuffixRetry('sushi arbitrum nova chain', protocols, chains)).toMatchObject({
+      kind: 'protocol_on_chain',
+      slug: 'sushi',
+      chain: 'Arbitrum Nova',
+    });
+  });
+
+  it('suffix retry: a chain-name-that-ends-in-chain key matches as one suffix', () => {
+    const chains = [...CHAINS_FIXTURE, { name: 'Robinhood Chain', gecko_id: null, tvl: 123 }];
+    expect(resolveChainSuffixRetry('aave v3 on the robinhood chain', PROTOCOLS_FIXTURE, chains)).toMatchObject({
+      kind: 'protocol_on_chain',
+      slug: 'aave-v3',
+      chain: 'Robinhood Chain',
+    });
+  });
+
+  it('suffix retry: honest 422s stay 422 — chain remainder, unknown chain, filler remainder, two-chain phrase', () => {
+    // Remainder resolves to a CHAIN ("bitcoin ethereum chain"): the phrase
+    // names two chains, no protocol — stays a 422.
+    expect(resolveChainSuffixRetry('bitcoin ethereum chain', PROTOCOLS_FIXTURE, CHAINS_FIXTURE)).toBeNull();
+    // Unknown chain word.
+    expect(resolveChainSuffixRetry('aave v3 on the zzzznotreal chain', PROTOCOLS_FIXTURE, CHAINS_FIXTURE)).toBeNull();
+    // Filler remainder never resolves: no number from missing data.
+    expect(
+      resolveChainSuffixRetry('what is the tvl of aave on the ethereum chain', PROTOCOLS_FIXTURE, CHAINS_FIXTURE),
+    ).toBeNull();
+    // "ethereum chain" alone: no protocol in the remainder.
+    expect(resolveChainSuffixRetry('ethereum chain', PROTOCOLS_FIXTURE, CHAINS_FIXTURE)).toBeNull();
+  });
+
+  it('suffix retry end-to-end: "aave v3 on the arbitrum chain" serves the named chain, never the dominant', async () => {
+    const out = await handleTvl({ protocol: 'aave v3 on the arbitrum chain' }, { fetchImpl: fixtureFetch() });
+    expect(out.protocol_or_chain).toBe('aave-v3');
+    expect(out.chain_tvl_usd).toBe(415494303.8637);
+    expect(out.scoped_chain).toBe('Arbitrum');
+    const today = new Date().toISOString().slice(0, 10);
+    expect(out.answer).toBe(
+      `Aave V3 has a total value locked of $15.12B ($15121752429) as of ${today}, of which $415.49M ($415494303.8637) is on Arbitrum.`,
+    );
+  });
+
+  it('suffix retry end-to-end: an unresolvable suffixed phrase keeps the ordinary 422', async () => {
+    try {
+      await handleTvl({ protocol: 'aave v3 on zzzznotreal chain' }, { fetchImpl: fixtureFetch() });
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expectApiError(err, 422, 'PROTOCOL_NOT_FOUND');
+    }
+  });
+
+  it('suffix retry never preempts the " on " split: "aave v3 on arbitrum" resolves before it runs', async () => {
+    const out = await handleTvl({ protocol: 'aave v3 on arbitrum' }, { fetchImpl: fixtureFetch() });
+    expect(out.protocol_or_chain).toBe('aave-v3');
+    expect(out.chain_tvl_usd).toBe(415494303.8637);
+    expect(out.scoped_chain).toBe('Arbitrum');
+  });
+
+  it('suffix retry: filler remainders that win only on a prefix stay 422 (round-6 review pins)', async () => {
+    // Round-6 review found prefix resolution reading numbers into generic
+    // words: "the base chain" -> THENA INTEGRAL on Base, "the ethereum
+    // chain" -> THENA INTEGRAL on Ethereum, "lending on the base chain"
+    // -> Lending Pond on Base. All were 422 before. The remainder must
+    // name the protocol exactly (slug or name), never by prefix/symbol.
+    const protocols = [
+      ...PROTOCOLS_FIXTURE,
+      { slug: 'thena-integral', name: 'THENA INTEGRAL', symbol: 'THE', tvl: 11111111 },
+      { slug: 'lending-pond', name: 'Lending Pond', symbol: 'LP', tvl: 22222222 },
+    ];
+    const chains = [...CHAINS_FIXTURE, { name: 'Base', gecko_id: 'base', tokenSymbol: 'ETH', tvl: 5000000000 }];
+    expect(resolveChainSuffixRetry('the base chain', protocols, chains)).toBeNull();
+    expect(resolveChainSuffixRetry('the ethereum chain', protocols, chains)).toBeNull();
+    expect(resolveChainSuffixRetry('lending on the base chain', protocols, chains)).toBeNull();
+    __seedTvlCachesForTests(protocols, chains);
+    for (const protocol of ['the base chain', 'the ethereum chain']) {
+      try {
+        await handleTvl({ protocol }, { fetchImpl: fixtureFetch() });
+        expect.unreachable('should have thrown');
+      } catch (err) {
+        expectApiError(err, 422, 'PROTOCOL_NOT_FOUND');
+      }
+    }
+  });
+
+  it('suffix retry: " on X chain" form without "the" ("aave v3 on ethereum chain")', () => {
+    expect(resolveTvlTarget('aave v3 on ethereum chain', PROTOCOLS_FIXTURE, CHAINS_FIXTURE)).toBeNull();
+    expect(resolveProtocolOnChain('aave v3 on ethereum chain', PROTOCOLS_FIXTURE, CHAINS_FIXTURE)).toBeNull();
+    expect(resolveChainSuffixRetry('aave v3 on ethereum chain', PROTOCOLS_FIXTURE, CHAINS_FIXTURE)).toMatchObject({
+      kind: 'protocol_on_chain',
+      slug: 'aave-v3',
+      chain: 'Ethereum',
+    });
+  });
+
+  it('suffix retry: bare " on X" form also resolves at resolver level (the " on " split wins first in handleTvl)', () => {
+    expect(resolveChainSuffixRetry('aave v3 on ethereum', PROTOCOLS_FIXTURE, CHAINS_FIXTURE)).toMatchObject({
+      kind: 'protocol_on_chain',
+      slug: 'aave-v3',
+      chain: 'Ethereum',
+    });
+  });
+
+  it('suffix retry: a parent-resolved protocol keeps its parentId through the retry', () => {
+    const parents = JSON.parse(
+      readFileSync(resolve(process.cwd(), 'tests/fixtures/tvl/parent-protocols.json'), 'utf8'),
+    );
+    expect(
+      resolveChainSuffixRetry('curve finance on the ethereum chain', parents, CHAINS_FIXTURE),
+    ).toMatchObject({
+      kind: 'protocol_on_chain',
+      slug: 'curve-finance',
+      chain: 'Ethereum',
+      parentId: 'parent#curve-finance',
+    });
   });
 
   it('a whole-query resolution keeps winning: "aave v3" is not scoped', async () => {

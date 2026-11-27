@@ -702,6 +702,93 @@ export function resolveProtocolOnChain(
   };
 }
 
+/**
+ * Trailing chain-suffix retry: free-text phrases that END in a chain
+ * reference — "uniswap v3 on the arbitrum nova chain", "aave v3
+ * ethereum chain" — fail BOTH the ordinary resolver (the whole phrase is
+ * no slug/name/prefix) and the " on " split (no " on ", or the left
+ * side carries trailing words). Tried only after both return null, so
+ * every existing resolution keeps winning. ONE trailing suffix is
+ * stripped — "on <chain>", "on the <chain>", "on <chain> chain",
+ * "on the <chain> chain", or "<chain> chain", where <chain> is an
+ * exact chain name or gecko id (longest key first, so a multi-word name
+ * like "arbitrum nova" beats its tail word, and a name that itself ends
+ * in "chain", like "Robinhood Chain", beats the bare word) — and the
+ * ordinary resolution is retried ONCE on the remainder. Only a remainder
+ * resolving to a PROTOCOL yields a reading, scoped to the stripped chain
+ * (protocol_on_chain, the same shape the " on " split produces). A chain
+ * or protocol_on_chain remainder, an unresolvable remainder, or an
+ * unknown chain word stays an ordinary 422. No reading comes from the
+ * suffix itself: the chain must be real and the protocol must resolve
+ * through the ordinary rules.
+ */
+export function resolveChainSuffixRetry(
+  input: string,
+  protocols: ProtocolEntry[],
+  chains: ChainEntry[],
+): TvlTarget | null {
+  const normalized = input.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (normalized.length < 3) return null;
+  const chainNameByKey = new Map<string, string>();
+  for (const c of chains) {
+    if (typeof c.name === 'string' && c.name.trim() !== '') {
+      chainNameByKey.set(c.name.toLowerCase(), c.name);
+    }
+    if (typeof c.gecko_id === 'string' && c.gecko_id.trim() !== '') {
+      chainNameByKey.set(c.gecko_id.toLowerCase(), c.name);
+    }
+  }
+  const keys = [...chainNameByKey.keys()].sort((a, b) => b.length - a.length);
+  for (const key of keys) {
+    const suffixes = [
+      ` on the ${key} chain`,
+      ` on ${key} chain`,
+      ` ${key} chain`,
+      ` on the ${key}`,
+      ` on ${key}`,
+    ];
+    for (const suffix of suffixes) {
+      if (!normalized.endsWith(suffix)) continue;
+      const remainder = normalized.slice(0, -suffix.length).trim();
+      if (remainder.length < 3) continue;
+      const target =
+        resolveTvlTarget(remainder, protocols, chains) ??
+        resolveProtocolOnChain(remainder, protocols, chains);
+      // Only a plain protocol remainder rescues the query: a chain
+      // remainder means the phrase named two chains, and an already
+      // chain-scoped remainder means a contradictory double scope — both
+      // stay an honest 422.
+      if (target === null || target.kind !== 'protocol') continue;
+      // Filler guard (round-6 review): the remainder must name the
+      // resolved protocol EXACTLY — slug or name, modulo case, spacing
+      // and the version-v convention (canonicalKey, the repo's own exact
+      // match). A remainder that wins only on a PREFIX is a generic word,
+      // not a protocol reference: "the base chain" must not read THENA
+      // INTEGRAL on Base and "lending on the base chain" must not read
+      // Lending Pond on Base. Those stay an honest 422.
+      const remainderKey = canonicalKey(remainder);
+      if (
+        canonicalKey(target.slug) !== remainderKey &&
+        canonicalKey(target.displayName) !== remainderKey
+      ) {
+        continue;
+      }
+      const chainName = chainNameByKey.get(key);
+      if (chainName === undefined) continue;
+      return {
+        kind: 'protocol_on_chain',
+        slug: target.slug,
+        displayName: target.displayName,
+        chain: chainName,
+        chainDisplayName: chainName,
+        confidence: target.confidence,
+        ...(target.parentId ? { parentId: target.parentId } : {}),
+      };
+    }
+  }
+  return null;
+}
+
 const NON_CHAIN_TVL_METRIC = /(?:^|-)(?:borrowed|staking|pool2|vesting|offers|treasury|owntokens)$/i;
 
 /**
@@ -2497,10 +2584,13 @@ export async function handleTvl(
   const protocols = await withParentMetadata(cachedProtocols);
   // Chain-scoped queries ("aave v3 on ethereum") resolve ONLY when the
   // whole query resolves to nothing, so every existing resolution keeps
-  // winning (resolveProtocolOnChain's own precondition).
+  // winning (resolveProtocolOnChain's own precondition). The trailing
+  // chain-suffix retry ("aave v3 on the ethereum chain") comes last, only
+  // when BOTH the ordinary resolver and the " on " split found nothing.
   const target =
     resolveTvlTarget(protocol, protocols, chains) ??
-    resolveProtocolOnChain(protocol, protocols, chains);
+    resolveProtocolOnChain(protocol, protocols, chains) ??
+    resolveChainSuffixRetry(protocol, protocols, chains);
   if (target === null) {
     throw unprocessable(
       'PROTOCOL_NOT_FOUND',
