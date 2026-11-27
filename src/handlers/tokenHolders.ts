@@ -132,8 +132,14 @@ async function fetchText(url: string, timeoutMs = HTTP_TIMEOUT_MS, canStart: () 
 }
 
 function holderFailureClass(error:unknown,token:string):Record<string,unknown>{
- let status:unknown;try{const d=error&&typeof error==='object'?Object.getOwnPropertyDescriptor(error,'status'):undefined;status=d&&'value'in d?d.value:undefined;}catch{}
- return{token_class:ADDRESS_RE.test(token)?'address':'symbol',...(typeof status==='number'&&Number.isInteger(status)&&status>=100&&status<=599?{upstream_http_status:status}:{})};
+ const prop=(key:string):unknown=>{try{const d=error&&typeof error==='object'?Object.getOwnPropertyDescriptor(error,key):undefined;return d&&'value'in d?d.value:undefined;}catch{return undefined;}};
+ const status=prop('status'),timeout=prop('timeout'),holdersField=prop('holdersField');
+ // Fixed-label upstream class: 429 and 5xx from the HTTP status, timeout
+ // from the budget abort, and 200_bad_shape when a fetched body failed to
+ // parse. Other shapes (4xx other than 429, transport errors) log no class.
+ const kind=failureKind(error);
+ const httpClass=status===429||kind==='rate_limited'?'429':typeof status==='number'&&status>=500&&status<=599?'5xx':timeout===true?'timeout':kind==='bad_payload'?'200_bad_shape':undefined;
+ return{token_class:ADDRESS_RE.test(token)?'address':'symbol',...(typeof status==='number'&&Number.isInteger(status)&&status>=100&&status<=599?{upstream_http_status:status}:{}),...(httpClass!==undefined?{upstream_http_class:httpClass}:{}),...(typeof holdersField==='boolean'?{has_holders_field:holdersField}:{})};
 }
 
 interface IndexerTokenInfo {
@@ -176,19 +182,25 @@ function parseIndexerResponse(rawBody: string, url: string, contract: string): I
 function parseGecko(rawBody: string, network: string, contract: string): IndexerTokenInfo {
   const data = JSON.parse(rawBody)?.data;
   const a = data?.attributes;
+  // Parse-failure diagnostics carry only whether the body had a holders
+  // field at all — never any value from the body.
+  const holdersField = typeof a?.holders === "object" && a?.holders !== null;
+  const fail = (msg: string): never => {
+    throw Object.assign(new Error(msg), { holdersField });
+  };
   if (data?.id?.toLowerCase() !== `${network}_${contract}`.toLowerCase() || data?.type !== "token" ||
       typeof a?.address !== "string" || a.address.toLowerCase() !== contract.toLowerCase()) {
-    throw new Error("GeckoTerminal network/token identity mismatch");
+    fail("GeckoTerminal network/token identity mismatch");
   }
   const count = a?.holders?.count;
   if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0 || count > MAX_HOLDERS) {
-    throw new Error("GeckoTerminal holders count missing or outside contract range");
+    fail("GeckoTerminal holders count missing or outside contract range");
   }
-  if (typeof a.symbol !== "string" || !a.symbol.trim()) throw new Error("GeckoTerminal symbol missing");
+  if (typeof a.symbol !== "string" || !a.symbol.trim()) fail("GeckoTerminal symbol missing");
   const updated = a?.holders?.last_updated;
   if (typeof updated !== "string" || !Number.isFinite(Date.parse(updated)) ||
       Date.parse(updated) > Date.now() + 60000 || Date.now() - Date.parse(updated) > 86400000) {
-    throw new Error("GeckoTerminal holder update time missing or stale");
+    fail("GeckoTerminal holder update time missing or stale");
   }
   return { holdersCount: count, symbol: a.symbol, rawBody, sourceUpdated: updated };
 }

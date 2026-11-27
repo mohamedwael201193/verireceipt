@@ -88,7 +88,7 @@ export function refusalParamClass(route:string|undefined,errorCode:string,query:
  if(route==='/v1/macro'&&errorCode==='UNSUPPORTED_INDICATOR')return macroTokens(ownString(query,'indicator'));
  if(route==='/v1/grid-price')return gridRefusalClass(ownString(query,'node_or_zone'));
  if(route==='/v1/liquidity')return {pool_class:poolClass(ownString(query,'pool')),chain_class:chainClass(liquidityChain(ownString(query,'chain')??''))};
- if(route==='/v1/token-holders')return {token_class:tokenClass(ownString(query,'token'))};
+ if(route==='/v1/token-holders')return {token_class:tokenClass(ownString(query,'token')),chain_class:chainClass(ownString(query,'chain'))};
  if(route==='/v1/tvl')return tvlProtocolClass(ownString(query,'protocol'));
  if(route==='/v1/token-supply')return {chain_class:chainClass(tokenSupplyChainRaw(query))};
  if(route==='/v1/weather-history')return {location_class:weatherLocationClass(ownString(query,'location')),date_age_bucket:dateAgeBucket(ownString(query,'date'))};
