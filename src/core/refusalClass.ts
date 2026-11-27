@@ -1,5 +1,7 @@
 import {isIP} from 'node:net';
+import {dateAgeBucket} from './dateAgeBucket';
 import {gridRefusalClass} from '../handlers/gridPrice';
+import {PAST_WEATHER_BINDINGS} from '../handlers/weatherWired';
 import {TOKEN_CONTRACTS,ADDRESS_RE} from '../handlers/tokenContracts';
 import {liquidityChain,liquidityPair} from './liquiditySelectors';
 // Coarse, fixed-label classes of a rejected input for the refusal_param_class log line.
@@ -65,6 +67,15 @@ function tokenSupplyChainRaw(query:unknown):string|undefined{
  // so an unbounded whitespace-heavy input costs quadratic time.
  return /\s+on\s+(.+)$/i.exec(text.slice(0,200))?.[1];
 }
+const BOUND_WEATHER_LOCATIONS=new Set(PAST_WEATHER_BINDINGS.map(b=>b.location.trim().toLowerCase()));
+/** Fixed-label class of a weather-history `location` value: bound (a reviewed
+ * station binding exists), has_comma, unbound_ascii or unbound_nonascii. Never the value. */
+export function weatherLocationClass(raw:string|undefined):string{
+ const v=(raw??'').trim();
+ if(BOUND_WEATHER_LOCATIONS.has(v.toLowerCase()))return 'bound';
+ if(v.includes(','))return 'has_comma';
+ return /^[\x00-\x7f]*$/.test(v)?'unbound_ascii':'unbound_nonascii';
+}
 function ownString(query:unknown,key:string):string|undefined{
  if(!query||typeof query!=='object')return undefined;
  const d=Object.getOwnPropertyDescriptor(query,key);
@@ -80,6 +91,7 @@ export function refusalParamClass(route:string|undefined,errorCode:string,query:
  if(route==='/v1/token-holders')return {token_class:tokenClass(ownString(query,'token'))};
  if(route==='/v1/tvl')return tvlProtocolClass(ownString(query,'protocol'));
  if(route==='/v1/token-supply')return {chain_class:chainClass(tokenSupplyChainRaw(query))};
+ if(route==='/v1/weather-history')return {location_class:weatherLocationClass(ownString(query,'location')),date_age_bucket:dateAgeBucket(ownString(query,'date'))};
  return null;
 }
-export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/liquidity':'LIQUIDITY_DEPTH_VERIFY_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL','/v1/tvl':'TVL_LOOKUP_GENERAL','/v1/token-supply':'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL'};
+export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/liquidity':'LIQUIDITY_DEPTH_VERIFY_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL','/v1/tvl':'TVL_LOOKUP_GENERAL','/v1/token-supply':'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL','/v1/weather-history':'WEATHER_FORECAST_VERIFY_GENERAL'};

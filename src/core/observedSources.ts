@@ -1,4 +1,5 @@
 import {answerDiagnostics,withAnswerClass} from './answerClass';
+import {dateAgeBucket} from './dateAgeBucket';
 import {publicSourceFailure} from './publicSource';
 import { upstreamUnavailable } from './errors';
 import { envelope, makeReceipt } from './receipt';
@@ -62,7 +63,7 @@ export async function observeFromSources<Q, T>(query: Q, sources: readonly Obser
     const deadline = policy.totalTimeoutMs === undefined ? Infinity : Date.now() + policy.totalTimeoutMs;
     const noRecords:unknown[]=[];let deferred:(()=>Promise<Record<string,unknown>>)|undefined;let attempts=0,gated=0;
     const weather=policy.intent==='WEATHER_FORECAST_VERIFY_GENERAL';
-    const tag=(o:Record<string,unknown>,result:string)=>weather?withAnswerClass(o,policy.intent,{weather_sources_tried:attempts,weather_gate:gated?'some_ineligible':'eligible',weather_result:result}):o;
+    const tag=(o:Record<string,unknown>,result:string)=>weather?withAnswerClass(o,policy.intent,{weather_sources_tried:attempts,weather_gate:gated?'some_ineligible':'eligible',weather_result:result,...(result==='no_record'?{date_age_bucket:dateAgeBucket((query as {date?:string}).date)}:{})}):o;
     let liquidityClass:Record<string,unknown>|undefined;
     for (const source of sources) {
         if (!approved(source.approval)) {
