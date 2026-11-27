@@ -5,7 +5,7 @@ import { it, expect, vi, afterEach } from "vitest";
 vi.mock("../src/core/storage", () => ({ saveReceipt: vi.fn(async () => {}) }));
 import { saveReceipt } from "../src/core/storage";
 import { createWiredWeatherHandlers } from "../src/handlers/weatherWired";
-import { pickGeocode } from "../src/handlers/openMeteoArchive";
+import { pickGeocode, qualifierMatches } from "../src/handlers/openMeteoArchive";
 import { sha256Hex } from "../src/core/receipt";
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); vi.useRealTimers(); });
 const DATE = "2026-11-15";
@@ -117,6 +117,68 @@ it("pickGeocode: unique, 10x dominance accepted; 9.9x, ties and no exact match r
   expect(() => pickGeocode("Testville", geoBody([row({ name: "Other" })]))).toThrow("no exact");
   expect(() => pickGeocode("Testville, US", geoBody([row({})]))).toThrow("no exact");
   expect(() => pickGeocode("Testville", "{}")).toThrow("no exact");
+});
+// "City, Country" locations (round 7): the geocoder returns nothing for the whole comma string, so the city part is
+// geocoded alone and the qualifier must match the result's country name, country_code (UK->GB, USA->US aliases) or
+// admin1, accent and case folded. Several qualifier matches still need the 10x-population rule.
+const londonGeo = () => geoBody([
+  row({ name: "London", country: "United Kingdom", country_code: "GB", admin1: "England", latitude: 51.50853, longitude: -0.12574, feature_code: "PPLC", population: 8900000 }),
+  row({ name: "London", country: "Canada", country_code: "CA", admin1: "Ontario", latitude: 42.98339, longitude: -81.23304, feature_code: "PPL", population: 346000 }),
+  row({ name: "London", country: "United States", country_code: "US", admin1: "Kentucky", latitude: 37.12898, longitude: -84.08326, feature_code: "PPL", population: 8000 }),
+]);
+const archiveBody = (lat: number, lon: number, date: string) => JSON.stringify({ latitude: lat, longitude: lon, timezone: "GMT", utc_offset_seconds: 0, daily_units: { time: "iso8601", temperature_2m_max: "\u00b0C", temperature_2m_min: "\u00b0C", precipitation_sum: "mm" }, daily: { time: [date], temperature_2m_max: [10.5], temperature_2m_min: [4.2], precipitation_sum: [1.3] } });
+it('"London, UK" geocodes the city only, matches GB by the UK alias, and discloses the requested string and matched country', async () => {
+  const f = stub({ geo: () => new Response(londonGeo()), archive: () => new Response(archiveBody(51.5, -0.12, DATE)) });
+  const out: any = await createWiredWeatherHandlers().past({ location: "London, UK", date: DATE });
+  expect(out.resolved_place).toBe("London, GB"); expect(out.temp_max_c).toBe(10.5);
+  const gu = new URL(String(f.mock.calls[0][0])); expect(gu.searchParams.get("name")).toBe("London");
+  const [receipt, evidence] = vi.mocked(saveReceipt).mock.calls[0] as any;
+  expect(sha256Hex(evidence)).toBe(receipt.raw_response_sha256);
+  const raw = JSON.parse(JSON.parse(evidence).raw_body);
+  expect(raw.requested_location).toBe("London, UK"); expect(raw.matched_country).toBe("United Kingdom");
+});
+it('"Paris, France" resolves FR Paris by the country-name qualifier (real geocoder fixture)', async () => {
+  const f = stub({ geo: () => new Response(fx("paris-geocode")), archive: () => new Response(fx(`paris-archive-${DATE}`)) });
+  const out: any = await createWiredWeatherHandlers().past({ location: "Paris, France", date: DATE });
+  const arch = JSON.parse(fx(`paris-archive-${DATE}`)).daily;
+  expect(out.resolved_place).toBe("Paris, FR"); expect(out.temp_max_c).toBe(arch.temperature_2m_max[0]);
+  const gu = new URL(String(f.mock.calls[0][0])); expect(gu.searchParams.get("name")).toBe("Paris");
+  const raw = JSON.parse(JSON.parse((vi.mocked(saveReceipt).mock.calls[0] as any)[1]).raw_body);
+  expect(raw.requested_location).toBe("Paris, France"); expect(raw.matched_country).toBe("France");
+});
+it("pickGeocode with qualifier: 'Paris, Texas' picks US Paris, never FR Paris (real geocoder fixture)", () => {
+  const pick = pickGeocode("Paris", fx("paris-geocode"), "Texas");
+  expect(pick.country_code).toBe("US"); expect(pick.admin1).toBe("Texas"); expect(pick.country).toBe("United States");
+});
+it('"Springfield, USA" stays ambiguous and refuses (real geocoder fixture, 10x rule after the qualifier filter)', async () => {
+  const f = stub({ geo: () => new Response(fx("springfield-geocode")), archive: () => new Response(fx("tokyo-archive-2026-11-15")) });
+  await expect(createWiredWeatherHandlers().past({ location: "Springfield, USA", date: DATE })).rejects.toMatchObject({ status: 502, code: "APPROVED_SOURCES_UNAVAILABLE" });
+  expect(hosts(f)).toEqual(["geocoding-api.open-meteo.com"]); expect(saveReceipt).not.toHaveBeenCalled();
+});
+it('"London, Narnia" matches no qualifier and refuses before the archive', async () => {
+  const f = stub({ geo: () => new Response(londonGeo()), archive: () => new Response(archiveBody(51.5, -0.12, DATE)) });
+  await expect(createWiredWeatherHandlers().past({ location: "London, Narnia", date: DATE })).rejects.toMatchObject({ status: 502, code: "APPROVED_SOURCES_UNAVAILABLE" });
+  expect(hosts(f)).toEqual(["geocoding-api.open-meteo.com"]); expect(saveReceipt).not.toHaveBeenCalled();
+});
+it("qualifierMatches: country name, ISO code, UK/USA aliases and admin1, accent and case folded", () => {
+  const fr = { name: "Paris", country: "France", country_code: "FR", admin1: "\u00cele-de-France Region" };
+  const us = { name: "Paris", country: "United States", country_code: "US", admin1: "Texas" };
+  expect(qualifierMatches("france", fr)).toBe(true); expect(qualifierMatches("FR", fr)).toBe(true);
+  expect(qualifierMatches("\u00eele-de-france region", fr)).toBe(true);
+  expect(qualifierMatches("texas", us)).toBe(true); expect(qualifierMatches("USA", us)).toBe(true); expect(qualifierMatches("Us", us)).toBe(true);
+  expect(qualifierMatches("UK", { country: "United Kingdom", country_code: "GB", admin1: "England" })).toBe(true);
+  expect(qualifierMatches("france", us)).toBe(false); expect(qualifierMatches("Narnia", fr)).toBe(false);
+});
+it("pickGeocode qualifier: country name, code, alias and admin1 all select; a miss throws qualifier-no-match", () => {
+  const body = geoBody([
+    row({ name: "Paris", country: "France", country_code: "FR", admin1: "\u00cele-de-France Region", population: 2138551 }),
+    row({ name: "Paris", country: "United States", country_code: "US", admin1: "Texas", population: 24782 }),
+  ]);
+  expect(pickGeocode("Paris", body, "france").country_code).toBe("FR");
+  expect(pickGeocode("Paris", body, "FR").country_code).toBe("FR");
+  expect(pickGeocode("Paris", body, "texas").country_code).toBe("US");
+  expect(pickGeocode("Paris", body, "USA").country_code).toBe("US");
+  expect(() => pickGeocode("Paris", body, "Narnia")).toThrow("qualifier matched no place");
 });
 it("pickGeocode: accent and case fold; only populated places with valid country and coordinates", () => {
   expect(pickGeocode("sao paulo", geoBody([row({ name: "São Paulo", country_code: "BR" })])).name).toBe("São Paulo");
