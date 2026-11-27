@@ -42,17 +42,23 @@ describe('sanctions full-list recompute primary, unit transport only',()=>{
  const SDN='https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV';
  const ALT='https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ALT.CSV';
  const UN='https://scsanctions.un.org/resources/xml/en/consolidated.xml';
+ const CONS_PRIM='https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONS_PRIM.CSV';
+ const CONS_ALT='https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONS_ALT.CSV';
  const sdnBody=(extra='')=>Array.from({length:1000},(_,i)=>`${i+1},"GENERIC ENTRY ${i+1}",-0- `).join('\n')+(extra?'\n'+extra:'');
  const altBody='999999,1,"aka","ARES CAPITAL CORP"';
  const unBody='<CONSOLIDATED_LIST dateGenerated="2026-11-24T00:00:00.000Z">'+Array.from({length:100},(_,i)=>`<INDIVIDUAL><FIRST_NAME>Person${i}</FIRST_NAME></INDIVIDUAL>`).join('')+'</CONSOLIDATED_LIST>';
+ // 300 consolidated primaries satisfy the production cons floor; numbers
+ // stay clear of the SDN body so no cross-list parent confusion is possible.
+ const consPrimBody=(extra='')=>Array.from({length:300},(_,i)=>`${2000000+i},"GENERIC CONS ENTRY ${i}",-0- `).join('\n')+(extra?'\n'+extra:'');
+ const consAltBody='2999999,1,"aka","GENERIC CONS ALIAS",-0- '; // parent absent: skipped
  const OFAC_HOST='wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com';
- const lists=(sdn:string,alt=altBody,un=unBody,mutant?:'other-redirect'|'pinned-redirect')=>{const calls:Record<string,number>={};const f:typeof fetch=async(input)=>{const url=String(input);calls[url]=(calls[url]??0)+1;
+ const lists=(sdn:string,alt=altBody,un=unBody,mutant?:'other-redirect'|'pinned-redirect',consP=consPrimBody(),consA=consAltBody)=>{const calls:Record<string,number>={};const f:typeof fetch=async(input)=>{const url=String(input);calls[url]=(calls[url]??0)+1;
    if(url===SDN&&mutant==='other-redirect')return new Response(null,{status:302,headers:{location:'https://lists.invalid/SDN.CSV'}});
    if(url===SDN&&mutant==='pinned-redirect'&&calls[url]===1)return new Response(null,{status:302,headers:{location:`https://${OFAC_HOST}/Published/x/SDN.CSV?sig=unit`}});
    if(url.startsWith(`https://${OFAC_HOST}/`))return new Response(sdn,{status:200});
-   return new Response(url===SDN?sdn:url===ALT?alt:un,{status:200});
+   return new Response(url===SDN?sdn:url===ALT?alt:url===CONS_PRIM?consP:url===CONS_ALT?consA:un,{status:200});
   };return {f,calls};};
- it('recomputes the exact best score from full list bytes',async()=>{const {f}=lists(sdnBody('999999,"ARES CAPITAL CORPORATION",-0- '));const r=await verifyResearchPrimary(fact,'1',{f,now});expect(r.ok).toBe(true);expect(r.source!.parser).toBe('ofac-sdn-alt-un-full-list-recompute-v1');expect(r.source!.raw_text).toContain('ARES CAPITAL CORPORATION');});
+ it('recomputes the exact best score from full list bytes',async()=>{const {f}=lists(sdnBody('999999,"ARES CAPITAL CORPORATION",-0- '));const r=await verifyResearchPrimary(fact,'1',{f,now});expect(r.ok).toBe(true);expect(r.source!.parser).toBe('ofac-sdn-alt-un-cons-full-list-recompute-v1');expect(r.source!.raw_text).toContain('ARES CAPITAL CORPORATION');});
  it('rejects a claimed score that differs from the recompute',async()=>{const {f}=lists(sdnBody('999999,"ARES CAPITAL CORPORATION",-0- '));expect((await verifyResearchPrimary(fact,'0.666667',{f,now})).ok).toBe(false);});
  it('accepts a zero score when no candidate reaches the floor',async()=>{const {f}=lists(sdnBody());const r=await verifyResearchPrimary({...fact,params:{name:'Zqwx Vbnm'}},'0',{f,now});expect(r.ok).toBe(true);});
  it('screens SDN aliases whose parent exists',async()=>{const {f}=lists(sdnBody('999999,"ARES CAPITAL CORPORATION",-0- '));const r=await verifyResearchPrimary({...fact,params:{name:'Ares Capital Corp'}},'1',{f,now});expect(r.ok).toBe(true);});

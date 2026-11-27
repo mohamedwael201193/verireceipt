@@ -105,7 +105,9 @@ export async function verifyResearchPrimary(fact:FactSpec,value:string,options:{
     const REDIRECT_HOSTS:Record<string,string[]>
      ={'https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV':['wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com'],
        'https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ALT.CSV':['wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com'],
-       'https://scsanctions.un.org/resources/xml/en/consolidated.xml':['unsolprodfiles.blob.core.windows.net']};
+       'https://scsanctions.un.org/resources/xml/en/consolidated.xml':['unsolprodfiles.blob.core.windows.net'],
+       'https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONS_PRIM.CSV':['wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com'],
+       'https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONS_ALT.CSV':['wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com']};
     const UA='VeriReceipt/2.0 sanctions-screening observer (+https://verireceipt.vercel.app)';
     const getList=async(origin:string):Promise<void>=>{
      let url=origin;
@@ -127,22 +129,29 @@ export async function verifyResearchPrimary(fact:FactSpec,value:string,options:{
     await getList('https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV');
     await getList('https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ALT.CSV');
     await getList('https://scsanctions.un.org/resources/xml/en/consolidated.xml');
+    await getList('https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONS_PRIM.CSV');
+    await getList('https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONS_ALT.CSV');
     const sdn=parseSdn(reads[0].raw_text),alt=parseAlt(reads[1].raw_text),un=parseUn(reads[2].raw_text);
+    const consPrim=parseSdn(reads[3].raw_text),consAlt=parseAlt(reads[4].raw_text);
     // The handler's truncation floors: never screen against a partial list.
     if(sdn.entries.size<1000)fail('OFAC SDN parsed to a truncated list; refusing to screen');
     if(un.length<100)fail('UN consolidated list parsed to a truncated list; refusing to screen');
+    if(consPrim.entries.size<300)fail('OFAC Consolidated (non-SDN) parsed to a truncated list; refusing to screen');
     // The handler's exact candidate set and fuzzy match (shared module):
     // SDN primaries, SDN aliases whose parent exists, UN primaries+aliases,
-    // best score among candidates at or above the 0.50 floor, else 0.
+    // Consolidated (non-SDN) primaries and their aliases whose parent
+    // exists, best score among candidates at or above the 0.50 floor, else 0.
     let best=0;const consider=(candidate:string)=>{const s=matchScore(name,candidate);if(s>=0.5&&s>best)best=s;};
     for(const n of sdn.entries.values())consider(n);
     for(const a of alt){if(sdn.entries.has(a.altNum))consider(a.name);}
     for(const u of un)consider(u.name);
+    for(const n of consPrim.entries.values())consider(n);
+    for(const a of consAlt){if(consPrim.entries.has(a.altNum))consider(a.name);}
     // The score is deterministic given the same published lists, so the
     // comparison is exact. A list republication between the paid and
     // independent reads changes the score and fails closed, by design.
     if(!equal(value,String(best)))fail('sanctions best match_score differs from the independent full-list recompute');
-    as_of=reads.at(-1)!.observed_at;parser='ofac-sdn-alt-un-full-list-recompute-v1';break;
+    as_of=reads.at(-1)!.observed_at;parser='ofac-sdn-alt-un-cons-full-list-recompute-v1';break;
    }
    case 'TOKEN_HOLDER_COUNT_GENERAL':{
     const chain=(fact.params.chain??'').toLowerCase();if(chain!=='ethereum')fail('holder-count primary is ethereum only; other chains have no parser');

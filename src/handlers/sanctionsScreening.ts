@@ -1,9 +1,10 @@
 // SANCTIONS_SCREENING_MATCH_GENERAL — GET /v1/sanctions-screen?name=<name>
 //
-// Zero-LLM. Screens a person or entity name against two keyless public
-// sanctions lists — the OFAC SDN list (with its published aliases) and
-// the UN Security Council consolidated list — with a documented fuzzy
-// match score and a SHA-256 receipt. The lists are fetched in full,
+// Zero-LLM. Screens a person or entity name against three keyless
+// public sanctions lists — the OFAC SDN list (with its published
+// aliases), the OFAC Consolidated (non-SDN) list (with its published
+// aliases) and the UN Security Council consolidated list — with a
+// documented fuzzy match score and a SHA-256 receipt. The lists are fetched in full,
 // hashed, and cached in memory for CACHE_TTL_MS; the receipt records
 // each list's SHA-256, fetch time and publication date plus the exact
 // raw lines of every candidate match, so the answer is recomputable
@@ -34,7 +35,7 @@
 // HONESTY (standing rule): a fuzzy name match is NOT identity
 // confirmation — false positives are common, especially for common
 // names — and a non-match is NOT a legal clearance: screening covers
-// only these two lists as of their published dates, and other lists
+// only these lists as of their published dates, and other lists
 // (EU, UK OFSI, national lists) are not checked. The answer says both,
 // every time. Nothing here is legal advice.
 import { badRequest, upstreamUnavailable } from "../core/errors";
@@ -52,6 +53,10 @@ const MAX_REPORTED = 5;
 const SDN_URL = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV";
 const ALT_URL = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ALT.CSV";
 const UN_URL = "https://scsanctions.un.org/resources/xml/en/consolidated.xml";
+// The OFAC Consolidated (non-SDN) list: same keyless public host and the
+// same CSV layouts as SDN.CSV / ALT.CSV, so the same parsers apply.
+const CONS_PRIM_URL = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONS_PRIM.CSV";
+const CONS_ALT_URL = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONS_ALT.CSV";
 
 async function fetchText(url: string): Promise<string> {
   const controller = new AbortController();
@@ -79,23 +84,35 @@ interface ListState {
 let cache: { at: number; state: ListState } | null = null;
 // Truncation floors guard against screening against a partial list
 // download; tests serve small real-format fixtures and lower them.
-let floors = { sdn: 1000, un: 100 };
-export function resetSanctionsCacheForTests(testFloors?: { sdn: number; un: number }): void {
+// The cons floor sits well under the real list size (486 primaries on
+// 2026-11-27) so a delisting round never trips it while a truncated
+// download still fails closed.
+export const SANCTIONS_LIST_FLOORS = { sdn: 1000, un: 100, cons: 300 };
+let floors = { ...SANCTIONS_LIST_FLOORS };
+export function resetSanctionsCacheForTests(testFloors?: { sdn: number; un: number; cons?: number }): void {
   cache = null;
-  floors = testFloors ?? { sdn: 1000, un: 100 };
+  // A test that lowers floors lowers every list it serves; an omitted cons
+  // floor follows the small-list default.
+  floors = testFloors
+    ? { sdn: testFloors.sdn, un: testFloors.un, cons: testFloors.cons ?? testFloors.un }
+    : { ...SANCTIONS_LIST_FLOORS };
 }
 
 async function loadLists(): Promise<ListState> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.state;
-  const [sdnRaw, altRaw, unRaw] = await Promise.all([
+  const [sdnRaw, altRaw, unRaw, consPrimRaw, consAltRaw] = await Promise.all([
     fetchText(SDN_URL), fetchText(ALT_URL), fetchText(UN_URL),
+    fetchText(CONS_PRIM_URL), fetchText(CONS_ALT_URL),
   ]);
   const fetchedAt = new Date().toISOString();
   const sdn = parseSdn(sdnRaw);
   const alt = parseAlt(altRaw);
   const un = parseUn(unRaw);
+  const consPrim = parseSdn(consPrimRaw);
+  const consAlt = parseAlt(consAltRaw);
   if (sdn.entries.size < floors.sdn) throw upstreamUnavailable("SDN_LIST_DEGRADED", `OFAC SDN parsed to only ${sdn.entries.size} entries; refusing to screen against a truncated list`);
   if (un.length < floors.un) throw upstreamUnavailable("UN_LIST_DEGRADED", `UN consolidated list parsed to only ${un.length} names; refusing to screen against a truncated list`);
+  if (consPrim.entries.size < floors.cons) throw upstreamUnavailable("CONS_LIST_DEGRADED", `OFAC Consolidated (non-SDN) parsed to only ${consPrim.entries.size} entries; refusing to screen against a truncated list`);
   const unDate = /dateGenerated="([^"]+)"/.exec(unRaw)?.[1] ?? "unknown";
   const entries: ListEntry[] = [];
   for (const [num, name] of sdn.entries) entries.push({ list: "OFAC SDN", name, raw: sdn.lines.get(num) ?? name, kind: "primary" });
@@ -104,10 +121,17 @@ async function loadLists(): Promise<ListState> {
     if (parent) entries.push({ list: "OFAC SDN", name: a.name, raw: `${a.raw} (alias of SDN #${a.altNum} "${parent}")`, kind: "alias" });
   }
   for (const u of un) entries.push({ list: "UN Consolidated", name: u.name, raw: u.raw, kind: u.kind });
+  for (const [num, name] of consPrim.entries) entries.push({ list: "OFAC Consolidated (non-SDN)", name, raw: consPrim.lines.get(num) ?? name, kind: "primary" });
+  for (const a of consAlt) {
+    const parent = consPrim.entries.get(a.altNum);
+    if (parent) entries.push({ list: "OFAC Consolidated (non-SDN)", name: a.name, raw: `${a.raw} (alias of Consolidated #${a.altNum} "${parent}")`, kind: "alias" });
+  }
   const state: ListState = { entries, hashes: [
     { list: "OFAC SDN", url: SDN_URL, sha256: sha256Hex(Buffer.from(sdnRaw, "utf8")), fetchedAt, published: "current publication preview" },
     { list: "OFAC SDN aliases", url: ALT_URL, sha256: sha256Hex(Buffer.from(altRaw, "utf8")), fetchedAt, published: "current publication preview" },
     { list: "UN Consolidated", url: UN_URL, sha256: sha256Hex(Buffer.from(unRaw, "utf8")), fetchedAt, published: unDate },
+    { list: "OFAC Consolidated (non-SDN)", url: CONS_PRIM_URL, sha256: sha256Hex(Buffer.from(consPrimRaw, "utf8")), fetchedAt, published: "current publication preview" },
+    { list: "OFAC Consolidated (non-SDN) aliases", url: CONS_ALT_URL, sha256: sha256Hex(Buffer.from(consAltRaw, "utf8")), fetchedAt, published: "current publication preview" },
   ] };
   cache = { at: Date.now(), state };
   return state;
@@ -138,7 +162,7 @@ export async function handleSanctionsScreen(query: Record<string, string | undef
     scoring: "max(Sørensen-Dice on token sets, normalized Levenshtein on the normalized name); names whose token sets are equal once legal-form tokens (pjsc, jsc, llc, ltd, inc, corp, company, gmbh, ...) are dropped score 1; a query core (2+ tokens, 3+ chars each) contained in a listed core whose extra tokens are all Slavic patronymic forms scores max(raw, 0.9); name similarity only, not identity",
     lists: state.hashes, cache_ttl_ms: CACHE_TTL_MS,
     candidate_raw_lines: scored.map((x) => x.e.raw) });
-  const receipt = makeReceipt(INTENT, SDN_URL, evidence, "OFAC SDN + aliases and UN consolidated list; list SHA-256 hashes + candidate raw lines; name similarity only");
+  const receipt = makeReceipt(INTENT, SDN_URL, evidence, "OFAC SDN + aliases, OFAC Consolidated (non-SDN) + aliases, and UN consolidated list; list SHA-256 hashes + candidate raw lines; name similarity only");
   receipt.fetched_at = state.hashes[0]?.fetchedAt ?? asOf;
   try {
     await saveReceipt(receipt, evidence);
@@ -152,13 +176,13 @@ export async function handleSanctionsScreen(query: Record<string, string | undef
   return envelope(INTENT, { name, matched, matches,
     lists: state.hashes.map((h) => h.list),
     match_score: best }, receipt, {
-    answer: `"${name}": ${matched ? "MATCH" : "no match above threshold"} against the OFAC SDN and UN consolidated sanctions lists. ` +
+    answer: `"${name}": ${matched ? "MATCH" : "no match above threshold"} against the OFAC SDN, OFAC Consolidated (non-SDN) and UN consolidated sanctions lists. ` +
       `Best name-similarity score ${best} (threshold ${MATCH_THRESHOLD}; scoring: max of token-set Sørensen-Dice and normalized Levenshtein, 1 when the names' token sets are equal once legal-form tokens are dropped, or max(raw, 0.9) when the query's core tokens are all present in a listed name that adds only Slavic patronymic tokens). ` +
       `Candidates: ${matchDesc}. Lists checked: ${listDesc}. ` +
       "A fuzzy name match is NOT identity confirmation — false positives are common, especially for common names. " +
-      "A non-match is NOT a legal clearance: only these two lists were screened, as of their published dates; other lists (EU, UK OFSI, national lists) were not checked. This is not legal advice.",
+      "A non-match is NOT a legal clearance: only these three lists were screened, as of their published dates; other lists (EU, UK OFSI, national lists) were not checked. This is not legal advice.",
     verdict: "verified",
     confidence: 0.9,
-    source: `${SDN_URL} + ${ALT_URL} + ${UN_URL}; lists hashed (SHA-256 in receipt) and cached ${CACHE_TTL_MS / 3600000}h; name similarity only, not identity; checked ${asOf}`,
+    source: `${SDN_URL} + ${ALT_URL} + ${UN_URL} + ${CONS_PRIM_URL} + ${CONS_ALT_URL}; lists hashed (SHA-256 in receipt) and cached ${CACHE_TTL_MS / 3600000}h; name similarity only, not identity; checked ${asOf}`,
   });
 }

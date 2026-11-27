@@ -11,14 +11,23 @@ import { buildServer } from "../src/server";
 import { getReceiptEvidence } from "../src/core/storage";
 import { sha256Hex } from "../src/core/receipt";
 // Real-format excerpts of the OFAC SDN list, OFAC aliases and the UN
-// consolidated list, retrieved 2026-11-23.
+// consolidated list, retrieved 2026-11-23; OFAC Consolidated (non-SDN)
+// excerpts retrieved 2026-11-27.
 const sdn = readFileSync(join(__dirname, "fixtures/sanctions/sdn-excerpt.csv"), "utf8");
 const alt = readFileSync(join(__dirname, "fixtures/sanctions/alt-excerpt.csv"), "utf8");
 const un = readFileSync(join(__dirname, "fixtures/sanctions/un-excerpt.xml"), "utf8");
-function stub(opts: { sdn?: string; alt?: string; un?: string } = {}): void {
+const consPrim = readFileSync(join(__dirname, "fixtures/sanctions/cons-prim-excerpt.csv"), "utf8");
+const consAlt = readFileSync(join(__dirname, "fixtures/sanctions/cons-alt-excerpt.csv"), "utf8");
+function stub(opts: { sdn?: string; alt?: string; un?: string; consPrim?: string; consAlt?: string } = {}): void {
   vi.stubGlobal("fetch", async (url: string) => {
     const u = String(url);
-    const body = u.includes("SDN.CSV") ? (opts.sdn ?? sdn) : u.includes("ALT.CSV") ? (opts.alt ?? alt) : (opts.un ?? un);
+    // CONS_ALT.CSV contains the substring "ALT.CSV", so the consolidated
+    // URLs must be routed first.
+    const body = u.includes("CONS_PRIM.CSV") ? (opts.consPrim ?? consPrim)
+      : u.includes("CONS_ALT.CSV") ? (opts.consAlt ?? consAlt)
+      : u.includes("SDN.CSV") ? (opts.sdn ?? sdn)
+      : u.includes("ALT.CSV") ? (opts.alt ?? alt)
+      : (opts.un ?? un);
     if (body === "ERR") throw new Error("test outage");
     return new Response(body, { status: 200 });
   });
@@ -79,7 +88,7 @@ describe("SANCTIONS_SCREENING_MATCH_GENERAL", () => {
     if (!stored.evidence) throw new Error("missing evidence");
     expect(sha256Hex(stored.evidence)).toBe(receipt.raw_response_sha256);
     const body = JSON.parse(stored.evidence.toString("utf8"));
-    expect(body.lists).toHaveLength(3);
+    expect(body.lists).toHaveLength(5);
     expect(body.candidate_raw_lines[0]).toContain("AEROCARIBBEAN AIRLINES");
   });
   it("a UN-listed individual matches via the UN list", async () => {

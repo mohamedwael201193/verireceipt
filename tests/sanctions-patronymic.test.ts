@@ -4,7 +4,7 @@ import { join } from "node:path";
 const scratch = mkdtempSync("/tmp/sanctions-patronymic-tests-");
 process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-beforeEach(() => resetSanctionsCacheForTests({ sdn: 1, un: 1 })); // fixtures are real-format excerpts
+beforeEach(() => resetSanctionsCacheForTests({ sdn: 1, un: 1, cons: 1 })); // fixtures are real-format excerpts
 afterEach(() => { vi.unstubAllGlobals(); resetSanctionsCacheForTests(); });
 import { handleSanctionsScreen, matchScore, resetSanctionsCacheForTests } from "../src/handlers/sanctionsScreening";
 import { getReceiptEvidence } from "../src/core/storage";
@@ -30,10 +30,18 @@ import { getReceiptEvidence } from "../src/core/storage";
 const sdnKadyrov = readFileSync(join(__dirname, "fixtures/sanctions/sdn-kadyrov-excerpt.csv"), "utf8");
 const altKadyrov = readFileSync(join(__dirname, "fixtures/sanctions/alt-kadyrov-excerpt.csv"), "utf8");
 const un = readFileSync(join(__dirname, "fixtures/sanctions/un-excerpt.xml"), "utf8");
+const consPrim = readFileSync(join(__dirname, "fixtures/sanctions/cons-prim-excerpt.csv"), "utf8");
+const consAlt = readFileSync(join(__dirname, "fixtures/sanctions/cons-alt-excerpt.csv"), "utf8");
 function stubKadyrov(): void {
   vi.stubGlobal("fetch", async (url: string) => {
     const u = String(url);
-    const body = u.includes("SDN.CSV") ? sdnKadyrov : u.includes("ALT.CSV") ? altKadyrov : un;
+    // CONS_ALT.CSV contains the substring "ALT.CSV", so the consolidated
+    // URLs must be routed first.
+    const body = u.includes("CONS_PRIM.CSV") ? consPrim
+      : u.includes("CONS_ALT.CSV") ? consAlt
+      : u.includes("SDN.CSV") ? sdnKadyrov
+      : u.includes("ALT.CSV") ? altKadyrov
+      : un;
     return new Response(body, { status: 200 });
   });
 }

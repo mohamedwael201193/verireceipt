@@ -29,10 +29,18 @@ import { getReceiptEvidence } from "../src/core/storage";
 const sdnMts = readFileSync(join(__dirname, "fixtures/sanctions/sdn-mts-excerpt.csv"), "utf8");
 const altMts = readFileSync(join(__dirname, "fixtures/sanctions/alt-mts-excerpt.csv"), "utf8");
 const un = readFileSync(join(__dirname, "fixtures/sanctions/un-excerpt.xml"), "utf8");
+const consPrim = readFileSync(join(__dirname, "fixtures/sanctions/cons-prim-excerpt.csv"), "utf8");
+const consAlt = readFileSync(join(__dirname, "fixtures/sanctions/cons-alt-excerpt.csv"), "utf8");
 function stubMts(): void {
   vi.stubGlobal("fetch", async (url: string) => {
     const u = String(url);
-    const body = u.includes("SDN.CSV") ? sdnMts : u.includes("ALT.CSV") ? altMts : un;
+    // CONS_ALT.CSV contains the substring "ALT.CSV", so the consolidated
+    // URLs must be routed first.
+    const body = u.includes("CONS_PRIM.CSV") ? consPrim
+      : u.includes("CONS_ALT.CSV") ? consAlt
+      : u.includes("SDN.CSV") ? sdnMts
+      : u.includes("ALT.CSV") ? altMts
+      : un;
     return new Response(body, { status: 200 });
   });
 }
