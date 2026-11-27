@@ -38,6 +38,20 @@ export function poolClass(raw:string|undefined):string{
  if(/^[A-Za-z][A-Za-z0-9.' %/-]*$/.test(v)&&/[A-Za-z]{3}/.test(v)&&/[ ]/.test(v))return 'name';
  return 'other';
 }
+const TVL_CHAIN_WORDS=new Set([...CHAINS,'ethereum','eth','bsc','bnb','polygon','arbitrum','optimism','base','avalanche','solana','sol','fantom','op','arb']);
+/** Fixed-label class of a TVL `protocol` value: length bucket and booleans only. Never the value or any substring. */
+export function tvlProtocolClass(raw:string|undefined):Record<string,unknown>{
+ const v=(raw??'').trim();
+ const words=v.toLowerCase().split(/[\s_-]+/).filter(Boolean);
+ const last=words.length>1?words[words.length-1]:'';
+ return {
+  length_bucket:v.length<=8?'<=8':v.length<=16?'9-16':v.length<=32?'17-32':'>32',
+  has_space:/\s/.test(v),has_hyphen:v.includes('-'),
+  has_chain_suffix:last!==''&&TVL_CHAIN_WORDS.has(last),
+  ascii_only:/^[\x00-\x7f]*$/.test(v),
+  has_version_suffix:/(?:^|[\s_-])v\d+(?:\.\d+)*$/i.test(v)
+ };
+}
 function ownString(query:unknown,key:string):string|undefined{
  if(!query||typeof query!=='object')return undefined;
  const d=Object.getOwnPropertyDescriptor(query,key);
@@ -51,6 +65,7 @@ export function refusalParamClass(route:string|undefined,errorCode:string,query:
  if(route==='/v1/grid-price')return gridRefusalClass(ownString(query,'node_or_zone'));
  if(route==='/v1/liquidity')return {pool_class:poolClass(ownString(query,'pool')),chain_class:chainClass(liquidityChain(ownString(query,'chain')??''))};
  if(route==='/v1/token-holders')return {token_class:tokenClass(ownString(query,'token'))};
+ if(route==='/v1/tvl')return tvlProtocolClass(ownString(query,'protocol'));
  return null;
 }
-export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/liquidity':'LIQUIDITY_DEPTH_VERIFY_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL'};
+export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/liquidity':'LIQUIDITY_DEPTH_VERIFY_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL','/v1/tvl':'TVL_LOOKUP_GENERAL'};
