@@ -122,16 +122,41 @@ function pairScore(a: string, b: string): number {
   return Math.round(Math.max(dice, lev) * 1e6) / 1e6;
 }
 
+/** Slavic patronymic suffixes: the extra token in a listed name that a
+ * short public name lacks ("KADYROV, Ramzan Akhmatovich" vs the public
+ * "Ramzan Kadyrov"). Covers Russian and common transliteration variants
+ * (ovich/ovitch, evich, ovych/evych) and the female forms (ovna/evna,
+ * ivna/yivna). */
+const PATRONYMIC = /(ovich|ovitch|evich|ovych|evych|ovna|evna|ivna|yivna)$/;
+
 /** The documented score: max of Sørensen-Dice on the token sets and
- * normalized Levenshtein on the whole normalized string — with one
- * legal-form rule: when both names reduce to the SAME token set once
- * legal-form tokens are dropped (same core, differing only in
- * jurisdiction boilerplate like "PJSC MTS BANK" vs "MTS BANK"), the
- * score is 1. Anything short of an equal stripped core scores exactly
- * the raw comparison, so the rule can never bridge two different cores
- * (measured on the real SDN+ALT lists, 2026-11-27: a wider stripped-pair
- * comparison produced 1,908 same-list false-positive pairs; the equal-core
- * rule produces none with different cores). */
+ * normalized Levenshtein on the whole normalized string — with two
+ * legal-form rules on the stripped cores.
+ *
+ * Equal core: when both names reduce to the SAME token set once legal-form
+ * tokens are dropped (same core, differing only in jurisdiction
+ * boilerplate like "PJSC MTS BANK" vs "MTS BANK"), the score is 1.
+ *
+ * Patronymic core: when the query core has at least 2 tokens, each at
+ * least 3 characters, every query token appears in the candidate core,
+ * and every EXTRA candidate token is a Slavic patronymic, the score is
+ * the raw comparison raised to a 0.9 floor. A public short name is the
+ * same person as a listed name that only adds a patronymic (graded
+ * evidence: prod answered matched=false, best 0.8, for "Ramzan Kadyrov"
+ * against SDN #23343 "KADYROV, Ramzan Akhmatovich", tokens
+ * {ramzan,kadyrov} vs {kadyrov,ramzan,akhmatovich}, Dice 4/5 = 0.8 under
+ * the 0.85 threshold). The floor is 0.9, not 1: a subset is weaker
+ * evidence than an equal core. The guard rails are what keep the rule
+ * safe (measured on the real SDN+ALT+UN lists, 2026-11-27): a plain
+ * subset rule newly lifts 4,419 cross-entity pairs to >=0.85; requiring
+ * patronymic-only extras, forward direction, and the 2-token/3-char
+ * minimums leaves 19, each a first+last name shared with a genuinely
+ * listed person (6 the same person across the UN and OFAC lists, 13 a
+ * name collision between two listed individuals). A single-token side
+ * never takes this path, tokens shorter than 3 characters never
+ * participate, and the reverse direction (a short listed alias inside a
+ * longer query) never fires. Anything short of this scores exactly the
+ * raw comparison. */
 export function matchScore(query: string, candidate: string): number {
   const a = normalizeName(query);
   const b = normalizeName(candidate);
@@ -141,5 +166,13 @@ export function matchScore(query: string, candidate: string): number {
   const setA = new Set(strippedA);
   const setB = new Set(strippedB);
   if (setA.size === setB.size && [...setA].every((t) => setB.has(t))) return 1;
-  return pairScore(a, b);
+  const raw = pairScore(a, b);
+  if (
+    setA.size >= 2 &&
+    [...setA].every((t) => t.length >= 3 && setB.has(t)) &&
+    [...setB].every((t) => setA.has(t) || PATRONYMIC.test(t))
+  ) {
+    return Math.max(raw, 0.9);
+  }
+  return raw;
 }

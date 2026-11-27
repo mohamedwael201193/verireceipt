@@ -17,11 +17,16 @@
 // names are normalized (lowercase, accents stripped, punctuation to
 // spaces, collapsed). The score is the maximum of (a) Sørensen-Dice on
 // the token sets and (b) normalized Levenshtein similarity on the whole
-// normalized string — with one legal-form rule: when both names reduce
+// normalized string — with two legal-form rules: when both names reduce
 // to the same token set once legal-form tokens (pjsc, llc, ltd, gmbh,
-// ...) are dropped, the core is identical and the score is 1; anything
-// short of an equal core scores the raw comparison exactly, and a name
-// that stripping would empty keeps its tokens. matched = best score >=
+// ...) are dropped, the core is identical and the score is 1; when the
+// query core (2+ tokens, each 3+ characters) is contained in a listed
+// core and every extra listed token is a Slavic patronymic
+// (-ovich/-ovna/...), the score is the raw comparison raised to a 0.9
+// floor — a public short name is the same person as a listed name that
+// only adds a patronymic. Anything short of these scores the raw
+// comparison exactly, and a name that stripping would empty keeps its
+// tokens. matched = best score >=
 // 0.85. Candidates between 0.50 and the threshold are reported as near
 // matches with their exact scores, never hidden. This is NAME SIMILARITY
 // ONLY.
@@ -130,7 +135,7 @@ export async function handleSanctionsScreen(query: Record<string, string | undef
   const matches = scored.map((x) => ({ list: x.e.list, name: x.e.name, kind: x.e.kind, score: x.score, above_threshold: x.score >= MATCH_THRESHOLD }));
   const evidence = JSON.stringify({ query_name: name, as_of: asOf, matched, match_score: best,
     threshold: MATCH_THRESHOLD, candidate_floor: CANDIDATE_FLOOR,
-    scoring: "max(Sørensen-Dice on token sets, normalized Levenshtein on the normalized name); names whose token sets are equal once legal-form tokens (pjsc, jsc, llc, ltd, inc, corp, company, gmbh, ...) are dropped score 1; name similarity only, not identity",
+    scoring: "max(Sørensen-Dice on token sets, normalized Levenshtein on the normalized name); names whose token sets are equal once legal-form tokens (pjsc, jsc, llc, ltd, inc, corp, company, gmbh, ...) are dropped score 1; a query core (2+ tokens, 3+ chars each) contained in a listed core whose extra tokens are all Slavic patronymic forms scores max(raw, 0.9); name similarity only, not identity",
     lists: state.hashes, cache_ttl_ms: CACHE_TTL_MS,
     candidate_raw_lines: scored.map((x) => x.e.raw) });
   const receipt = makeReceipt(INTENT, SDN_URL, evidence, "OFAC SDN + aliases and UN consolidated list; list SHA-256 hashes + candidate raw lines; name similarity only");
@@ -148,7 +153,7 @@ export async function handleSanctionsScreen(query: Record<string, string | undef
     lists: state.hashes.map((h) => h.list),
     match_score: best }, receipt, {
     answer: `"${name}": ${matched ? "MATCH" : "no match above threshold"} against the OFAC SDN and UN consolidated sanctions lists. ` +
-      `Best name-similarity score ${best} (threshold ${MATCH_THRESHOLD}; scoring: max of token-set Sørensen-Dice and normalized Levenshtein, or 1 when the names' token sets are equal once legal-form tokens are dropped). ` +
+      `Best name-similarity score ${best} (threshold ${MATCH_THRESHOLD}; scoring: max of token-set Sørensen-Dice and normalized Levenshtein, 1 when the names' token sets are equal once legal-form tokens are dropped, or max(raw, 0.9) when the query's core tokens are all present in a listed name that adds only Slavic patronymic tokens). ` +
       `Candidates: ${matchDesc}. Lists checked: ${listDesc}. ` +
       "A fuzzy name match is NOT identity confirmation — false positives are common, especially for common names. " +
       "A non-match is NOT a legal clearance: only these two lists were screened, as of their published dates; other lists (EU, UK OFSI, national lists) were not checked. This is not legal advice.",
