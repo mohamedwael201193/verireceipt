@@ -68,6 +68,29 @@ function tokenSupplyChainRaw(query:unknown):string|undefined{
  return /\s+on\s+(.+)$/i.exec(text.slice(0,200))?.[1];
 }
 const BOUND_WEATHER_LOCATIONS=new Set(PAST_WEATHER_BINDINGS.map(b=>b.location.trim().toLowerCase()));
+/** Fixed-label class of a token-supply token value on an UNSUPPORTED_TOKEN
+ * refusal: a 0x contract address, a short symbol-like token, a name-like
+ * token, or one containing whitespace. Never the value. Empty input logs
+ * no class (an empty token refuses as MISSING_PARAM before this). */
+export function supplyTokenClass(raw:string|undefined):string|undefined{
+ const v=(raw??'').trim();
+ if(!v)return undefined;
+ if(ADDRESS_RE.test(v))return 'address';
+ if(/\s/.test(v))return 'has_space';
+ if(/^[A-Za-z0-9]{2,10}$/.test(v))return 'symbol';
+ return 'name';
+}
+/** The token a /v1/token-supply refusal asked for: the structured token
+ * parameter, or the free-text query with any " on <chain>" suffix removed
+ * (the same split tokenSupplyChainRaw uses for the chain side). */
+function tokenSupplyTokenRaw(query:unknown):string|undefined{
+ const token=ownString(query,'token');
+ if(token!==undefined)return token;
+ const text=ownString(query,'query');
+ if(text===undefined)return undefined;
+ const m=/^(.+?)\s+on\s+\S.*$/i.exec(text.trim());
+ return m?m[1]:text;
+}
 /** Fixed-label class of a weather-history `location` value: bound (a reviewed
  * station binding exists), has_comma, unbound_ascii or unbound_nonascii. Never the value. */
 export function weatherLocationClass(raw:string|undefined):string{
@@ -90,7 +113,14 @@ export function refusalParamClass(route:string|undefined,errorCode:string,query:
  if(route==='/v1/liquidity')return {pool_class:poolClass(ownString(query,'pool')),chain_class:chainClass(liquidityChain(ownString(query,'chain')??''))};
  if(route==='/v1/token-holders')return {token_class:tokenClass(ownString(query,'token')),chain_class:chainClass(ownString(query,'chain'))};
  if(route==='/v1/tvl')return tvlProtocolClass(ownString(query,'protocol'));
- if(route==='/v1/token-supply')return {chain_class:chainClass(tokenSupplyChainRaw(query))};
+ if(route==='/v1/token-supply'){
+  const chain_class=chainClass(tokenSupplyChainRaw(query));
+  if(errorCode==='UNSUPPORTED_TOKEN'){
+   const token_class=supplyTokenClass(tokenSupplyTokenRaw(query));
+   return token_class===undefined?{chain_class}:{chain_class,token_class};
+  }
+  return {chain_class};
+ }
  if(route==='/v1/weather-history')return {location_class:weatherLocationClass(ownString(query,'location')),date_age_bucket:dateAgeBucket(ownString(query,'date'))};
  return null;
 }

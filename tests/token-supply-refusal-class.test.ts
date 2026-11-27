@@ -1,6 +1,6 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {recordRequestCompletion} from '../src/core/requestMetrics';
-import {refusalParamClass,chainClass,REFUSAL_INTENTS} from '../src/core/refusalClass';
+import {refusalParamClass,chainClass,supplyTokenClass,REFUSAL_INTENTS} from '../src/core/refusalClass';
 let lines:string[];
 beforeEach(()=>{lines=[];vi.spyOn(console,'info').mockImplementation((m:unknown)=>{lines.push(String(m));});});
 afterEach(()=>vi.restoreAllMocks());
@@ -64,4 +64,41 @@ it('a 200 token-supply answer logs no class line',()=>{
 it('other token-supply refusals also carry the chain class label',()=>{
  recordRequestCompletion('/v1/token-supply',400,5,{query:{query:'USDC on solana'},errorCode:'CHAIN_MISMATCH'});
  expect(refusal()[0]).toMatchObject({error_code:'CHAIN_MISMATCH',chain_class:'solana'});
+});
+
+// Round 7: token_class on the UNSUPPORTED_TOKEN refusal line (address |
+// symbol | name | has_space), labels only, only for that error code.
+it.each([
+ ['0x'+'a'.repeat(40),'address'],
+ ['FAKECOIN','symbol'],
+ ['PEPE2','symbol'],
+ ['verylongtokenname','name'],
+ ['doge coin','has_space'],
+ ['Secret-Token-Zq31337','name'],
+])('token class of %j is %s',(text,cls)=>{
+ expect(refusalParamClass('/v1/token-supply','UNSUPPORTED_TOKEN',{token:text})).toEqual({chain_class:'other',token_class:cls});
+});
+it('free-text UNSUPPORTED_TOKEN classes the token part before any " on <chain>" suffix',()=>{
+ expect(refusalParamClass('/v1/token-supply','UNSUPPORTED_TOKEN',{query:'FAKECOIN on solana'})).toEqual({chain_class:'solana',token_class:'symbol'});
+ expect(refusalParamClass('/v1/token-supply','UNSUPPORTED_TOKEN',{query:'doge coin on solana'})).toEqual({chain_class:'solana',token_class:'has_space'});
+});
+it('other token-supply error codes keep the chain-only line',()=>{
+ expect(refusalParamClass('/v1/token-supply','UNSUPPORTED_CHAIN',{token:'FAKECOIN'})).toEqual({chain_class:'other'});
+ expect(refusalParamClass('/v1/token-supply','MISSING_PARAM',{})).toEqual({chain_class:'other'});
+ expect(refusalParamClass('/v1/token-supply','UNSUPPORTED_TOKEN',{})).toEqual({chain_class:'other'});
+});
+it('a 422 UNSUPPORTED_TOKEN logs token_class and chain_class, never the input text',()=>{
+ const secret='Secret-Token-Zq31337';
+ recordRequestCompletion('/v1/token-supply',422,5,{query:{token:secret,chain:'solana'},errorCode:'UNSUPPORTED_TOKEN'});
+ const r=refusal();expect(r).toHaveLength(1);
+ expect(r[0]).toMatchObject({intent:'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL',error_code:'UNSUPPORTED_TOKEN',status:'422',chain_class:'solana',token_class:'name'});
+ const all=lines.join('\n');for(const bad of ['Secret','Zq31337','31337'])expect(all).not.toContain(bad);
+});
+it('the classifier is exported with its boundary: 10 chars symbol, 11 name',()=>{
+ expect(supplyTokenClass('0x'+'f'.repeat(40))).toBe('address');
+ expect(supplyTokenClass('a'.repeat(10))).toBe('symbol');
+ expect(supplyTokenClass('a'.repeat(11))).toBe('name');
+ expect(supplyTokenClass('a b')).toBe('has_space');
+ expect(supplyTokenClass('')).toBeUndefined();
+ expect(supplyTokenClass(undefined)).toBeUndefined();
 });
