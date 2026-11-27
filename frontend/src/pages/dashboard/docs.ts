@@ -249,6 +249,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - STOCK_PRICE_US_EQUITY\n' +
     '    - THREAT_INTELLIGENCE_INDICATOR\n' +
     '    - TOKEN_HOLDER_COUNT_GENERAL\n' +
+    '    - WASH_TRADING_DETECTION_GENERAL\n' +
     '    - TRANSACTION_RISK_GENERAL\n' +
     '    - TRAVEL_DISRUPTION_GENERAL\n' +
     '    - URL_SAFE_GENERAL\n' +
@@ -264,10 +265,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - SECURITY_REVIEW_GENERAL\n' +
     '    - WEATHER_FORECAST_VERIFY_GENERAL\n' +
     '    - RETURN_POLICY_VERIFY_GENERAL\n' +
-    '    - GAME_RESULT_GENERAL\n' +
     '    - CRYPTO_YIELD_RATE_GENERAL\n' +
-    '    - VESSEL_TELEMETRY_VERIFY_GENERAL\n' +
-    '    - SENSOR_TELEMETRY_VERIFY_GENERAL\n' +
     '  signal_mapping:\n' +
     '    confidence_field: confidence\n' +
     '    label_field: answer\n' +
@@ -1050,6 +1048,23 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          - TOKEN_HOLDER_COUNT_GENERAL\n' +
     '          description: Chain of the token\n' +
     '\n' +
+    '  - path: /v1/wash-trading\n' +
+    '    external_path: /v1/wash-trading\n' +
+    '    method: GET\n' +
+    '    description: A disclosed wash-trading proxy for a DEX pool or token address, from the latest 300\n' +
+    '      public pool trades (matched same-sender round trips), with a SHA-256 receipt over the exact\n' +
+    '      upstream bodies.\n' +
+    '    intents:\n' +
+    '    - WASH_TRADING_DETECTION_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: subject\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - WASH_TRADING_DETECTION_GENERAL\n' +
+    '          description: Pool or token contract address (0x...)\n' +
+    '\n' +
     '  - path: /v1/transaction-risk\n' +
     '    external_path: /v1/transaction-risk\n' +
     '    method: GET\n' +
@@ -1357,7 +1372,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    external_path: /v1/weather-history\n' +
     '    method: GET\n' +
     '    description: \'Measured NOAA NCEI daily station archive only, for Cairo, London, New York JFK,\n' +
-    '      Dubai or Frankfurt on an explicit past YYYY-MM-DD date. Coverage depends on published complete\n' +
+    '      New York / New York City (Central Park), Los Angeles, Chicago, Sydney, Dubai or Frankfurt on an explicit past YYYY-MM-DD date. Coverage depends on published complete\n' +
     '      TMAX, TMIN and precipitation observations for the bound station. Missing or quality-failed days\n' +
     '      are refused, never replaced by zero, forecast or reanalysis. Reports a station-labelled climate\n' +
     '      day, not necessarily local midnight; weather condition is not inferred from daily extrema.\'\n' +
@@ -1370,7 +1385,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          type: string\n' +
     '          intents:\n' +
     '          - WEATHER_FORECAST_VERIFY_GENERAL\n' +
-    '          description: \'Cairo, London, New York JFK, Dubai or Frankfurt; exact bound station only.\'\n' +
+    '          description: \'Cairo, London, New York JFK, New York / New York City (Central Park), Los Angeles, Chicago, Sydney, Dubai or Frankfurt; exact bound station only.\'\n' +
     '        - name: date\n' +
     '          type: string\n' +
     '          intents:\n' +
@@ -1395,25 +1410,6 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          intents:\n' +
     '          - RETURN_POLICY_VERIFY_GENERAL\n' +
     '          description: \'Exact Apple US or Walmart US. Plain Apple and Walmart explicitly mean US only.\'\n' +
-    '\n' +
-    '  - path: /v1/game-result\n' +
-    '    external_path: /v1/game-result\n' +
-    '    method: GET\n' +
-    '    description: \'Exact dated completed game with two named teams separated by vs, v or at.\n' +
-    '      NFL, NBA, MLB and NHL ESPN scoreboards; MLB-only official final fallback if all\n' +
-    '      primary sources fail fast. No latest-game substitution, no other sports, no\n' +
-    '      ambiguous doubleheaders, no inferred scores. Source failures are errors, not zero scores.\'\n' +
-    '    intents:\n' +
-    '    - GAME_RESULT_GENERAL\n' +
-    '    params:\n' +
-    '      query:\n' +
-    '        required:\n' +
-    '        - name: game\n' +
-    '          type: string\n' +
-    '          intents:\n' +
-    '          - GAME_RESULT_GENERAL\n' +
-    '          description: \'Two competitor names and exact YYYY-MM-DD date, at most 200 characters.\'\n' +
-    '\n' +
     '\n' +
     '  - path: /v1/yield\n' +
     '    external_path: /v1/yield\n' +
@@ -1443,51 +1439,6 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          intents:\n' +
     '          - CRYPTO_YIELD_RATE_GENERAL\n' +
     '          description: \'Exact ethereum, case-insensitive. No chain substitution.\'\n' +
-    '\n' +
-    '  - path: /v1/vessel-telemetry\n' +
-    '    external_path: /v1/vessel-telemetry\n' +
-    '    method: GET\n' +
-    "    description: 'Decoded AIS position report via Open Waters and BarentsWatch, exact nine-digit\n" +
-    '      ship MMSI only. No vessel-name or IMO resolution. Event no older than five minutes;\n' +
-    '      missing, stale, invalid or conflicting fields are refused. Source event time is not\n' +
-    '      guaranteed GPS fix time; JSON-synthesized reports are disclosed. Norwegian source\n' +
-    "      coverage only, not global consensus, independent authentication or navigation advice.'\n" +
-    '    intents:\n' +
-    '    - VESSEL_TELEMETRY_VERIFY_GENERAL\n' +
-    '    params:\n' +
-    '      query:\n' +
-    '        required:\n' +
-    '        - name: vessel\n' +
-    '          type: string\n' +
-    '          intents:\n' +
-    '          - VESSEL_TELEMETRY_VERIFY_GENERAL\n' +
-    "          description: 'Exact nine-digit ship MMSI beginning with 2 through 7. Names and IMO unsupported.'\n" +
-    '\n' +
-    '  - path: /v1/sensor-telemetry\n' +
-    '    external_path: /v1/sensor-telemetry\n' +
-    '    method: GET\n' +
-    "    description: 'NOAA NDBC Boston buoy NDBC:44013 only, water_temperature or air_temperature\n" +
-    '      in degrees Celsius. No other station, device or metric substituted. Station pair\n' +
-    '      fetched at most hourly per process, including failures; cache resets on restart,\n' +
-    '      shared budget required before multiprocess scaling. Original UTC observation time\n' +
-    '      retained, maximum age 90 minutes. Missing latest MM values, stale or malformed\n' +
-    '      sources are refused without older-row substitution. Automated gross-error QC only,\n' +
-    "      subject to revision; not independent sensor authentication or general telemetry.'\n" +
-    '    intents:\n' +
-    '    - SENSOR_TELEMETRY_VERIFY_GENERAL\n' +
-    '    params:\n' +
-    '      query:\n' +
-    '        required:\n' +
-    '        - name: sensor\n' +
-    '          type: string\n' +
-    '          intents:\n' +
-    '          - SENSOR_TELEMETRY_VERIFY_GENERAL\n' +
-    "          description: 'Exact NDBC:44013, Boston buoy station, not a physical sensor serial.'\n" +
-    '        - name: metric\n' +
-    '          type: string\n' +
-    '          intents:\n' +
-    '          - SENSOR_TELEMETRY_VERIFY_GENERAL\n' +
-    "          description: 'Exact water_temperature or air_temperature, both degC; no inferred metric.'\n" +
     '\n' +
     'intent_mapping:\n' +
     '  ONCHAIN_TX_LOOKUP_GENERAL:\n' +
@@ -2045,6 +1996,24 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '      malicious:\n' +
     '        path: malicious\n' +
     '\n' +
+    '  WASH_TRADING_DETECTION_GENERAL:\n' +
+    '    endpoint: /v1/wash-trading\n' +
+    '    input:\n' +
+    '      subject:\n' +
+    '        from: subject\n' +
+    '    output:\n' +
+    '      subject:\n' +
+    '        path: subject\n' +
+    '      verdict:\n' +
+    '        path: verdict\n' +
+    '      wash_volume_pct:\n' +
+    '        path: wash_volume_pct\n' +
+    '        unit: "percent"\n' +
+    '      signals:\n' +
+    '        path: signals\n' +
+    '      summary:\n' +
+    '        path: summary\n' +
+    '\n' +
     '  TOKEN_HOLDER_COUNT_GENERAL:\n' +
     '    endpoint: /v1/token-holders\n' +
     '    input:\n' +
@@ -2397,27 +2366,6 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '      sources:\n' +
     '        path: sources\n' +
     '\n' +
-    '  GAME_RESULT_GENERAL:\n' +
-    '    endpoint: /v1/game-result\n' +
-    '    input:\n' +
-    '      game:\n' +
-    '        from: game\n' +
-    '    output:\n' +
-    '      winner:\n' +
-    '        path: winner\n' +
-    '      home_team:\n' +
-    '        path: home_team\n' +
-    '      away_team:\n' +
-    '        path: away_team\n' +
-    '      home_score:\n' +
-    '        path: home_score\n' +
-    '        unit: "points"\n' +
-    '      away_score:\n' +
-    '        path: away_score\n' +
-    '        unit: "points"\n' +
-    '      date:\n' +
-    '        path: date\n' +
-    '\n' +
     '  CRYPTO_YIELD_RATE_GENERAL:\n' +
     '    endpoint: /v1/yield\n' +
     '    input:\n' +
@@ -2430,50 +2378,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    output:\n' +
     '      supply_apy:\n' +
     '        path: supply_apy\n' +
-    '        unit: "basis points"\n' +
-    '\n' +
-    '  VESSEL_TELEMETRY_VERIFY_GENERAL:\n' +
-    '    endpoint: /v1/vessel-telemetry\n' +
-    '    input:\n' +
-    '      vessel:\n' +
-    '        from: vessel\n' +
-    '    output:\n' +
-    '      vessel:\n' +
-    '        path: vessel\n' +
-    '      speed_knots:\n' +
-    '        path: speed_knots\n' +
-    '        unit: "knots"\n' +
-    '      latitude:\n' +
-    '        path: latitude\n' +
-    '        unit: "degrees"\n' +
-    '      longitude:\n' +
-    '        path: longitude\n' +
-    '        unit: "degrees"\n' +
-    '      course_deg:\n' +
-    '        path: course_deg\n' +
-    '        unit: "degrees"\n' +
-    '      observed_at:\n' +
-    '        path: observed_at\n' +
-    '\n' +
-    '  SENSOR_TELEMETRY_VERIFY_GENERAL:\n' +
-    '    endpoint: /v1/sensor-telemetry\n' +
-    '    input:\n' +
-    '      sensor:\n' +
-    '        from: sensor\n' +
-    '      metric:\n' +
-    '        from: metric\n' +
-    '    output:\n' +
-    '      sensor:\n' +
-    '        path: sensor\n' +
-    '      metric:\n' +
-    '        path: metric\n' +
-    '      value:\n' +
-    '        path: value\n' +
-    '        unit: "the sensor\'s unit"\n' +
-    '      unit:\n' +
-    '        path: unit\n' +
-    '      observed_at:\n' +
-    '        path: observed_at\n',
+    '        unit: "basis points"\n',
 
   cast: REGISTRATION_CAST_SNIPPET,
 };
