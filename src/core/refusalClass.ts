@@ -52,6 +52,19 @@ export function tvlProtocolClass(raw:string|undefined):Record<string,unknown>{
   has_version_suffix:/(?:^|[\s_-])v\d+(?:\.\d+)*$/i.test(v)
  };
 }
+/** The chain a /v1/token-supply refusal asked for: the chain parameter,
+ * else the "on <chain>" suffix of the free-text token input (the graded
+ * refusals arrive as param_keys ["query"]). Never the value: only the
+ * fixed chainClass label is logged. */
+function tokenSupplyChainRaw(query:unknown):string|undefined{
+ const chain=ownString(query,'chain');
+ if(chain!==undefined)return chain;
+ const text=ownString(query,'query')??ownString(query,'token');
+ if(text===undefined)return undefined;
+ // Cap before the suffix scan: the regex is linear per start position,
+ // so an unbounded whitespace-heavy input costs quadratic time.
+ return /\s+on\s+(.+)$/i.exec(text.slice(0,200))?.[1];
+}
 function ownString(query:unknown,key:string):string|undefined{
  if(!query||typeof query!=='object')return undefined;
  const d=Object.getOwnPropertyDescriptor(query,key);
@@ -66,6 +79,7 @@ export function refusalParamClass(route:string|undefined,errorCode:string,query:
  if(route==='/v1/liquidity')return {pool_class:poolClass(ownString(query,'pool')),chain_class:chainClass(liquidityChain(ownString(query,'chain')??''))};
  if(route==='/v1/token-holders')return {token_class:tokenClass(ownString(query,'token'))};
  if(route==='/v1/tvl')return tvlProtocolClass(ownString(query,'protocol'));
+ if(route==='/v1/token-supply')return {chain_class:chainClass(tokenSupplyChainRaw(query))};
  return null;
 }
-export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/liquidity':'LIQUIDITY_DEPTH_VERIFY_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL','/v1/tvl':'TVL_LOOKUP_GENERAL'};
+export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/liquidity':'LIQUIDITY_DEPTH_VERIFY_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL','/v1/tvl':'TVL_LOOKUP_GENERAL','/v1/token-supply':'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL'};
