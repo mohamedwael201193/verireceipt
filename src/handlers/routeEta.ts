@@ -24,7 +24,7 @@
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt, sha256Hex } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
-import {resolveRoutePlace,ROUTE_GEOCODER_ATTRIBUTION} from "./routeGeocoder";
+import {resolveRoutePlace,ROUTE_GEOCODER_ATTRIBUTION,type RouteCandidate} from "./routeGeocoder";
 
 const SOURCE_TIMEOUT_MS = 6000;
 // Assumed response budget (the contract publishes none): geocoding may use up to ROUTE_GEOCODE_BUDGET_MS, the route read gets what is left (at least 1.5 s, because geocode reads end by 7.5 s), so the worst case is 9 s.
@@ -77,7 +77,33 @@ export function verifyRouteEndpoints(route:OsrmRoute,origin:{lat:number;lon:numb
 
 export const INTENT = "ROUTE_ETA_GENERAL";
 
-interface ResolvedPoint { lat:number;lon:number;label:string;selection:string;geocoders:{url:string;body:string;fetched_at:string}[] }
+const greatCircleKm=(a:{latitude:number;longitude:number},b:{latitude:number;longitude:number}):number=>{
+ const r=Math.PI/180,x=Math.sin((b.latitude-a.latitude)*r/2)**2+Math.cos(a.latitude*r)*Math.cos(b.latitude*r)*Math.sin((b.longitude-a.longitude)*r/2)**2;
+ return 6371*2*Math.atan2(Math.sqrt(x),Math.sqrt(Math.max(0,1-x)));
+};
+/** Pair choice from the candidates the geocoder already returned (top 5 per side, no extra call). A named side with 2+ candidates is
+ * ambiguous. A coordinate endpoint or a named side with one candidate is fixed. When at least one side is ambiguous, the
+ * origin/destination pair with the smallest great-circle distance is used (a fixed side contributes only itself). Ties go to the
+ * better provider rank (rank sum, then origin rank). Two fixed sides stay exactly as today. The disclosure is added to the ambiguous side. */
+export function chooseClosestPair(o:ResolvedPoint,d:ResolvedPoint):{o:ResolvedPoint;d:ResolvedPoint}{
+ const oAmb=o.candidates.length>=2,dAmb=d.candidates.length>=2;
+ if(!oAmb&&!dAmb)return {o,d};
+ const fixed=(p:ResolvedPoint):RouteCandidate[]=>[{latitude:p.lat,longitude:p.lon,label:p.label,rank:1,provider:p.provider}];
+ const oc=oAmb?o.candidates:fixed(o),dc=dAmb?d.candidates:fixed(d);
+ let best:{a:RouteCandidate;b:RouteCandidate;km:number}|undefined;
+ for(const a of oc)for(const b of dc){
+  const km=greatCircleKm(a,b);
+  if(!best||km<best.km||(km===best.km&&(a.rank+b.rank<best.a.rank+best.b.rank||(a.rank+b.rank===best.a.rank+best.b.rank&&a.rank<best.a.rank))))best={a,b,km};
+ }
+ const b=best!,lab=(c:RouteCandidate)=>c.label+' ('+c.latitude+', '+c.longitude+')';
+ const pairLabel=(c:RouteCandidate,p:ResolvedPoint,amb:boolean)=>amb?lab(c):p.label;
+ const pair='chose the closest pair among '+oc.length+' x '+dc.length+' candidates ('+pairLabel(b.a,o,oAmb)+' to '+pairLabel(b.b,d,dAmb)+', great-circle '+b.km.toFixed(1)+' km); not confirmed unique';
+ const mk=(p:ResolvedPoint,c:RouteCandidate):ResolvedPoint=>({...p,lat:c.latitude,lon:c.longitude,label:lab(c),
+  selection:'chose '+lab(c)+' ('+c.provider+' rank '+c.rank+' of the first rows it returned); '+pair});
+ return {o:oAmb?mk(o,b.a):o,d:dAmb?mk(d,b.b):d};
+}
+
+interface ResolvedPoint { lat:number;lon:number;label:string;selection:string;geocoders:{url:string;body:string;fetched_at:string}[];candidates:RouteCandidate[];count:number;provider:string }
 async function resolveEndpoint(raw:string|undefined,which:'origin'|'destination'):Promise<ResolvedPoint> {
  if(!raw?.trim())throw badRequest('MISSING_PARAM',which+' is required: lat,lon or a place/street');
  const trimmed=raw.trim();
@@ -85,12 +111,12 @@ async function resolveEndpoint(raw:string|undefined,which:'origin'|'destination'
  if(/^[+\-\d.\s,eE]+$/.test(trimmed)) {
   if(!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)\s*,\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(trimmed))throw badRequest('BAD_LOCATION','invalid coordinates; expected latitude,longitude');
   const [lat,lon]=trimmed.split(',').map(Number);if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180)throw badRequest('BAD_LOCATION','coordinates outside latitude/longitude bounds');
-  return {lat,lon,label:lat+','+lon,selection:'coordinates given directly',geocoders:[]};
+  return {lat,lon,label:lat+','+lon,selection:'coordinates given directly',geocoders:[],candidates:[],count:0,provider:''};
  }
  if(trimmed.length>250)throw badRequest('BAD_LOCATION','location name too long');
- const {hit,captures}=await resolveRoutePlace(trimmed);
+ const {hit,candidates,captures}=await resolveRoutePlace(trimmed);
  const label=hit.label+' ('+hit.latitude+', '+hit.longitude+')';
- return {lat:hit.latitude,lon:hit.longitude,label,selection:'chose '+label+' of '+hit.count+' matches returned by '+hit.provider+' (rank 1, provider order; not confirmed unique)',geocoders:captures};
+ return {lat:hit.latitude,lon:hit.longitude,label,selection:'chose '+label+' of '+hit.count+' matches returned by '+hit.provider+' (rank 1, provider order; not confirmed unique)',geocoders:captures,candidates,count:hit.count,provider:hit.provider};
 }
 
 // At most four demo-server operations, no queue. A timed-out read retains
@@ -126,7 +152,8 @@ async function readRouteBody(url: string, timeoutMs: number = SOURCE_TIMEOUT_MS)
 
 export async function handleRouteEta(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const startedAt = Date.now();
-  const [o,dst] = await Promise.all([resolveEndpoint(query.origin, "origin"),resolveEndpoint(query.destination, "destination")]);
+  const [o0,d0] = await Promise.all([resolveEndpoint(query.origin, "origin"),resolveEndpoint(query.destination, "destination")]);
+  const {o,d:dst}=chooseClosestPair(o0,d0);
   // OSRM takes lon,lat order.
   const url = `https://router.project-osrm.org/route/v1/driving/${o.lon},${o.lat};${dst.lon},${dst.lat}?overview=false&steps=false`;
   const fetchedAt = new Date().toISOString();

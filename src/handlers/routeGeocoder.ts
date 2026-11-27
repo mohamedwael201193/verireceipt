@@ -9,6 +9,26 @@ export function parseRankedLocation(raw:string,provider:'Open-Meteo'|'Photon'):R
  if(typeof lat!=='number'||typeof lon!=='number'||!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180||!label|| (provider==='Photon'&&(h.geometry?.type!=='Point'||!Array.isArray(h.geometry.coordinates)||h.geometry.coordinates.some((x:unknown)=>typeof x!=='number'))))throw new Error('invalid top geocoder result');
  return {latitude:lat,longitude:lon,label,count:rows.length,rank:1,provider};
 }
+export interface RouteCandidate {latitude:number;longitude:number;label:string;rank:number;provider:string}
+/** Up to the first 5 rows the provider already returned, in provider order, each validated exactly like rank 1
+ * Rank is the provider's own position. No extra call. The candidates deliberately include non-city Open-Meteo rows (parks, mountains,
+ * monuments): the closest-pair chooser picks by distance, and those are real places. Rank-1 selection (resolveEndpoint) still applies isCityRow. */
+export function rankedCandidates(raw:string,provider:'Open-Meteo'|'Photon',max:number=5):RouteCandidate[]{
+ const j=JSON.parse(raw);const rows=provider==='Open-Meteo'?j.results:j.features;if(!Array.isArray(rows))return [];
+ const out:RouteCandidate[]=[];
+ for(let i=0;i<Math.min(max,rows.length);i++){
+  try{const h=parseRankedLocation(JSON.stringify(provider==='Open-Meteo'?{results:[rows[i]]}:{features:[rows[i]]}),provider);
+   if(h)out.push({latitude:h.latitude,longitude:h.longitude,label:h.label,rank:i+1,provider});}catch{/* an invalid row is not a candidate */}
+ }
+ return out;
+}
+/** Candidates from every geocoder body already fetched for this one query (Open-Meteo first, then Photon when it was asked), each
+ * provider's first 5 rows, de-duplicated by label and coordinates. A candidate keeps its own provider and rank. */
+export function allCandidates(fetched:{provider:'Open-Meteo'|'Photon';raw:string}[]):RouteCandidate[]{
+ const seen=new Set<string>(),out:RouteCandidate[]=[];
+ for(const f of fetched)for(const c of rankedCandidates(f.raw,f.provider)){const k=c.label+'|'+c.latitude+'|'+c.longitude;if(!seen.has(k)){seen.add(k);out.push(c);}}
+ return out;
+}
 /** True for a populated place or administrative division (GeoNames PPL*, ADM*). A missing feature code is not accepted. */
 export const isCityRow=(r:any):boolean=>typeof r?.feature_code==='string'&&/^(PPL|ADM)/.test(r.feature_code);
 /** Time one request may spend waiting in and reading from the geocoder queue. The route read after it
@@ -37,14 +57,14 @@ async function read(url:string,deadlineAt:number) {
   try{return await Promise.race([readPublicBody(url,1000000,READ_TIMEOUT_MS),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('geocoder deadline')),READ_TIMEOUT_MS);})]).finally(()=>clearTimeout(timer!));}catch(e){console.warn(JSON.stringify({event:'route_geocoder_read_failed',provider,error:e instanceof Error?e.name:'non-error',timeout:e instanceof Error&&/deadline|timeout|abort/i.test(e.message+e.name),elapsed_ms:Date.now()-startedAt,halts_provider_ms:haltsProvider(provider,e)?PROVIDER_HALT_MS:0}));if(haltsProvider(provider,e))haltedUntil[provider]=Date.now()+PROVIDER_HALT_MS;throw e;}
  });
 }
-export async function resolveRoutePlace(query:string,deadlineAt:number=Date.now()+ROUTE_GEOCODE_BUDGET_MS):Promise<{hit:RankedLocation;captures:{url:string;body:string;fetched_at:string}[]}> {
- const captures:{url:string;body:string;fetched_at:string}[]=[];
+export async function resolveRoutePlace(query:string,deadlineAt:number=Date.now()+ROUTE_GEOCODE_BUDGET_MS):Promise<{hit:RankedLocation;candidates:RouteCandidate[];captures:{url:string;body:string;fetched_at:string}[]}> {
+ const captures:{url:string;body:string;fetched_at:string}[]=[];const fetched:{provider:'Open-Meteo'|'Photon';raw:string}[]=[];
  for(const provider of ['Open-Meteo','Photon'] as const){
   const url=provider==='Open-Meteo'?`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=10&language=en&format=json`:`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=10&lang=en`;
-  try{const body=await read(url,deadlineAt);captures.push({url,body:body.raw,fetched_at:body.fetchedAt});const hit=parseRankedLocation(body.raw,provider);
+  try{const body=await read(url,deadlineAt);captures.push({url,body:body.raw,fetched_at:body.fetchedAt});fetched.push({provider,raw:body.raw});const hit=parseRankedLocation(body.raw,provider);
    // An Open-Meteo rank 1 that is not a populated place or administrative division (a park, a mountain, a monument) is not a city: ask the street geocoder, never fall back to it.
    if(hit&&provider==='Open-Meteo'&&!isCityRow(JSON.parse(body.raw).results[0]))continue;
-   if(hit)return {hit,captures};}catch(e){if(e instanceof GeocoderBusy)throw upstreamUnavailable('GEOCODER_BUSY','route geocoder queue is full for this request: reads are kept 1.1 s apart and the wait would exceed the response budget; nothing was guessed, retry shortly');throw upstreamUnavailable('GEOCODER_UNREACHABLE','route geocoder unavailable or invalid; no retry, bypass or guessed location');}
+   if(hit)return {hit,candidates:allCandidates(fetched),captures};}catch(e){if(e instanceof GeocoderBusy)throw upstreamUnavailable('GEOCODER_BUSY','route geocoder queue is full for this request: reads are kept 1.1 s apart and the wait would exceed the response budget; nothing was guessed, retry shortly');throw upstreamUnavailable('GEOCODER_UNREACHABLE','route geocoder unavailable or invalid; no retry, bypass or guessed location');}
  }
  throw unprocessable('PLACE_NOT_FOUND','neither city nor street geocoder returned a location; pass valid lat,lon');
 }

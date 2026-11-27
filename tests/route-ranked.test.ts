@@ -13,14 +13,18 @@ const route=readFileSync(join(__dirname,'fixtures/route-eta/osrm-corpus-to-calal
 beforeEach(()=>resetRouteGeocoderForTests());afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();resetRouteGeocoderForTests();});afterAll(()=>rmSync(scratch,{recursive:true,force:true}));
 it('real ambiguous city uses first provider result, count and full-precision coordinates disclosed',async()=>{
  const body=raw('springfield'),j=JSON.parse(body),hit=j.results[0];const f=vi.fn(async(url:unknown)=>new Response(String(url).includes('geocoding-api')?body:springfieldRoute));vi.stubGlobal('fetch',f);
- const out=await handleRouteEta({origin:'Springfield',destination:'27.8006,-97.3961'});expect(out.origin).toBe(hit.latitude+','+hit.longitude);expect(String(out.answer)).toContain('of '+j.results.length+' matches');expect(String(out.answer)).toContain('rank 1, provider order; not confirmed unique');
+ const out=await handleRouteEta({origin:'Springfield',destination:'27.8006,-97.3961'});expect(out.origin).toBe(hit.latitude+','+hit.longitude);expect(String(out.answer)).toContain('Open-Meteo rank 1 of the first rows it returned');expect(String(out.answer)).toContain('closest pair among '+(new Set(j.results.slice(0,5).map((r:any)=>r.name+'|'+r.latitude+'|'+r.longitude)).size)+' x 1 candidates');expect(String(out.answer)).toContain('not confirmed unique');
  expect(f.mock.calls.some(([url])=>String(url).includes('photon'))).toBe(false);
- const r=out.receipt as any,ev=String((await getReceiptEvidence(r.receipt_id)).evidence),e=JSON.parse(ev);expect(sha256Hex(ev)).toBe(r.raw_response_sha256);expect(e.geocoders[0].raw_body).toBe(body);expect(e.origin_selection).toContain('of '+j.results.length+' matches');expect(e.origin).toBe(out.origin);
+ const r=out.receipt as any,ev=String((await getReceiptEvidence(r.receipt_id)).evidence),e=JSON.parse(ev);expect(sha256Hex(ev)).toBe(r.raw_response_sha256);expect(e.geocoders[0].raw_body).toBe(body);expect(e.origin_selection).toContain('closest pair among');expect(e.origin).toBe(out.origin);
 });
 it('real public street capture falls through a real empty city capture, exact evidence retained',async()=>{
  const city=raw('street-city-negative'),street=raw('street'),hit=JSON.parse(street).features[0],c=hit.geometry.coordinates;
- vi.stubGlobal('fetch',async(url:unknown)=>new Response(String(url).includes('geocoding-api')?city:String(url).includes('photon')?street:dcRoute));
- const out=await handleRouteEta({origin:'1600 Pennsylvania Avenue NW, Washington DC',destination:'27.8006,-97.3961'});expect(out.origin).toBe(c[1]+','+c[0]);expect(String(out.answer)).toContain('Photon');expect(String(out.answer)).toContain('OpenStreetMap');expect(String(out.answer)).toContain('ODbL');
+ // The coordinate destination is fixed, so the origin is the Photon candidate (top 5) nearest to it. The OSRM body is SYNTHETIC: it echoes the requested points.
+ const echo=(url:string)=>{const mm=/driving\/([^;]+);([^?]+)\?/.exec(new URL(url).pathname+'?')!;const [a,b]=[mm[1],mm[2]].map(x=>x.split(',').map(Number));return JSON.stringify({code:'Ok',routes:[{duration:900,distance:7000}],waypoints:[{location:a,distance:1},{location:b,distance:1}]});};
+ vi.stubGlobal('fetch',async(url:unknown)=>new Response(String(url).includes('geocoding-api')?city:String(url).includes('photon')?street:echo(String(url))));
+ const gc=(f:any)=>{const r=Math.PI/180,la=f.geometry.coordinates[1],lo=f.geometry.coordinates[0],x=Math.sin((27.8006-la)*r/2)**2+Math.cos(la*r)*Math.cos(27.8006*r)*Math.sin((-97.3961-lo)*r/2)**2;return 2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));};
+ const near=[...JSON.parse(street).features.slice(0,5)].sort((p:any,q:any)=>gc(p)-gc(q))[0].geometry.coordinates;void hit;void c;
+ const out=await handleRouteEta({origin:'1600 Pennsylvania Avenue NW, Washington DC',destination:'27.8006,-97.3961'});expect(out.origin).toBe(near[1]+','+near[0]);expect(String(out.answer)).toContain('Photon');expect(String(out.answer)).toContain('OpenStreetMap');expect(String(out.answer)).toContain('ODbL');
  const ev=JSON.parse(String((await getReceiptEvidence((out.receipt as any).receipt_id)).evidence));expect(ev.geocoders.map((g:any)=>g.raw_body)).toEqual([city,street]);
 });
 it('actual negative street capture gives only PLACE_NOT_FOUND',async()=>{
