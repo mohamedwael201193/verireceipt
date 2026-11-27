@@ -42,6 +42,9 @@ describe("SANCTIONS_SCREENING_MATCH_GENERAL", () => {
     // threshold and still be disclosed as a candidate. The reviewer's memo
     // quoted 0.57, which is this pair's Sørensen-Dice component; the
     // documented score is max(Dice, normalized Levenshtein) = 0.666667.
+    // Legal-form stripping ("co", "ltd") does NOT lift this pair: the
+    // stripped cores ("anglo caribbean shipping" vs "anglo caribbean")
+    // are not equal, so the raw score stands.
     expect(matchScore("ANGLO CARIBBEAN SHIPPING", "ANGLO-CARIBBEAN CO., LTD.")).toBe(0.666667);
     stub();
     const result = await handleSanctionsScreen({ name: "ANGLO CARIBBEAN SHIPPING" });

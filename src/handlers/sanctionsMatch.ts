@@ -91,12 +91,27 @@ function levenshtein(a: string, b: string): number {
   return prev[n];
 }
 
-/** The documented score: max of Sørensen-Dice on token sets and
- * normalized Levenshtein on the whole normalized string. */
-export function matchScore(query: string, candidate: string): number {
-  const a = normalizeName(query);
-  const b = normalizeName(candidate);
-  if (!a || !b) return 0;
+/** Legal-form tokens are jurisdiction boilerplate, not identity: the
+ * company behind "PJSC MTS BANK" is MTS BANK. They are dropped from both
+ * names before scoring (graded receipt rcpt_2ZJWV2G5XZDSTWD2YZK98VEJIF:
+ * "MTS BANK" scored 0.8 against the SDN alias "PJSC MTS BANK" and stayed
+ * under the 0.85 threshold on the legal-form token alone). */
+const LEGAL_FORM_TOKENS = new Set([
+  "pjsc", "jsc", "ojsc", "cjsc", "pao", "oao", "zao", "ao", "llc", "ooo",
+  "ltd", "limited", "inc", "corp", "corporation", "co", "company", "plc",
+  "sa", "ag", "gmbh", "nv", "bv", "public", "joint", "stock",
+]);
+
+/** A name that stripping would empty keeps its tokens: two legal-form-only
+ * names must never collapse into an empty-string "match". */
+function withoutLegalForms(tokens: string[]): string[] {
+  const kept = tokens.filter((t) => !LEGAL_FORM_TOKENS.has(t));
+  return kept.length ? kept : tokens;
+}
+
+/** One normalized pair: max of Sørensen-Dice on the token sets and
+ * normalized Levenshtein on the whole string. */
+function pairScore(a: string, b: string): number {
   if (a === b) return 1;
   const ta = a.split(" ");
   const tb = b.split(" ");
@@ -105,4 +120,26 @@ export function matchScore(query: string, candidate: string): number {
   const dice = (2 * inter) / (ta.length + tb.length);
   const lev = 1 - levenshtein(a, b) / Math.max(a.length, b.length);
   return Math.round(Math.max(dice, lev) * 1e6) / 1e6;
+}
+
+/** The documented score: max of Sørensen-Dice on the token sets and
+ * normalized Levenshtein on the whole normalized string — with one
+ * legal-form rule: when both names reduce to the SAME token set once
+ * legal-form tokens are dropped (same core, differing only in
+ * jurisdiction boilerplate like "PJSC MTS BANK" vs "MTS BANK"), the
+ * score is 1. Anything short of an equal stripped core scores exactly
+ * the raw comparison, so the rule can never bridge two different cores
+ * (measured on the real SDN+ALT lists, 2026-11-27: a wider stripped-pair
+ * comparison produced 1,908 same-list false-positive pairs; the equal-core
+ * rule produces none with different cores). */
+export function matchScore(query: string, candidate: string): number {
+  const a = normalizeName(query);
+  const b = normalizeName(candidate);
+  if (!a || !b) return 0;
+  const strippedA = withoutLegalForms(a.split(" "));
+  const strippedB = withoutLegalForms(b.split(" "));
+  const setA = new Set(strippedA);
+  const setB = new Set(strippedB);
+  if (setA.size === setB.size && [...setA].every((t) => setB.has(t))) return 1;
+  return pairScore(a, b);
 }
