@@ -19,16 +19,16 @@ describe("current frontend contract metadata", () => {
   // is separate and must change only after a verified registration update.
   const workingHash = "0x" + createHash("sha256").update(raw).digest("hex");
   expect(workingHash).toBe(MINER_YAML_SHA256);
-  expect(SEPOLIA_YAML_HASH).toBe("0x30195e677e413b623445d82593b22e05402bf0176dea3912e053725ac7ca08f1");
+  expect(SEPOLIA_YAML_HASH).toBe("0x373438711810673d7e22f0d928352668a3bc882e9127a228e02b404c4a3747a2");
  });
  it("separates six selected demos from the declarations", () => {
   expect(INTENTS).toHaveLength(6);
   expect(INTENT_ENDPOINTS).toHaveLength(6);
-  expect(BOND_INTENT_COUNT).toBe(54); // on-chain registered count (registration 6188)
+  expect(BOND_INTENT_COUNT).toBe(58); // on-chain registered count (registration 6205)
   expect(BOND_REGISTRATION_ID).toBe(SEPOLIA_REGISTRATION_ID);
-  expect(SEPOLIA_REGISTRATION_ID).toBe(6188);
-  expect(MINER_BOND_BASE_UNITS).toBe(4_950_000);
-  expect(SEPOLIA_SERVING_REGISTRATION_IDS).toEqual([6152, 6160, 6174, 6176, 6177, 6188]);
+  expect(SEPOLIA_REGISTRATION_ID).toBe(6205);
+  expect(MINER_BOND_BASE_UNITS).toBe(5_230_000);
+  expect(SEPOLIA_SERVING_REGISTRATION_IDS).toEqual([6152, 6160, 6174, 6176, 6177, 6181, 6188, 6196, 6205]);
  });
  it("derives every visible declared-intent count from the manifest", () => {
   for (const f of ["../components/Layout.tsx", "../pages/landing/SiteFooter.tsx", "../pages/landing/IntentIde.tsx"]) {

@@ -58,7 +58,7 @@ describe("registration cast snippet", () => {
   });
 
   it("approves exactly the live quoteMinerBond amount in Sepolia Test USDC", () => {
-    expect(S).toContain('"quoteMinerBond(uint256)(uint256,uint256)" 54');
+    expect(S).toContain('"quoteMinerBond(uint256)(uint256,uint256)" 58');
     expect(S).toContain('cast send "$USDC" "approve(address,uint256)" "$DIAMOND" "$BOND"');
     expect(S).not.toMatch(/MACHINA/);
   });

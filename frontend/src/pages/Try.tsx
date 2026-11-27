@@ -88,7 +88,7 @@ export default function Try() {
         <p className="rp-muted">
           The full endpoint contracts, with parameters and error codes, are on{' '}
           <Link to="/docs">/docs</Link>; {DECLARED_INTENT_COUNT} intents are declared in the
-          manifest, 54 registered on Sepolia.
+          manifest, 58 registered on Sepolia.
         </p>
       </section>
 

@@ -39,12 +39,12 @@ export const DESK_DAILY_CAP_UUSDC = 2_000_000n;
 /** VeriReceipt's routing id in the node's miner catalogue (GET /api/miners, slug "verireceipt"). */
 export const VERIRECEIPT_MINER_ID = "774921";
 /** On-chain registration id (receipts and delivery rows use this, not the catalogue id). */
-export const VERIRECEIPT_ONCHAIN_MINER_ID = "6188";
+export const VERIRECEIPT_ONCHAIN_MINER_ID = "6205";
 /**
  * Every on-chain registration id that has served paid calls for slug
  * "verireceipt". A receipt names the registration that served it, so rows
  * keep their id after an updateMiner; append new ids, never rewrite.
  */
-export const VERIRECEIPT_ONCHAIN_MINER_IDS: readonly string[] = Array.from(new Set(["6152", "6160", VERIRECEIPT_ONCHAIN_MINER_ID]));
+export const VERIRECEIPT_ONCHAIN_MINER_IDS: readonly string[] = Array.from(new Set(["6152", "6160", "6188", "6196", VERIRECEIPT_ONCHAIN_MINER_ID]));
 /** The miner's public base URL (stored evidence at /receipts/{id}/raw). */
 export const MINER_BASE_URL = "https://verireceipt.onrender.com";

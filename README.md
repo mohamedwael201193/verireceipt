@@ -3,7 +3,7 @@
 **Sourced answers. Re-checkable bytes. Explicit limits.**
 
 VeriReceipt is a deterministic keyless miner for the Miners / Providers
-track (54 intents registered on Sepolia, registration 6188) and a Mission
+track (58 intents registered on Sepolia, registration 6205) and a Mission
 Desk app for the Apps & Agents track, Telegraph Season II. The miner fetches data
 without a language model. Every successful answer includes the SHA-256 of its
 stored upstream bytes. The Desk agent buys answers through testnet escrow and
@@ -56,7 +56,7 @@ state. Registration 6160 and YAML miner id 774921 are different identifiers.*
 
 ## Selected intents
 
-54 intents are registered on Sepolia under registration 6188; the registered
+58 intents are registered on Sepolia under registration 6205; the registered
 set lives in the pinned `miner.yaml` (see /docs). Six of the served
 intents:
 
@@ -130,13 +130,13 @@ Field names vary per endpoint; `confidence`, `verdict`, `source`, and
 
 ## Registration facts
 
-- **registrationId:** `6188` on Ethereum Sepolia (chainId 11155111). Node status `active` at
-  `GET https://devnode.telegraphprotocol.com/api/miners/6188` (checked 2026-11-24 17:47 UTC).
-  Created by `updateMiner(6181, …)` in tx
-  [`0x115e0e237ad66992ed52b8c2cf571806dedf9bff6e2338bd8bbe280853c9cb56`](https://sepolia.etherscan.io/tx/0x115e0e237ad66992ed52b8c2cf571806dedf9bff6e2338bd8bbe280853c9cb56)
-  (block 12197330). The earlier registrations (6152, 6160, 6174, 6176, 6177, 6181) are superseded.
-- **Registered YAML:** [`miner.yaml` @ `680fbdbf`](https://raw.githubusercontent.com/mohamedwael201193/verireceipt/680fbdbf8b77b640ba0d62c088dc9c154ab9acf7/miner.yaml),
-  SHA-256 `0x30195e677e413b623445d82593b22e05402bf0176dea3912e053725ac7ca08f1`
+- **registrationId:** `6205` on Ethereum Sepolia (chainId 11155111). Node status `active` at
+  `GET https://devnode.telegraphprotocol.com/api/miners/6205` (checked 2026-11-27 00:59 UTC).
+  Created by `updateMiner(6196, …)` in tx
+  [`0x0abb85de710b9b20a551d0676c8b005357786ed223c29dd9596409dcdf213ec7`](https://sepolia.etherscan.io/tx/0x0abb85de710b9b20a551d0676c8b005357786ed223c29dd9596409dcdf213ec7)
+  (block 12220050). The earlier registrations (6152, 6160, 6174, 6176, 6177, 6181, 6188, 6196) are superseded.
+- **Registered YAML:** [`miner.yaml` @ `fa71e619`](https://raw.githubusercontent.com/mohamedwael201193/verireceipt/fa71e619758b4efc8bd679b25e2018cf0e104003/miner.yaml),
+  SHA-256 `0x373438711810673d7e22f0d928352668a3bc882e9127a228e02b404c4a3747a2`
 - **Diamond (Telegraph):** `0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b`
 - **Floor price (on-chain):** `minPriceUsdc = 10000` = $0.01, the protocol minimum (getMiner(6160)).
   Telegraph docs (using/api-keys.md): a request costs "usually about $0.01" per miner call.

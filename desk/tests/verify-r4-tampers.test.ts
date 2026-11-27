@@ -293,10 +293,10 @@ describe("J2 r3 / J1 r3 tampers (desk-d r4)", () => {
   });
 });
 
-describe("pin-6188: current registration and historical receipt ids", () => {
+describe("pin-6205: current registration and historical receipt ids", () => {
   it("accepts the current id and keeps historical committed purchase ids, nothing else", () => {
-    expect(VERIRECEIPT_ONCHAIN_MINER_ID).toBe("6188");
-    expect([...VERIRECEIPT_ONCHAIN_MINER_IDS].sort()).toEqual(["6152", "6160", "6188"]);
+    expect(VERIRECEIPT_ONCHAIN_MINER_ID).toBe("6205");
+    expect([...VERIRECEIPT_ONCHAIN_MINER_IDS].sort()).toEqual(["6152", "6160", "6188", "6196", "6205"]);
     expect(honest.telegraph_receipt.miner).toBe("6152");
   });
   it("a delivery row naming a different registration than the receipt fails", () => {

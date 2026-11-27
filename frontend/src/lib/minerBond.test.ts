@@ -21,12 +21,12 @@ import { SPRINT_STEPS } from "../pages/landing/data";
 const word = (n: number) => "0x" + n.toString(16).padStart(64, "0");
 
 describe("miner bond (single source)", () => {
-  it("is the on-chain 6188 bond for 54 intents: 4,950,000 = $4.95", () => {
+  it("is the on-chain 6205 bond for 58 intents: 5,230,000 = $5.23", () => {
     expect(BOND_REGISTRATION_ID).toBe(SEPOLIA_REGISTRATION_ID);
-    expect(BOND_INTENT_COUNT).toBe(54);
-    expect(MINER_BOND_BASE_UNITS).toBe(4_950_000);
-    expect(MINER_BOND_USD).toBe(4.95);
-    expect(MINER_BOND_USD_TEXT).toBe("$4.95");
+    expect(BOND_INTENT_COUNT).toBe(58);
+    expect(MINER_BOND_BASE_UNITS).toBe(5_230_000);
+    expect(MINER_BOND_USD).toBe(5.23);
+    expect(MINER_BOND_USD_TEXT).toBe("$5.23");
   });
 
   it("reproduces quoteMinerBond(n) as read on-chain 2026-11-21", () => {
@@ -47,11 +47,11 @@ describe("miner bond (single source)", () => {
   });
 
   it("every display derives from it (no stale $1.40)", () => {
-    expect(BOND_DISPLAY).toBe("$4.95 Test USDC Bond");
-    expect(MINER_BOND_USDC).toBe(4.95);
-    expect(DASH_BOND).toBe("$4.95 Test USDC");
+    expect(BOND_DISPLAY).toBe("$5.23 Test USDC Bond");
+    expect(MINER_BOND_USDC).toBe(5.23);
+    expect(DASH_BOND).toBe("$5.23 Test USDC");
     const plan = SPRINT_STEPS.map((s) => s.g2).join("\n");
-    expect(plan).toContain("$4.95 Test USDC bond");
+    expect(plan).toContain("$5.23 Test USDC bond");
     expect(plan).not.toContain("$1.40");
   });
 
@@ -65,7 +65,7 @@ describe("miner bond (single source)", () => {
 describe("fetchLiveMinerBond", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("reads minerBond(6188) and quoteMinerBond(54) and reports a match", async () => {
+  it("reads minerBond(6205) and quoteMinerBond(58) and reports a match", async () => {
     const calls: string[] = [];
     vi.stubGlobal(
       "fetch",
@@ -74,16 +74,16 @@ describe("fetchLiveMinerBond", () => {
         const body = JSON.parse(String(init.body));
         calls.push(body.params[0].data);
         expect(body.params[0].to).toBe("0x72a70e949362670Bf8bceAd24eFC5b8f950aa08b");
-        const out = body.params[0].data.startsWith(SEL_QUOTE_MINER_BOND) ? word(4_950_000) + word(4_950_000).slice(2) : word(4_950_000);
+        const out = body.params[0].data.startsWith(SEL_QUOTE_MINER_BOND) ? word(5_230_000) + word(5_230_000).slice(2) : word(5_230_000);
         return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: out }), { status: 200 });
       }),
     );
     const r = await fetchLiveMinerBond();
-    expect(r.registrationBond).toBe(BigInt(4_950_000));
-    expect(r.quoteForIntents).toBe(BigInt(4_950_000));
+    expect(r.registrationBond).toBe(BigInt(5_230_000));
+    expect(r.quoteForIntents).toBe(BigInt(5_230_000));
     expect(r.matchesConstant).toBe(true);
     expect(calls.sort()).toEqual(
-      [SEL_MINER_BOND + (6188).toString(16).padStart(64, "0"), SEL_QUOTE_MINER_BOND + (54).toString(16).padStart(64, "0")].sort(),
+      [SEL_MINER_BOND + (6205).toString(16).padStart(64, "0"), SEL_QUOTE_MINER_BOND + (58).toString(16).padStart(64, "0")].sort(),
     );
   });
 
