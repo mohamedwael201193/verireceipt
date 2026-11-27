@@ -28,6 +28,7 @@
 // checks and no statuses serves neutral with passed=false and says
 // there is nothing to verify — never an invented pass.
 import { ApiError, badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
+import { withAnswerClass } from "../core/answerClass";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
@@ -56,6 +57,30 @@ async function fetchText(url: string): Promise<string> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Fixed-label class of a `patch` value: shape label and length bucket only.
+ *  Never the value or any substring. Labels name the shape the input most
+ *  resembles whether or not parsePatchRef accepts it. */
+export function patchInputClass(raw: string | undefined): { patch_input_class: string; length_bucket: string } {
+  const v = (raw ?? "").trim();
+  let patch_input_class: string;
+  if (!/[0-9A-Za-z]/.test(v)) patch_input_class = "empty_like";
+  else if (/^https?:\/\//i.test(v)) {
+    if (/^https?:\/\/github\.com\//i.test(v)) {
+      if (/\/commit\//i.test(v)) patch_input_class = "github_url_commit";
+      else if (/\/pull\//i.test(v)) patch_input_class = "github_url_pull";
+      else if (/\/actions\/runs\//i.test(v)) patch_input_class = "github_url_run";
+      else patch_input_class = "github_url_other";
+    } else patch_input_class = "other_host_url";
+  }
+  else if (/^[0-9a-f]{7,40}$/i.test(v)) patch_input_class = "sha_only";
+  else if (v.includes("/") && v.includes("@")) patch_input_class = "owner_repo_at";
+  else if (v.includes("/") && v.includes("#")) patch_input_class = "owner_repo_hash";
+  else if (/^[^/\s@#]+\/[^/\s@#]+\/?$/.test(v)) patch_input_class = "owner_repo_only";
+  else if (/^[A-Za-z0-9._-]+$/.test(v)) patch_input_class = "bare_word";
+  else patch_input_class = "other";
+  return { patch_input_class, length_bucket: v.length <= 16 ? "<=16" : v.length <= 40 ? "17-40" : v.length <= 100 ? "41-100" : ">100" };
 }
 
 interface PatchRef { owner: string; repo: string; kind: "commit" | "pr" | "run" | "head"; ref: string }
@@ -135,7 +160,7 @@ export async function handleCodePatchVerify(query: Record<string, string | undef
   let ref: PatchRef;
   try { ref = parsePatchRef(raw); }
   catch {
-    return { answer: "passed=false; conclusion=neutral; failing checks: unknown. The input does not resolve to a GitHub repository, commit, pull request or Actions run. No CI result was fetched or verified.", conclusion: "neutral", passed: false, commit: null, pipeline: null, verdict: "unavailable", confidence: 0, receipt: null };
+    return withAnswerClass({ answer: "passed=false; conclusion=neutral; failing checks: unknown. The input does not resolve to a GitHub repository, commit, pull request or Actions run. No CI result was fetched or verified.", conclusion: "neutral", passed: false, commit: null, pipeline: null, verdict: "unavailable", confidence: 0, receipt: null }, INTENT, patchInputClass(raw));
   }
   const base = `https://api.github.com/repos/${ref.owner}/${ref.repo}`;
   let sha = ref.ref;

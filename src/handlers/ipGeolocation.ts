@@ -28,6 +28,7 @@ import {isIP} from 'node:net';
 // the degradation named. Private/reserved addresses have no public
 // geolocation: disclosed no_data, without coordinates.
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
+import { withAnswerClass } from "../core/answerClass";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
@@ -51,6 +52,35 @@ const plainName=(v:string):string=>v.toLowerCase().replace(/^the\s+/,'').trim();
 
 const V4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 const V6 = /^[0-9a-fA-F:]+$/;
+
+/** Fixed-label class of a refused IP: the range family only, never the address or any
+ *  part of it. The whole 192.0.0.0/16 block logs v4_192_0, including the 192.0.2.0/24
+ *  documentation range (narrowing it to v4_doc is a later change). v4-mapped IPv6 logs
+ *  v6_mapped without recursing into the v4 family; v6 multicast has no label of its own
+ *  and logs other. */
+export function ipClass(ip: string): string {
+  const m = V4.exec(ip);
+  if (m) {
+    const [a, b, c] = m.slice(1).map(Number);
+    if (a === 10) return "v4_private_10";
+    if (a === 127) return "v4_loopback";
+    if (a === 169 && b === 254) return "v4_link_local";
+    if (a === 172 && b >= 16 && b <= 31) return "v4_private_172";
+    if (a === 192 && b === 168) return "v4_private_192_168";
+    if (a === 100 && b >= 64 && b <= 127) return "v4_cgnat";
+    if (a === 192 && b === 0) return "v4_192_0";
+    if (a === 198 && (b === 18 || b === 19)) return "v4_198_18";
+    if ((a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113)) return "v4_doc";
+    if (a === 0 || a >= 224) return "v4_multicast_reserved";
+    return "other";
+  }
+  if (isIP(ip) !== 6) return "other";
+  const low = new URL(`http://[${ip}]/`).hostname.slice(1, -1).toLowerCase();
+  if (low.startsWith("::ffff:")) return "v6_mapped";
+  if (low.startsWith("2001:db8:")) return "v6_doc";
+  if (low === "::1" || low === "::" || low.startsWith("fc") || low.startsWith("fd") || /^fe[89ab]/.test(low)) return "v6_local";
+  return "other";
+}
 
 export function validatePublicIp(ip: string): void {
   if (ip.includes("%") || !isIP(ip)) throw badRequest("INVALID_IP", "ip must be an IPv4 or IPv6 address");
@@ -124,13 +154,13 @@ export async function handleIpGeolocation(query: Record<string, string | undefin
   query=queryFallback(query,"ip",firstIp);
   const ip = query.ip?.trim();
   if (!ip) throw badRequest("MISSING_PARAM", "ip is required");
-  if (ip.length > 45) throw badRequest("INVALID_IP", "ip is too long to be an IP address");
+  if (ip.length > 45) throw withAnswerClass(badRequest("INVALID_IP", "ip is too long to be an IP address"), INTENT, { ip_class: "too_long" });
   try { validatePublicIp(ip); } catch (error) {
-    if ((error as {code?:string}).code !== 'PRIVATE_IP') throw error;
-    return {intent:INTENT,ip,receipt:null,checked_at:new Date().toISOString(),
+    if ((error as {code?:string}).code !== 'PRIVATE_IP') throw withAnswerClass(error as Error, INTENT, { ip_class: "invalid" });
+    return withAnswerClass({intent:INTENT,ip,receipt:null,checked_at:new Date().toISOString(),
       answer: `${ip}: PRIVATE_IP, private, reserved or documentation addresses have no public geolocation. No coordinates are available.`,
       verdict: 'no_data', confidence: 0, source: 'local IP address classification',
-    };
+    }, INTENT, { ip_class: ipClass(ip) });
   }
   const whoUrl = `https://ipwho.is/${encodeURIComponent(ip)}`;
   const apiUrl = `http://ip-api.com/json/${encodeURIComponent(ip)}`;
