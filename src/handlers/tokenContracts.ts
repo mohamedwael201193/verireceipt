@@ -81,6 +81,27 @@ export const TOKEN_CONTRACTS: Record<string, Record<string, string>> = {
     USDP: "0x8E870D67F660D95d5be530380D0eC0bd388289E1",
     PYUSD: "0x6c3ea9036406852006290770BEdFcAbA0e23A0e8",
     ONDO: "0xfAbA6f8e4a5E8Ab82F62fe7C39859FA577269BE3",
+    // T3 (verified live via decimals() + symbol() at finalized, 2026-11-28,
+    // all 18 decimals). RENDER's on-chain symbol is 'RNDR' (RNDR is an alias of
+    // the RENDER key, see TOKEN_SYMBOL_ALIASES). USDE ('USDe') and ENA are
+    // already registered by the issuer-published list below. MKR stays
+    // excluded (bytes32 symbol).
+    SUSHI: "0x6B3595068778DD592e39A122f4f5a5cF09C90fE2",
+    "1INCH": "0x111111111117dC0aa78b770fA6A738034120C302",
+    YFI: "0x0bc529c00C6401aEF6D220BE8C6Ea1667F6Ad93e",
+    BAL: "0xba100000625a3754423978a60c9317c58a424e3D",
+    CVX: "0x4e3FBD56CD56c3e72c1403e103b45Db9da5B9D2B",
+    GNO: "0x6810e776880C02933D47DB1b9fc05908e5386b96",
+    DYDX: "0x92D6C1e31e14520e676a687F0a93788B716BEff5",
+    TUSD: "0x0000000000085d4780B73119b644AE5ecd22b376",
+    POL: "0x455e53CBB86018Ac2B8092FdCd39d8444aFFC3F6",
+    PAXG: "0x45804880De22913dAFE09f4980848ECE6EcbAf78",
+    RENDER: "0x6De037ef9aD2725EB40118Bb1702EBb27e4Aeb24",
+    IMX: "0xF57e7e7C23978C3cAEC3C3548E3D615c346e79fF",
+    FET: "0xaea46A60368A7bD060eec7DF8CBa43b7EF41Ad85",
+    LRC: "0xBBbbCA6A901c926F240b89EacB641d8Aec7AEafD",
+    AXS: "0xBB0E17EF65F82Ab018d8EDd776e8DD940327B28b",
+    CHZ: "0x3506424F91fD33084466F402d5D97f05F8e3b4AF",
   },
   base: {
     USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
@@ -138,9 +159,17 @@ export function isNativeSymbol(chain: string, symbol: string): boolean {
   return s === "ETH";
 }
 
+/** Alternate tickers that resolve to an existing registry key. */
+export const TOKEN_SYMBOL_ALIASES: Record<string, string> = { RNDR: "RENDER" };
+
+function registryKey(symbol: string): string {
+  const sym = symbol.trim().toUpperCase();
+  return Object.hasOwn(TOKEN_SYMBOL_ALIASES, sym) ? TOKEN_SYMBOL_ALIASES[sym] : sym;
+}
+
 /** Look up a symbol's contract on a chain; undefined when unknown. */
 export function tokenContractFor(chain: string, symbol: string): string | undefined {
-  return TOKEN_CONTRACTS[chain]?.[symbol.trim().toUpperCase()];
+  return TOKEN_CONTRACTS[chain]?.[registryKey(symbol)];
 }
 
 /**
@@ -196,7 +225,7 @@ const CANONICAL_CHAIN_ORDER = ["ethereum", "base", "arbitrum", "optimism", "poly
 /** Canonical home chain + contract for a bare symbol with no chain
  * given, or null when no listed chain carries the symbol. */
 export function canonicalHomeChain(symbol: string): { chain: string; contract: string } | null {
-  const sym = symbol.trim().toUpperCase();
+  const sym = registryKey(symbol);
   for (const chain of CANONICAL_CHAIN_ORDER) {
     const contract = TOKEN_CONTRACTS[chain]?.[sym];
     if (contract) return { chain, contract };

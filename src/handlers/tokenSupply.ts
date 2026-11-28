@@ -1,5 +1,6 @@
 import {discoverSupplyChains} from './tokenChainDiscovery';
 import {withAnswerClass} from '../core/answerClass';
+import {symbolBucket} from '../core/symbolVocab';
 // TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL — GET /v1/token-supply?token=
 //
 // Zero-LLM. Answers the current total minted supply of an ERC-20 token
@@ -152,7 +153,7 @@ function agreeingPair(legs: SupplyLeg[]): { leg: SupplyLeg; count: number } | nu
   return best;
 }
 
-export function supplyInputClass(token:string|undefined,chain:string|undefined){const value=token?.trim()??'';return{token_shape:!value?'empty':ADDRESS_RE.test(value)?'address':/\s/.test(value)?'name_with_spaces':'symbol',has_chain:!!chain,in_registry:!!value&&Object.keys(TOKEN_CONTRACTS).some(c=>!!tokenContractFor(c,value))};}
+export function supplyInputClass(token:string|undefined,chain:string|undefined){const value=token?.trim()??'';return{token_shape:!value?'empty':ADDRESS_RE.test(value)?'address':/\s/.test(value)?'name_with_spaces':'symbol',has_chain:!!chain,in_registry:!!value&&Object.keys(TOKEN_CONTRACTS).some(c=>!!tokenContractFor(c,value)),...(value?{symbol_bucket:symbolBucket(value)}:{})};}
 
 export async function handleTokenSupply(
   query: Record<string, string | undefined>,
