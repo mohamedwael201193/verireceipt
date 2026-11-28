@@ -7,9 +7,36 @@ import {liquidityChain,liquidityPair} from './liquiditySelectors';
 import {stripTvlWrapper} from '../handlers/tvl';
 // Coarse, fixed-label classes of a rejected input for the refusal_param_class log line.
 // Only labels from fixed lists are returned. The raw value, or any part of it outside the lists, is never logged.
-const CHAINS=new Set(['gnosis','celo','blast','fantom','linea','scroll','zksync','mantle','metis','moonbeam','moonriver','cronos','aurora','harmony','kava','klaytn','sei','sui','aptos','near','cosmos','tron','ton','cardano','polkadot','tezos','stellar','xrp','ripple','litecoin','dogecoin','bitcoin','solana','avalanche','bsc','bnb','polygon','arbitrum','optimism','base','ethereum','zora','mode','taiko','manta','berachain','sonic','unichain','ink','abstract','hyperliquid','monad']);
+const BASE_CHAINS=['gnosis','celo','blast','fantom','linea','scroll','zksync','mantle','metis','moonbeam','moonriver','cronos','aurora','harmony','kava','klaytn','sei','sui','aptos','near','cosmos','tron','ton','cardano','polkadot','tezos','stellar','xrp','ripple','litecoin','dogecoin','bitcoin','solana','avalanche','bsc','bnb','polygon','arbitrum','optimism','base','ethereum','zora','mode','taiko','manta','berachain','sonic','unichain','ink','abstract','hyperliquid','monad'];
+// Popular aliases: logging labels only, nothing here changes which chains are served.
+const ALIAS_CHAIN_LABELS=['eth','matic','avax','bnbchain','arbitrum-one','op-mainnet','mainnet','polygon-pos','base-mainnet','zkevm','pulsechain','bitcoin-cash','monad','berachain','unichain','sonic','ink','soneium','abstract','taiko','manta','mint','opbnb','arbitrum-nova','polygon-zkevm','linea-mainnet','scroll-mainnet'];
+const CHAINS=new Set([...BASE_CHAINS,...ALIAS_CHAIN_LABELS]);
 const MACRO_TOKENS=new Set(['gdp','growth','per','capita','real','nominal','inflation','unemployment','rate','cpi','population','trade','debt','interest','other']);
 export function chainClass(raw:string|undefined):string{const k=(raw??'').trim().toLowerCase();return CHAINS.has(k)?k:'other';}
+const NETWORK_WORDS=new Set(['mainnet','testnet','chain','network','pos','l1','l2','evm']);
+/** Fixed-label shape of a chain value. Only labels from fixed lists; the raw text or any part of it outside the lists is never returned. */
+export function chainShape(raw:string|undefined):Record<string,unknown>{
+ const v=raw??'';
+ const n=v.length;
+ const tokens=v.toLowerCase().split(/[\s-]+/).filter(Boolean);
+ const first=tokens[0]??'';
+ return {
+  len_bucket:n===0?'0':n<=3?'1-3':n<=8?'4-8':n<=16?'9-16':n<=32?'17-32':'>32',
+  has_space:/\s/.test(v),has_hyphen:v.includes('-'),
+  ascii:/^[\x00-\x7f]*$/.test(v),
+  first_token_known:CHAINS.has(first)?first:'none',
+  has_network_word:tokens.some(t=>NETWORK_WORDS.has(t)),
+  case_variant:v===v.toLowerCase()?'lower':v===v.toUpperCase()?'upper':'mixed'
+ };
+}
+/** Every request parameter name the miner serves (miner.yaml endpoints plus the logged aliases). Names outside it are only counted. */
+const REQUEST_SHAPE_KEYS=new Set(['address','amount','asset','base','bin','block','block_height','chain','chains','cik','company','country','currency','cve','cve_id','date','destination','domain','entity','event','form','form_type','from','from_currency','game','host','indicator','interval_start','ip','jurisdiction','lat','location','lon','metric','name','node_or_zone','origin','patch','pair','period','pool','project','protocol','query','question','quote','record_type','reference','retailer','route_or_flight','service','subject','symbol','target','ticker','to','to_currency','token','topic','transaction','tx_hash','url','validator_index','vat_number','vendor','window_hours','year']);
+/** Fixed-label shape of a request's parameters: how many, which closed-list names, and how many others. Never an unlisted name or any value. */
+export function requestShape(query:unknown):{param_count:0|1|2|'3+';keys_in_closed_list:string[];unknown_key_count:number}{
+ const keys=query!==null&&typeof query==='object'?Object.keys(query as object):[];
+ const known=[...new Set(keys.filter(k=>REQUEST_SHAPE_KEYS.has(k)))].sort();
+ return {param_count:keys.length>=3?'3+':keys.length as 0|1|2,keys_in_closed_list:known,unknown_key_count:keys.filter(k=>!REQUEST_SHAPE_KEYS.has(k)).length};
+}
 export function indicatorType(raw:string|undefined):string{
  const v=(raw??'').trim();
  if(/^[0-9a-f]{32}$/i.test(v))return 'md5';if(/^[0-9a-f]{40}$/i.test(v))return 'sha1';if(/^[0-9a-f]{64}$/i.test(v))return 'sha256';
@@ -41,7 +68,7 @@ export function poolClass(raw:string|undefined):string{
  if(/^[A-Za-z][A-Za-z0-9.' %/-]*$/.test(v)&&/[A-Za-z]{3}/.test(v)&&/[ ]/.test(v))return 'name';
  return 'other';
 }
-const TVL_CHAIN_WORDS=new Set([...CHAINS,'ethereum','eth','bsc','bnb','polygon','arbitrum','optimism','base','avalanche','solana','sol','fantom','op','arb']);
+const TVL_CHAIN_WORDS=new Set([...BASE_CHAINS,'ethereum','eth','bsc','bnb','polygon','arbitrum','optimism','base','avalanche','solana','sol','fantom','op','arb']);
 /** Fixed-label class of a TVL `protocol` value: length bucket and booleans only. Never the value or any substring. */
 export function tvlProtocolClass(raw:string|undefined):Record<string,unknown>{
  const v=(raw??'').trim();
@@ -111,7 +138,7 @@ function ownString(query:unknown,key:string):string|undefined{
 }
 /** The extra fields of a refusal_param_class line for this route and error, or null when the route/error has no class. */
 export function refusalParamClass(route:string|undefined,errorCode:string,query:unknown):Record<string,unknown>|null{
- if(route==='/v1/gas-price'&&errorCode==='CHAIN_NOT_SERVED')return {chain_class:chainClass(ownString(query,'chain'))};
+ if(route==='/v1/gas-price'&&errorCode==='CHAIN_NOT_SERVED'){const chain=ownString(query,'chain');return {chain_class:chainClass(chain),...chainShape(chain)};}
  if(route==='/v1/threat-indicator'||route==='/v1/malware-hash')return {indicator_type:indicatorType(ownString(query,'indicator'))};
  if(route==='/v1/macro'&&errorCode==='UNSUPPORTED_INDICATOR')return macroTokens(ownString(query,'indicator'));
  if(route==='/v1/grid-price')return gridRefusalClass(ownString(query,'node_or_zone'));

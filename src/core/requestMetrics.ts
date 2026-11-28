@@ -1,6 +1,6 @@
 import { targetShapeOf } from '../handlers/packageSecurity';
 import {sanitizeAnswerClass} from "./answerClass";
-import {refusalParamClass,REFUSAL_INTENTS} from "./refusalClass";
+import {refusalParamClass,requestShape,REFUSAL_INTENTS} from "./refusalClass";
 import { hostClassOf } from "./hostClass";
 // Fixed-label observability. Only route-owned closed enums may expose canonical values.
 // Never retain free text, URL/query strings, bodies, headers, IPs or user ids.
@@ -227,7 +227,7 @@ export function recordRequestCompletion(route: string | undefined, status: numbe
       const dnsReasons:Record<string,string>={DNS_RESOLVERS_DISAGREE:'resolver_disagreement',DNS_RESOLVERS_DOWN:'inconclusive',INVALID_RECORD_TYPE:'bad_type',MISSING_PARAM:'missing_param',INVALID_NAME:'invalid_name',RECEIPT_PERSIST_FAILED:'persistence_failed',INTERNAL:'internal'};
       const dnsClass=intent==='DNS_RECORD_LOOKUP_GENERAL'&&status>=400?{dns_refusal_reason:typeof details.errorCode==='string'&&Object.hasOwn(dnsReasons,details.errorCode)?dnsReasons[details.errorCode]:'other'}:undefined;
       const answerClass=sanitizeAnswerClass(intent,details.answerClass??dnsClass??paymentClass??refused);
-      console.info(JSON.stringify({ event: "request_complete", intent, path: route, param_keys,
+      console.info(JSON.stringify({ event: "request_complete", intent, path: route, param_keys, request_shape: requestShape(query),
         ...(route === "/v1/security-review" ? { target_shape: targetShapeOf(ownString(details.query, "target")) } : {}),
         ...(route === "/v1/server-uptime" ? { host_class: hostClassOf(ownString(details.query, "host")) } : {}),
         ...(input_shape ? { input_shape } : {}), ...(receiptId?{receipt_id:receiptId}:{}), ...(answerClass?{answer_class:answerClass}:{}),
