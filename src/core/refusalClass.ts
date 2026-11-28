@@ -229,6 +229,14 @@ export function periodShape(raw:string|undefined):string{
  if(new RegExp('^(?:'+MONTHS+')[a-z]*\\.?[\\s,_-]*\\d{4}$','i').test(v)||new RegExp('^\\d{4}[\\s,_-]*(?:'+MONTHS+')[a-z]*\\.?$','i').test(v))return 'month_name';
  return 'other';
 }
+/** Fixed-label class of a route-eta endpoint value: latlon, ascii_place, non_ascii, long (over the handler's 250-char limit) or absent. Never the value. */
+export function routePlaceClass(raw:string|undefined):string{
+ if(raw===undefined||raw.trim()==='')return 'absent';
+ const v=raw.trim();
+ if(v.length>250)return 'long';
+ if(/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)\s*,\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(v))return 'latlon';
+ return /^[\x00-\x7f]*$/.test(v)?'ascii_place':'non_ascii';
+}
 /** The extra fields of a refusal_param_class line for this route and error, or null when the route/error has no class. */
 export function refusalParamClass(route:string|undefined,errorCode:string,query:unknown,errorLabel?:string):Record<string,unknown>|null{
  if(route==='/v1/gas-price'&&errorCode==='CHAIN_NOT_SERVED'){const chain=ownString(query,'chain');return {chain_class:chainClass(chain),...chainShape(chain)};}
@@ -253,6 +261,7 @@ export function refusalParamClass(route:string|undefined,errorCode:string,query:
   if(errorCode==='AMBIGUOUS_COMPANY'&&(errorLabel==='multi_exact'||errorLabel==='page_incomplete'))cls.ambiguity_reason=errorLabel;
   return cls;
  }
+ if(route==='/v1/route-eta'){const o=ownString(query,'origin'),d=ownString(query,'destination');return {origin_place_class:routePlaceClass(o),origin_has_comma:(o??'').includes(','),destination_place_class:routePlaceClass(d),destination_has_comma:(d??'').includes(',')};}
  if(route==='/v1/weather-history')return {location_class:weatherLocationClass(ownString(query,'location')),date_age_bucket:dateAgeBucket(ownString(query,'date'))};
  if(route==='/v1/weather-forecast')return {location_class:forecastLocationClass(ownString(query,'location')),window_class:forecastWindowClass(ownString(query,'window_hours'))};
  if(route==='/v1/transaction-risk'){const t=ownString(query,'transaction');return {tx_shape:txShapeClass(t),length_bucket:txLengthBucket(t)};}
@@ -263,4 +272,4 @@ export function refusalParamClass(route:string|undefined,errorCode:string,query:
  if(route==='/v1/filings'&&(errorCode==='INVALID_PERIOD'||errorCode==='PERIOD_TOO_BROAD'))return {period_shape:periodShape(ownString(query,'period')),has_form_type:(ownString(query,'form_type')??ownString(query,'form')??'').trim()!==''};
  return null;
 }
-export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/liquidity':'LIQUIDITY_DEPTH_VERIFY_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL','/v1/tvl':'TVL_LOOKUP_GENERAL','/v1/token-supply':'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL','/v1/weather-history':'WEATHER_FORECAST_VERIFY_GENERAL','/v1/corporate-registry':'CORPORATE_REGISTRY_LOOKUP_GENERAL','/v1/weather-forecast':'WEATHER_FORECAST_GENERAL','/v1/transaction-risk':'TRANSACTION_RISK_GENERAL','/v1/onchain-metric':'ONCHAIN_METRIC_VERIFY_GENERAL','/v1/filings':'REGULATORY_FILING_MONITOR_GENERAL'};
+export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/liquidity':'LIQUIDITY_DEPTH_VERIFY_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL','/v1/tvl':'TVL_LOOKUP_GENERAL','/v1/token-supply':'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL','/v1/weather-history':'WEATHER_FORECAST_VERIFY_GENERAL','/v1/corporate-registry':'CORPORATE_REGISTRY_LOOKUP_GENERAL','/v1/route-eta':'ROUTE_ETA_GENERAL','/v1/weather-forecast':'WEATHER_FORECAST_GENERAL','/v1/transaction-risk':'TRANSACTION_RISK_GENERAL','/v1/onchain-metric':'ONCHAIN_METRIC_VERIFY_GENERAL','/v1/filings':'REGULATORY_FILING_MONITOR_GENERAL'};

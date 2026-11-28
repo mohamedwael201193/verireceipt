@@ -114,7 +114,7 @@ async function resolveEndpoint(raw:string|undefined,which:'origin'|'destination'
   return {lat,lon,label:lat+','+lon,selection:'coordinates given directly',geocoders:[],candidates:[],count:0,provider:''};
  }
  if(trimmed.length>250)throw badRequest('BAD_LOCATION','location name too long');
- const {hit,candidates,captures}=await resolveRoutePlace(trimmed);
+ const {hit,candidates,captures}=await resolveRoutePlace(trimmed,undefined,which);
  const label=hit.label+' ('+hit.latitude+', '+hit.longitude+')';
  return {lat:hit.latitude,lon:hit.longitude,label,selection:'chose '+label+' of '+hit.count+' matches returned by '+hit.provider+' (rank 1, provider order; not confirmed unique)',geocoders:captures,candidates,count:hit.count,provider:hit.provider};
 }

@@ -57,15 +57,34 @@ async function read(url:string,deadlineAt:number) {
   try{return await Promise.race([readPublicBody(url,1000000,READ_TIMEOUT_MS),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('geocoder deadline')),READ_TIMEOUT_MS);})]).finally(()=>clearTimeout(timer!));}catch(e){console.warn(JSON.stringify({event:'route_geocoder_read_failed',provider,error:e instanceof Error?e.name:'non-error',timeout:e instanceof Error&&/deadline|timeout|abort/i.test(e.message+e.name),elapsed_ms:Date.now()-startedAt,halts_provider_ms:haltsProvider(provider,e)?PROVIDER_HALT_MS:0}));if(haltsProvider(provider,e))haltedUntil[provider]=Date.now()+PROVIDER_HALT_MS;throw e;}
  });
 }
-export async function resolveRoutePlace(query:string,deadlineAt:number=Date.now()+ROUTE_GEOCODE_BUDGET_MS):Promise<{hit:RankedLocation;candidates:RouteCandidate[];captures:{url:string;body:string;fetched_at:string}[]}> {
+export type GeocodeOutcome='hit'|'no_result'|'not_city'|'http_429'|'http_403'|'timeout'|'halted'|'budget'|'busy'|'parse'|'other'|'not_asked';
+/** Reduce a read or parse failure to the closed outcome set. Never the error text. */
+export function geocodeFailureOutcome(e:unknown,parsing:boolean):GeocodeOutcome{
+ if(e instanceof GeocoderBusy)return 'busy';
+ if(parsing)return 'parse';
+ const m=e instanceof Error?e.message:'';
+ if(m==='geocoder reads halted')return 'halted';
+ if(m==='geocoder conservative budget exhausted')return 'budget';
+ const f=publicSourceFailure(e);
+ if(f==='http_429'||f==='http_403'||f==='timeout')return f;
+ if(m==='geocoder deadline')return 'timeout';
+ return 'other';
+}
+function logGeocodeOutcome(outcomes:Record<'Open-Meteo'|'Photon',GeocodeOutcome>,which:string):void{
+ try{console.info(JSON.stringify({event:'route_geocode_outcome',open_meteo:outcomes['Open-Meteo'],photon:outcomes.Photon,origin_or_dest:which==='origin'||which==='destination'?which:'unknown'}));}catch{/* never throws */}
+}
+export async function resolveRoutePlace(query:string,deadlineAt:number=Date.now()+ROUTE_GEOCODE_BUDGET_MS,which?:'origin'|'destination'):Promise<{hit:RankedLocation;candidates:RouteCandidate[];captures:{url:string;body:string;fetched_at:string}[]}> {
  const captures:{url:string;body:string;fetched_at:string}[]=[];const fetched:{provider:'Open-Meteo'|'Photon';raw:string}[]=[];
+ const outcomes:Record<'Open-Meteo'|'Photon',GeocodeOutcome>={'Open-Meteo':'not_asked',Photon:'not_asked'};
  for(const provider of ['Open-Meteo','Photon'] as const){
   const url=provider==='Open-Meteo'?`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=10&language=en&format=json`:`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=10&lang=en`;
-  try{const body=await read(url,deadlineAt);captures.push({url,body:body.raw,fetched_at:body.fetchedAt});fetched.push({provider,raw:body.raw});const hit=parseRankedLocation(body.raw,provider);
+  let parsing=false;
+  try{const body=await read(url,deadlineAt);captures.push({url,body:body.raw,fetched_at:body.fetchedAt});fetched.push({provider,raw:body.raw});parsing=true;const hit=parseRankedLocation(body.raw,provider);
    // An Open-Meteo rank 1 that is not a populated place or administrative division (a park, a mountain, a monument) is not a city: ask the street geocoder, never fall back to it.
-   if(hit&&provider==='Open-Meteo'&&!isCityRow(JSON.parse(body.raw).results[0]))continue;
-   if(hit)return {hit,candidates:allCandidates(fetched),captures};}catch(e){if(e instanceof GeocoderBusy)throw upstreamUnavailable('GEOCODER_BUSY','route geocoder queue is full for this request: reads are kept 1.1 s apart and the wait would exceed the response budget; nothing was guessed, retry shortly');throw upstreamUnavailable('GEOCODER_UNREACHABLE','route geocoder unavailable or invalid; no retry, bypass or guessed location');}
+   if(hit&&provider==='Open-Meteo'&&!isCityRow(JSON.parse(body.raw).results[0])){outcomes[provider]='not_city';continue;}
+   if(hit)return {hit,candidates:allCandidates(fetched),captures};outcomes[provider]='no_result';}catch(e){outcomes[provider]=geocodeFailureOutcome(e,parsing);logGeocodeOutcome(outcomes,which??'');if(e instanceof GeocoderBusy)throw upstreamUnavailable('GEOCODER_BUSY','route geocoder queue is full for this request: reads are kept 1.1 s apart and the wait would exceed the response budget; nothing was guessed, retry shortly');throw upstreamUnavailable('GEOCODER_UNREACHABLE','route geocoder unavailable or invalid; no retry, bypass or guessed location');}
  }
+ logGeocodeOutcome(outcomes,which??'');
  throw unprocessable('PLACE_NOT_FOUND','neither city nor street geocoder returned a location; pass valid lat,lon');
 }
 export const ROUTE_GEOCODER_ATTRIBUTION='Geocoding: Open-Meteo / GeoNames (CC BY 4.0); street fallback Photon, contains OpenStreetMap contributors data under ODbL 1.0, https://www.openstreetmap.org/copyright and https://opendatacommons.org/licenses/odbl/1-0/.';
