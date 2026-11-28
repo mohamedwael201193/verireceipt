@@ -1299,11 +1299,13 @@ interface ChainSplitEntry {
 }
 const protocolChainSplitCache = new Map<string, ChainSplitEntry>();
 const listsChainSplit = new Map<string, number>();
-/** Full per-chain split from the live protocol list, retained for the
- * top 200 protocols by TVL (chain-scoped "X on Y" answers without a
- * /protocol fill). Rebuilt on every lists refresh alongside the dominant
- * map; like that map it is in-memory only, so a restart serves an honest
- * "split unavailable" refusal until the first refresh lands. */
+/** Full per-chain split from the live protocol list, retained for every
+ * entry whose raw chainTvls carries a usable chain bucket (chain-scoped
+ * "X on Y" answers without a /protocol fill). Rebuilt on every lists
+ * refresh alongside the dominant map; unlike the dominant map it is
+ * in-memory only (not in the disk snapshot), so after a disk-seeded
+ * restart an honest "split unavailable" refusal stands until the first
+ * live refresh or the background fill lands. */
 const listsChainSplitFull = new Map<string, Record<string, number>>();
 /** When the lists chain-split map was last rebuilt (A5-fix2, J2-R2 F6:
  * the freshness comparison needs a timestamp for the lists side too). */
@@ -1354,17 +1356,30 @@ function installListsChainSplit(splits: ReadonlyMap<string, number>, fetchedAtMs
   listsChainSplitFetchedAt = fetchedAtMs;
 }
 
+/** Full per-chain split for every raw entry with a usable chain bucket.
+ * Small objects only; the raw payload is not retained. */
+function deriveListsChainSplitFull(
+  protocols: readonly ProtocolEntry[],
+): Map<string, Record<string, number>> {
+  const full = new Map<string, Record<string, number>>();
+  for (const entry of protocols) {
+    const split = fullChainSplit(entry.chainTvls);
+    if (split !== null) full.set(entry.slug, split);
+  }
+  return full;
+}
+
+function installListsChainSplitFull(full: ReadonlyMap<string, Record<string, number>>): void {
+  listsChainSplitFull.clear();
+  for (const [slug, split] of full) listsChainSplitFull.set(slug, split);
+}
+
 function rebuildListsChainSplit(
   protocols: readonly ProtocolEntry[],
   fetchedAtMs: number = Date.now(),
 ): void {
   installListsChainSplit(deriveListsChainSplit(protocols), fetchedAtMs);
-  listsChainSplitFull.clear();
-  const byTvlDesc = [...protocols].sort((a, b) => (b.tvl ?? 0) - (a.tvl ?? 0));
-  for (const entry of byTvlDesc.slice(0, 200)) {
-    const split = fullChainSplit(entry.chainTvls);
-    if (split !== null) listsChainSplitFull.set(entry.slug, split);
-  }
+  installListsChainSplitFull(deriveListsChainSplitFull(protocols));
 }
 
 /**
@@ -2134,6 +2149,9 @@ async function fetchListsLive(
       (raw, fetchedAt) => {
         const splits = deriveListsChainSplit(raw);
         installListsChainSplit(splits, fetchedAt);
+        // Chain-scoped "X on Y" must be answerable from the same raw
+        // catalog, not only after a /protocol/{slug} fill.
+        installListsChainSplitFull(deriveListsChainSplitFull(raw));
         freshChainSplits = { version: 1, source: PROTOCOLS_URL,
           fetched_at: fetchedAt, values: [...splits] };
       },
