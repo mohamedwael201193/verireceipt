@@ -33,6 +33,20 @@ import { saveReceipt } from "../core/storage";
 
 import {readForecastSource,rememberForecastSource} from './forecastSourceCache';
 import {metForecastFallback} from './weatherForecastFallback';
+import {stormHttpClass} from './stormAlert';
+
+type WeatherStage='geocoder'|'forecast'|'fallback';
+type WeatherHttpClass='429'|'4xx'|'5xx'|'timeout'|'parse'|'none';
+/** Reduce a failure to the closed class set with the storm reducer; the source cache tags an upstream HTTP status on its error. Never upstream text. */
+function weatherHttpClass(err:unknown):WeatherHttpClass{
+ const st=err instanceof Error?(err as {httpStatus?:unknown}).httpStatus:undefined;
+ if(typeof st==='number'&&Number.isInteger(st))return st===429?'429':st>=400&&st<500?'4xx':st>=500&&st<600?'5xx':'none';
+ return stormHttpClass(err);
+}
+/** One closed-vocabulary line per failed stage. Never throws; the response is unchanged. */
+function logWeatherStage(stage:WeatherStage,httpClass:WeatherHttpClass):void{
+ try{console.info(JSON.stringify({event:'weather_stage_failure',stage,http_class:httpClass}));}catch{/* never throws */}
+}
 
 export const INTENT = "WEATHER_FORECAST_GENERAL";
 
@@ -78,6 +92,8 @@ function dominantCondition(codes: number[]): string {
   return WMO_CONDITIONS[best] ?? `WMO weather code ${best}`;
 }
 
+function forecastMalformed(message:string):ApiError{logWeatherStage('forecast','parse');return upstreamUnavailable('FORECAST_MALFORMED',message);}
+
 export async function handleWeatherForecast(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const location = query.location?.trim();
   if (!location) throw badRequest("MISSING_PARAM", "location is required: a city or place name (provider-ranked selection is disclosed), or \"lat,lon\"");
@@ -101,7 +117,7 @@ export async function handleWeatherForecast(query: Record<string, string | undef
     const geocode = async (name: string): Promise<{ url: string; body: string; fetchedAt:string }> => {
       const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=10&language=en&format=json`;
       try { const entry=await readForecastSource('geocode',url);return {url,...entry}; }
-      catch { throw upstreamUnavailable('UPSTREAM_UNREACHABLE','Open-Meteo geocode source unavailable'); }
+      catch(e) { logWeatherStage('geocoder',weatherHttpClass(e));throw upstreamUnavailable('UPSTREAM_UNREACHABLE','Open-Meteo geocode source unavailable'); }
     };
     const nameOf = (hit: GeoHit) =>
       `${hit.name}${hit.admin1 ? `, ${hit.admin1}` : ""}${hit.country ? `, ${hit.country}` : ""} (${hit.latitude.toFixed(4)}, ${hit.longitude.toFixed(4)})`;
@@ -116,7 +132,7 @@ export async function handleWeatherForecast(query: Record<string, string | undef
       resolved = { lat: hit.latitude, lon: hit.longitude, name: nameOf(hit) };
     } catch (e) {
       if (e instanceof ApiError && e.code === "PLACE_NOT_FOUND") notFound = e;
-      else throw e;
+      else {if(e instanceof ApiError&&e.code==='GEOCODER_MALFORMED')logWeatherStage('geocoder','parse');throw e;}
     }
     if (!resolved && notFound && /\s/.test(location)) {
       // A space-separated "City Country" without the comma defeats the
@@ -132,6 +148,7 @@ export async function handleWeatherForecast(query: Record<string, string | undef
         try {
           hits = ((JSON.parse(retry.body) as { results?: GeoHit[] }).results ?? []);
         } catch {
+          logWeatherStage('geocoder','parse');
           throw upstreamUnavailable("GEOCODER_MALFORMED", "the geocoder returned a body that is not JSON; refusing to guess a location");
         }
         const matches = hits.filter((r) =>
@@ -157,9 +174,13 @@ export async function handleWeatherForecast(query: Record<string, string | undef
     `&hourly=temperature_2m,precipitation_probability,weather_code,precipitation,wind_speed_10m,wind_gusts_10m,cloud_cover,relative_humidity_2m&forecast_days=${forecastDays}&timezone=auto`;
   let fcEntry: {body:string;fetchedAt:string};
   try { fcEntry=await readForecastSource('forecast',fcUrl); }
-  catch {
-    const fallback = await metForecastFallback({ lat, lon, windowHours, location, resolvedName, locationSelection, geoUrl, geoBody });
+  catch(primaryErr) {
+    logWeatherStage('forecast',weatherHttpClass(primaryErr));
+    let fallback: Awaited<ReturnType<typeof metForecastFallback>>;
+    try { fallback = await metForecastFallback({ lat, lon, windowHours, location, resolvedName, locationSelection, geoUrl, geoBody }); }
+    catch(fallbackErr) { logWeatherStage('fallback',weatherHttpClass(fallbackErr)); throw fallbackErr; }
     if (fallback) return fallback;
+    logWeatherStage('fallback','none');
     throw upstreamUnavailable('UPSTREAM_UNREACHABLE','Open-Meteo forecast source unavailable');
   }
   const fcBody=fcEntry.body;
@@ -171,16 +192,16 @@ export async function handleWeatherForecast(query: Record<string, string | undef
   try {
     fc = JSON.parse(fcBody);
   } catch {
-    throw upstreamUnavailable("FORECAST_MALFORMED", "the forecast API returned a body that is not JSON; refusing to answer");
+    throw forecastMalformed( "the forecast API returned a body that is not JSON; refusing to answer");
   }
   const h = fc.hourly as (NonNullable<FcBody["hourly"]>&Record<string,unknown>)|undefined;
   if (!h?.time?.length || !h.temperature_2m || h.time.length !== h.temperature_2m.length) {
-    throw upstreamUnavailable("FORECAST_MALFORMED", "the forecast body is missing aligned hourly arrays; refusing to answer from a partial view");
+    throw forecastMalformed( "the forecast body is missing aligned hourly arrays; refusing to answer from a partial view");
   }
   if(fc.hourly_units?.time!=='iso8601'||fc.hourly_units.temperature_2m!=='°C'||fc.hourly_units.precipitation_probability!=='%'||fc.hourly_units.weather_code!=='wmo code')
-    throw upstreamUnavailable('FORECAST_MALFORMED','forecast units do not match the requested Celsius, percentage and WMO hourly fields');
+    throw forecastMalformed('forecast units do not match the requested Celsius, percentage and WMO hourly fields');
   if(typeof fc.utc_offset_seconds!=='number'||!Number.isInteger(fc.utc_offset_seconds)||Math.abs(fc.utc_offset_seconds)>14*3600)
-    throw upstreamUnavailable('FORECAST_MALFORMED','forecast UTC offset is missing or invalid');
+    throw forecastMalformed('forecast UTC offset is missing or invalid');
   const offsetSec = fc.utc_offset_seconds;
   const tzName = fc.timezone ?? "UTC", tzAbbr = fc.timezone_abbreviation ?? "UTC";
   // Current local hour at the place, as the upstream formats it.
@@ -198,19 +219,19 @@ export async function handleWeatherForecast(query: Record<string, string | undef
   const times = h.time.slice(startIdx, endIdx);
   const localStart=Date.parse(localHour+':00Z');
   if(times.some((t,i)=>typeof t!=='string'||t!==new Date(localStart+i*3600000).toISOString().slice(0,16)))
-    throw upstreamUnavailable('FORECAST_MALFORMED','requested hourly window has gaps, duplicates or invalid local times');
+    throw forecastMalformed('requested hourly window has gaps, duplicates or invalid local times');
   const temps = h.temperature_2m.slice(startIdx,endIdx);
   if(temps.length!==windowHours||temps.some(t=>typeof t!=='number'||!Number.isFinite(t)||t< -90||t>60))
-    throw upstreamUnavailable('FORECAST_MALFORMED','requested hourly temperature window is incomplete or invalid; full-window extrema are not inferred');
+    throw forecastMalformed('requested hourly temperature window is incomplete or invalid; full-window extrema are not inferred');
   const tempMax = Math.max(...temps as number[]), tempMin = Math.min(...temps as number[]);
   const precipRaw = (h.precipitation_probability ?? []).slice(startIdx,endIdx);
   if(precipRaw.length!==windowHours||precipRaw.some(p=>typeof p!=='number'||!Number.isFinite(p)||p<0||p>100))
-    throw upstreamUnavailable('FORECAST_MALFORMED','requested precipitation-probability window is incomplete or invalid');
+    throw forecastMalformed('requested precipitation-probability window is incomplete or invalid');
   const precipVals=precipRaw as number[];
   const precipPeak=Math.max(...precipVals);
   const codesRaw=(h.weather_code ?? []).slice(startIdx,endIdx);
   if(codesRaw.length!==windowHours||codesRaw.some(c=>typeof c!=='number'||!Number.isInteger(c)||!Object.hasOwn(WMO_CONDITIONS,c)))
-    throw upstreamUnavailable('FORECAST_MALFORMED','requested WMO weather-code window is incomplete or invalid');
+    throw forecastMalformed('requested WMO weather-code window is incomplete or invalid');
   const codes=codesRaw as number[];
   const condition=dominantCondition(codes);
   rememberForecastSource('forecast',fcUrl,fcEntry);

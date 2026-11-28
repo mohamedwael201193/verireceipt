@@ -23,7 +23,7 @@ export async function readForecastSource(kind:Kind,url:string):Promise<Entry> {
       try{await res.body?.cancel();}catch{}
       if(controller.signal.aborted)throw Error('forecast source timeout');
       if(n===0&&(res.status===429||res.status>=500)){await new Promise(r=>setTimeout(r,1000));continue;}
-      throw Error('forecast upstream HTTP failure');
+      {const failure=Error('forecast upstream HTTP failure') as Error&{httpStatus?:number};failure.httpStatus=res.status;throw failure;}
      }
      const body=await res.text();
      if(controller.signal.aborted)throw Error('forecast source timeout');

@@ -180,6 +180,55 @@ export function companyShape(raw:string|undefined):string{
  if(/[^\x00-\x7f]/.test(v))return 'has_non_ascii';
  return 'other';
 }
+/** Fixed-label class of a weather-forecast `location` value. Never the value. */
+export function forecastLocationClass(raw:string|undefined):string{
+ if(raw===undefined)return 'absent';
+ const v=raw.trim();
+ if(Buffer.byteLength(v,'utf8')>256)return 'long';
+ if(/^-?\d{1,2}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?$/.test(v))return 'latlon';
+ return /^[\x00-\x7f]*$/.test(v)?'ascii_place':'non_ascii';
+}
+/** Fixed-label class of a weather-forecast `window_hours` value. Never the value. */
+export function forecastWindowClass(raw:string|undefined):string{
+ if(raw===undefined||raw.trim()==='')return 'absent';
+ const v=raw.trim();
+ if(!/^\d{1,6}$/.test(v))return 'invalid';
+ const n=Number(v);
+ return n>=1&&n<=24?'1-24':n>=25&&n<=72?'25-72':n>=73&&n<=240?'73-240':'invalid';
+}
+function lengthBucket(n:number):string{return n===0?'0':n<=16?'1-16':n<=66?'17-66':n<=256?'67-256':'>256';}
+/** Fixed-label shape of a transaction-risk `transaction` value. Never the value. */
+export function txShapeClass(raw:string|undefined):string{
+ const v=(raw??'').trim();
+ if(v.length>256)return 'long';
+ if(/^0x[0-9a-fA-F]{64}$/.test(v))return 'hash_0x64';
+ if(/^(?:0x)?[0-9a-fA-F]+$/.test(v)||/^0x\S*$/i.test(v))return 'hash_other';
+ return 'description';
+}
+/** Fixed-label length bucket of a transaction-risk `transaction` value. Never the value. */
+export function txLengthBucket(raw:string|undefined):string{return lengthBucket((raw??'').trim().length);}
+/** Fixed-label class of an onchain-metric `metric` value. Never the value. */
+export function metricClass(raw:string|undefined):string{
+ if(raw===undefined)return 'absent';
+ return raw.trim().toLowerCase()==='balance'?'balance':'other';
+}
+/** Fixed-label class of an onchain-metric `block` value. Never the value. */
+export function blockClass(raw:string|undefined):string{
+ if(raw===undefined||raw.trim()==='')return 'absent';
+ return /^\d{1,20}$/.test(raw.trim())?'numeric':'other';
+}
+const MONTHS='jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec';
+/** Fixed-label shape of a filings `period` value by a fixed regex vocabulary. Checked in listed order; never the value. */
+export function periodShape(raw:string|undefined):string{
+ const v=(raw??'').trim().slice(0,100);
+ if(/^\d{4}\s*(?:-|to|\.\.|:|\u2013)\s*\d{4}$/i.test(v)||/^\d{4}-\d{2}-\d{2}\s*(?:\.\.|to|:)\s*\d{4}-\d{2}-\d{2}$/i.test(v))return 'range';
+ if(/^\d{4}$/.test(v))return 'year4';
+ if(/^(?:q[1-4][\s_-]*(?:fy)?[\s_-]*(?:\d{2}|\d{4})|(?:\d{4}|fy[\s_-]*\d{2,4})[\s_-]*q[1-4]|(?:first|second|third|fourth|1st|2nd|3rd|4th)[\s_-]+quarter(?:[\s_-]+(?:of[\s_-]+)?(?:fy[\s_-]*)?\d{2,4})?)$/i.test(v))return 'quarter_like';
+ if(/^(?:fy|fiscal(?:[\s_-]*year)?)[\s_-]*\d{2,4}$/i.test(v)||/^\d{4}[\s_-]*(?:fy|fiscal(?:[\s_-]*year)?)$/i.test(v))return 'fiscal_like';
+ if(/^(?:(?:last|past|previous|trailing)[\s_-]*)?\d{1,4}[\s_-]*months?$/i.test(v))return 'relative_months';
+ if(new RegExp('^(?:'+MONTHS+')[a-z]*\\.?[\\s,_-]*\\d{4}$','i').test(v)||new RegExp('^\\d{4}[\\s,_-]*(?:'+MONTHS+')[a-z]*\\.?$','i').test(v))return 'month_name';
+ return 'other';
+}
 /** The extra fields of a refusal_param_class line for this route and error, or null when the route/error has no class. */
 export function refusalParamClass(route:string|undefined,errorCode:string,query:unknown,errorLabel?:string):Record<string,unknown>|null{
  if(route==='/v1/gas-price'&&errorCode==='CHAIN_NOT_SERVED'){const chain=ownString(query,'chain');return {chain_class:chainClass(chain),...chainShape(chain)};}
@@ -205,6 +254,13 @@ export function refusalParamClass(route:string|undefined,errorCode:string,query:
   return cls;
  }
  if(route==='/v1/weather-history')return {location_class:weatherLocationClass(ownString(query,'location')),date_age_bucket:dateAgeBucket(ownString(query,'date'))};
+ if(route==='/v1/weather-forecast')return {location_class:forecastLocationClass(ownString(query,'location')),window_class:forecastWindowClass(ownString(query,'window_hours'))};
+ if(route==='/v1/transaction-risk'){const t=ownString(query,'transaction');return {tx_shape:txShapeClass(t),length_bucket:txLengthBucket(t)};}
+ if(route==='/v1/onchain-metric'&&(errorCode==='UNSUPPORTED_CHAIN'||errorCode.startsWith('INVALID_'))){
+  const chain=ownString(query,'chain');
+  return {chain_class:chain===undefined?'absent':chainClass(chain),metric_class:metricClass(ownString(query,'metric')),block_class:blockClass(ownString(query,'block')),has_free_text_query:ownString(query,'query')!==undefined};
+ }
+ if(route==='/v1/filings'&&(errorCode==='INVALID_PERIOD'||errorCode==='PERIOD_TOO_BROAD'))return {period_shape:periodShape(ownString(query,'period')),has_form_type:(ownString(query,'form_type')??ownString(query,'form')??'').trim()!==''};
  return null;
 }
-export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/liquidity':'LIQUIDITY_DEPTH_VERIFY_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL','/v1/tvl':'TVL_LOOKUP_GENERAL','/v1/token-supply':'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL','/v1/weather-history':'WEATHER_FORECAST_VERIFY_GENERAL','/v1/corporate-registry':'CORPORATE_REGISTRY_LOOKUP_GENERAL'};
+export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/liquidity':'LIQUIDITY_DEPTH_VERIFY_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL','/v1/tvl':'TVL_LOOKUP_GENERAL','/v1/token-supply':'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL','/v1/weather-history':'WEATHER_FORECAST_VERIFY_GENERAL','/v1/corporate-registry':'CORPORATE_REGISTRY_LOOKUP_GENERAL','/v1/weather-forecast':'WEATHER_FORECAST_GENERAL','/v1/transaction-risk':'TRANSACTION_RISK_GENERAL','/v1/onchain-metric':'ONCHAIN_METRIC_VERIFY_GENERAL','/v1/filings':'REGULATORY_FILING_MONITOR_GENERAL'};
