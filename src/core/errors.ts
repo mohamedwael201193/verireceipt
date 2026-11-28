@@ -2,6 +2,11 @@ export class ApiError extends Error {
   status: number;
   code: string;
   retryAfterSec?: number;
+  /** Internal fixed-vocabulary diagnostic label (which closed branch refused),
+   * threaded to the refusal_param_class log line only. Set from string
+   * literals in this codebase, never from request or upstream text, and never
+   * serialized into the response: errorBody picks its fields explicitly. */
+  logLabel?: string;
   /** When set, the server sends this body verbatim instead of errorBody
    * (used by the ROUTE unavailable-envelope path, 2026-11-22). */
   responseBody?: Record<string, unknown>;

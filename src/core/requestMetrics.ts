@@ -58,6 +58,7 @@ const DIAGNOSTIC_ERROR_CODES = new Set([
   "AMBIGUOUS_VAT", "INVALID_VENDOR", "INVALID_VAT", "VIES_SCOPE", "VIES_UNREACHABLE", "VIES_MALFORMED", "VIES_ERROR",
   "INVALID_LOCATION", "INVALID_DATE", "APPROVED_SOURCES_UNAVAILABLE",
   "ALL_QUOTERS_FAILED",
+  "AMBIGUOUS_COMPANY", "COMPANY_TOO_LONG", "EDGAR_BAD_BODY", "GLEIF_UNAVAILABLE", "INVALID_JURISDICTION", "SEC_UNAVAILABLE",
   "PROTOCOL_NOT_FOUND", "CHAIN_TVL_NONE",
   "EVENT_NOT_FOUND", "AMBIGUOUS_EVENT", "NON_BINARY_MARKET", "EVENT_NOT_RESOLVED",
   "UNCLEAN_RESOLUTION", "POLYMARKET_UNREACHABLE", "EVENT_TOO_LONG",
@@ -190,7 +191,7 @@ export function recordRequestArrival(route?: string, query?: unknown): void {
   } catch { /* observability never changes a response */ }
 }
 
-export function recordRequestCompletion(route: string | undefined, status: number, latencyMs: number, details: { query?: unknown; errorCode?: unknown; receiptId?:unknown; answerClass?:unknown; rawErrorCode?:unknown; disclosedNull?:unknown; nullStatus?:unknown } = {}): void {
+export function recordRequestCompletion(route: string | undefined, status: number, latencyMs: number, details: { query?: unknown; errorCode?: unknown; receiptId?:unknown; answerClass?:unknown; rawErrorCode?:unknown; errorLabel?:unknown; disclosedNull?:unknown; nullStatus?:unknown } = {}): void {
   try {
     const intent = intentFor(route), row = bucket(intent);
     const code = Number.isInteger(status) && status >= 100 && status <= 599 ? String(status) : "other";
@@ -201,7 +202,7 @@ export function recordRequestCompletion(route: string | undefined, status: numbe
     const nullAnswer=status===200&&route==='/v1/liquidity'&&details.disclosedNull===true;
     if((status>=400||nullAnswer)&&route!==undefined&&Object.hasOwn(REFUSAL_INTENTS,route)){
       const errorCode=nullAnswer?'DISCLOSED_NULL':typeof details.rawErrorCode==='string'?details.rawErrorCode:typeof details.errorCode==='string'?details.errorCode:'';
-      const cls=refusalParamClass(route,errorCode,details.query);
+      const cls=refusalParamClass(route,errorCode,details.query,typeof details.errorLabel==='string'?details.errorLabel:undefined);
       if(cls)console.info(JSON.stringify({event:'refusal_param_class',intent:REFUSAL_INTENTS[route],error_code:/^[A-Z][A-Z0-9_]{2,47}$/.test(errorCode)?errorCode:'OTHER_ERROR',status:code,...cls,...(nullAnswer?{data_status:details.nullStatus==='no_data'||details.nullStatus==='source_unavailable'?details.nullStatus:'other'}:{})}));
     }
     if (intent !== "other") {

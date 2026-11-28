@@ -151,8 +151,37 @@ function ownString(query:unknown,key:string):string|undefined{
  const d=Object.getOwnPropertyDescriptor(query,key);
  return d&&'value' in d&&typeof d.value==='string'?d.value:undefined;
 }
+// The same US spellings src/handlers/corporateRegistry.ts routes to SEC.
+const US_JURISDICTION_ALIASES=new Set(['us','usa','u.s.','u.s.a.','united states','united states of america','america']);
+/** Fixed-label class of a corporate-registry jurisdiction value: the input shape
+ * the resolver saw. Checked in resolver order; never the value. */
+export function jurisdictionClass(raw:string|undefined):string{
+ const v=(raw??'').trim();
+ if(US_JURISDICTION_ALIASES.has(v.toLowerCase()))return 'us_alias';
+ if(/^[A-Za-z]{2}$/.test(v))return 'iso2';
+ if(/^[A-Za-z]{2}-[A-Za-z0-9]{1,3}$/.test(v))return 'iso_with_subdivision';
+ if(/^[A-Za-z][A-Za-z .,'()-]{2,}$/.test(v))return 'english_name';
+ return 'other';
+}
+/** Fixed-label length bucket of a corporate-registry company value. Never the value. */
+export function companyLengthBucket(raw:string|undefined):string{
+ const n=(raw??'').trim().length;
+ return n<=20?'<=20':n<=60?'21-60':n<=120?'61-120':'>120';
+}
+const LEGAL_SUFFIX_TOKENS=new Set(['inc','incorporated','llc','ltd','limited','corp','corporation','company','co','llp','lp','plc','gmbh','ag','sa','nv','bv','sarl','srl','spa','pty','pte','ab','oy','as','se','kg','kgaa']);
+/** Fixed-label shape of a corporate-registry company value; first match wins in
+ * the listed order (a name that is both non-ascii and suffixed is suffixed).
+ * Never the value or any part of it. */
+export function companyShape(raw:string|undefined):string{
+ const v=(raw??'').trim();
+ if(/^\d{1,10}$/.test(v))return 'cik_digits';
+ if(/^[A-Z]{1,5}(?:[.-][A-Z]{1,2})?$/.test(v))return 'ticker_like';
+ if(v.toLowerCase().split(/[^a-z]+/).some(t=>LEGAL_SUFFIX_TOKENS.has(t)))return 'has_legal_suffix';
+ if(/[^\x00-\x7f]/.test(v))return 'has_non_ascii';
+ return 'other';
+}
 /** The extra fields of a refusal_param_class line for this route and error, or null when the route/error has no class. */
-export function refusalParamClass(route:string|undefined,errorCode:string,query:unknown):Record<string,unknown>|null{
+export function refusalParamClass(route:string|undefined,errorCode:string,query:unknown,errorLabel?:string):Record<string,unknown>|null{
  if(route==='/v1/gas-price'&&errorCode==='CHAIN_NOT_SERVED'){const chain=ownString(query,'chain');return {chain_class:chainClass(chain),...chainShape(chain)};}
  if(route==='/v1/threat-indicator'||route==='/v1/malware-hash')return {indicator_type:indicatorType(ownString(query,'indicator'))};
  if(route==='/v1/macro'&&errorCode==='UNSUPPORTED_INDICATOR')return {...macroTokens(ownString(query,'indicator')),country_class:countryClass(ownString(query,'country')),year_class:yearClass(ownString(query,'year'))};
@@ -168,7 +197,14 @@ export function refusalParamClass(route:string|undefined,errorCode:string,query:
   }
   return {chain_class};
  }
+ if(route==='/v1/corporate-registry'){
+  const cls:Record<string,unknown>={jurisdiction_class:jurisdictionClass(ownString(query,'jurisdiction')),company_length_bucket:companyLengthBucket(ownString(query,'company')),company_shape:companyShape(ownString(query,'company'))};
+  // The two AMBIGUOUS_COMPANY branches in gleifRegistry.ts tag the thrown
+  // error with this fixed label; anything else logs no reason.
+  if(errorCode==='AMBIGUOUS_COMPANY'&&(errorLabel==='multi_exact'||errorLabel==='page_incomplete'))cls.ambiguity_reason=errorLabel;
+  return cls;
+ }
  if(route==='/v1/weather-history')return {location_class:weatherLocationClass(ownString(query,'location')),date_age_bucket:dateAgeBucket(ownString(query,'date'))};
  return null;
 }
-export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/liquidity':'LIQUIDITY_DEPTH_VERIFY_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL','/v1/tvl':'TVL_LOOKUP_GENERAL','/v1/token-supply':'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL','/v1/weather-history':'WEATHER_FORECAST_VERIFY_GENERAL'};
+export const REFUSAL_INTENTS:Record<string,string>={'/v1/gas-price':'GAS_PRICE_GENERAL','/v1/threat-indicator':'THREAT_INTELLIGENCE_INDICATOR','/v1/malware-hash':'MALWARE_DETECTION_HASH','/v1/macro':'MACRO_ECONOMIC_INDICATOR_GENERAL','/v1/token-holders':'TOKEN_HOLDER_COUNT_GENERAL','/v1/liquidity':'LIQUIDITY_DEPTH_VERIFY_GENERAL','/v1/grid-price':'GRID_POWER_PRICE_GENERAL','/v1/tvl':'TVL_LOOKUP_GENERAL','/v1/token-supply':'TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL','/v1/weather-history':'WEATHER_FORECAST_VERIFY_GENERAL','/v1/corporate-registry':'CORPORATE_REGISTRY_LOOKUP_GENERAL'};

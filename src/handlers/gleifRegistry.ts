@@ -21,11 +21,17 @@ function creationDate(value:unknown):string|null {
  return Number.isFinite(ms)&&new Date(ms).toISOString().slice(0,10)===day&&Number.isFinite(Date.parse(value))?day:null;
 }
 const norm=(s:string)=>s.normalize('NFKC').toUpperCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+// Both 422 branches carry a fixed internal label for the refusal_param_class
+// log line (logLabel is logging-only, never serialized into the response);
+// the client-facing code and message are unchanged.
+function ambiguousCompany(reason:'multi_exact'|'page_incomplete',message:string):Error {
+ const e=unprocessable('AMBIGUOUS_COMPANY',message);e.logLabel=reason;return e;
+}
 export function parseGleif(raw:string,company:string,jurisdiction:string):{entity:any;lei:string}|null {
  const body=JSON.parse(raw);if(!Array.isArray(body.data)||!Number.isInteger(body.meta?.pagination?.total)||body.meta.pagination.total<0||body.meta.pagination.total<body.data.length)throw new Error('malformed GLEIF result');
  const hits=body.data.filter((r:any)=>typeof r.attributes?.entity?.legalName?.name==='string' && norm(r.attributes.entity.legalName.name)===norm(company) && r.attributes.entity.jurisdiction===jurisdiction);
- if(hits.length>1)throw unprocessable('AMBIGUOUS_COMPANY','multiple exact GLEIF legal names in this jurisdiction; supply a more specific registered name');
- if(body.meta.pagination.total>body.data.length)throw unprocessable('AMBIGUOUS_COMPANY','search page incomplete; no company guessed');
+ if(hits.length>1)throw ambiguousCompany('multi_exact','multiple exact GLEIF legal names in this jurisdiction; supply a more specific registered name');
+ if(body.meta.pagination.total>body.data.length)throw ambiguousCompany('page_incomplete','search page incomplete; no company guessed');
  if(!hits.length)return null;
  const h=hits[0],e=h.attributes.entity;
  if(typeof h.attributes.lei!=='string'||!/^[A-Z0-9]{20}$/.test(h.attributes.lei)||!['ACTIVE','INACTIVE'].includes(e.status)||typeof e.registeredAs!=='string'||!e.registeredAs.trim()||!e.legalAddress||!Array.isArray(e.legalAddress.addressLines)||!e.legalAddress.addressLines.every((v:unknown)=>typeof v==='string')||typeof e.legalAddress.city!=='string'||typeof e.legalAddress.country!=='string')throw new Error('incomplete GLEIF legal entity');

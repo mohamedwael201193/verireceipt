@@ -194,6 +194,7 @@ export function buildServer(): FastifyInstance {
   const requestStart = new WeakMap<object, bigint>();
   const requestErrors = new WeakMap<object, string>();
   const requestRawErrors = new WeakMap<object, string>(); // server-owned error constants, for the refusal_param_class log line only
+  const requestErrorLabels = new WeakMap<object, string>(); // fixed internal ApiError.logLabel values, for the refusal_param_class log line only
   const requestAnswers = new WeakMap<object, {receiptId?:string;answerClass?:Record<string,unknown>}>();
   const requestNullAnswers = new WeakMap<object, {disclosedNull:true;nullStatus:string}>(); // any 200 payload whose own liquidity_usd is null; only /v1/liquidity consumes it (requestMetrics), fixed labels only
   app.addHook("preSerialization",async(request,reply,payload)=>{
@@ -209,7 +210,7 @@ export function buildServer(): FastifyInstance {
   app.addHook("onResponse", async (request, reply) => {
     const started = requestStart.get(request);
     const elapsedMs = started === undefined ? 0 : Number(process.hrtime.bigint() - started) / 1e6;
-    recordRequestCompletion(request.routeOptions.url, reply.statusCode, elapsedMs, { query: request.query, errorCode: requestErrors.get(request), rawErrorCode: requestRawErrors.get(request), ...requestAnswers.get(request), ...requestNullAnswers.get(request) });
+    recordRequestCompletion(request.routeOptions.url, reply.statusCode, elapsedMs, { query: request.query, errorCode: requestErrors.get(request), rawErrorCode: requestRawErrors.get(request), errorLabel: requestErrorLabels.get(request), ...requestAnswers.get(request), ...requestNullAnswers.get(request) });
   });
 
   // Initialise storage (creates tables on first run). Handlers rely on it
@@ -230,6 +231,9 @@ export function buildServer(): FastifyInstance {
     if (err instanceof ApiError) {
       requestErrors.set(request, diagnosticErrorCode(err.code));
       if (typeof err.code === "string") requestRawErrors.set(request, err.code);
+      // Closed-vocabulary internal label only; the regex refuses anything
+      // that could carry request or upstream text into a log line.
+      if (typeof err.logLabel === "string" && /^[a-z][a-z_]{0,31}$/.test(err.logLabel)) requestErrorLabels.set(request, err.logLabel);
       try { const info=answerDiagnostics(intentFor(request.routeOptions.url),err); if(info.answerClass)requestAnswers.set(request,info); } catch {}
       void reply.status(err.status).send(err.responseBody ?? errorBody(err));
       return;
