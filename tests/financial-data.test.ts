@@ -68,6 +68,7 @@ describe("FINANCIAL_DATA_GENERAL", () => {
   });
   it("a US equity cap is price x SEC shares outstanding, derivation disclosed", async () => {
     stub();
+    pinClock();
     const result = await handleFinancialData({ asset: "aapl" });
     expect(result.asset).toBe("AAPL");
     expect(result.asset_type).toBe("equity"); expect(result.symbol).toBe("AAPL"); expect(result.name).toBe("Apple Inc.");
@@ -114,6 +115,7 @@ describe("financial name resolution and aggregated crypto", () => {
   });
   it("Apple resolves to AAPL without changing its recorded cap derivation", async () => {
     stub();
+    pinClock();
     const r = await handleFinancialData({ asset: "Apple" });
     expect(r.asset).toBe("AAPL");
     expect(r.resolved_name).toBe("Apple Inc.");
@@ -162,6 +164,7 @@ describe("Yahoo equity discovery remains SEC-bound", () => {
     });
   }
   it("uses a matched search alias only for an SEC-listed ticker and binds the body", async () => {
+    pinClock();
     discovery([{ symbol: "AAPL", quoteType: "EQUITY", shortname: "Apple Computers" }]);
     const r = await handleFinancialData({ asset: "Apple Computers" });
     expect(r.asset).toBe("AAPL");
@@ -235,7 +238,7 @@ it('SEC warm cache preserves original bytes/time, avoids repeated SEC requests, 
 it.each([['cik',999999],['taxonomy','us-gaap'],['tag','WrongSharesTag']])('wrong shares %s refuses and valid same-key retry proves no cache poisoning',async(field,value)=>{vi.useFakeTimers();vi.setSystemTime(new Date('2026-11-23T12:00:00Z'));let valid=false,shareReads=0;const wrong={...JSON.parse(shares),[field]:value};vi.stubGlobal('fetch',async(url:any)=>{if(String(url).includes('company_tickers'))return new Response(tickers);if(String(url).includes('/dei/')){shareReads++;return new Response(valid?shares:JSON.stringify(wrong));}return new Response(chart);});await expect(handleFinancialData({asset:'AAPL'})).rejects.toMatchObject({status:502,code:'SOURCE_UNREACHABLE'});valid=true;const out=await handleFinancialData({asset:'AAPL'});expect(out.asset).toBe('AAPL');expect(out.market_cap_usd).toBeGreaterThan(0);expect(shareReads).toBe(2);});
 it('abort-ignoring SEC index completing after deadline neither answers nor poisons1hour cache',async()=>{vi.useFakeTimers();vi.setSystemTime(new Date('2026-11-23T12:00:00Z'));let first=true;let release!:(r:Response)=>void;let indexReads=0;vi.stubGlobal('fetch',async(url:any)=>{if(String(url).includes('company_tickers')){indexReads++;if(first){first=false;return new Promise<Response>(r=>release=r);}return new Response(tickers);}return new Response(String(url).includes('companyconcept')?shares:chart);});const request=expect(handleFinancialData({asset:'AAPL'})).rejects.toMatchObject({code:'SEC_UNAVAILABLE'});await vi.advanceTimersByTimeAsync(10000);await request;release(new Response(tickers));await vi.advanceTimersByTimeAsync(1);expect((await handleFinancialData({asset:'AAPL'})).asset).toBe('AAPL');expect(indexReads).toBe(2);});
 it.each(['BTC','AAPL','ETH'])('contract metrics string on real captured %s HTTP success, cap/volume/evidence unchanged',async asset=>{
- stub();if(asset==='ETH'){vi.useFakeTimers();vi.setSystemTime(new Date(Date.parse(JSON.parse(crypto).last_updated)+1000));}
+ stub();if(asset==='ETH'){vi.useFakeTimers();vi.setSystemTime(new Date(Date.parse(JSON.parse(crypto).last_updated)+1000));}if(asset==='AAPL'){pinClock();}
  const app=buildServer();try{const response=await app.inject({method:'GET',url:'/v1/financial-data?asset='+asset});expect(response.statusCode).toBe(200);const r=response.json();expect(typeof r.metrics).toBe('string');expect(r.metrics.length).toBeGreaterThan(0);const receipt=r.receipt,ev=await getReceiptEvidence(receipt.receipt_id);expect(sha256Hex(ev.evidence!)).toBe(receipt.raw_response_sha256);const evidence=JSON.parse(ev.evidence!.toString());expect(evidence.market_cap_usd).toBe(r.market_cap_usd);if(asset==='BTC'){expect(r.metrics).toBe('supply_btc=20116031.25 at tip 977129; spot_usd=60970.905; derivation=spot x emission-schedule supply');expect(r.volume_24h_usd).toBeNull();}else if(asset==='AAPL'){expect(r.structured_metrics.latest_regular_session.volume_usd_estimate).toBe(27642038215);expect(r.structured_metrics.latest_regular_session.method).toContain('NOT actual traded-dollar turnover');expect(r.volume_24h_usd).toBeNull();}else{expect(r.metrics).toBe('methodology=CoinPaprika aggregated market cap and rolling 24h volume');expect(r.volume_24h_usd).toBe(JSON.parse(crypto).quotes.USD.volume_24h);}}
  finally{await app.close();}
 });
