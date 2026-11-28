@@ -25,17 +25,35 @@ export function parseFlightStats(html:string,carrier:string,number:string,now=Da
  const status=flight.status;
  if(!status||typeof status.statusDescription!=='string'||typeof status.status!=='string')throw Error('missing flight status');
  const updateText=status.lastUpdatedText;
- const terminal=flight.flightNote?.final===true&&((status.status==='Arrived'&&status.statusCode==='L'&&flight.flightNote?.landed===true&&flight.isLanded===true)||(status.status==='Canceled'&&status.statusCode==='C'&&flight.flightNote?.canceled===true)||(status.status==='Diverted'&&status.statusCode==='D'&&status.diverted===true));
- if(!terminal){const mins=/^(?:Status Last Updated )(\d+) Minutes? Ago$/.exec(updateText??'');if(!mins||Number(mins[1])>60)throw Error('current flight status update age unverified');}
  const text=[status.statusDescription,status.finalStatus,status.status].filter(Boolean).join('; ');
  const positive=/\b(cancelled|canceled|delayed|diverted)\b/i.test(text)||status.diverted===true||flight.flightNote?.canceled===true;
  const negative=/\bon time\b/i.test(status.statusDescription)&&!positive;
+ const terminal=flight.flightNote?.final===true&&((status.status==='Arrived'&&status.statusCode==='L'&&flight.flightNote?.landed===true&&flight.isLanded===true)||(status.status==='Canceled'&&status.statusCode==='C'&&flight.flightNote?.canceled===true)||(status.status==='Diverted'&&status.statusCode==='D'&&flight.diverted===true));
+ let statusAgeHours:number|null=null,statusAgeNote:string|null=null;
+ if(!terminal){
+  const mins=/^(?:Status Last Updated )(\d+) Minutes? Ago$/.exec(updateText??'');
+  if(!mins||Number(mins[1])>60){
+   // Pre-departure exception: FlightStats leaves the last-updated label at its
+   // previous refresh while a flight is still scheduled, so a stale label alone
+   // does not make a flight that has not left's status unknown. Accept only when
+   // the provider states an explicit classification, nothing has departed or
+   // been cancelled/diverted, and scheduled departure is still strictly in the
+   // future inside the coverage window checked above. The caveat travels with
+   // the answer so the status age is never hidden.
+   const stale=/^Status Last Updated (?:More Than )?(\d+) Hours? Ago$/.exec(updateText??'');
+   const hours=stale?Number(stale[1]):mins?Number(mins[1])/60:null;
+   const notDeparted=status.statusCode==='S'&&flight.flightNote?.final!==true&&flight.flightNote?.tracking===false&&flight.flightNote?.hasDepartedGate===false&&flight.flightNote?.hasDepartedRunway===false&&flight.flightNote?.canceled!==true&&status.diverted!==true&&dep>now;
+   if(hours===null||!Number.isFinite(hours)||hours<0||!notDeparted||(!positive&&!negative))throw Error('current flight status update age unverified');
+   statusAgeHours=hours;
+   statusAgeNote=`provider status last updated ${stale&&/More Than /.test(updateText??'')?'more than ':''}${hours} ${hours===1?'hour':'hours'} ago; flight has not departed`;
+  }
+ }
  if(!positive&&!negative)throw Error('flight status not explicitly delayed/cancelled/diverted or on time');
  const delay=status.delayStatus?.minutes;
  if(delay!==undefined&&(typeof delay!=='number'||!Number.isFinite(delay)||delay<0||delay>10000))throw Error('invalid delay');
  // Provider classification is used as stated, not an inferred threshold on
  // departure/arrival differences. Those timestamps remain evidence only.
- return {embedded,fields:{disrupted:positive,status:status.status+'; '+status.statusDescription,delay_minutes:typeof delay==='number'?delay:null,reason:null,flight_date:schedule.scheduledDepartureUTC.slice(0,10),schedule,origin,destination,provider_update_label:typeof status.lastUpdatedText==='string'?status.lastUpdatedText:null,method:'FlightStats explicit flight-level status classification; not inferred from airport conditions',date_selection:'source-selected recent/current occurrence, exact departure UTC date disclosed; no date was supplied'}};
+ return {embedded,fields:{disrupted:positive,status:status.status+'; '+status.statusDescription,delay_minutes:typeof delay==='number'?delay:null,reason:null,flight_date:schedule.scheduledDepartureUTC.slice(0,10),schedule,origin,destination,provider_update_label:typeof status.lastUpdatedText==='string'?status.lastUpdatedText:null,method:'FlightStats explicit flight-level status classification; not inferred from airport conditions',date_selection:'source-selected recent/current occurrence, exact departure UTC date disclosed; no date was supplied',...(statusAgeNote?{status_age_note:statusAgeNote,status_age_hours:statusAgeHours}:{})}};
 }
 async function persist(input:string,fields:Record<string,unknown>,evidence:Record<string,unknown>,url:string,fetchedAt:string,answer:string){
  const raw=JSON.stringify(evidence),receipt=makeReceipt('TRAVEL_DISRUPTION_GENERAL',url,raw,'dated flight status or explicitly separate airport fallback; no missing status converted to false');receipt.fetched_at=fetchedAt;
@@ -72,7 +90,7 @@ export async function observeFlight(input:string,airportStatus:(airport:string)=
     return persist(input,fields,{requested_flight:input,source_url:url,extracted_json:parsed.embedded,page_sha256:sha256Hex(got.raw),extraction:'literal __NEXT_DATA__ JSON substring, not reserialized; whole page hash retained',fetched_at:got.fetchedAt,route_comparison:comparison,provider_fields:parsed.fields,airport_result:airportEvidence,...fields},url,got.fetchedAt,`${normalized}: flight disruption for the supplied route is unknown, not false. ${why} The provider's own status for ${o}-${d} (${parsed.fields.status}) is kept in the evidence under provider_route and is not applied to the supplied route. ${airportEvidence?'FAA airport conditions for the supplied airports are reported separately in airport_disrupted and airport_statuses, not the flight status.':'No airport status is reported.'}`);
     }
    }
-   return persist(input,{...parsed.fields,disruption_scope:'flight-level provider status',as_of:got.fetchedAt,...matchFields},{...matchEvidence,requested_flight:input,source_url:url,extracted_json:parsed.embedded,page_sha256:sha256Hex(got.raw),extraction:'literal __NEXT_DATA__ JSON substring, not reserialized; whole page hash retained',fetched_at:got.fetchedAt,...parsed.fields},url,got.fetchedAt,`${normalized}: ${parsed.fields.status}; departure ${parsed.fields.schedule.scheduledDepartureUTC}, ${parsed.fields.origin}-${parsed.fields.destination}. Flight-level status reported by FlightStats, not airport inference. ${parsed.fields.delay_minutes===null?'No delay minutes asserted.':`Provider delay ${parsed.fields.delay_minutes} minutes.`} Source-selected occurrence because no date was supplied. Retrieved ${got.fetchedAt}.`);
+   return persist(input,{...parsed.fields,disruption_scope:'flight-level provider status',as_of:got.fetchedAt,...matchFields},{...matchEvidence,requested_flight:input,source_url:url,extracted_json:parsed.embedded,page_sha256:sha256Hex(got.raw),extraction:'literal __NEXT_DATA__ JSON substring, not reserialized; whole page hash retained',fetched_at:got.fetchedAt,...parsed.fields},url,got.fetchedAt,`${normalized}: ${parsed.fields.status}; departure ${parsed.fields.schedule.scheduledDepartureUTC}, ${parsed.fields.origin}-${parsed.fields.destination}. Flight-level status reported by FlightStats, not airport inference. ${parsed.fields.status_age_note?`${parsed.fields.status_age_note}. `:''}${parsed.fields.delay_minutes===null?'No delay minutes asserted.':`Provider delay ${parsed.fields.delay_minutes} minutes.`} Source-selected occurrence because no date was supplied. Retrieved ${got.fetchedAt}.`);
   }catch(error){sourceFailure=publicSourceFailure(error);if(['http_403','http_429'].includes(sourceFailure)){blockedUntil=Date.now()+300000;sourceFailure='flight_source_blocked_no_bypass';}}
  }
  if(supplied)return null;

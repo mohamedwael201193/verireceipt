@@ -43,5 +43,13 @@
     "sha256": "395d7d3b432574481b3cc1dcbb8f46d50f8f1dce70dbbbde2485c311737dea1c",
     "extraction": "exact source JSON body",
     "retrieved_date": "2026-11-26"
+  },
+  {
+    "fixture": "UA934-pre-departure-20261128T0650Z.html",
+    "url": "https://www.flightstats.com/v2/flight-tracker/UA/934",
+    "page_sha256": "dbfec1844cd7333684bf631d7e106b1f82c66947e6d510280732cf29798a638a",
+    "extraction": "whole public pre-departure page committed verbatim (no cookies, credentials or authenticated content present)",
+    "retrieved_date": "2026-11-28",
+    "note": "live page fetched 2026-11-28 06:50Z: Scheduled, On time, delay 0, tracking false, departure 2026-11-28T13:20:00Z, label Status Last Updated More Than 3 Hours Ago"
   }
 ]

@@ -1,0 +1,29 @@
+import {afterAll,afterEach,expect,it,vi} from 'vitest';import {readFileSync,mkdtempSync,rmSync} from 'node:fs';import {join} from 'node:path';
+const dir=mkdtempSync('/tmp/flight-stale-tests-');process.env.SQLITE_PATH=join(dir,'receipts.db');
+import {parseFlightStats,resetFlightSourcesForTests} from '../src/handlers/flightStatus';import {handleTravelDisruption} from '../src/handlers/travelDisruption';import {getReceiptEvidence} from '../src/core/storage';
+// Real FlightStats page for UA934 fetched 2026-11-28 06:50Z, committed verbatim:
+// Scheduled, On time, delay 0, tracking false, departure 2026-11-28T13:20:00Z,
+// label "Status Last Updated More Than 3 Hours Ago".
+const page=readFileSync(join(__dirname,'fixtures/flight-status/UA934-pre-departure-20261128T0650Z.html'),'utf8');
+const now=Date.parse('2026-11-28T06:50:00Z');
+afterAll(()=>rmSync(dir,{recursive:true,force:true}));afterEach(()=>{resetFlightSourcesForTests();vi.useRealTimers();vi.unstubAllGlobals();});
+// Test-only edits derived from the real page: the __NEXT_DATA__ JSON is parsed,
+// one provider field changed, and the page rebuilt with the same embedded block.
+function editPage(change:(flight:any)=>void){const raw=/__NEXT_DATA__\s*=\s*([\s\S]*?);\s*__NEXT_LOADED_PAGES__/.exec(page)![1],data=JSON.parse(raw);change(data.props.initialState.flightTracker.flight);return '<script>__NEXT_DATA__ = '+JSON.stringify(data)+';__NEXT_LOADED_PAGES__=[];</script>';}
+it('real pre-departure UA934 page: stale provider label accepted with caveat, disrupted false',()=>{const r=parseFlightStats(page,'UA','934',now);expect(r.fields).toMatchObject({disrupted:false,status_age_hours:3,provider_update_label:'Status Last Updated More Than 3 Hours Ago',flight_date:'2026-11-28',origin:'EWR',destination:'LHR'});expect(r.fields.status_age_note).toBe('provider status last updated more than 3 hours ago; flight has not departed');expect(r.fields.status).toBe('Scheduled; On time');});
+it('real page rejected once scheduled departure is no longer in the future',()=>{expect(()=>parseFlightStats(page,'UA','934',Date.parse('2026-11-28T14:00:00Z'))).toThrow('current flight status update age unverified');});
+it('real page edited to tracking true (departed) keeps the stale label rejected',()=>{const body=editPage(f=>{f.flightNote.tracking=true;});expect(()=>parseFlightStats(body,'UA','934',now)).toThrow('current flight status update age unverified');});
+it.each([
+ ['statusCode A',(f:any)=>{f.status.statusCode='A';}],
+ ['canceled true',(f:any)=>{f.flightNote.canceled=true;}],
+ ['diverted true',(f:any)=>{f.status.diverted=true;}],
+ ['hasDepartedGate true',(f:any)=>{f.flightNote.hasDepartedGate=true;}],
+ ['hasDepartedRunway true',(f:any)=>{f.flightNote.hasDepartedRunway=true;}],
+ ['flightNote.final true while statusCode stays S',(f:any)=>{f.flightNote.final=true;}],
+ ['an unparseable label',(f:any)=>{f.status.lastUpdatedText='Status Last Updated Yesterday';}],
+])('real page edited to %s still throws the update-age error',(_name,change)=>{expect(()=>parseFlightStats(editPage(change),'UA','934',now)).toThrow('current flight status update age unverified');});
+it('real page edited to provider-stated Delayed 45 min returns disrupted true with the caveat',()=>{const body=editPage(f=>{f.status.statusDescription='Delayed';f.status.delayStatus={wording:'Delayed',minutes:45};f.status.delay={departure:{minutes:45},arrival:{minutes:45}};});const r=parseFlightStats(body,'UA','934',now);expect(r.fields).toMatchObject({disrupted:true,delay_minutes:45,status_age_hours:3});expect(r.fields.status_age_note).toBe('provider status last updated more than 3 hours ago; flight has not departed');});
+it('real page edited to a non-explicit status with the stale label still stays unverified',()=>{const body=editPage(f=>{f.status.status='Unknown';f.status.statusDescription='Unknown';});expect(()=>parseFlightStats(body,'UA','934',now)).toThrow('current flight status update age unverified');});
+it('real page edited to a one-hour label reads "1 hour" and keeps the note authoritative',()=>{const body=editPage(f=>{f.status.lastUpdatedText='Status Last Updated More Than 1 Hour Ago';});const r=parseFlightStats(body,'UA','934',now);expect(r.fields.status_age_hours).toBe(1);expect(r.fields.status_age_note).toBe('provider status last updated more than 1 hour ago; flight has not departed');});
+it('existing fresh-update fixture AA100 (14 Minutes Ago) is unchanged and gains no age caveat',()=>{const raw=readFileSync(join(__dirname,'fixtures/flight-status/AA100.json'),'utf8'),body='<script>__NEXT_DATA__ = '+raw+';__NEXT_LOADED_PAGES__=[];</script>';const r=parseFlightStats(body,'AA','100',Date.parse('2026-11-25T23:50:00Z'));expect(r.fields).toMatchObject({disrupted:false,delay_minutes:0,provider_update_label:'Status Last Updated 14 Minutes Ago'});expect(r.fields).not.toHaveProperty('status_age_note');expect(r.fields).not.toHaveProperty('status_age_hours');});
+it('handler answer text and receipt fields carry the same status-age caveat',async()=>{vi.useFakeTimers();vi.setSystemTime(new Date('2026-11-28T06:50:00Z'));vi.stubGlobal('fetch',async(u:unknown)=>new Response(String(u).includes('flightstats')?page:'{"response":"unknown callsign"}'));const r=await handleTravelDisruption({route_or_flight:'UA934'});expect(r).toMatchObject({disrupted:false,delay_minutes:0,verdict:'verified',status_age_hours:3});expect(r.answer).toContain('provider status last updated more than 3 hours ago; flight has not departed');expect(r.answer).toContain('departure 2026-11-28T13:20:00.000Z');const evidence=JSON.parse((await getReceiptEvidence((r.receipt as any).receipt_id)).evidence!.toString());expect(evidence.status_age_note).toBe('provider status last updated more than 3 hours ago; flight has not departed');expect(evidence.provider_update_label).toBe('Status Last Updated More Than 3 Hours Ago');});
