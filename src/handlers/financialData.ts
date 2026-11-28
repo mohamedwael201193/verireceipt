@@ -62,6 +62,48 @@ export function resolveSec(entries: SecEntry[], asset: string): SecEntry | undef
   return matches[0];
 }
 
+/** "Company (TICKER)" asset form, e.g. "Microsoft (MSFT)". */
+export function splitNameTicker(asset: string): { name: string; ticker: string } | null {
+  const m = /^\s*(.+?)\s*\(\s*([A-Za-z0-9.^-]{1,10})\s*\)\s*$/.exec(asset);
+  return m ? { name: m[1], ticker: m[2] } : null;
+}
+
+export interface SecAssetResolution { row: SecEntry | undefined; search: string; searchTicker?: string; note?: string }
+
+/**
+ * Resolves the asset against the SEC index. The bracketed token of "Name (TICKER)" is accepted only as an exact
+ * SEC ticker whose title equals, or starts with (whole words), the folded leading name. A ticker that SEC lists
+ * under a different company is never accepted. A ticker SEC does not list falls back to the bare name.
+ */
+export function resolveSecAsset(entries: SecEntry[], asset: string): SecAssetResolution {
+  const pair = splitNameTicker(asset);
+  const name = pair ? companyName(pair.name) : "";
+  if (!pair || !name) return { row: resolveSec(entries, asset), search: asset };
+  const listed = entries.filter((e) => e.ticker?.toUpperCase() === pair.ticker.toUpperCase());
+  if (listed.length) {
+    const agreeing = listed.filter((e) => { const t = companyName(e.title ?? ""); return t === name || t.startsWith(name + " "); });
+    if (agreeing.length > 1) throw unprocessable("AMBIGUOUS_ASSET", "multiple SEC entries match; supply the exact ticker");
+    if (agreeing[0]) return { row: agreeing[0], search: asset, note: `name (ticker) form: ticker ${String(agreeing[0].ticker).toUpperCase()} matched SEC title ${agreeing[0].title}` };
+    return { row: resolveSec(entries, asset), search: asset };
+  }
+  const whole = resolveSec(entries, asset);
+  if (whole) return { row: whole, search: asset };
+  return { row: resolveSec(entries, pair.name), search: pair.name.trim(), searchTicker: pair.ticker.toUpperCase() };
+}
+
+/** Closed-vocabulary labels for the refusal log; never carries the asset text. */
+export function assetShape(asset: string): "ticker" | "name" | "name_paren_ticker" | "other" {
+  const a = asset.trim();
+  if (splitNameTicker(a)) return "name_paren_ticker";
+  if (/^[A-Z0-9.^-]{1,10}$/.test(a)) return "ticker";
+  if (/^[A-Za-z][A-Za-z0-9 .,&'\/-]*$/.test(a)) return "name";
+  return "other";
+}
+export function assetLenBucket(asset: string): "1-5" | "6-12" | "13-24" | ">24" {
+  const n = [...asset.trim()].length;
+  return n <= 5 ? "1-5" : n <= 12 ? "6-12" : n <= 24 ? "13-24" : ">24";
+}
+
 async function aggregatedCrypto(asset: string, crypto: { id: string; symbol: string; name: string }): Promise<Record<string, unknown>> {
   const url = `https://api.coinpaprika.com/v1/tickers/${crypto.id}`;
   const validate = (body: string): number => {
@@ -197,9 +239,10 @@ async function financialData(query: Record<string, string | undefined>): Promise
     entries = Object.values(parsed);
     if (!entries.length || entries.some((e) => !e || typeof e !== "object")) throw new Error("invalid SEC rows");
   } catch { throw upstreamUnavailable("SEC_MALFORMED", "SEC company ticker response was malformed; no asset guessed"); }
-  let row = resolveSec(entries, asset);
+  const resolved = resolveSecAsset(entries, asset);
+  let row = resolved.row;
   let searchBody: string | null = null;
-  const searchUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(asset.trim().toLowerCase().replace(/\s+/g," "))}&quotesCount=10&newsCount=0`;
+  const searchUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(resolved.search.trim().toLowerCase().replace(/\s+/g," "))}&quotesCount=10&newsCount=0`;
   let searchObservation: EquityObservation | undefined;
   if (!row) {
     const resolveSearch = (body: string): SecEntry | undefined => {
@@ -209,7 +252,7 @@ async function financialData(query: Record<string, string | undefined>): Promise
         if (!Array.isArray(parsed.quotes)) throw new Error("invalid quotes");
         quotes = parsed.quotes;
       } catch { throw upstreamUnavailable("ASSET_SEARCH_UNAVAILABLE", "Yahoo search returned an invalid quote list"); }
-      const candidates=quotes.filter(q=>q&&q.quoteType==='EQUITY'&&typeof q.symbol==='string'&&/^[A-Za-z0-9^][A-Za-z0-9.^=-]{0,29}$/.test(q.symbol)&&[q.symbol,q.shortname,q.longname].some(n=>typeof n==='string'&&companyName(n)===companyName(asset)));
+      const candidates=quotes.filter(q=>q&&q.quoteType==='EQUITY'&&typeof q.symbol==='string'&&/^[A-Za-z0-9^][A-Za-z0-9.^=-]{0,29}$/.test(q.symbol)&&(!resolved.searchTicker||q.symbol.toUpperCase()===resolved.searchTicker)&&[q.symbol,q.shortname,q.longname].some(n=>typeof n==='string'&&companyName(n)===companyName(resolved.search)));
       const unique=[...new Map(candidates.map(q=>[q.symbol!.toUpperCase(),q])).values()];
       if(unique.length>1)throw unprocessable('AMBIGUOUS_ASSET','multiple exact equity search matches; supply an exact ticker');
       if(!unique[0])return undefined;
@@ -217,7 +260,7 @@ async function financialData(query: Record<string, string | undefined>): Promise
       return sec??{ticker:quote.symbol!.toUpperCase(),title:quote.longname??quote.shortname??quote.symbol};
     };
     try {
-      searchObservation = await cachedYahooSearch(asset, () => fetchText(searchUrl), body => { resolveSearch(body); });
+      searchObservation = await cachedYahooSearch(resolved.search, () => fetchText(searchUrl), body => { resolveSearch(body); });
       searchBody = searchObservation.body;
       row = resolveSearch(searchBody);
     } catch (err) {
@@ -292,7 +335,7 @@ async function financialData(query: Record<string, string | undefined>): Promise
     shares_as_of: shares.end, shares_filed: shares.filed, shares_accession: shares.accn,
     volume_shares: Number.isFinite(volumeShares) ? volumeShares : null, market_cap_usd: cap, volume_24h_usd: volumeUsd,
     session_volume_usd: sessionVolumeUsd,volume_observation:volumeObservation,volume_basis:volumeObservation.basis,
-    resolution: { requested_asset: asset, resolved_name: row.title, ticker, yahoo_search_url: searchBody === null ? null : searchUrl, observation: resolutionEvidence },
+    resolution: { requested_asset: asset, resolved_name: row.title, ticker, ...(resolved.note ? { resolution_note: resolved.note } : {}), yahoo_search_url: searchBody === null ? null : searchUrl, observation: resolutionEvidence },
     raw_bodies: { company_tickers: tickersBody, yahoo_search: searchBody, sec_shares: sharesBody, yahoo_chart: chartBody }, fetched_at: fetchedAt });
   const receipt = makeReceipt(INTENT, `${TICKERS_URL} + data.sec.gov + query1.finance.yahoo.com`, evidence, `SEC EDGAR shares outstanding x Yahoo regular-market price; derivation disclosed${anyStale ? "; STALE SOURCE DISCLOSED" : ""}`);
   receipt.fetched_at = fetchedAt;
@@ -306,7 +349,7 @@ async function financialData(query: Record<string, string | undefined>): Promise
     (sessionVolumeUsd !== null ? `Latest regular session proxy (separate from trailing24h bucket estimate): $${sessionVolumeUsd.toLocaleString("en-US")}, current price times session shares, not actual dollar turnover. ` : "Volume is not served: the price source carried none. ") +
     `The cap is derived from two named sources, not copied from a vendor; the quote may be delayed. Annual SEC revenue, net income and total assets are separately reported in structured metrics when available, each with its own period and filing date. ${Object.values(annualPublic).some((m:any)=>String(m.period_alignment).startsWith('mixed'))?'WARNING: annual metrics have mixed period ends, not one fiscal year. ':''}P/E and EPS are not asserted.`;
   return envelope(INTENT, {
-    asset: ticker, asset_type: "equity", symbol: ticker, name: row.title, resolved_name: row.title, market_cap_usd: cap, volume_24h_usd: volumeUsd,volume_basis:volumeObservation.basis,volume_observation:volumePublic,
+    asset: ticker, asset_type: "equity", symbol: ticker, name: row.title, resolved_name: row.title, market_cap_usd: cap, volume_24h_usd: volumeUsd,volume_basis:volumeObservation.basis,volume_observation:volumePublic,...(resolved.note?{resolution_note:resolved.note}:{}),
     metrics:[`shares_outstanding=${shares.val} as of ${shares.end} (filed ${shares.filed})`,`price_usd=${price} at ${marketTime}`,'market_cap=price x shares outstanding (mixed-age estimate)',`latest_regular_session.volume_usd_estimate=${sessionVolumeUsd??'unavailable'}; method=current price x regular-session shares, not actual dollar turnover or rolling24h`,...Object.entries(annualPublic).map(([key,value])=>{const v=value as any,f=v.fact;return f?`${key}=${f.value_usd} USD; period=${f.period_start??'instant'} to ${f.period_end}; filed=${f.filed}; concept=${f.concept}`:`${key}=${v.status}`;})].join('; '),
     structured_metrics:structuredMetrics,
     sec_observations:secObservations,
@@ -316,6 +359,7 @@ async function financialData(query: Record<string, string | undefined>): Promise
 }
 
 export async function handleFinancialData(query:Record<string,string|undefined>):Promise<Record<string,unknown>>{
- try{const out=await financialData(query);return withAnswerClass(out,INTENT,{asset_resolution:out.reason_code==='unsupported_asset'?'unsupported_asset':'resolved'});}
- catch(err){if(err&&typeof err==='object'&&(err as any).code==='AMBIGUOUS_ASSET')throw withAnswerClass(err,INTENT,{asset_resolution:'ambiguous_asset'});throw err;}
+ const given=[query.asset,query.ticker,query.symbol,query.company,query.query].find(v=>v?.trim())??'';
+ try{const out=await financialData(query);const unsupported=out.reason_code==='unsupported_asset';return withAnswerClass(out,INTENT,{asset_resolution:unsupported?'unsupported_asset':'resolved',asset_shape:assetShape(given),...(unsupported?{asset_len_bucket:assetLenBucket(given)}:{})});}
+ catch(err){if(err&&typeof err==='object'&&(err as any).code==='AMBIGUOUS_ASSET')throw withAnswerClass(err,INTENT,{asset_resolution:'ambiguous_asset',asset_shape:assetShape(given)});throw err;}
 }

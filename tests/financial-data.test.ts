@@ -8,7 +8,8 @@ process.env.SQLITE_PATH = join(scratch, "receipts.sqlite");
 beforeAll(() => { process.env.SEC_USER_AGENT = "VeriReceipt tests contact@example.com"; });
 afterAll(() => { delete process.env.SEC_USER_AGENT; rmSync(scratch, { recursive: true, force: true }); });
 afterEach(() => { resetSecFinancialCacheForTests(); resetEquityCacheForTests(); resetMarketCacheForTests(); vi.unstubAllGlobals(); vi.useRealTimers(); });
-import { handleFinancialData, btcSupplyAtHeight, latestShares, resolveSec } from "../src/handlers/financialData";
+import { handleFinancialData, btcSupplyAtHeight, latestShares, resolveSec, resolveSecAsset, splitNameTicker, assetShape, assetLenBucket } from "../src/handlers/financialData";
+import { answerDiagnostics, sanitizeAnswerClass } from "../src/core/answerClass";
 import { resetEquityCacheForTests } from "../src/handlers/equityQuoteCache";
 import { resetMarketCacheForTests } from "../src/handlers/marketSourceCache";
 import { buildServer } from "../src/server";
@@ -237,4 +238,175 @@ it.each(['BTC','AAPL','ETH'])('contract metrics string on real captured %s HTTP 
  stub();if(asset==='ETH'){vi.useFakeTimers();vi.setSystemTime(new Date(Date.parse(JSON.parse(crypto).last_updated)+1000));}
  const app=buildServer();try{const response=await app.inject({method:'GET',url:'/v1/financial-data?asset='+asset});expect(response.statusCode).toBe(200);const r=response.json();expect(typeof r.metrics).toBe('string');expect(r.metrics.length).toBeGreaterThan(0);const receipt=r.receipt,ev=await getReceiptEvidence(receipt.receipt_id);expect(sha256Hex(ev.evidence!)).toBe(receipt.raw_response_sha256);const evidence=JSON.parse(ev.evidence!.toString());expect(evidence.market_cap_usd).toBe(r.market_cap_usd);if(asset==='BTC'){expect(r.metrics).toBe('supply_btc=20116031.25 at tip 977129; spot_usd=60970.905; derivation=spot x emission-schedule supply');expect(r.volume_24h_usd).toBeNull();}else if(asset==='AAPL'){expect(r.structured_metrics.latest_regular_session.volume_usd_estimate).toBe(27642038215);expect(r.structured_metrics.latest_regular_session.method).toContain('NOT actual traded-dollar turnover');expect(r.volume_24h_usd).toBeNull();}else{expect(r.metrics).toBe('methodology=CoinPaprika aggregated market cap and rolling 24h volume');expect(r.volume_24h_usd).toBe(JSON.parse(crypto).quotes.USD.volume_24h);}}
  finally{await app.close();}
+});
+
+// ---- "Company (TICKER)" asset form ----
+// Real SEC company_tickers rows (as served 2026-11-28, taken from the raw evidence of graded receipts); AAPL shares
+// and Yahoo chart are the real bodies recorded above.
+const realRows = readFileSync(join(__dirname, "fixtures/financial-data/company-tickers-real-rows.json"), "utf8");
+const secEntries = Object.values(JSON.parse(realRows)) as { cik_str: number; ticker: string; title: string }[];
+// The recorded chart is only valid inside the 7 day quote window, so pin the clock just after it.
+const pinClock = () => vi.useFakeTimers({ toFake: ["Date"], now: new Date(JSON.parse(chart).chart.result[0].meta.regularMarketTime * 1000 + 3600_000) });
+function parenStub(quotes: unknown[] = []) {
+  const urls: string[] = [];
+  pinClock();
+  vi.stubGlobal("fetch", async (input: unknown) => {
+    const u = String(input); urls.push(u);
+    if (u.includes("company_tickers")) return new Response(realRows);
+    if (u.includes("finance/search")) return new Response(JSON.stringify({ quotes }));
+    if (u.includes("companyconcept/CIK0000320193/dei")) return new Response(shares);
+    if (u.includes("finance/chart/AAPL")) return new Response(chart);
+    if (u.includes("us-gaap")) return new Response("{}", { status: 404 });
+    throw Object.assign(new Error("unexpected source " + u), { status: 503 });
+  });
+  return urls;
+}
+const searchQueries = (urls: string[]) => urls.filter((u) => u.includes("finance/search")).map((u) => new URL(u).searchParams.get("q"));
+
+describe("splitNameTicker", () => {
+  it("splits only the strict Name (TICKER) shape", () => {
+    expect(splitNameTicker("Microsoft (MSFT)")).toEqual({ name: "Microsoft", ticker: "MSFT" });
+    expect(splitNameTicker("  Meta Platforms ( META ) ")).toEqual({ name: "Meta Platforms", ticker: "META" });
+    expect(splitNameTicker("Berkshire Hathaway (BRK.B)")).toEqual({ name: "Berkshire Hathaway", ticker: "BRK.B" });
+    for (const bad of ["MSFT", "Microsoft", "(MSFT)", "Microsoft (MSFT) x", "Microsoft ()", "Microsoft (TOOLONGTICKER1)", "Microsoft (MS FT)"]) expect(splitNameTicker(bad)).toBeNull();
+  });
+});
+
+describe("resolveSecAsset: Company (TICKER) form", () => {
+  it.each([
+    ["Microsoft (MSFT)", "MSFT"], ["NVIDIA (NVDA)", "NVDA"], ["Apple Inc. (AAPL)", "AAPL"], ["Meta Platforms (META)", "META"],
+    ["microsoft ( msft )", "MSFT"], ["Microsoft(MSFT)", "MSFT"], ["Meta (META)", "META"],
+  ])("%s resolves to %s from real SEC rows", (asset, ticker) => {
+    const r = resolveSecAsset(secEntries, asset);
+    expect(r.row?.ticker).toBe(ticker);
+    expect(r.note).toBe(`name (ticker) form: ticker ${ticker} matched SEC title ${r.row?.title}`);
+    expect(r.search).toBe(asset);
+  });
+  it("a bracketed SEC ticker whose title disagrees is not accepted, whichever side is longer", () => {
+    expect(resolveSecAsset(secEntries, "Apple (MSFT)")).toEqual({ row: undefined, search: "Apple (MSFT)" });
+    expect(resolveSecAsset(secEntries, "Micro (MSFT)").row).toBeUndefined();
+    expect(resolveSecAsset(secEntries, "Microsoft Japan (MSFT)").row).toBeUndefined();
+    expect(resolveSecAsset(secEntries, "Meta Platforms Inc Class A (META)").row).toBeUndefined();
+  });
+  it("unlisted bracketed ticker falls back to the bare name alone, else stays unresolved", () => {
+    expect(resolveSecAsset(secEntries, "Foo (ZZZZ)")).toEqual({ row: undefined, search: "Foo", searchTicker: "ZZZZ" });
+    const viaName = resolveSecAsset(secEntries, "Microsoft (ZZZZ)");
+    expect(viaName.row?.ticker).toBe("MSFT");
+    expect(viaName.note).toBeUndefined();
+  });
+  it("bare tickers, bare names and other shapes are unchanged", () => {
+    expect(resolveSecAsset(secEntries, "TSLA")).toEqual({ row: secEntries.find((e) => e.ticker === "TSLA"), search: "TSLA" });
+    expect(resolveSecAsset(secEntries, "Apple").row?.ticker).toBe("AAPL");
+    expect(resolveSecAsset(secEntries, "Apple Inc.").row?.ticker).toBe("AAPL");
+    expect(resolveSecAsset(secEntries, "Apple Banana")).toEqual({ row: undefined, search: "Apple Banana" });
+    expect(resolveSecAsset(secEntries, "(MSFT)")).toEqual({ row: undefined, search: "(MSFT)" });
+    expect(resolveSecAsset(secEntries, "- (MSFT)")).toEqual({ row: undefined, search: "- (MSFT)" });
+    expect(resolveSecAsset(secEntries, "Microsoft (MSFT) x")).toEqual({ row: undefined, search: "Microsoft (MSFT) x" });
+  });
+  it("an existing whole-string title match for an unlisted bracket is never rerouted", () => {
+    const rows = [{ cik_str: 1, ticker: "AAA", title: "Alpha (Holdings)" }, { cik_str: 2, ticker: "BBB", title: "Alpha Inc." }];
+    expect(resolveSecAsset(rows, "Alpha (Holdings)").row?.ticker).toBe("AAA");
+  });
+  it("a mismatched listed ticker still honours an exact whole-string title match", () => {
+    const rows = [{ cik_str: 1, ticker: "AAA", title: "Alpha (BBB)" }, { cik_str: 2, ticker: "BBB", title: "Beta Inc." }];
+    expect(resolveSecAsset(rows, "Alpha (BBB)").row?.ticker).toBe("AAA");
+  });
+  it("a bracket whose leading name folds to nothing is left whole", () => {
+    expect(resolveSecAsset(secEntries, "- (ZZZZ)")).toEqual({ row: undefined, search: "- (ZZZZ)" });
+  });
+  it("two SEC rows with the same bracketed ticker and agreeing titles are ambiguous", () => {
+    expect(() => resolveSecAsset([{ ticker: "DUP", title: "Acme Inc." }, { ticker: "DUP", title: "Acme Corp" }], "Acme (DUP)")).toThrow("multiple SEC entries");
+  });
+});
+
+describe("refusal-log asset labels", () => {
+  it("assetShape", () => {
+    expect(assetShape("TSLA")).toBe("ticker"); expect(assetShape("BRK-B")).toBe("ticker");
+    expect(assetShape("Apple")).toBe("name"); expect(assetShape("Apple Inc.")).toBe("name"); expect(assetShape("microsoft")).toBe("name");
+    expect(assetShape("Microsoft (MSFT)")).toBe("name_paren_ticker");
+    expect(assetShape(" TSLA ")).toBe("ticker"); expect(assetShape("MICROSOFT CORP")).toBe("name"); expect(assetShape("MICROSOFTCORP")).toBe("name");
+    expect(assetShape("ZZZZ9!")).toBe("other"); expect(assetShape("123 456")).toBe("other");
+  });
+  it("assetLenBucket", () => {
+    expect(assetLenBucket("  abcde  ")).toBe("1-5");
+    expect([ "a", "abcde", "abcdef", "a".repeat(12), "a".repeat(13), "a".repeat(24), "a".repeat(25) ].map(assetLenBucket)).toEqual(["1-5", "1-5", "6-12", "6-12", "13-24", "13-24", ">24"]);
+  });
+  it("only closed-vocabulary values are ever kept", () => {
+    expect(sanitizeAnswerClass("FINANCIAL_DATA_GENERAL", { asset_resolution: "resolved", asset_shape: "Microsoft (MSFT)", asset_len_bucket: "17" })).toEqual({ asset_resolution: "resolved" });
+    expect(sanitizeAnswerClass("FINANCIAL_DATA_GENERAL", { asset_shape: "name_paren_ticker", asset_len_bucket: ">24" })).toEqual({ asset_shape: "name_paren_ticker", asset_len_bucket: ">24" });
+  });
+});
+
+describe("FINANCIAL_DATA_GENERAL with Company (TICKER) assets", () => {
+  it("Apple Inc. (AAPL) serves the bare-ticker figures, echoes the asset as sent and records the note", async () => {
+    parenStub();
+    const bare = await handleFinancialData({ asset: "AAPL" });
+    resetSecFinancialCacheForTests(); resetEquityCacheForTests();
+    const urls = parenStub();
+    const r = await handleFinancialData({ asset: "Apple Inc. (AAPL)" });
+    expect(r.asset).toBe("AAPL");
+    expect(r.market_cap_usd).toBe(bare.market_cap_usd);
+    expect(r.market_cap_usd).toBe(Math.round(342.56 * 14532182000));
+    expect(r.verdict).toBe("verified");
+    expect(r.resolution_note).toBe("name (ticker) form: ticker AAPL matched SEC title Apple Inc.");
+    expect(bare).not.toHaveProperty("resolution_note");
+    expect(searchQueries(urls)).toEqual([]);
+    const ev = JSON.parse((await getReceiptEvidence((r.receipt as { receipt_id: string }).receipt_id)).evidence!.toString());
+    expect(ev.resolution.requested_asset).toBe("Apple Inc. (AAPL)");
+    expect(ev.resolution.resolution_note).toBe(r.resolution_note);
+    expect(answerDiagnostics("FINANCIAL_DATA_GENERAL", r).answerClass).toEqual({ asset_resolution: "resolved", asset_shape: "name_paren_ticker" });
+    expect(answerDiagnostics("FINANCIAL_DATA_GENERAL", bare).answerClass).toEqual({ asset_resolution: "resolved", asset_shape: "ticker" });
+  });
+  it("Microsoft (MSFT), NVIDIA (NVDA) and Meta Platforms (META) resolve through SEC (right CIK and chart ticker requested) with no search", async () => {
+    for (const [asset, cik, tk] of [["Microsoft (MSFT)", "0000789019", "MSFT"], ["NVIDIA (NVDA)", "0001045810", "NVDA"], ["Meta Platforms (META)", "0001326801", "META"]]) {
+      resetSecFinancialCacheForTests(); resetEquityCacheForTests();
+      const urls = parenStub();
+      await expect(handleFinancialData({ asset })).rejects.toMatchObject({ code: "SOURCE_UNREACHABLE" });
+      expect(urls.some((u) => u.includes(`companyconcept/CIK${cik}/dei`))).toBe(true);
+      expect(urls.some((u) => u.includes(`finance/chart/${tk}?`))).toBe(true);
+      expect(searchQueries(urls)).toEqual([]);
+    }
+  });
+  it("Apple (MSFT) stays unsupported, today's whole-string search, labelled in the refusal log", async () => {
+    const urls = parenStub();
+    const r = await handleFinancialData({ asset: "Apple (MSFT)" });
+    expect(r).toMatchObject({ verdict: "no_data", market_cap_usd: null, reason_code: "unsupported_asset", asset: "Apple (MSFT)" });
+    expect(searchQueries(urls)).toEqual(["apple (msft)"]);
+    expect(urls.some((u) => u.includes("companyconcept") || u.includes("finance/chart"))).toBe(false);
+    expect(answerDiagnostics("FINANCIAL_DATA_GENERAL", r).answerClass).toEqual({ asset_resolution: "unsupported_asset", asset_shape: "name_paren_ticker", asset_len_bucket: "6-12" });
+  });
+  it("Foo (ZZZZ) stays unsupported and searches the bare name", async () => {
+    const urls = parenStub();
+    const r = await handleFinancialData({ asset: "Foo (ZZZZ)" });
+    expect(r).toMatchObject({ verdict: "no_data", market_cap_usd: null, reason_code: "unsupported_asset" });
+    expect(searchQueries(urls)).toEqual(["foo"]);
+  });
+  it("a search hit for a bare name must carry the bracketed ticker as its symbol", async () => {
+    parenStub([{ symbol: "AAPL", quoteType: "EQUITY", shortname: "Foo" }]);
+    expect(await handleFinancialData({ asset: "Foo (ZZZZ)" })).toMatchObject({ verdict: "no_data", reason_code: "unsupported_asset" });
+    resetSecFinancialCacheForTests(); resetEquityCacheForTests();
+    parenStub([{ symbol: "AAPL", quoteType: "EQUITY", shortname: "Foo" }]);
+    expect((await handleFinancialData({ asset: "Foo (AAPL)" })).reason_code).toBe("unsupported_asset"); // AAPL is listed under another title: today's path, whole string
+  });
+  it("a search hit whose symbol is the bracketed ticker and whose name is the bare name resolves it", async () => {
+    const urls = parenStub([{ symbol: "ZZZZ", quoteType: "EQUITY", shortname: "Foo" }]);
+    await expect(handleFinancialData({ asset: "Foo (ZZZZ)" })).rejects.toMatchObject({ code: "SOURCE_UNREACHABLE" }); // resolved to ZZZZ, whose non-SEC price/share sources are not stubbed
+    expect(urls.some((u) => u.includes("finance/chart/ZZZZ"))).toBe(true);
+  });
+  it("the bracketed ticker is compared case-insensitively with the search symbol", async () => {
+    const urls = parenStub([{ symbol: "ZZZZ", quoteType: "EQUITY", shortname: "Foo" }]);
+    await expect(handleFinancialData({ asset: "Foo (zzzz)" })).rejects.toMatchObject({ code: "SOURCE_UNREACHABLE" });
+    expect(urls.some((u) => u.includes("finance/chart/ZZZZ"))).toBe(true);
+  });
+  it("the bare-name search is cached under the bare name", async () => {
+    const urls = parenStub();
+    await handleFinancialData({ asset: "Foo (ZZZZ)" });
+    await handleFinancialData({ asset: "Foo" });
+    expect(searchQueries(urls)).toEqual(["foo"]);
+  });
+  it("a plain name still sends its whole string to search when SEC has no match", async () => {
+    const urls = parenStub();
+    await handleFinancialData({ asset: "Foo Bar" });
+    expect(searchQueries(urls)).toEqual(["foo bar"]);
+  });
 });
