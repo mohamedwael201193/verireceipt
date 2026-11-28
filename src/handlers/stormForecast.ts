@@ -40,5 +40,5 @@ export async function readStormForecast(url:string){
   let timer:ReturnType<typeof setTimeout>;
   try{return await Promise.race([readPublicBody(url,256000,4000),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('forecast deadline')),4100);})]).finally(()=>clearTimeout(timer!));}
   catch(e){if(e instanceof Error&&/public source returned HTTP (?:403|429)$/.test(e.message))backoffUntil=Date.now()+3600000;throw e;}
- });}catch{throw upstreamUnavailable('STORM_FORECAST_UNAVAILABLE','forecast unavailable, over budget or in temporary throttle backoff');}
+ });}catch(cause){throw Object.assign(upstreamUnavailable('STORM_FORECAST_UNAVAILABLE','forecast unavailable, over budget or in temporary throttle backoff'),{stormCause:cause});}
 }

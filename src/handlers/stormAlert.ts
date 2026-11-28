@@ -92,6 +92,27 @@ export function stormQueryLocations(text:string):string[]{
 
 export const INTENT = "STORM_ALERT_GENERAL";
 
+// Stage-level failure logging: fixed labels only, never upstream text.
+const STORM_STAGES = ["geocoder", "forecast", "nws"] as const;
+const STORM_HTTP_CLASSES = ["429", "4xx", "5xx", "timeout", "parse", "none"] as const;
+type StormStage = (typeof STORM_STAGES)[number];
+type StormHttpClass = (typeof STORM_HTTP_CLASSES)[number];
+function httpClassOf(status: number): StormHttpClass { return status === 429 ? "429" : status >= 400 && status < 500 ? "4xx" : status >= 500 && status < 600 ? "5xx" : "none"; }
+/** Reduce a failure to the closed class set; the error text itself is never logged. */
+export function stormHttpClass(err: unknown): StormHttpClass {
+  const inner = err instanceof Error && (err as { stormCause?: unknown }).stormCause !== undefined ? (err as { stormCause?: unknown }).stormCause : err;
+  const msg = inner instanceof Error ? inner.message : "";
+  const http = /HTTP (\d{3})\b/.exec(msg);
+  if (http) return httpClassOf(Number(http[1]));
+  if (/deadline|timeout|timed out|abort/i.test(msg) || (inner instanceof Error && /^(AbortError|TimeoutError)$/.test(inner.name))) return "timeout";
+  return "none";
+}
+export function logStormStageFailure(stage: StormStage, httpClass: StormHttpClass): void {
+  const s = STORM_STAGES.includes(stage) ? stage : "geocoder";
+  const c = STORM_HTTP_CLASSES.includes(httpClass) ? httpClass : "none";
+  console.info(JSON.stringify({ event: "storm_stage_failure", stage: s, http_class: c }));
+}
+
 export async function handleStormAlert(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
   const fromQuery=query.location===undefined&&query.query!==undefined;
   const candidates=fromQuery?stormQueryLocations(query.query!.trim()):[];
@@ -105,18 +126,19 @@ export async function handleStormAlert(query: Record<string, string | undefined>
     let selected=false;
     const geocoderDeadline=Date.now()+SOURCE_TIMEOUT_MS;
     for(const candidate of fromQuery?candidates:[rawLocation]){
-      if(Date.now()>=geocoderDeadline)throw upstreamUnavailable("GEOCODER_UNREACHABLE","shared geocoder deadline reached; no guessed location");
+      if(Date.now()>=geocoderDeadline){logStormStageFailure("geocoder","timeout");throw upstreamUnavailable("GEOCODER_UNREACHABLE","shared geocoder deadline reached; no guessed location");}
       const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(candidate)}&count=10&language=en&format=json`;
       let g: { status: number; body: string };
       try {
         g = await fetchText(geoUrl,undefined,geocoderDeadline);
         if (g.status >= 400) throw new Error(`geocoder HTTP ${g.status}`);
-      } catch {
+      } catch (geoErr) {
+        logStormStageFailure("geocoder", stormHttpClass(geoErr));
         throw upstreamUnavailable("GEOCODER_UNREACHABLE", "the Open-Meteo geocoder could not be reached; pass \"lat,lon\" to skip geocoding");
       }
       let hit;
       try { hit = parseRankedLocation(g.body, "Open-Meteo"); }
-      catch { throw upstreamUnavailable("GEOCODER_UNREACHABLE", "invalid top geocoder result; no guessed location"); }
+      catch { logStormStageFailure("geocoder", "parse"); throw upstreamUnavailable("GEOCODER_UNREACHABLE", "invalid top geocoder result; no guessed location"); }
       if(!hit)continue;
       lat = hit.latitude; lon = hit.longitude;
       placeLabel = `${hit.label} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
@@ -144,8 +166,8 @@ export async function handleStormAlert(query: Record<string, string | undefined>
     const points=await fetchText(pointsUrl,nwsController.signal);
     if(nwsController.signal.aborted)throw new Error("NWS deadline");
     if(points.status===404)return {available:false as const,reason:"outside NWS grid",points,alerts:null};
-    if(points.status>=400)throw new Error("NWS coverage unavailable");
-    const alerts=await fetchText(alertsUrl,nwsController.signal);if(alerts.status>=400)throw new Error("NWS alerts unavailable");
+    if(points.status>=400)throw new Error(`NWS coverage unavailable HTTP ${points.status}`);
+    const alerts=await fetchText(alertsUrl,nwsController.signal);if(alerts.status>=400)throw new Error(`NWS alerts unavailable HTTP ${alerts.status}`);
     return {available:true as const,reason:"available",points,alerts};
   };
   let nwsTimer: ReturnType<typeof setTimeout>;
@@ -155,9 +177,14 @@ export async function handleStormAlert(query: Record<string, string | undefined>
   let forecast=null;
   if(capture){try {forecast=parseStormForecast(capture.raw,forecastInterval.start,forecastInterval.end);}catch { /* invalid forecast may not replace available NWS evidence */ }}
   const nowIso=new Date(requestedAt).toISOString();
+  const forecastClass:StormHttpClass=capture?"parse":stormHttpClass(forecastResult.status==="rejected"?forecastResult.reason:undefined);
   let alerts:IssuedAlert[]=[],nwsState=nwsResult.status==='fulfilled'?nwsResult.value.reason:'unavailable';
   if(nwsResult.status==='fulfilled'&&nwsResult.value.available){
     try{alerts=parseAlerts(nwsResult.value.alerts.body);}catch{nwsState='malformed alert response';}
+  }
+  if(!forecast&&nwsState!=="available"){
+    logStormStageFailure("forecast",forecastClass);
+    logStormStageFailure("nws",nwsResult.status==="rejected"?stormHttpClass(nwsResult.reason):nwsState==="malformed alert response"?"parse":nwsState==="outside NWS grid"?"4xx":"none");
   }
   if(!forecast&&nwsState!=="available")throw upstreamUnavailable("STORM_FORECAST_UNAVAILABLE","no valid forecast or available NWS alert evidence; no guessed LOW");
   const assessed=assessAlerts(alerts,nowIso,windowHours);

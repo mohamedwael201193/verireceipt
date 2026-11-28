@@ -32,6 +32,7 @@ import { envelope, makeReceipt, sha256Hex } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 
 import {readForecastSource,rememberForecastSource} from './forecastSourceCache';
+import {metForecastFallback} from './weatherForecastFallback';
 
 export const INTENT = "WEATHER_FORECAST_GENERAL";
 
@@ -156,7 +157,11 @@ export async function handleWeatherForecast(query: Record<string, string | undef
     `&hourly=temperature_2m,precipitation_probability,weather_code,precipitation,wind_speed_10m,wind_gusts_10m,cloud_cover,relative_humidity_2m&forecast_days=${forecastDays}&timezone=auto`;
   let fcEntry: {body:string;fetchedAt:string};
   try { fcEntry=await readForecastSource('forecast',fcUrl); }
-  catch { throw upstreamUnavailable('UPSTREAM_UNREACHABLE','Open-Meteo forecast source unavailable'); }
+  catch {
+    const fallback = await metForecastFallback({ lat, lon, windowHours, location, resolvedName, locationSelection, geoUrl, geoBody });
+    if (fallback) return fallback;
+    throw upstreamUnavailable('UPSTREAM_UNREACHABLE','Open-Meteo forecast source unavailable');
+  }
   const fcBody=fcEntry.body;
 
   interface FcBody { utc_offset_seconds?: number; timezone?: string; timezone_abbreviation?: string; latitude?: number; longitude?: number;
