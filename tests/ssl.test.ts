@@ -126,3 +126,72 @@ describe("real live TLS peers, no simulated certificates", () => {
 });
 it('SSL cached real observation preserves DER receipt and expires by ten minutes',async()=>{const a=await handleSsl({host:'google.com'});const start=Date.now(),calls=vi.mocked(tls.connect).mock.calls.length;vi.useFakeTimers();try{vi.setSystemTime(start+599999);const b=await handleSsl({host:'GOOGLE.COM.'});expect(vi.mocked(tls.connect).mock.calls.length).toBe(calls);expect(b.receipt).toEqual(a.receipt);expect(b.as_of).toBe(a.as_of);expect(b.observation_cached).toBe(true);expect(b.answer).toContain('not a new source check');vi.setSystemTime(start+600001);vi.mocked(dns.lookup).mockRejectedValueOnce(Error('test unavailable'));await expect(handleSsl({host:'google.com'})).rejects.toMatchObject({code:'TLS_DNS_UNAVAILABLE'});}finally{vi.useRealTimers();}},15000);
 it('SSL cache recomputes after receipt evidence is pruned',async()=>{const a=await handleSsl({host:'google.com'});const {getDb}=await import('../src/core/db');getDb().prepare('UPDATE miner_receipts SET evidence_gzip=NULL,evidence_bytes=0 WHERE receipt_id=?').run((a.receipt as any).receipt_id);expect((await getReceiptEvidence((a.receipt as any).receipt_id)).evidence).toBeNull();const b=await handleSsl({host:'google.com'});expect(b.observation_cached).toBe(false);expect((b.receipt as any).receipt_id).not.toBe((a.receipt as any).receipt_id);expect((await getReceiptEvidence((b.receipt as any).receipt_id)).evidence?.length).toBeGreaterThan(0);},15000);
+
+import { runHedged } from "../src/handlers/sslVerification";
+describe("hedged TLS attempt scheduler", () => {
+  const never = (_i: string, _b: number, signal: AbortSignal) => new Promise<string>((_, rej) => signal.addEventListener("abort", () => rej(new Error("aborted"))));
+  it("first stalls, second wins at hedge time plus its own latency; loser is aborted", async () => {
+    vi.useFakeTimers();
+    try {
+      const aborted: string[] = [];
+      const t0 = Date.now();
+      const p = runHedged(["a", "b", "a", "b"], (item, _b, signal) => {
+        if (item === "a") { signal.addEventListener("abort", () => aborted.push("a")); return new Promise<string>(() => {}); }
+        return new Promise<string>((res) => setTimeout(() => res("b-done"), 300));
+      }, { deadline: Date.now() + 8000 });
+      await vi.advanceTimersByTimeAsync(1199);
+      await vi.advanceTimersByTimeAsync(301);
+      const r = await p;
+      expect(r.ok && r.value).toBe("b-done");
+      expect(Date.now() - t0).toBe(1500);
+      expect(aborted).toEqual(["a"]);
+    } finally { vi.useRealTimers(); }
+  });
+  it("does not hedge before 1200ms", async () => {
+    vi.useFakeTimers();
+    try {
+      const started: string[] = [];
+      const p = runHedged(["a", "b"], (item) => { started.push(item); return new Promise<string>((res) => setTimeout(() => res(item), 1000)); }, { deadline: Date.now() + 8000 });
+      await vi.advanceTimersByTimeAsync(1000);
+      const r = await p;
+      expect(started).toEqual(["a"]);
+      expect(r.ok && r.value).toBe("a");
+    } finally { vi.useRealTimers(); }
+  });
+  it("all stall: refusal after the shared deadline with every attempt recorded, per-attempt cap 3000", async () => {
+    vi.useFakeTimers();
+    try {
+      const budgets: number[] = [];
+      const t0 = Date.now();
+      const p = runHedged(["a", "b", "a", "b"], (i, b, s) => { budgets.push(b); return never(i, b, s); }, { deadline: Date.now() + 8000 });
+      await vi.advanceTimersByTimeAsync(8000);
+      const r = await p;
+      expect(r.ok).toBe(false);
+      expect(r.failures.length).toBe(4);
+      expect(Math.max(...budgets)).toBeLessThanOrEqual(3000);
+      expect(Date.now() - t0).toBeLessThanOrEqual(8000);
+    } finally { vi.useRealTimers(); }
+  });
+  it("first fails fast: second starts immediately", async () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt: number[] = [];
+      const t0 = Date.now();
+      const p = runHedged(["a", "b"], (item) => { startedAt.push(Date.now() - t0); return item === "a" ? Promise.reject(new Error("ECONNRESET")) : Promise.resolve("ok"); }, { deadline: Date.now() + 8000 });
+      const r = await p;
+      expect(startedAt).toEqual([0, 0]);
+      expect(r.ok && r.value).toBe("ok");
+      expect(r.failures).toEqual([{ item: "a", error: "ECONNRESET" }]);
+    } finally { vi.useRealTimers(); }
+  });
+  it("a conclusive result is returned without a second probe", async () => {
+    vi.useFakeTimers();
+    try {
+      const started: string[] = [];
+      const r = await runHedged(["a", "b"], (item) => { started.push(item); return Promise.resolve({ valid: false }); }, { deadline: Date.now() + 8000 });
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(started).toEqual(["a"]);
+      expect(r.ok && r.value).toEqual({ valid: false });
+    } finally { vi.useRealTimers(); }
+  });
+});
