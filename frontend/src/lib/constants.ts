@@ -10,8 +10,8 @@ export const MINER_IDENTITY = {
 
 export const MINER_NAME = "VeriReceipt Deterministic Oracle";
 
-// Miner bond: $5.23 Test USDC = on-chain minerBond(6205) = quoteMinerBond(58)
-// = 5,230,000 base units ($1.00 + 8 x $0.10 + 49 x $0.07 for 58 intents). Derived from
+// Miner bond: $5.30 Test USDC = on-chain minerBond(6220) = quoteMinerBond(59)
+// = 5,300,000 base units ($1.00 + 8 x $0.10 + 50 x $0.07 for 59 intents). Derived from
 // ./minerBond, the single source of truth.
 // The dashboard design file's "$1.84 / 184 checks sponsored" is fabricated —
 // no such live value exists and it must never be displayed.

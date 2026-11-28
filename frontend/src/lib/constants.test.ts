@@ -14,8 +14,8 @@ describe("miner identity", () => {
     expect(MINER_NAME).toBe("VeriReceipt Deterministic Oracle");
   });
 
-  it("bond is the on-chain $5.23 (minerBond(6205) = quoteMinerBond(58)), not the stale $1.40 or fabricated $1.84", () => {
-    expect(MINER_BOND_USDC).toBe(5.23);
+  it("bond is the on-chain $5.30 (minerBond(6220) = quoteMinerBond(59)), not the stale $1.40 or fabricated $1.84", () => {
+    expect(MINER_BOND_USDC).toBe(5.3);
     expect(MINER_BOND_USDC).not.toBe(1.4);
     expect(MINER_BOND_USDC).not.toBe(1.84);
   });

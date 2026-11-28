@@ -12,10 +12,13 @@ import './research.css';
 import './research-desk.css';
 import {
   SEPOLIA_EXPLORER_TX,
+  SEPOLIA_REGISTERED_INTENT_COUNT,
   SEPOLIA_REGISTRATION_ID,
   SEPOLIA_YAML_HASH,
   SEPOLIA_YAML_PIN,
   TELEGRAPH_NODE_BASE,
+  describeNodeListing,
+  useMinerRegistration,
 } from '../lib/minerRegistration';
 import { MINER_BOND_USD_TEXT } from '../lib/minerBond';
 import { DECLARED_INTENT_COUNT } from '../lib/minerManifest';
@@ -42,6 +45,7 @@ const RUNS = [
 ];
 
 export default function Try() {
+  const registration = useMinerRegistration();
   return (
     <main className="rp-page rd-page">
       <header className="rp-hero">
@@ -88,7 +92,7 @@ export default function Try() {
         <p className="rp-muted">
           The full endpoint contracts, with parameters and error codes, are on{' '}
           <Link to="/docs">/docs</Link>; {DECLARED_INTENT_COUNT} intents are declared in the
-          manifest, 58 registered on Sepolia.
+          manifest, {SEPOLIA_REGISTERED_INTENT_COUNT} registered on Sepolia.
         </p>
       </section>
 
@@ -127,7 +131,8 @@ export default function Try() {
           <div>
             <dt>Registration</dt>
             <dd>
-              {SEPOLIA_REGISTRATION_ID} · active ·{' '}
+              {SEPOLIA_REGISTRATION_ID} ·{' '}
+              {registration.data ? describeNodeListing(registration.data.nodeByRegistrationId) : 'checking the live node…'} ·{' '}
               <a href={`${TELEGRAPH_NODE_BASE}/api/miners/${SEPOLIA_REGISTRATION_ID}`} target="_blank" rel="noreferrer">
                 node record
               </a>

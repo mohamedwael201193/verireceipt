@@ -1,32 +1,34 @@
 /**
  * Miner registration bond: one source of truth for every bond figure in the UI.
  *
- * On-chain facts (Ethereum Sepolia, Diamond 0x72a70e…a08b, read 2026-11-27):
+ * On-chain facts (Ethereum Sepolia, Diamond 0x72a70e…a08b, read 2026-11-28):
  *   minerBondParams() -> [1000000, 100000, 70000, 9, 172800]
- *   quoteMinerBond(58) -> [5230000, 5230000]   (58 intents)
- *   minerBond(6205)   -> [5230000, 5230000]              (our live registration)
- *   updateMiner tx 0x0abb85de…13ec7 created registration 6205 at block 12220050.
+ *   quoteMinerBond(59) -> [5300000, 5300000]   (59 intents)
+ *   minerBond(6220)   -> [5300000, 5300000]              (our live registration)
+ *   minerBond(6205)   -> [0, 0]   (deregistered by the updateMiner below)
+ *   updateMiner tx 0x083b6aa1…f7c24 created registration 6220 at block 12229044.
  * Bonds on this Diamond are paid in Sepolia Test USDC (6 decimals), per
  * telegraph-docs protocol/addresses-and-params.md. Pricing per
  * protocol/roles.md: $1 for the first intent, $0.10 for each further intent
- * up to 9, then $0.07 each. VeriReceipt declares 58 intents:
- * $1.00 + 8 x $0.10 + 49 x $0.07 = $5.23.
+ * up to 9, then $0.07 each. VeriReceipt registers 59 intents:
+ * $1.00 + 8 x $0.10 + 50 x $0.07 = $5.30.
  *
  * Static displays use the labelled constant below. The Status page also
- * re-reads minerBond(6205) and quoteMinerBond(58) live and shows any
+ * re-reads minerBond(current id) and quoteMinerBond(count) live and shows any
  * disagreement instead of hiding it.
  */
 
-import { SEPOLIA_REGISTRATION_ID } from "./minerRegistration";
+import { SEPOLIA_REGISTERED_INTENT_COUNT, SEPOLIA_REGISTRATION_ID } from "./minerRegistration";
 
 export const BOND_REGISTRATION_ID = SEPOLIA_REGISTRATION_ID;
-/** On-chain registered intent count for registration 6205 (58).
- * Matches DECLARED_INTENT_COUNT at this snapshot. */
-export const BOND_INTENT_COUNT = 58;
-/** 6-decimal Test USDC base units: on-chain minerBond(6205) == quoteMinerBond(58). */
-export const MINER_BOND_BASE_UNITS = 5_230_000;
-export const MINER_BOND_SOURCE =
-  "on-chain minerBond(6205) = quoteMinerBond(58) = 5,230,000 Test USDC base units (Sepolia, read 2026-11-27)";
+/** On-chain registered intent count of the current registration: derived
+ * from the registration list, never typed twice. */
+export const BOND_INTENT_COUNT = SEPOLIA_REGISTERED_INTENT_COUNT;
+/** 6-decimal Test USDC base units read on-chain 2026-11-28:
+ * minerBond(6220) == quoteMinerBond(59) == 5,300,000. A test ties this to
+ * bondForIntents(BOND_INTENT_COUNT). */
+export const MINER_BOND_BASE_UNITS = 5_300_000;
+export const MINER_BOND_SOURCE = `on-chain minerBond(${BOND_REGISTRATION_ID}) = quoteMinerBond(${BOND_INTENT_COUNT}) = ${MINER_BOND_BASE_UNITS.toLocaleString("en-US")} Test USDC base units (Sepolia, read 2026-11-28)`;
 
 /** minerBondParams() as read on 2026-11-22 (USD, 6 decimals). */
 export const MINER_BOND_PARAMS = {
@@ -54,7 +56,7 @@ export function bondForIntents(n: number, p: BondParams = MINER_BOND_PARAMS): nu
   return p.firstIntent + mid * p.furtherIntent + tail * p.tailIntent;
 }
 
-/** 5230000 -> "$5.23" (6-decimal USDC base units, exact integer cents). */
+/** 5300000 -> "$5.30" (6-decimal USDC base units, exact integer cents). */
 export function formatUsdcBaseUnits(units: number | bigint): string {
   const u = BigInt(units);
   const ZERO = BigInt(0);
@@ -65,9 +67,9 @@ export function formatUsdcBaseUnits(units: number | bigint): string {
   return `$${dollars.toString()}.${rem.toString().padStart(2, "0")}`;
 }
 
-/** "$5.23" */
+/** "$5.30" */
 export const MINER_BOND_USD_TEXT = formatUsdcBaseUnits(MINER_BOND_BASE_UNITS);
-/** 5.23 */
+/** 5.3 */
 export const MINER_BOND_USD = MINER_BOND_BASE_UNITS / 1_000_000;
 
 // ---- live read (Status page) ----------------------------------------------
@@ -103,7 +105,7 @@ function firstWord(hex: string): bigint {
 }
 
 export interface LiveMinerBond {
-  /** minerBond(6205), Test USDC base units. */
+  /** minerBond(current registration), Test USDC base units. */
   registrationBond: bigint;
   /** quoteMinerBond(58) first return value, base units. */
   quoteForIntents: bigint;

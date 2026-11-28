@@ -10,8 +10,8 @@
  * is `/v1/grid-price`. The design files also list the intent endpoints as
  * POST paths with `-lookup` suffixes; the contract is the GET paths below.
  *
- * Bond: $5.23 Test USDC — on-chain minerBond(6205) = quoteMinerBond(58) =
- * 5,230,000 base units (see lib/minerBond.ts, the single source).
+ * Bond: Test USDC, read on-chain (minerBond of the current registration =
+ * quoteMinerBond of its intent count; 5,300,000 base units on 2026-11-28) (see lib/minerBond.ts, the single source).
  * The dashboard's sponsored-checks figure is fabricated — never shown.
  */
 import { MINER_BOND_USD_TEXT } from "./lib/minerBond";

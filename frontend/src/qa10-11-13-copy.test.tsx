@@ -1,3 +1,4 @@
+import { SEPOLIA_REGISTRATION_ID } from "./lib/minerRegistration";
 // QA-10 / QA-11 / QA-13 (external live-site QA, 2026-11-21).
 // QA-10: the footer labels each identifier by namespace (miner.yaml id vs
 //        node registration) and shows frontend + backend release SHAs.
@@ -50,7 +51,7 @@ describe("QA-10 identity and release labels", () => {
   it("footer names both IDs and shows the backend SHA from /health", async () => {
     renderAt("/docs");
     expect(await screen.findByText(/miner\.yaml id 774921 · verireceipt/)).toBeTruthy();
-    expect(screen.getByText(/node registration 6205 \(on-chain bond\)/)).toBeTruthy();
+    expect(screen.getByText(new RegExp(`node registration ${SEPOLIA_REGISTRATION_ID} \\(on-chain bond\\)`))).toBeTruthy();
     const link = await screen.findByRole("link", { name: SHA });
     expect(link.getAttribute("href")).toContain(`/commit/${SHA}`);
     expect(screen.getByText(/frontend and backend deploy separately/)).toBeTruthy();

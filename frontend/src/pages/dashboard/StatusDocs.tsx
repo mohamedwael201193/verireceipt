@@ -16,6 +16,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getFilings, getGridPrice, getHealth, getRoute, getTvl, getTx, getValidator } from "../../lib/api";
+import { SEPOLIA_REGISTERED_INTENT_COUNT, SEPOLIA_REGISTRATION_ID, SEPOLIA_YAML_PIN } from "../../lib/minerRegistration";
 import { DOC_SNIPPETS, DOC_TABS, type DocTabId } from "./docs";
 import type { LiveReceipt, ScopeSamples, ScopeSeriesKey } from "./types";
 import {
@@ -479,7 +480,7 @@ export default function StatusDocs({
       </div>
       {activeDoc === "yaml" && (
         <div className="note-line" style={{ marginTop: 10 }}>
-          Verbatim from the repo-root miner.yaml (a test enforces byte equality) — re-sync this tab if miner.yaml changes. This is the declared set: registration 6205 currently registers 58 intents (the supported_intents of miner.yaml at pin fa71e619); any intent declared after that pin is wired and live but not yet registered.
+          Verbatim from the repo-root miner.yaml (a test enforces byte equality) — re-sync this tab if miner.yaml changes. This is the declared set: registration {SEPOLIA_REGISTRATION_ID} currently registers {SEPOLIA_REGISTERED_INTENT_COUNT} intents (the supported_intents of miner.yaml at pin {SEPOLIA_YAML_PIN.slice(0, 8)}); any intent declared after that pin is wired and live but not yet registered.
         </div>
       )}
       {activeDoc === "cast" && (

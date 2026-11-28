@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { DECLARED_INTENTS, DECLARED_INTENT_COUNT, MINER_YAML_SHA256 } from "./minerManifest";
 import { BOND_INTENT_COUNT, BOND_REGISTRATION_ID, MINER_BOND_BASE_UNITS } from "./minerBond";
-import { SEPOLIA_REGISTRATION_ID, SEPOLIA_YAML_HASH, SEPOLIA_SERVING_REGISTRATION_IDS } from "./minerRegistration";
+import { SEPOLIA_REGISTERED_INTENTS, SEPOLIA_REGISTERED_INTENT_COUNT, SEPOLIA_PREVIOUS_REGISTRATION_ID, SEPOLIA_REGISTRATION_ID, SEPOLIA_YAML_HASH, SEPOLIA_SERVING_REGISTRATION_IDS } from "./minerRegistration";
 import { INTENT_ENDPOINTS } from "../config";
 import { INTENTS } from "../pages/landing/data";
 
@@ -19,16 +19,19 @@ describe("current frontend contract metadata", () => {
   // is separate and must change only after a verified registration update.
   const workingHash = "0x" + createHash("sha256").update(raw).digest("hex");
   expect(workingHash).toBe(MINER_YAML_SHA256);
-  expect(SEPOLIA_YAML_HASH).toBe("0x373438711810673d7e22f0d928352668a3bc882e9127a228e02b404c4a3747a2");
+  expect(SEPOLIA_YAML_HASH).toBe("0xc334c69ccae79480fe5ff9726d91d3f0efee7b87d60bcc8edea2d5c6a5ab9ad9");
  });
  it("separates six selected demos from the declarations", () => {
   expect(INTENTS).toHaveLength(6);
   expect(INTENT_ENDPOINTS).toHaveLength(6);
-  expect(BOND_INTENT_COUNT).toBe(58); // on-chain registered count (registration 6205)
+  expect(BOND_INTENT_COUNT).toBe(59); // on-chain registered count (registration 6220)
+  expect(BOND_INTENT_COUNT).toBe(SEPOLIA_REGISTERED_INTENT_COUNT);
+  expect(SEPOLIA_REGISTERED_INTENTS).toEqual([...DECLARED_INTENTS]);
+  expect(SEPOLIA_PREVIOUS_REGISTRATION_ID).toBe(6205);
   expect(BOND_REGISTRATION_ID).toBe(SEPOLIA_REGISTRATION_ID);
-  expect(SEPOLIA_REGISTRATION_ID).toBe(6205);
-  expect(MINER_BOND_BASE_UNITS).toBe(5_230_000);
-  expect(SEPOLIA_SERVING_REGISTRATION_IDS).toEqual([6152, 6160, 6174, 6176, 6177, 6181, 6188, 6196, 6205]);
+  expect(SEPOLIA_REGISTRATION_ID).toBe(6220);
+  expect(MINER_BOND_BASE_UNITS).toBe(5_300_000);
+  expect(SEPOLIA_SERVING_REGISTRATION_IDS).toEqual([6152, 6160, 6174, 6176, 6177, 6181, 6188, 6196, 6205, 6220]);
  });
  it("derives every visible declared-intent count from the manifest", () => {
   for (const f of ["../components/Layout.tsx", "../pages/landing/SiteFooter.tsx", "../pages/landing/IntentIde.tsx"]) {

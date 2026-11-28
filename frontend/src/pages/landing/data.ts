@@ -12,8 +12,8 @@
 //   ERCOT has no keyless feed). Supported grid markets: CAISO, NYISO,
 //   Elering (EE, FI, LV, LT).
 // - Miner identity: id 774921, slug verireceipt (see ../config).
-// - Bond is $5.23 Test USDC (on-chain minerBond(6205) = quoteMinerBond(58),
-//   lib/minerBond.ts). No sponsored-balance figure.
+// - Bond is the on-chain Test USDC bond of the current registration
+//   (lib/minerBond.ts, single source). No sponsored-balance figure.
 // - M12 curtailment numbers (ERCOT $118.40 vs $65) were fabricated and
 //   are NOT reproduced: the desk grid items show live LMP with no
 //   threshold verdict.
