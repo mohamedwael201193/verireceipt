@@ -37,6 +37,21 @@ export function requestShape(query:unknown):{param_count:0|1|2|'3+';keys_in_clos
  const known=[...new Set(keys.filter(k=>REQUEST_SHAPE_KEYS.has(k)))].sort();
  return {param_count:keys.length>=3?'3+':keys.length as 0|1|2,keys_in_closed_list:known,unknown_key_count:keys.filter(k=>!REQUEST_SHAPE_KEYS.has(k)).length};
 }
+/** Fixed-label class of a macro `country` value. Never the value. */
+export function countryClass(raw:string|undefined):string{
+ const v=(raw??'').trim();
+ if(/^[A-Za-z]{2}$/.test(v))return 'iso2';
+ if(/^[A-Za-z]{3}$/.test(v))return 'iso3';
+ if(/^[A-Za-z][A-Za-z .,'()-]{3,}$/.test(v))return 'name';
+ return 'other';
+}
+/** Fixed-label class of a macro `year` value: yyyy, range or other. Never the value. */
+export function yearClass(raw:string|undefined):string{
+ const v=(raw??'').trim();
+ if(/^\d{4}$/.test(v))return 'yyyy';
+ if(/^\d{4}\s*(?:-|to|\.\.|:)\s*\d{4}$/i.test(v))return 'range';
+ return 'other';
+}
 export function indicatorType(raw:string|undefined):string{
  const v=(raw??'').trim();
  if(/^[0-9a-f]{32}$/i.test(v))return 'md5';if(/^[0-9a-f]{40}$/i.test(v))return 'sha1';if(/^[0-9a-f]{64}$/i.test(v))return 'sha256';
@@ -140,7 +155,7 @@ function ownString(query:unknown,key:string):string|undefined{
 export function refusalParamClass(route:string|undefined,errorCode:string,query:unknown):Record<string,unknown>|null{
  if(route==='/v1/gas-price'&&errorCode==='CHAIN_NOT_SERVED'){const chain=ownString(query,'chain');return {chain_class:chainClass(chain),...chainShape(chain)};}
  if(route==='/v1/threat-indicator'||route==='/v1/malware-hash')return {indicator_type:indicatorType(ownString(query,'indicator'))};
- if(route==='/v1/macro'&&errorCode==='UNSUPPORTED_INDICATOR')return macroTokens(ownString(query,'indicator'));
+ if(route==='/v1/macro'&&errorCode==='UNSUPPORTED_INDICATOR')return {...macroTokens(ownString(query,'indicator')),country_class:countryClass(ownString(query,'country')),year_class:yearClass(ownString(query,'year'))};
  if(route==='/v1/grid-price')return gridRefusalClass(ownString(query,'node_or_zone'));
  if(route==='/v1/liquidity')return {pool_class:poolClass(ownString(query,'pool')),chain_class:chainClass(liquidityChain(ownString(query,'chain')??''))};
  if(route==='/v1/token-holders')return {token_class:tokenClass(ownString(query,'token')),chain_class:chainClass(ownString(query,'chain'))};

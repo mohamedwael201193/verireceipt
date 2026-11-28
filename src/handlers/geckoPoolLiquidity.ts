@@ -1,5 +1,6 @@
 import type {ObservationSource,SourceApproval} from '../core/observedSources';
 import {readPublicBody,StartBudget} from '../core/publicSource';
+import {recordGeckoCall,logGecko429} from '../core/geckoCallCounter';
 import type {PoolQuery,PoolValue} from './financeObservations';
 import {resolvePoolBinding,type PoolBinding} from './marketSourceAdapters';
 // Separate provider and network namespace. Never an alternate DEX Screener route.
@@ -12,7 +13,9 @@ export function geckoPoolLiquiditySource(bindings:readonly PoolBinding[],approva
   if(!network||!/^0x[0-9a-fA-F]{40}$/.test(pool.address)||signal.aborted)throw Error('unbound pool or network');
   if(!starts.take())throw Error('pool source start budget');
   const address=pool.address.toLowerCase();const url=`https://api.geckoterminal.com/api/v2/networks/${network}/pools/${address}`;
-  const b=await readPublicBody(url,200000,2500);if(signal.aborted)throw Error('aborted');
+  recordGeckoCall();
+  let b:Awaited<ReturnType<typeof readPublicBody>>;
+  try{b=await readPublicBody(url,200000,2500);}catch(e){logGecko429(e);throw e;}if(signal.aborted)throw Error('aborted');
   const j=JSON.parse(b.raw),data=j?.data,a=data?.attributes;
   if(data?.type!=='pool'||data.id!==`${network}_${address}`||typeof a?.address!=='string'||a.address.toLowerCase()!==address)throw Error('pool network/address identity mismatch');
   if(pool.tokenAddresses){

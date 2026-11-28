@@ -19,6 +19,7 @@ import {macroCandidateIds} from './macroCandidates';
 // reference is a country series; an aggregate input is 422. No fuzzy
 // substring matching: an unmatched country is 422 COUNTRY_NOT_FOUND.
 import {discoverMacroSeries,macroInputDiagnostic,isMacroRequest,resetMacroDiscoveryForTests} from './macroSeriesDiscovery';
+import {logMacroStage,macroIndicatorFailure,macroFetchClass} from '../core/macroStageLog';
 import {macroObservation,resetMacroSourceCacheForTests,readMacroText} from './macroSourceCache';
 import {withAnswerClass} from "../core/answerClass";
 import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
@@ -252,9 +253,11 @@ async function loadCatalog(deadline:number, canStart:()=>boolean=()=>true): Prom
   try {
     parsed = JSON.parse(raw);
   } catch {
+    logMacroStage("catalog","parse");
     throw upstreamUnavailable("WORLD_BANK_UNAVAILABLE", "World Bank catalog returned invalid JSON");
   }
   if (!Array.isArray(parsed) || !Array.isArray(parsed[1])) {
+    logMacroStage("catalog","none");
     throw upstreamUnavailable("WORLD_BANK_UNAVAILABLE", "World Bank catalog returned an unexpected shape");
   }
   const countries: WbCountry[] = [];
@@ -377,6 +380,7 @@ export async function handleMacro(
     countries = await loadCatalog(deadline);
   } catch (err) {
     if (err instanceof Error && err.name === "ApiError") throw err;
+    logMacroStage("catalog",macroFetchClass(err));
     throw upstreamUnavailable(
       "WORLD_BANK_UNAVAILABLE",
       "World Bank country catalog is unreachable",
@@ -423,16 +427,19 @@ export async function handleMacro(
   let observation: { fetchedAt: string; stale?: boolean };
   try {
     const result=await observeMacro(url,deadline,requestedYear);rawText=result.body;observation=result;
-  } catch {
+  } catch (fetchError) {
+    macroIndicatorFailure(fetchError);
     throw upstreamUnavailable("WORLD_BANK_UNAVAILABLE", "World Bank indicator API is unreachable");
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawText);
   } catch {
+    logMacroStage("indicator_parse","parse");
     throw upstreamUnavailable("WORLD_BANK_UNAVAILABLE", "World Bank indicator API returned invalid JSON");
   }
   if (!Array.isArray(parsed) || (parsed[1] !== null && !Array.isArray(parsed[1]))) {
+    logMacroStage("row_shape","none");
     throw upstreamUnavailable("WORLD_BANK_UNAVAILABLE", "World Bank indicator API returned an unexpected row shape");
   }
   const rows = (parsed[1] ?? []) as Array<Record<string, unknown>>;
@@ -443,12 +450,14 @@ export async function handleMacro(
     : rows.find((r) => String(r?.date) === String(requestedYear));
   if (row && (!Object.values(SERIES).slice(0,10).some(item=>item.id===series.id))) {
     if ((row.indicator as {id?:unknown})?.id !== series.id || String(row.countryiso3code)!==country.iso3) {
+      logMacroStage('binding','none');
       throw upstreamUnavailable('WORLD_BANK_UNAVAILABLE','Observation does not bind the requested series and country');
     }
   }
   const year = requestedYear ?? (row ? Number(row.date) : undefined);
   const value = row?.value;
   if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value))) {
+    logMacroStage("nonnumeric","none");
     throw upstreamUnavailable("WORLD_BANK_UNAVAILABLE", "World Bank returned a nonnumeric observation");
   }
   const hasValue = typeof value === "number" && Number.isFinite(value);

@@ -18,7 +18,7 @@ export async function readMacroText(url: string, deadline: number): Promise<stri
       const res = await fetch(url, { signal: controller.signal });
       if (!res.ok) {
         // Preserve HTTP classification even if cancellation itself rejects.
-        const failure = Object.assign(Error('macro source HTTP failure'), { retryable: res.status >= 500 });
+        const failure = Object.assign(Error('macro source HTTP failure'), { retryable: res.status >= 500, status: res.status });
         // Keep ownership until cancellation settles, even for error bodies.
         try { await res.body?.cancel(); } catch { /* HTTP status owns retry policy. */ }
         throw failure;

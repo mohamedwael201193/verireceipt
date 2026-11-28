@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {logMacroStage,macroFetchClass} from '../core/macroStageLog';
 import {readMacroText} from './macroSourceCache';
 import {upstreamUnavailable} from '../core/errors';
 
@@ -21,15 +22,15 @@ export async function discoverMacroSeries(input:string,deadline:number) {
   let raw:string,fetchedAt:string;
   if(cache && Date.now()-Date.parse(cache.fetchedAt)>=0 && Date.now()-Date.parse(cache.fetchedAt)<3600000){({raw,fetchedAt}=cache);}
   else {
-    try{raw=await readMacroText(URL,deadline);}catch{throw upstreamUnavailable('WORLD_BANK_UNAVAILABLE','World Bank indicator catalog is unreachable');}
+    try{raw=await readMacroText(URL,deadline);}catch(fetchError){logMacroStage('discovery_fetch',macroFetchClass(fetchError));throw upstreamUnavailable('WORLD_BANK_UNAVAILABLE','World Bank indicator catalog is unreachable');}
     fetchedAt=new Date().toISOString();
   }
-  let parsed:unknown;try{parsed=JSON.parse(raw);}catch{throw upstreamUnavailable('WORLD_BANK_UNAVAILABLE','Invalid indicator catalog JSON');}
+  let parsed:unknown;try{parsed=JSON.parse(raw);}catch{logMacroStage('discovery_parse','parse');throw upstreamUnavailable('WORLD_BANK_UNAVAILABLE','Invalid indicator catalog JSON');}
   if(!Array.isArray(parsed)||!parsed[0]||!Array.isArray(parsed[1])||Number(parsed[0].pages)!==1||Number(parsed[0].total)!==parsed[1].length||!parsed[1].length)
-    throw upstreamUnavailable('WORLD_BANK_UNAVAILABLE','Incomplete or malformed indicator catalog');
+    {logMacroStage('discovery_parse','none');throw upstreamUnavailable('WORLD_BANK_UNAVAILABLE','Incomplete or malformed indicator catalog');}
   const rows=parsed[1] as Array<{id?:unknown;name?:unknown;unit?:unknown;source?:{id?:unknown}}>;
   if(rows.some(row=>typeof row?.id!=='string'||!/^[A-Z0-9][A-Z0-9_.]{0,100}$/i.test(row.id)||typeof row.name!=='string'||row.name.length>500||String(row.source?.id)!=='2'))
-    throw upstreamUnavailable('WORLD_BANK_UNAVAILABLE','Unbound WDI indicator metadata');
+    {logMacroStage('discovery_parse','none');throw upstreamUnavailable('WORLD_BANK_UNAVAILABLE','Unbound WDI indicator metadata');}
   cache={raw,fetchedAt};
   const matches=rows.filter(row=>key(String(row.id))===key(input)||key(String(row.name))===key(input));
   const row=matches.length===1?matches[0]:undefined;

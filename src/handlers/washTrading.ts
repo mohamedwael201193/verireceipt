@@ -18,6 +18,7 @@ import { badRequest, unprocessable, upstreamUnavailable } from "../core/errors";
 import { envelope, makeReceipt } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { publicSourceFailure, readPublicBody, StartBudget } from "../core/publicSource";
+import { recordGeckoCall, geckoCallsLast60sBucket } from "../core/geckoCallCounter";
 import { recordUpstreamError } from "../core/upstreams";
 
 export const INTENT = "WASH_TRADING_DETECTION_GENERAL";
@@ -75,6 +76,7 @@ interface Computed { unpriced: number; network: string; pool: string; poolName: 
 async function get(url: string, timeoutMs: number): Promise<string> {
   if (fetchImpl) return fetchImpl(url, timeoutMs);
   if (!starts.take()) throw Object.assign(new Error("wash start budget"), { status: 429 });
+  recordGeckoCall();
   return (await readPublicBody(url, 600_000, timeoutMs)).raw;
 }
 
@@ -136,6 +138,7 @@ function sourceFailure(e: unknown, step: "search" | "trades"): Error {
   const cls = budget ? "budget" : FAILURE_CLASSES.has(label) ? label : "other";
   const limited = budget || cls === "http_429";
   console.info(JSON.stringify({ event: "wash_source_failure", step, class: cls }));
+  if (cls === "http_429") console.info(JSON.stringify({ event: "gecko_429", gecko_calls_last_60s_bucket: geckoCallsLast60sBucket() }));
   recordUpstreamError("geckoterminal", limited ? "UPSTREAM_RATE_LIMITED" : "INDEXER_UNREACHABLE");
   return upstreamUnavailable(limited ? "UPSTREAM_RATE_LIMITED" : "TRADE_SOURCE_UNREACHABLE", "GeckoTerminal trade source unavailable; no answer is guessed");
 }

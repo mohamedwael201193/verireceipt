@@ -1,4 +1,5 @@
 import {queryFallback} from '../core/queryFallback';
+import {recordGeckoCall,geckoCallsLast60sBucket} from '../core/geckoCallCounter';
 import {markFailure,failureKind} from '../core/upstreamFailureDiagnostics';
 import {withAnswerClass} from '../core/answerClass';
 // TOKEN_HOLDER_COUNT_GENERAL — GET /v1/token-holders?token=&chain=
@@ -79,6 +80,7 @@ async function fetchTextOnce(url: string, timeoutMs = HTTP_TIMEOUT_MS): Promise<
     io = (async () => {
       try {
         if (fetchImpl) return await fetchImpl(url);
+        if (url.includes('api.geckoterminal.com')) recordGeckoCall();
         const res = await fetch(url, { signal: controller.signal, headers: { accept: "application/json" } });
         if (!res.ok) {
           const error = Object.assign(new Error("holder HTTP failure"), { status: res.status, retryAfterMs: undefined as number | undefined });
@@ -139,7 +141,7 @@ function holderFailureClass(error:unknown,token:string):Record<string,unknown>{
  // parse. Other shapes (4xx other than 429, transport errors) log no class.
  const kind=failureKind(error);
  const httpClass=status===429||kind==='rate_limited'?'429':typeof status==='number'&&status>=500&&status<=599?'5xx':timeout===true?'timeout':kind==='bad_payload'?'200_bad_shape':undefined;
- return{token_class:ADDRESS_RE.test(token)?'address':'symbol',...(typeof status==='number'&&Number.isInteger(status)&&status>=100&&status<=599?{upstream_http_status:status}:{}),...(httpClass!==undefined?{upstream_http_class:httpClass}:{}),...(typeof holdersField==='boolean'?{has_holders_field:holdersField}:{})};
+ return{token_class:ADDRESS_RE.test(token)?'address':'symbol',...(typeof status==='number'&&Number.isInteger(status)&&status>=100&&status<=599?{upstream_http_status:status}:{}),...(httpClass!==undefined?{upstream_http_class:httpClass}:{}),...(httpClass==='429'?{gecko_calls_last_60s_bucket:geckoCallsLast60sBucket()}:{}),...(typeof holdersField==='boolean'?{has_holders_field:holdersField}:{})};
 }
 
 interface IndexerTokenInfo {

@@ -1,3 +1,4 @@
+import {recordGeckoCall,logGecko429} from '../core/geckoCallCounter';
 import {PublicBodyCache,StartBudget,readPublicBody} from '../core/publicSource';import {envelope,makeReceipt} from '../core/receipt';import {saveReceipt} from '../core/storage';import {badRequest,upstreamUnavailable} from '../core/errors';import {liquidityChain,liquidityPair} from '../core/liquiditySelectors';
 const networks:Record<string,string>={ethereum:'eth',base:'base',arbitrum:'arbitrum',optimism:'optimism',polygon:'polygon_pos',bsc:'bsc',avalanche:'avax',linea:'linea',scroll:'scroll',gnosis:'xdai',zksync:'zksync',blast:'blast',mantle:'mantle',celo:'celo',sonic:'sonic',unichain:'unichain',solana:'solana'};
 const tokens:Record<string,Record<string,string>>={solana:{SOL:'So11111111111111111111111111111111111111112',USDC:'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'},base:{WETH:'0x4200000000000000000000000000000000000006',USDC:'0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'}};
@@ -19,7 +20,7 @@ export async function discoverLiquidity(q:Record<string,string|undefined>){
  if(network){
   url=exact?`https://api.geckoterminal.com/api/v2/networks/${network}/pools/${chain==='solana'?pool:pool.toLowerCase()}`:`https://api.geckoterminal.com/api/v2/search/pools?query=${encodeURIComponent(pool)}&network=${network}&page=1`;
   try{
-   const got=await cache.get(url,async()=>{if(active>=4||!budget.take())throw Error('discovery capacity');active++;let timer:ReturnType<typeof setTimeout>;const io=readPublicBody(url!,200000,2500).finally(()=>{active--;});try{return await Promise.race([io,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(Error('discovery deadline')),2600);})]);}finally{clearTimeout(timer!);}});
+   const got=await cache.get(url,async()=>{if(active>=4||!budget.take())throw Error('discovery capacity');active++;let timer:ReturnType<typeof setTimeout>;recordGeckoCall();const io=readPublicBody(url!,200000,2500).catch(e=>{logGecko429(e);throw e;}).finally(()=>{active--;});try{return await Promise.race([io,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(Error('discovery deadline')),2600);})]);}finally{clearTimeout(timer!);}});
    body=got.raw;fetchedAt=got.fetchedAt;if(Date.now()-Date.parse(fetchedAt)<0||Date.now()-Date.parse(fetchedAt)>=60000)throw Error('discovery observation expired');const data=JSON.parse(body).data;
    if(exact){const candidate=parseDiscoveryPool(data,network,chain);if(chain==='solana'?candidate.pool_address!==pool:candidate.pool_address.toLowerCase()!==pool.toLowerCase())throw Error('exact address mismatch');candidates=[candidate];selected=candidate;status='exact_pool';}
    else{
