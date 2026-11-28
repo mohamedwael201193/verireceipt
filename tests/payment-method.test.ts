@@ -134,7 +134,7 @@ it("merges only non-empty fields and discloses conflicts without losing primary 
 });
 it("never calls partial no-record a negative and accepts a found source during outage", async () => {
  vi.stubGlobal("fetch", async (u: unknown) => {if(String(u).includes("api.dharun.dev")) throw new Error("outage");return new Response("{}")});
- await expect(handlePaymentMethod({bin:"411111"})).rejects.toMatchObject({status:502,code:"BIN_COVERAGE_INCOMPLETE"});
+ await expect(handlePaymentMethod({bin:"900000"})).rejects.toMatchObject({status:502,code:"BIN_COVERAGE_INCOMPLETE"});
  resetBinCacheForTests();
  vi.stubGlobal("fetch", async (u: unknown) => {if(String(u).includes("api.dharun.dev")) throw new Error("outage");return new Response(BIN_424242)});
  expect((await handlePaymentMethod({bin:"424242"})).valid).toBe(true);
@@ -155,17 +155,17 @@ it("malformed upstream JSON is an honest502 not an escaping SyntaxError",async()
 it('rejects wrong-prefix open-list evidence instead of asserting it for requested BIN or caching it',async()=>{
  const raw=JSON.parse(readFileSync(join(FX,'open-bin-411111.json'),'utf8'));raw.data.bin='516732';let calls=0;
  vi.stubGlobal('fetch',async(u:unknown)=>{if(String(u).includes('api.dharun.dev')){calls++;return new Response(JSON.stringify(raw));}return new Response('{}');});
- for(let i=0;i<2;i++)await expect(handlePaymentMethod({bin:'411111'})).rejects.toMatchObject({code:'BIN_COVERAGE_INCOMPLETE'});
+ for(let i=0;i<2;i++){const out=await handlePaymentMethod({bin:'411111'});expect(out).toMatchObject({valid:true,coverage:'partial_range_only',allocation_known:false,issuing_bank:null,network:'visa'});}
  expect(calls).toBe(2);
 });
 it.each([undefined,411111,'41111200'])('refuses missing, typed or wrong-length source BIN identity %s',async identity=>{
  const raw=JSON.parse(readFileSync(join(FX,'open-bin-411111.json'),'utf8'));raw.data.bin=identity;
  vi.stubGlobal('fetch',async(u:unknown)=>new Response(String(u).includes('api.dharun.dev')?JSON.stringify(raw):'{}'));
- await expect(handlePaymentMethod({bin:'411111'})).rejects.toMatchObject({code:'BIN_COVERAGE_INCOMPLETE'});
+ const out=await handlePaymentMethod({bin:'411111'});expect(out).toMatchObject({valid:true,coverage:'partial_range_only',issuing_bank:null,issuing_country:null});expect(out.issuing_bank).not.toBe('CONOTOXIA SP. Z O.O');
 });
 it('HTTP400 is a failed lookup, never a negative allocation observation or cached absence',async()=>{
  let calls=0;vi.stubGlobal('fetch',async(u:unknown)=>{if(String(u).includes('api.dharun.dev'))return new Response('{}',{status:404});calls++;return new Response('invalid request',{status:400});});
- for(let i=0;i<2;i++)await expect(handlePaymentMethod({bin:'411111'})).rejects.toMatchObject({code:'BIN_COVERAGE_INCOMPLETE'});
+ for(let i=0;i<2;i++)expect(await handlePaymentMethod({bin:'411111'})).toMatchObject({valid:true,coverage:'partial_range_only',allocation_known:false});
  expect(calls).toBe(2);
 });
 it('a wrong-prefix source cannot override a valid matching primary observation',async()=>{
@@ -200,7 +200,7 @@ it.each([200,404])('cache preserves source acquisition time after a delayed HTTP
   const first=handlePaymentMethod({bin:'424242'});const firstResult=first.catch(e=>e);await vi.advanceTimersByTimeAsync(1200);const a=await firstResult;
   vi.setSystemTime(new Date(start.getTime()+60000));const b=await handlePaymentMethod({bin:'424242'}).catch(e=>e);
   if(status===200){expect((a.receipt as any).fetched_at).toBe(start.toISOString());expect((b.receipt as any).fetched_at).toBe(start.toISOString());}
-  else{expect(a.code).toBe('BIN_COVERAGE_INCOMPLETE');expect(b.code).toBe('BIN_COVERAGE_INCOMPLETE');}
+  else{expect(a).toMatchObject({valid:true,coverage:'partial_range_only'});expect(b).toMatchObject({valid:true,coverage:'partial_range_only'});}
   expect(calls).toBe(3); // first pair plus second unavailable open source; primary stays cached.
  }finally{vi.useRealTimers();}
 });
@@ -251,4 +251,57 @@ describe('published network candidate ranges and intentional overlaps',()=>{
  it('9-11 digits with no reference hit are valid=false even inside a published network range',async()=>{vi.stubGlobal('fetch',async()=>new Response('{}',{status:404}));const out=await handlePaymentMethod({bin:'411111111'});expect(out).toMatchObject({bin:'41111111',valid:false,allocation_known:false});expect(String(out.answer)).toContain('valid reflects a reference hit only');const same=await handlePaymentMethod({bin:'41111111'});expect(same.valid).toBe(true);});
  it('9-11 digit tail is never persisted and evidence records the truncation',async()=>{stub();const out=await handlePaymentMethod({bin:'4242424299'});const r=out.receipt as {receipt_id:string};const ev=String((await getReceiptEvidence(r.receipt_id)).evidence);expect(ev).toContain('"input_truncated_to_8":true');expect(ev).toContain('"input_digits":10');expect(ev).toContain('42424242');expect(JSON.stringify([out,ev])).not.toContain('4242424299');});
  it('12+ digits stay checksum-only',async()=>{const f=vi.fn();vi.stubGlobal('fetch',f);expect(await handlePaymentMethod({bin:'4242424242424242'})).toMatchObject({checksum_assessed:true,luhn_valid:true});expect(f).not.toHaveBeenCalled();});
+});
+
+// Fixture provenance (captured 2026-11-28 from the live sources):
+// - binlist-nullnumber-411111.json and dharun-530-1033.txt: saved directly from the live responses.
+// - binlist-nullnumber-453201.json, binlist-nullnumber-520082.json and binlist-37828224.json: binlist.net answered HTTP 429 during the
+//   recapture, so these files hold the exact real body text received in the first live calls of the same session (200 responses),
+//   written from that text, not freshly saved.
+// - The 378282 case reuses the 411111 null-number body; the 6-digit 378282 response itself was not captured.
+describe('partial coverage: one source dead, the other has no record (real captured responses)',()=>{
+ const NULLNUM=(b:string)=>readFileSync(join(FX,`binlist-nullnumber-${b}.json`),'utf8');
+ const DEAD=readFileSync(join(FX,'dharun-530-1033.txt'),'utf8');
+ const stubPartial=(binlistBody:string)=>{const f=vi.fn(async(u:unknown)=>String(u).includes('api.dharun.dev')?new Response(DEAD,{status:530}):new Response(binlistBody,{status:200}));vi.stubGlobal('fetch',f);return f;};
+ it.each([['411111','visa'],['453201','visa'],['520082','mastercard'],['378282','american express']])('%s answers valid=true from the published range only (%s)',async(bin,net)=>{
+  stubPartial(NULLNUM(bin==='378282'?'411111':bin));
+  const out=await handlePaymentMethod({bin});
+  expect(out).toMatchObject({valid:true,network:net,issuing_bank:null,issuing_country:null,card_type:null,coverage:'partial_range_only',unavailable_sources:['open BIN list'],allocation_known:false,checksum_assessed:false});
+  expect(String(out.answer)).toContain('No issuer record available (one reference source unavailable, the other has no record).');
+  expect(String(out.answer)).toContain(`Prefix matches the published ${net} range; valid=true reflects the range only, issuer and country not identified.`);
+  const rc=out.receipt as {receipt_id:string;raw_response_sha256:string};const st=await getReceiptEvidence(rc.receipt_id);
+  expect(sha256Hex(st.evidence!)).toBe(rc.raw_response_sha256);
+  const ev=JSON.parse(Buffer.from(st.evidence!).toString());
+  expect(ev).toMatchObject({valid:true,coverage:'partial_range_only',unavailable_sources:['open BIN list'],allocation_known:false});
+  expect(String(st.evidence)).toContain(JSON.stringify(NULLNUM(bin==='378282'?'411111':bin)));
+ });
+ it('the partial answer is not cached as an allocation hit: the dead source is retried',async()=>{
+  const f=stubPartial(NULLNUM('411111'));
+  await handlePaymentMethod({bin:'411111'});const second=await handlePaymentMethod({bin:'411111'});
+  expect(second).toMatchObject({allocation_known:false,coverage:'partial_range_only'});
+  expect(f.mock.calls.filter(c=>String(c[0]).includes('api.dharun.dev')).length).toBe(2);
+ });
+ it('a 6-digit prefix in no published range stays a refusal',async()=>{
+  stubPartial('{"number":null,"country":{},"bank":{}}');
+  await expect(handlePaymentMethod({bin:'900000'})).rejects.toMatchObject({status:502,code:'BIN_COVERAGE_INCOMPLETE'});
+ });
+ it.each(['411111234','4111112345','41111123456'])('a %s-digit input truncated to 8 stays a refusal in the same source state',async bin=>{
+  stubPartial('{"number":null,"country":{},"bank":{}}');
+  await expect(handlePaymentMethod({bin})).rejects.toMatchObject({status:502,code:'BIN_COVERAGE_INCOMPLETE'});
+ });
+ it('both sources with no record is unchanged (full no-record answer, no partial fields)',async()=>{
+  vi.stubGlobal('fetch',async(u:unknown)=>String(u).includes('api.dharun.dev')?new Response('{}',{status:404}):new Response(NULLNUM('411111'),{status:200}));
+  const out=await handlePaymentMethod({bin:'411111'});
+  expect(out.valid).toBe(true);expect(out.coverage).toBeUndefined();expect(out.unavailable_sources).toBeUndefined();expect(String(out.answer)).toContain('No record for BIN 411111 in either reference');
+ });
+ it('8-digit 37828224 with a binlist record is unchanged',async()=>{
+  vi.stubGlobal('fetch',async(u:unknown)=>String(u).includes('api.dharun.dev')?new Response(DEAD,{status:530}):new Response(readFileSync(join(FX,'binlist-37828224.json'),'utf8'),{status:200}));
+  const out=await handlePaymentMethod({bin:'37828224'});
+  expect(out).toMatchObject({valid:true,network:'american express',allocation_known:true});expect(out.coverage).toBeUndefined();
+  expect(String(out.answer)).toContain('allocated, known card prefix');
+ });
+ it('both sources dead is still BIN_SOURCES_UNAVAILABLE',async()=>{
+  vi.stubGlobal('fetch',async(u:unknown)=>String(u).includes('api.dharun.dev')?new Response(DEAD,{status:530}):new Response('',{status:503}));
+  await expect(handlePaymentMethod({bin:'411111'})).rejects.toMatchObject({status:502,code:'BIN_SOURCES_UNAVAILABLE'});
+ });
 });
