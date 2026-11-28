@@ -97,6 +97,20 @@ export function parseNasStatus(raw: string, airport: string): { updateTime: stri
   return { updateTime, entries, excluded_closures };
 }
 
+/** Split a "<origin> to <destination>" or "AAA-BBB" route. The origin is the text after the last whole word "from", so leading words ("7:15 AM Southwest flight from BWI") are not part of the endpoint. Nothing else is inferred; text that still does not resolve stays coverage_unavailable. */
+export function splitTravelRoute(input:string):{origin:string;destination:string}|null{
+  const m=/^(.+?)\s+to\s+(.+)$/i.exec(input);
+  if(m){
+    let origin=m[1].trim().replace(/^from\s+/i,'');
+    const words=[...m[1].matchAll(/\bfrom\s+/gi)];
+    const last=words[words.length-1];
+    if(last&&last.index!==undefined){const after=m[1].slice(last.index+last[0].length).trim();if(after)origin=after;}
+    return {origin,destination:m[2].trim()};
+  }
+  const c=/^([a-z]{3})\s*[-/]\s*([a-z]{3})$/i.exec(input);
+  return c?{origin:c[1].trim(),destination:c[2].trim()}:null;
+}
+
 async function travelUnknown(input:string,reason:'flight_status_unavailable'|'coverage_unavailable'){
  const now=new Date().toISOString();const notice=reason==='flight_status_unavailable'?'Flight status is not verifiable from keyless FAA NAS airport data. A flight number alone does not establish its airports or dated itinerary.':'FAA NAS coverage is limited to the bundled US airports in this slice. Non-US or unrecognized endpoints are not verified; no disruption status is inferred.';
  const evidence=JSON.stringify({route_or_flight:input,reason_code:reason,disrupted:null,notice,external_lookup:false,assessed_at:now});const receipt=makeReceipt(INTENT,'local:travel-coverage',evidence,'input/coverage assessment only; no flight or airport observation');receipt.fetched_at=now;
@@ -112,9 +126,10 @@ async function handleTravelDisruptionInternal(query: Record<string, string | und
   // A supplied airport route is context, never a dated flight-to-airport lookup.
   const suppliedFlight = /^([A-Za-z]{2,3}\s*\d{1,4}[A-Za-z]?)\s+(.+)$/i.exec(rawInput);
   const routeInput = suppliedFlight ? suppliedFlight[2].trim() : rawInput;
-  const route = /^(.+?)\s+to\s+(.+)$/i.exec(routeInput) ?? /^([a-z]{3})\s*[-/]\s*([a-z]{3})$/i.exec(routeInput);
+  const split = splitTravelRoute(routeInput);
+  const route = split !== null;
   if(suppliedFlight&&!route)return travelUnknown(rawInput,'flight_status_unavailable');
-  const names = route ? [route[1].trim().replace(/^from\s+/i,''),route[2].trim()] : [routeInput.replace(/^from\s+/i,'')];
+  const names = split ? [split.origin,split.destination] : [routeInput.replace(/^from\s+/i,'')];
   if(suppliedFlight&&route){
     // Compare the supplied route with a verified flight record before anything else. Without one, the airport-route path below runs as before.
     const set=(n:string):string[]|null=>{const g=travelEndpoint(n);if(g.length)return g.map(x=>x.airport);return /^[A-Za-z]{3}$/.test(n)?[n.toUpperCase()]:null;};
@@ -205,8 +220,8 @@ function travelInputClass(q:Record<string,string|undefined>):string {
  if(!raw)return 'missing';
  if(raw.length>200||/[\x00-\x1f]/.test(raw))return 'invalid';
  if(/^[A-Za-z]{2,3}\s*\d{1,4}[A-Za-z]?(?:\s.*)?$/.test(raw))return 'flight_number';
- const route=/^(.+?)\s+to\s+(.+)$/i.exec(raw)??/^([a-z]{3})\s*[-/]\s*([a-z]{3})$/i.exec(raw);
- const names=route?[route[1].trim(),route[2].trim()]:[raw];
+ const split=splitTravelRoute(raw);const route=split!==null;
+ const names=split?[split.origin,split.destination]:[raw];
  const kinds=names.map(n=>/^[a-z]{3}$/i.test(n)?'code':resolveAirportName(n).length===1?'name':resolveAirportName(n).length>1?'ambiguous':'unsupported');
  if(names.some(n=>travelMetro(n)))return 'metro';
  if(names.some(n=>!travelEndpoint(n).length))return 'coverage_unavailable';
