@@ -8,19 +8,20 @@ const parsed=()=>lines.map(l=>JSON.parse(l));
 const refusal=()=>parsed().filter(o=>o.event==='refusal_param_class');
 it('TVL route is registered for the refusal class line',()=>{expect(REFUSAL_INTENTS['/v1/tvl']).toBe('TVL_LOOKUP_GENERAL');});
 it.each([
- ['aave',{length_bucket:'<=8',has_space:false,has_hyphen:false,has_chain_suffix:false,ascii_only:true,has_version_suffix:false}],
- ['uniswap-v3',{length_bucket:'9-16',has_space:false,has_hyphen:true,has_chain_suffix:false,ascii_only:true,has_version_suffix:true}],
- ['Curve Finance Polygon',{length_bucket:'17-32',has_space:true,has_hyphen:false,has_chain_suffix:true,ascii_only:true,has_version_suffix:false}],
- ['a-very-long-protocol-name-with-many-words-here',{length_bucket:'>32',has_space:false,has_hyphen:true,has_chain_suffix:false,ascii_only:true,has_version_suffix:false}],
- ['prötocol',{length_bucket:'<=8',has_space:false,has_hyphen:false,has_chain_suffix:false,ascii_only:false,has_version_suffix:false}],
- ['sushi v2',{length_bucket:'<=8',has_space:true,has_hyphen:false,has_chain_suffix:false,ascii_only:true,has_version_suffix:true}],
- ['',{length_bucket:'<=8',has_space:false,has_hyphen:false,has_chain_suffix:false,ascii_only:true,has_version_suffix:false}],
+ ['aave',{length_bucket:'<=8',has_space:false,has_hyphen:false,has_chain_suffix:false,ascii_only:true,has_version_suffix:false,has_wrapper_phrase:false}],
+ ['uniswap-v3',{length_bucket:'9-16',has_space:false,has_hyphen:true,has_chain_suffix:false,ascii_only:true,has_version_suffix:true,has_wrapper_phrase:false}],
+ ['Curve Finance Polygon',{length_bucket:'17-32',has_space:true,has_hyphen:false,has_chain_suffix:true,ascii_only:true,has_version_suffix:false,has_wrapper_phrase:false}],
+ ['a-very-long-protocol-name-with-many-words-here',{length_bucket:'>32',has_space:false,has_hyphen:true,has_chain_suffix:false,ascii_only:true,has_version_suffix:false,has_wrapper_phrase:false}],
+ ['prötocol',{length_bucket:'<=8',has_space:false,has_hyphen:false,has_chain_suffix:false,ascii_only:false,has_version_suffix:false,has_wrapper_phrase:false}],
+ ['sushi v2',{length_bucket:'<=8',has_space:true,has_hyphen:false,has_chain_suffix:false,ascii_only:true,has_version_suffix:true,has_wrapper_phrase:false}],
+ ['total value locked in aave v3 on ethereum',{length_bucket:'>32',has_space:true,has_hyphen:false,has_chain_suffix:true,ascii_only:true,has_version_suffix:false,has_wrapper_phrase:true}],
+ ['',{length_bucket:'<=8',has_space:false,has_hyphen:false,has_chain_suffix:false,ascii_only:true,has_version_suffix:false,has_wrapper_phrase:false}],
 ])('tvlProtocolClass %j',(v,exp)=>{expect(tvlProtocolClass(v)).toEqual(exp);});
 it('a 422 PROTOCOL_NOT_FOUND logs fixed labels only and no input text; the completion line keeps the code',()=>{
  const secret='Secret-Protocol-Zq31337 Polygon';
  recordRequestCompletion('/v1/tvl',422,5,{query:{protocol:secret},errorCode:'PROTOCOL_NOT_FOUND'});
  const r=refusal();expect(r).toHaveLength(1);
- expect(r[0]).toMatchObject({intent:'TVL_LOOKUP_GENERAL',error_code:'PROTOCOL_NOT_FOUND',status:'422',length_bucket:'17-32',has_space:true,has_hyphen:true,has_chain_suffix:true,ascii_only:true,has_version_suffix:false});
+ expect(r[0]).toMatchObject({intent:'TVL_LOOKUP_GENERAL',error_code:'PROTOCOL_NOT_FOUND',status:'422',length_bucket:'17-32',has_space:true,has_hyphen:true,has_chain_suffix:true,ascii_only:true,has_version_suffix:false,has_wrapper_phrase:false});
  const all=lines.join('\n');for(const bad of ['Secret','Zq31337','31337','Polygon'])expect(all).not.toContain(bad);
  expect(parsed().some(o=>o.error_code==='PROTOCOL_NOT_FOUND'&&o.event!=='refusal_param_class')).toBe(true);
 });

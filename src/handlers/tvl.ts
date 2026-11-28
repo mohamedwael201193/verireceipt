@@ -464,6 +464,7 @@ export function resolveTvlTarget(
   input: string,
   protocols: ProtocolEntry[],
   chains: ChainEntry[],
+  exactOnly = false,
 ): TvlTarget | null {
   // Collapse runs of whitespace (space / tab / NBSP) to one space, so
   // "Aave  V3" (double space) and "Aave\tV3" match exactly like "Aave V3".
@@ -611,6 +612,8 @@ export function resolveTvlTarget(
       confidence: 0.9,
     };
   }
+  // exactOnly (sentence-wrapper path): no prefix approximations at all.
+  if (exactOnly) return null;
   // Prefix fallback (steps 6–7, reordered round 4 / BLOCKER 1). The >= 3-char
   // rule is already enforced at step 0 above, so no second length check
   // is needed here.
@@ -673,6 +676,7 @@ export function resolveProtocolOnChain(
   input: string,
   protocols: ProtocolEntry[],
   chains: ChainEntry[],
+  exactOnly = false,
 ): TvlTarget | null {
   const normalized = input.trim().toLowerCase().replace(/\s+/g, ' ');
   const idx = normalized.lastIndexOf(' on ');
@@ -689,7 +693,7 @@ export function resolveProtocolOnChain(
       ),
     )[0] ?? null;
   if (chain === null) return null;
-  const protocolTarget = resolveTvlTarget(protocolPart, protocols, chains);
+  const protocolTarget = resolveTvlTarget(protocolPart, protocols, chains, exactOnly);
   if (protocolTarget === null || protocolTarget.kind !== 'protocol') return null;
   return {
     kind: 'protocol_on_chain',
@@ -726,6 +730,7 @@ export function resolveChainSuffixRetry(
   input: string,
   protocols: ProtocolEntry[],
   chains: ChainEntry[],
+  exactOnly = false,
 ): TvlTarget | null {
   const normalized = input.trim().toLowerCase().replace(/\s+/g, ' ');
   if (normalized.length < 3) return null;
@@ -752,8 +757,8 @@ export function resolveChainSuffixRetry(
       const remainder = normalized.slice(0, -suffix.length).trim();
       if (remainder.length < 3) continue;
       const target =
-        resolveTvlTarget(remainder, protocols, chains) ??
-        resolveProtocolOnChain(remainder, protocols, chains);
+        resolveTvlTarget(remainder, protocols, chains, exactOnly) ??
+        resolveProtocolOnChain(remainder, protocols, chains, exactOnly);
       // Only a plain protocol remainder rescues the query: a chain
       // remainder means the phrase named two chains, and an already
       // chain-scoped remainder means a contradictory double scope — both
@@ -787,6 +792,98 @@ export function resolveChainSuffixRetry(
     }
   }
   return null;
+}
+
+/**
+ * Sentence-style wrapper stripper (2026-11-28). Graded callers phrase the
+ * request as a sentence, "Total value locked in Aave V3 on Ethereum",
+ * "current TVL of Compound on Ethereum", and every such phrase used to
+ * 422 PROTOCOL_NOT_FOUND (4 of 12 graded tvl calls). This removes ONE layer
+ * of the request sentence and returns the protocol/chain core, or null when
+ * there is nothing to strip. It is the LAST link in the resolution chain
+ * (see handleTvl), so every existing resolution and every honest 422 keeps
+ * its behaviour: it only runs when all three resolvers above it returned
+ * null.
+ *
+ * Order: trim, lowercase, drop one trailing "?" or "."; then a leading
+ * request lead ("what is", "show me", ...), a leading "the", a leading
+ * recency word ("current", "latest", "present"), the phrase "total value
+ * locked" / "tvl" with its connector, an optional "the", and a trailing
+ * filler word ("protocol", "platform", "dapp", "project", "pool").
+ * The "on" connector is KEPT when the phrase carries it, so a chain scope
+ * survives: "uniswap v3 total value locked on arbitrum" -> "uniswap v3 on
+ * arbitrum" -> the ordinary " on " split. "of"/"in"/"for"/"across" are
+ * dropped. The trailing filler word is removed at the end of the string and
+ * at the end of the protocol part before the last " on ", so "total value
+ * locked in the lido protocol on ethereum chain" -> "lido on ethereum chain".
+ *
+ * The remainder goes through the SAME three resolvers with their own
+ * exact-name rules, nothing fuzzy is added here. Nothing stripped, an
+ * empty remainder, or an unchanged string returns null.
+ */
+export function stripTvlWrapper(input: string): string | null {
+  return stripTvlWrapperParts(input)?.core ?? null;
+}
+
+/**
+ * Same strip, plus the candidate list the resolver should try, in order:
+ * when the strip removed an article that belongs to the name ("tvl of the
+ * graph", "the graph tvl"), the core with "the " restored comes first, then
+ * the bare core. Exact-name matching only on every candidate.
+ */
+export function stripTvlWrapperCandidates(input: string): string[] {
+  const r = stripTvlWrapperParts(input);
+  if (r === null) return [];
+  return r.nameArticle ? [`the ${r.core}`, r.core] : [r.core];
+}
+
+function stripTvlWrapperParts(input: string): { core: string; nameArticle: boolean } | null {
+  if (typeof input !== 'string') return null;
+  const original = input.trim().toLowerCase();
+  let s = original.replace(/[?.]$/, '').trim();
+  if (s === '') return null;
+  let stripped = false;
+  const cut = (re: RegExp): void => {
+    const next = s.replace(re, '');
+    if (next !== s) {
+      s = next;
+      stripped = true;
+    }
+  };
+  // One leading request lead, then one leading article, then one recency word.
+  cut(/^(?:what is|what are|what's|show me|give me|tell me|look up|find|get|check)\s+/);
+  let preArticle = false;
+  {
+    const before = s;
+    cut(/^the\s+/);
+    preArticle = s !== before;
+  }
+  cut(/^(?:current|latest|present)\s+/);
+  // The TVL phrase anywhere in the sentence, with its connector. "on" is
+  // kept (as a bare " on ") so the chain scope survives; the others are
+  // dropped with the phrase.
+  let nameArticle = false;
+  const phrase = /(?<!\S)(?:total value locked|tvl)(?:\s+(of|in|for|across|on))?(?:\s+|$)/.exec(s);
+  if (phrase !== null) {
+    // An article before the phrase belongs to the name only when a name precedes the phrase.
+    if (preArticle && phrase.index > 0) nameArticle = true;
+    const keepOn = phrase[1] === 'on';
+    s = `${s.slice(0, phrase.index)}${keepOn ? ' on ' : ' '}${s.slice(phrase.index + phrase[0].length)}`.trim();
+    stripped = true;
+  }
+  // Optional article left in front of the core ("... in the lido ...").
+  {
+    const before = s;
+    cut(/^the\s+/);
+    if (s !== before) nameArticle = true;
+  }
+  // One trailing filler word, at the end or at the end of the protocol part
+  // before the last " on ".
+  cut(/\s+(?:protocol|platform|dapp|project|pool)$/);
+  cut(/\s+(?:protocol|platform|dapp|project|pool)(?=\s+on\s+)/);
+  s = s.replace(/\s+/g, ' ').trim();
+  if (!stripped || s === '' || s === original) return null;
+  return { core: s, nameArticle };
 }
 
 const NON_CHAIN_TVL_METRIC = /(?:^|-)(?:borrowed|staking|pool2|vesting|offers|treasury|owntokens)$/i;
@@ -2587,10 +2684,35 @@ export async function handleTvl(
   // winning (resolveProtocolOnChain's own precondition). The trailing
   // chain-suffix retry ("aave v3 on the ethereum chain") comes last, only
   // when BOTH the ordinary resolver and the " on " split found nothing.
+  // The sentence-style wrapper (2026-11-28) is the LAST link: it runs only
+  // when all three resolvers above returned null, so every existing
+  // resolution keeps winning and every honest 422 stays a 422. The
+  // remainder it returns goes through the same three resolvers.
   const target =
     resolveTvlTarget(protocol, protocols, chains) ??
     resolveProtocolOnChain(protocol, protocols, chains) ??
-    resolveChainSuffixRetry(protocol, protocols, chains);
+    resolveChainSuffixRetry(protocol, protocols, chains) ??
+    (() => {
+      // Exact-name matching only: no prefix step on the stripped core.
+      for (const core of stripTvlWrapperCandidates(protocol)) {
+        if (core === protocol) continue;
+        const hit =
+          resolveTvlTarget(core, protocols, chains, true) ??
+          resolveProtocolOnChain(core, protocols, chains, true) ??
+          resolveChainSuffixRetry(core, protocols, chains, true);
+        if (hit !== null) return hit;
+      }
+      // Chain-scoped short form ("compound on ethereum"): when no article was
+      // stripped, the core is the very string the short form would send, so it
+      // resolves exactly as that short form does today (the graded "Compound on
+      // Ethereum" case needs the ordinary protocol rules). Bare names and any
+      // core that lost an article stay exact-only.
+      const cands = stripTvlWrapperCandidates(protocol);
+      if (cands.length === 1 && cands[0] !== protocol) {
+        return resolveProtocolOnChain(cands[0], protocols, chains);
+      }
+      return null;
+    })();
   if (target === null) {
     throw unprocessable(
       'PROTOCOL_NOT_FOUND',

@@ -4,6 +4,7 @@ import {gridRefusalClass} from '../handlers/gridPrice';
 import {PAST_WEATHER_BINDINGS} from '../handlers/weatherWired';
 import {TOKEN_CONTRACTS,ADDRESS_RE} from '../handlers/tokenContracts';
 import {liquidityChain,liquidityPair} from './liquiditySelectors';
+import {stripTvlWrapper} from '../handlers/tvl';
 // Coarse, fixed-label classes of a rejected input for the refusal_param_class log line.
 // Only labels from fixed lists are returned. The raw value, or any part of it outside the lists, is never logged.
 const CHAINS=new Set(['gnosis','celo','blast','fantom','linea','scroll','zksync','mantle','metis','moonbeam','moonriver','cronos','aurora','harmony','kava','klaytn','sei','sui','aptos','near','cosmos','tron','ton','cardano','polkadot','tezos','stellar','xrp','ripple','litecoin','dogecoin','bitcoin','solana','avalanche','bsc','bnb','polygon','arbitrum','optimism','base','ethereum','zora','mode','taiko','manta','berachain','sonic','unichain','ink','abstract','hyperliquid','monad']);
@@ -51,7 +52,11 @@ export function tvlProtocolClass(raw:string|undefined):Record<string,unknown>{
   has_space:/\s/.test(v),has_hyphen:v.includes('-'),
   has_chain_suffix:last!==''&&TVL_CHAIN_WORDS.has(last),
   ascii_only:/^[\x00-\x7f]*$/.test(v),
-  has_version_suffix:/(?:^|[\s_-])v\d+(?:\.\d+)*$/i.test(v)
+  has_version_suffix:/(?:^|[\s_-])v\d+(?:\.\d+)*$/i.test(v),
+  // True when the sentence-style wrapper stripper found something to strip
+  // (the 2026-11-28 fix for "total value locked in ..." phrasings). A
+  // boolean only, never the wrapper words or any part of the value.
+  has_wrapper_phrase:stripTvlWrapper(v)!==null
  };
 }
 /** The chain a /v1/token-supply refusal asked for: the chain parameter,
