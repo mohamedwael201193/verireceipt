@@ -1,0 +1,167 @@
+{
+  "captured_at": "2026-11-28T17:07:22.899Z",
+  "chain": "optimism",
+  "token": "0xdC6fF44d5d932Cbd77B52E5612Ba0529DC6226F1",
+  "block_tag": "finalized",
+  "legs": [
+    {
+      "url": "https://optimism.drpc.org",
+      "responses": [
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xdC6fF44d5d932Cbd77B52E5612Ba0529DC6226F1",
+                "data": "0x18160ddd"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000019f94abff6ca778ba3fa590\"}"
+        },
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xdC6fF44d5d932Cbd77B52E5612Ba0529DC6226F1",
+                "data": "0x313ce567"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+        },
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xdC6fF44d5d932Cbd77B52E5612Ba0529DC6226F1",
+                "data": "0x95d89b41"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000003574c440000000000000000000000000000000000000000000000000000000000\"}"
+        }
+      ]
+    },
+    {
+      "url": "https://mainnet.optimism.io",
+      "responses": [
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xdC6fF44d5d932Cbd77B52E5612Ba0529DC6226F1",
+                "data": "0x18160ddd"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000019f94abff6ca778ba3fa590\",\"id\":1}\n"
+        },
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xdC6fF44d5d932Cbd77B52E5612Ba0529DC6226F1",
+                "data": "0x313ce567"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\",\"id\":1}\n"
+        },
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xdC6fF44d5d932Cbd77B52E5612Ba0529DC6226F1",
+                "data": "0x95d89b41"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"jsonrpc\":\"2.0\",\"result\":\"0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000003574c440000000000000000000000000000000000000000000000000000000000\",\"id\":1}\n"
+        }
+      ]
+    },
+    {
+      "url": "https://optimism.gateway.tenderly.co",
+      "responses": [
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xdC6fF44d5d932Cbd77B52E5612Ba0529DC6226F1",
+                "data": "0x18160ddd"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000019f94abff6ca778ba3fa590\"}"
+        },
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xdC6fF44d5d932Cbd77B52E5612Ba0529DC6226F1",
+                "data": "0x313ce567"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x0000000000000000000000000000000000000000000000000000000000000012\"}"
+        },
+        {
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [
+              {
+                "to": "0xdC6fF44d5d932Cbd77B52E5612Ba0529DC6226F1",
+                "data": "0x95d89b41"
+              },
+              "finalized"
+            ]
+          },
+          "status": 200,
+          "raw": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000003574c440000000000000000000000000000000000000000000000000000000000\"}"
+        }
+      ]
+    }
+  ]
+}

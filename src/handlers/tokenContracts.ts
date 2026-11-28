@@ -102,6 +102,9 @@ export const TOKEN_CONTRACTS: Record<string, Record<string, string>> = {
     LRC: "0xBBbbCA6A901c926F240b89EacB641d8Aec7AEafD",
     AXS: "0xBB0E17EF65F82Ab018d8EDd776e8DD940327B28b",
     CHZ: "0x3506424F91fD33084466F402d5D97f05F8e3b4AF",
+    // Verified live 2026-11-28 on three ethereum legs at finalized: symbol() 'WLD',
+    // decimals() 18, totalSupply() 10,000,000,000 whole tokens. Canonical home chain.
+    WLD: "0x163f8C2467924be0ae7B5347228CABF260318753",
   },
   base: {
     USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
@@ -127,6 +130,10 @@ export const TOKEN_CONTRACTS: Record<string, Record<string, string>> = {
     WBTC: "0x68f180fcCe6836688e9084f035309E29Bf0A2095",
     OP: "0x4200000000000000000000000000000000000042",
     LINK: "0x350a791Bfc2C21F9Ed5d10980Dad2e2638ffa7f6",
+    // Verified live 2026-11-28 on three optimism legs at finalized (decimals() 18,
+    // symbol() 'WLD', totalSupply() agreed). Not the home chain: the ethereum entry is
+    // (canonicalHomeChain picks ethereum first); this one answers an explicit optimism ask.
+    WLD: "0xdC6fF44d5d932Cbd77B52E5612Ba0529DC6226F1",
   },
   polygon: {
     USDC: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
