@@ -118,6 +118,7 @@ semantics:
     - WEATHER_FORECAST_VERIFY_GENERAL
     - RETURN_POLICY_VERIFY_GENERAL
     - CRYPTO_YIELD_RATE_GENERAL
+    - SENSOR_TELEMETRY_VERIFY_GENERAL
   signal_mapping:
     confidence_field: confidence
     label_field: answer
@@ -1292,6 +1293,32 @@ endpoints:
           - CRYPTO_YIELD_RATE_GENERAL
           description: 'Exact ethereum, case-insensitive. No chain substitution.'
 
+  - path: /v1/sensor-telemetry
+    external_path: /v1/sensor-telemetry
+    method: GET
+    description: 'NOAA NDBC Boston buoy NDBC:44013 only, water_temperature or air_temperature
+      in degrees Celsius. No other station, device or metric substituted. Station pair
+      fetched at most hourly per process, including failures; cache resets on restart,
+      shared budget required before multiprocess scaling. Original UTC observation time
+      retained, maximum age 90 minutes. Missing latest MM values, stale or malformed
+      sources are refused without older-row substitution. Automated gross-error QC only,
+      subject to revision; not independent sensor authentication or general telemetry.'
+    intents:
+    - SENSOR_TELEMETRY_VERIFY_GENERAL
+    params:
+      query:
+        required:
+        - name: sensor
+          type: string
+          intents:
+          - SENSOR_TELEMETRY_VERIFY_GENERAL
+          description: 'Exact NDBC:44013, Boston buoy station, not a physical sensor serial.'
+        - name: metric
+          type: string
+          intents:
+          - SENSOR_TELEMETRY_VERIFY_GENERAL
+          description: 'Exact water_temperature or air_temperature, both degC; no inferred metric.'
+
 intent_mapping:
   ONCHAIN_TX_LOOKUP_GENERAL:
     endpoint: /v1/tx
@@ -2231,3 +2258,23 @@ intent_mapping:
       supply_apy:
         path: supply_apy
         unit: "basis points"
+
+  SENSOR_TELEMETRY_VERIFY_GENERAL:
+    endpoint: /v1/sensor-telemetry
+    input:
+      sensor:
+        from: sensor
+      metric:
+        from: metric
+    output:
+      sensor:
+        path: sensor
+      metric:
+        path: metric
+      value:
+        path: value
+        unit: "the sensor's unit"
+      unit:
+        path: unit
+      observed_at:
+        path: observed_at

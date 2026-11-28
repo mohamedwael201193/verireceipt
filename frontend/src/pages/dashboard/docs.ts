@@ -266,6 +266,7 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    - WEATHER_FORECAST_VERIFY_GENERAL\n' +
     '    - RETURN_POLICY_VERIFY_GENERAL\n' +
     '    - CRYPTO_YIELD_RATE_GENERAL\n' +
+    '    - SENSOR_TELEMETRY_VERIFY_GENERAL\n' +
     '  signal_mapping:\n' +
     '    confidence_field: confidence\n' +
     '    label_field: answer\n' +
@@ -1440,6 +1441,32 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '          - CRYPTO_YIELD_RATE_GENERAL\n' +
     '          description: \'Exact ethereum, case-insensitive. No chain substitution.\'\n' +
     '\n' +
+    '  - path: /v1/sensor-telemetry\n' +
+    '    external_path: /v1/sensor-telemetry\n' +
+    '    method: GET\n' +
+    '    description: \'NOAA NDBC Boston buoy NDBC:44013 only, water_temperature or air_temperature\n' +
+    '      in degrees Celsius. No other station, device or metric substituted. Station pair\n' +
+    '      fetched at most hourly per process, including failures; cache resets on restart,\n' +
+    '      shared budget required before multiprocess scaling. Original UTC observation time\n' +
+    '      retained, maximum age 90 minutes. Missing latest MM values, stale or malformed\n' +
+    '      sources are refused without older-row substitution. Automated gross-error QC only,\n' +
+    '      subject to revision; not independent sensor authentication or general telemetry.\'\n' +
+    '    intents:\n' +
+    '    - SENSOR_TELEMETRY_VERIFY_GENERAL\n' +
+    '    params:\n' +
+    '      query:\n' +
+    '        required:\n' +
+    '        - name: sensor\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - SENSOR_TELEMETRY_VERIFY_GENERAL\n' +
+    '          description: \'Exact NDBC:44013, Boston buoy station, not a physical sensor serial.\'\n' +
+    '        - name: metric\n' +
+    '          type: string\n' +
+    '          intents:\n' +
+    '          - SENSOR_TELEMETRY_VERIFY_GENERAL\n' +
+    '          description: \'Exact water_temperature or air_temperature, both degC; no inferred metric.\'\n' +
+    '\n' +
     'intent_mapping:\n' +
     '  ONCHAIN_TX_LOOKUP_GENERAL:\n' +
     '    endpoint: /v1/tx\n' +
@@ -2378,7 +2405,27 @@ export const DOC_SNIPPETS: Record<DocTabId, string> = {
     '    output:\n' +
     '      supply_apy:\n' +
     '        path: supply_apy\n' +
-    '        unit: "basis points"\n',
+    '        unit: "basis points"\n' +
+    '\n' +
+    '  SENSOR_TELEMETRY_VERIFY_GENERAL:\n' +
+    '    endpoint: /v1/sensor-telemetry\n' +
+    '    input:\n' +
+    '      sensor:\n' +
+    '        from: sensor\n' +
+    '      metric:\n' +
+    '        from: metric\n' +
+    '    output:\n' +
+    '      sensor:\n' +
+    '        path: sensor\n' +
+    '      metric:\n' +
+    '        path: metric\n' +
+    '      value:\n' +
+    '        path: value\n' +
+    '        unit: "the sensor\'s unit"\n' +
+    '      unit:\n' +
+    '        path: unit\n' +
+    '      observed_at:\n' +
+    '        path: observed_at\n',
 
   cast: REGISTRATION_CAST_SNIPPET,
 };
