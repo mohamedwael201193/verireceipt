@@ -7,6 +7,7 @@ import { parseRankedLocation } from "./routeGeocoder";
 import { envelope, makeReceipt, sha256Hex } from "../core/receipt";
 import { saveReceipt } from "../core/storage";
 import { forecastWindow,stormForecastUrl,readStormForecast,parseStormForecast,STORM_HEURISTIC } from "./stormForecast";
+import { retryAfterBucket, limitScope } from "../core/publicSource";
 
 const SOURCE_TIMEOUT_MS = 6000;
 const UA = "VeriReceipt/2.0 storm-alert observer (+https://verireceipt.vercel.app)";
@@ -107,10 +108,29 @@ export function stormHttpClass(err: unknown): StormHttpClass {
   if (/deadline|timeout|timed out|abort/i.test(msg) || (inner instanceof Error && /^(AbortError|TimeoutError)$/.test(inner.name))) return "timeout";
   return "none";
 }
-export function logStormStageFailure(stage: StormStage, httpClass: StormHttpClass): void {
+const STORM_REFUSALS = ["backoff", "budget_day", "budget_hour", "budget_minute"] as const;
+const STORM_RETRY_AFTER = ["absent", "le_60s", "le_900s", "gt_900s", "unparseable"] as const;
+const STORM_LIMIT_SCOPES = ["minutely", "hourly", "daily", "other"] as const;
+export interface StormFailureExtra { refusal?: string; retry_after?: string; limit_scope?: string }
+/** Closed-vocabulary labels for a forecast failure: why it was refused locally, or the Retry-After bucket of a 429. */
+export function stormForecastExtra(err: unknown): StormFailureExtra {
+  const refusal = err !== null && typeof err === "object" ? (err as { stormRefusal?: unknown }).stormRefusal : undefined;
+  if (typeof refusal === "string") return { refusal };
+  const cause = err !== null && typeof err === "object" ? (err as { stormCause?: unknown }).stormCause : undefined;
+  const bucket = retryAfterBucket(cause);
+  const scope = limitScope(cause);
+  return bucket === undefined ? {} : { retry_after: bucket, ...(scope === undefined ? {} : { limit_scope: scope }) };
+}
+export function logStormStageFailure(stage: StormStage, httpClass: StormHttpClass, extra: StormFailureExtra = {}): void {
   const s = STORM_STAGES.includes(stage) ? stage : "geocoder";
   const c = STORM_HTTP_CLASSES.includes(httpClass) ? httpClass : "none";
-  console.info(JSON.stringify({ event: "storm_stage_failure", stage: s, http_class: c }));
+  const line: Record<string, string> = { event: "storm_stage_failure", stage: s, http_class: c };
+  if (s === "forecast") {
+    if ((STORM_REFUSALS as readonly string[]).includes(extra.refusal as string)) line.refusal = extra.refusal as string;
+    if ((STORM_RETRY_AFTER as readonly string[]).includes(extra.retry_after as string)) line.retry_after = extra.retry_after as string;
+    if ((STORM_LIMIT_SCOPES as readonly string[]).includes(extra.limit_scope as string)) line.limit_scope = extra.limit_scope as string;
+  }
+  console.info(JSON.stringify(line));
 }
 
 export async function handleStormAlert(query: Record<string, string | undefined>): Promise<Record<string, unknown>> {
@@ -183,7 +203,7 @@ export async function handleStormAlert(query: Record<string, string | undefined>
     try{alerts=parseAlerts(nwsResult.value.alerts.body);}catch{nwsState='malformed alert response';}
   }
   if(!forecast&&nwsState!=="available"){
-    logStormStageFailure("forecast",forecastClass);
+    logStormStageFailure("forecast",forecastClass,forecastResult.status==="rejected"?stormForecastExtra(forecastResult.reason):{});
     logStormStageFailure("nws",nwsResult.status==="rejected"?stormHttpClass(nwsResult.reason):nwsState==="malformed alert response"?"parse":nwsState==="outside NWS grid"?"4xx":"none");
   }
   if(!forecast&&nwsState!=="available")throw upstreamUnavailable("STORM_FORECAST_UNAVAILABLE","no valid forecast or available NWS alert evidence; no guessed LOW");

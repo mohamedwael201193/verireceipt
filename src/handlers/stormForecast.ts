@@ -1,5 +1,5 @@
 import { upstreamUnavailable } from '../core/errors';
-import { readPublicBody, PublicBodyCache } from '../core/publicSource';
+import { readPublicBody, PublicBodyCache, retryAfterBucket, limitScope } from '../core/publicSource';
 export const STORM_HEURISTIC='VeriReceipt heuristic, not an official warning or contract formula: gust >=60/90/120 km/h OR maximum rolling 24-hour forecast precipitation >=25/50/100 mm gives MODERATE/HIGH/SEVERE (0.5/0.75/1), otherwise LOW (0). For windows shorter than 24h, rain uses that shorter window. Final score is maximum of forecast heuristic and available NWS alert score.';
 export function forecastWindow(now:number,hours:number):{start:number;end:number} {
  const start=Math.ceil(now/3600000)*3600000;return {start,end:start+hours*3600000};
@@ -27,18 +27,25 @@ export const FORECAST_DAILY_BUDGET=2000;
 let cache=new PublicBodyCache(500,600000,()=>Date.now()),starts:number[]=[],backoffUntil=0;
 export function resetStormForecastForTests():void{cache=new PublicBodyCache(500,600000,()=>Date.now());starts=[];backoffUntil=0;}
 export function stormBudgetCountsForTests():{day:number;hour:number;minute:number}{const now=Date.now();return {day:starts.filter(t=>t>now-86400000).length,hour:starts.filter(t=>t>now-3600000).length,minute:starts.filter(t=>t>now-60000).length};}
-function admitRead():boolean {
+export type StormRefusal='backoff'|'budget_day'|'budget_hour'|'budget_minute';
+export type StormAdmission='admitted'|StormRefusal;
+// Same admit/deny decisions as before; the label only says which check refused.
+function admitRead():StormAdmission {
  const now=Date.now();starts=starts.filter(t=>t>now-86400000);
  // Check every window before recording the single actual read start.
- if(now<backoffUntil||starts.length>=FORECAST_DAILY_BUDGET||starts.filter(t=>t>now-3600000).length>=300||starts.filter(t=>t>now-60000).length>=30)return false;
- starts.push(now);return true;
+ if(now<backoffUntil)return 'backoff';
+ if(starts.length>=FORECAST_DAILY_BUDGET)return 'budget_day';
+ if(starts.filter(t=>t>now-3600000).length>=300)return 'budget_hour';
+ if(starts.filter(t=>t>now-60000).length>=30)return 'budget_minute';
+ starts.push(now);return 'admitted';
 }
 export function stormCacheKey(url:string):string{const u=new URL(url);for(const k of ['latitude','longitude'])u.searchParams.set(k,Number(u.searchParams.get(k)).toFixed(2));return u.toString();}
 export async function readStormForecast(url:string){
  try{return await cache.get(stormCacheKey(url),async()=>{
-  if(!admitRead())throw new Error('forecast backoff or budget exhausted');
+  const admission=admitRead();
+  if(admission!=='admitted')throw Object.assign(new Error('forecast backoff or budget exhausted'),{stormRefusal:admission});
   let timer:ReturnType<typeof setTimeout>;
   try{return await Promise.race([readPublicBody(url,256000,4000),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('forecast deadline')),4100);})]).finally(()=>clearTimeout(timer!));}
-  catch(e){if(e instanceof Error&&/public source returned HTTP (?:403|429)$/.test(e.message))backoffUntil=Date.now()+3600000;throw e;}
- });}catch(cause){throw Object.assign(upstreamUnavailable('STORM_FORECAST_UNAVAILABLE','forecast unavailable, over budget or in temporary throttle backoff'),{stormCause:cause});}
+  catch(e){if(e instanceof Error){const m=/public source returned HTTP (403|429)$/.exec(e.message);if(m){backoffUntil=Date.now()+3600000;console.info(JSON.stringify(m[1]==='429'?{event:'storm_backoff_set',cause:'http_429',retry_after:retryAfterBucket(e)??'absent',limit_scope:limitScope(e)??'other'}:{event:'storm_backoff_set',cause:'http_403'}));}}throw e;}
+ });}catch(cause){throw Object.assign(upstreamUnavailable('STORM_FORECAST_UNAVAILABLE','forecast unavailable, over budget or in temporary throttle backoff'),{stormCause:cause,...((cause as {stormRefusal?:StormRefusal}|null)?.stormRefusal!==undefined?{stormRefusal:(cause as {stormRefusal:StormRefusal}).stormRefusal}:{})});}
 }
