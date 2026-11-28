@@ -16,6 +16,31 @@ export function buildBrief(groups:BriefGroup[],maxBytes=256):string{
  if(top){const pts=top.points!==null?` (${top.points} pts)`:'',fixed=new TextEncoder().encode(`${counts}. Top: ""${pts}${suffix}`).length,budget=maxBytes-fixed;if(budget>0)mid=`. Top: "${capBytes(top.title,budget)}"${pts}`;}
  return capBytes(counts+mid+suffix,maxBytes);
 }
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const cp=(s:string)=>Array.from(s);
+// Cut on a code point boundary; the single "…" counts toward the limit.
+function fitText(text:string,max:number):string{const c=cp(text);return c.length<=max?text:c.slice(0,Math.max(0,max-1)).join('').trimEnd()+'…';}
+function hostOf(url:string):string{try{return new URL(url).hostname.replace(/^www\./,'');}catch{return '';}}
+// Reference/feed-revision items carry a page revision time, not a publication date: no date shown.
+function realDate(i:NewsItem,year:boolean):string{
+ if(((i as NewsItem&{date_kind?:string}).date_kind??'source publication time')!=='source publication time')return '';
+ const t=Date.parse(i.published);if(!Number.isFinite(t))return '';const d=new Date(t);
+ return `${d.getUTCDate()} ${MON[d.getUTCMonth()]}${year?' '+d.getUTCFullYear():''}`;
+}
+// Contract: one plain sentence, at most 80 characters, answer first.
+export function makeBrief(selected:NewsItem[],_exact:NewsItem[],q:string):string{
+ const top=selected[0];
+ if(!top){const lead='No recent news found for "',tail='".';return lead+fitText(q.replace(/\s+/g,' ').trim(),80-cp(lead+tail).length)+tail;}
+ const host=hostOf(top.url),date=realDate(top,false),suffix=[host,date].filter(Boolean).join(' '),title=top.title.replace(/\s+/g,' ').trim();
+ if(!suffix)return fitText(title,80);
+ const sep=', ',avail=80-cp(sep+suffix).length;
+ return avail<2?fitText(title+sep+suffix,80):fitText(title,avail)+sep+suffix;
+}
+function leadSentence(selected:NewsItem[],exact:NewsItem[],q:string):string{
+ const top=selected[0];if(!top)return `No recent news found for "${q}".`;
+ const d=realDate(top,true),meta=[hostOf(top.url),d].filter(Boolean).join(', ');
+ return `${exact.length?'Latest':'Closest match'}: "${top.title}"${meta?` (${meta})`:''}.`;
+}
 const FEED_INDEX='Current news feeds';
 const SEARCH_INDEX='Story search';
 export async function handleNewsSearch(query:Record<string,string|undefined>):Promise<Record<string,unknown>>{
@@ -50,14 +75,13 @@ export async function handleNewsSearch(query:Record<string,string|undefined>):Pr
  if(!storyOk&&referenceItems===null&&dispatchItems===null&&!feedCaptures.some(f=>f.items!==null))throw upstreamUnavailable('NEWS_INDEXES_UNREACHABLE','all named search sources failed; no answer is guessed');
  const unavailable=[...(!storyOk?[SEARCH_INDEX]:[]),...(referenceItems===null?[REFERENCE_INDEX]:[]),...(dispatchItems===null?[DISPATCH_INDEX]:[]),...feedCaptures.filter(f=>f.items===null).map(f=>FEED_INDEX+': '+f.category)];
  const indexes=[SEARCH_INDEX,REFERENCE_INDEX,DISPATCH_INDEX,FEED_INDEX];
- const briefBase=selected.length&&exact.length===0?'Closest match only. ':'';
- const brief=capBytes(briefBase+buildBrief([{label:'Stories',items:selected.filter(i=>i.points!==null)},{label:'Other named sources',items:selected.filter(i=>i.points===null)}],256-new TextEncoder().encode(briefBase).length),256);
+ const brief=makeBrief(selected,exact,q);
  const asOf=new Date().toISOString();
  const evidence=JSON.stringify({query:q,query_length:q.length,as_of:asOf,fetched_at:fetchedAt,indexes,unavailable_indexes:unavailable,match_scope:scope,hn_window_days:stories.captures.length>1?365:7,hn_matches:stories.exact,closest_hn_matches:stories.closest,reference_matches:refs,dispatch_matches:dispatches,selected_items:selected,story_captures:stories.captures,reference_capture:{url:referenceUrl,...reference},dispatch_capture:{url:dispatchUrl,...dispatch},feed_captures:feeds.map(f=>({category:f.category,acquired_at:f.acquiredAt,body:f.result.body})),source_policy:'Named sources only; current feeds may be cached60seconds; reference timestamps are page revision times, not news publication. Closest matches do not verify the whole query. No comprehensive news claim.'});
  const receipt=makeReceipt(INTENT,strictUrl,evidence,'named-source search with disclosed closest matches');receipt.fetched_at=fetchedAt;
  try{await withinNewsDeadline(saveReceipt(receipt,evidence),sourceDeadline+450);}catch{throw upstreamUnavailable('RECEIPT_PERSIST_FAILED','receipt evidence could not be stored; answer unavailable');}
  const details=selected.map(i=>({title:i.title,url:i.url,date:i.published,date_kind:(i as NewsItem&{date_kind?:string}).date_kind??'source publication time',source:i.points!==null?SEARCH_INDEX:i.index,points:i.points}));
  const lead=selected.length?(exact.length?'Exact title keyword matches. ':'')+details.slice(0,3).map(i=>`"${i.title}" (${i.date}, ${i.source}, ${i.date_kind}) ${i.url}`).join('; ')+'.':'No usable keyword match found in the named sources. Sources searched: '+indexes.join('; ')+'; zero matches.';
- const answer=lead+' Scope: '+scope+'. Reference pages are background, not news articles. Feed cache up to60seconds; original acquisition times retained in receipt. Named sources only, never comprehensive news coverage.'+(unavailable.length?' Degraded: '+unavailable.join('; ')+' unavailable.':'');
+ const answer=leadSentence(selected,exact,q)+' '+lead+' Scope: '+scope+'. Reference pages are background, not news articles. Feed cache up to60seconds; original acquisition times retained in receipt. Named sources only, never comprehensive news coverage.'+(unavailable.length?' Degraded: '+unavailable.join('; ')+' unavailable.':'');
  return envelope(INTENT,{brief,result_count:selected.length,hn_window_days:stories.captures.length>1?365:7,sources:indexes,match_scope:scope,results:details,urls:details.map(i=>i.url)},receipt,{answer,verdict:'verified',confidence:exact.length?0.8:0.5,source:indexes.join(' + ')});
 }

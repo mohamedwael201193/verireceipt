@@ -186,7 +186,8 @@ describe("NEWS_SEARCH_GENERAL", () => {
     expect((result.sources as string[]).join(" ")).toContain("Encyclopedia search");
     expect((result.sources as string[]).join(" ")).toContain("Community news search");
     const brief = String(result.brief);
-    expect(new TextEncoder().encode(brief).length).toBeLessThanOrEqual(256);
+    expect(Array.from(brief).length).toBeLessThanOrEqual(80);
+    expect(brief).not.toMatch(/Closest|pts|Named sources only/);
     expect(String(result.answer)).toContain("never comprehensive");
     const receipt = result.receipt as { receipt_id: string; raw_response_sha256: string; intent: string };
     expect(receipt.intent).toBe("NEWS_SEARCH_GENERAL");
@@ -199,9 +200,9 @@ describe("NEWS_SEARCH_GENERAL", () => {
     const result = await handleNewsSearch({ query: "zzq nonexistent" });
     expect(Number(result.result_count)).toBe(0);
     const brief = String(result.brief);
-    expect(new TextEncoder().encode(brief).length).toBeLessThanOrEqual(256);
-    expect(brief).toContain("Stories: 0");
-    expect(brief).toContain("Named sources only");
+    expect(brief).toBe('No recent news found for "zzq nonexistent".');
+    expect(Array.from(brief).length).toBeLessThanOrEqual(80);
+    expect(String(result.answer).startsWith('No recent news found for "zzq nonexistent".')).toBe(true);
     expect(String(result.answer)).toContain("Sources searched");
     expect(String(result.answer)).toContain("zero matches");
     expect(result.confidence).toBe(0.5);
